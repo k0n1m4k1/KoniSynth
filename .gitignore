@@ -1,0 +1,9 @@
+build/
+build-clap/
+dist/
+Tests/renders/
+__pycache__/
+build-linux/
+.venv/
+.mcp.json
+*.zip

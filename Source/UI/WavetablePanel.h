@@ -1,0 +1,99 @@
+// Extraído de KoniSynth.cpp (2026-10-21): se incluye desde allí, en el mismo punto, dentro de la misma unidad de
+// compilación; usa las declaraciones previas de KoniSynth.cpp (JUCE, Params, utilidades). No es una cabecera independiente.
+#pragma once
+
+// UI: wavetable como pila de fotogramas en perspectiva (el actual, según Position, resaltado)
+class WavetableView : public juce::Component, private juce::Timer
+{
+public:
+    explicit WavetableView (KoniSynthProcessor& p) : koni (p) { startTimerHz (15); }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto r = getLocalBounds().toFloat();
+        g.setColour (Skin::black().withAlpha (0.55f));
+        g.fillRoundedRectangle (r, 6.0f);
+        if (frames.empty())
+        {
+            g.setColour (Skin::white().withAlpha (0.4f));
+            g.drawText ("Generating wavetable...", r, juce::Justification::centred);
+            return;
+        }
+        const auto n = (int) frames.size();
+        const auto area = r.reduced (16.0f);
+        const auto depthX = area.getWidth() * 0.25f, depthY = area.getHeight() * 0.35f;
+        const auto w = area.getWidth() - depthX, h = area.getHeight() - depthY;
+        const auto position = koni.apvts.getRawParameterValue ("wtPosition")->load();
+        const auto current = juce::roundToInt (position * (float) (n - 1));
+
+        auto drawFrame = [&] (int k, juce::Colour colour, float thickness)
+        {
+            const auto t = n > 1 ? (float) k / (float) (n - 1) : 0.0f;
+            const auto x0 = area.getX() + t * depthX, y0 = area.getBottom() - h * 0.5f - t * depthY;
+            juce::Path path;
+            const auto& f = frames[(size_t) k];
+            for (size_t i = 0; i < f.size(); ++i)
+            {
+                const auto x = x0 + w * (float) i / (float) (f.size() - 1);
+                const auto y = y0 - f[i] * h * 0.42f;
+                if (i == 0) path.startNewSubPath (x, y); else path.lineTo (x, y);
+            }
+            g.setColour (colour);
+            g.strokePath (path, juce::PathStrokeType (thickness));
+        };
+        for (int k = n - 1; k >= 0; --k)
+            if (k != current)
+                drawFrame (k, Skin::white().withAlpha (0.12f), 1.0f);
+        drawFrame (current, Skin::c (0xff42a2c8), 2.2f);
+        g.setColour (Skin::white().withAlpha (0.7f));
+        g.drawText (koni.getWavetableName() + "  |  Position " + juce::String (juce::roundToInt (position * 100.0f)) + " %  (up to 32 frames drawn)",
+                    r.reduced (8.0f, 4.0f), juce::Justification::topLeft);
+    }
+
+private:
+    void timerCallback() override
+    {
+        const auto name = koni.getWavetableName();
+        if (name != lastName || frames.empty())
+        {
+            lastName = name;
+            frames = koni.getWavetableOverview (32, 256);
+        }
+        repaint();
+    }
+
+    KoniSynthProcessor& koni;
+    std::vector<std::vector<float>> frames;
+    juce::String lastName;
+};
+
+class WavetablePanel : public juce::Component
+{
+public:
+    WavetablePanel (KoniSynthProcessor& p, std::function<void()> chooseFile) : view (p)
+    {
+        auto& s = p.apvts;
+        controls.withCombo (s, "wtTable")
+                .withHeaderButton ("Load", "Load a wavetable file: WAV with 2048 samples per frame (Serum format) or a single cycle.", std::move (chooseFile))
+                .withKnob (s, "wtLevel", "Level").withKnob (s, "wtPosition", "Position");
+        lfoHint.setText ("Tip: set LFO 2 Target to 'WT Position' to sweep the table.", juce::dontSendNotification);
+        lfoHint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
+        addAndMakeVisible (view);
+        addAndMakeVisible (controls);
+        addAndMakeVisible (lfoHint);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        lfoHint.setBounds (r.removeFromBottom (22));
+        controls.setBounds (r.removeFromBottom (140));
+        r.removeFromBottom (8);
+        view.setBounds (r);
+    }
+
+private:
+    WavetableView view;
+    Section controls { "Wavetable" };
+    juce::Label lfoHint;
+};

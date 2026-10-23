@@ -1,0 +1,276 @@
+# Synth
+
+The Synth is KoniSynth's own polyphonic synthesizer. It does not emulate a specific instrument: it is a subtractive
+design with its own personality, combining four summed sources (a minBLEP oscillator with unison, a wavetable, a
+sample player and a Karplus-Strong plucked string), a Buchla 259-style complex oscillator, a second oscillator with
+sub and noise, 14 filter modes, per-voice saturation, two LFOs, an 8-slot modulation matrix and an analog-style drift
+model. Use it for basses, leads, pads, keys, plucks, sound effects and anything the emulated engines do not cover.
+
+Unlike the emulated engines, the Synth is not bound to an original. Its analog behaviours (drift, filter input
+saturation, VCA click and bleed, RC envelope curves) are part of its design; several of them are off or at a low
+setting by default.
+
+## What you need
+
+Nothing extra. Optional: an audio file for the **Sample** source (KoniSynth includes no samples) and a wavetable file
+for the **User File** wavetable.
+
+## Controls
+
+The Synth fills three rows: sources -> Complex Oscillator -> Osc 2 / Mixer; Filter, Filter Envelope, Amp Envelope;
+Voice, LFO, LFO 2. Voice, LFO 2 and the matrix act only in the Synth.
+
+### Source tabs: Osc 1, Wavetable, Sample, String
+
+The four sources sound summed; each tab has its own level and LED. Right-click a tab for **Mute / Solo** (Mute
+silences the source without changing its level; mutes are off by default and presets do not change them).
+
+**Osc 1**
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Wave menu | Oscillator 1 waveform: sine pure, triangle soft, saw bright, square hollow. | Sine, Triangle, Saw, Square / Sine |
+| Level | Oscillator 1 volume in the mixer. | 0-100 % / 100 % |
+| Voices | Oscillators per note (unison): wider and thicker, more CPU. | 1-7 / 1 |
+| Detune | Detune between the unison oscillators. | 0-50 ct / 12 ct |
+| Spread | Stereo width of the unison oscillators. | 0-100 % / 50 % |
+| PW | Square pulse width: 50 % hollow, extremes thin and nasal. | 5-95 % / 50 % |
+| PWM | How much the LFO moves the pulse width. | 0-45 % / 0 % |
+| Drift | Analog instability: slow random detuning (see Drift below). | 0-100 % / 20 % |
+| P.Env | Pitch drop or rise at the start of each note: kicks, toms, laser zaps. | -48 to +48 st / 0 st |
+| P.Decay | How fast the pitch envelope returns to the note's pitch. | 1-2000 ms / 50 ms |
+
+**Wavetable** (Edit... opens the wavetable editor: the frames in perspective, the table menu, Level, Position and a
+**Load** button for a WAV with 2048 samples per frame, the Serum format, or a single cycle)
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Table menu | Built-in tables or your own file. | Basic Shapes, PWM Sweep, Harmonic Sweep, Sync Sweep, Formant Sweep, User File / Basic Shapes |
+| Level | Wavetable volume in the mixer. | 0-100 % / 0 % |
+| Position | Sweeps from the first to the last waveform; LFO 2 can move it. | 0-100 % / 0 % |
+
+**Sample** (Edit... opens the sample editor: waveform with a draggable Start, the end of Length and the loop zone;
+Loop, Level, Root, Start, Length and a **Load** button. The file chooser accepts WAV, AIFF, FLAC, OGG, SoundFont 2
+(.sf2), SNES BRR (.brr) and SNES APU snapshots (.spc); for .sf2 and .spc you choose one item inside the bank)
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Level | Sample volume; it goes through the filter and envelopes like an oscillator. | 0-100 % / 0 % |
+| Root (editor) | Note at which the sample plays at its original pitch. | C-1 to G9 / C4 |
+| Start (editor) | Playback start point. | 0-99 % / 0 % |
+| Length (editor) | Cuts the sample after this time with a short fade; short values give LA-style synthesis. | Full, up to 2000 ms / Full |
+| Loop (editor) | Loops from Start to the end while the note is held. | Off / On / Off |
+
+**String** (Karplus-Strong plucked string)
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Excite menu | Noise: filtered noise burst (classic, a bit grainy). Pick: triangle shape with its tip at Pick. | Noise, Pick / Noise |
+| Level | Plucked string volume. | 0-100 % / 0 % |
+| Decay | Time to fall by 60 dB. | 0.10-20 s / 3.00 s |
+| Bright | Low = soft finger, high = hard plectrum or harpsichord quill. | 0-100 % / 60 % |
+| Pick | Pluck position: near the end bright and thin, the middle hollow. | 2-50 % / 13 % |
+| Damping | Upper partials die out sooner than the fundamental; fundamental Decay and tuning are compensated. | 0-100 % / 0 % |
+| Pickup | Magnetic pickup position from the bridge; harmonic k is shaped by 2·abs(sin(π·k·position)). | Off-50 % / Off |
+
+### Complex Oscillator
+
+Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x oversampling.
+
+| Control | What it does | Range / default |
+|---|---|---|
+| On (header) | Turns the complex oscillator on for oscillator 1. | Off / On / Off |
+| Mod Wave menu | Modulator waveform. | Sine, Triangle, Saw, Square / Sine |
+| Sync (switch) | Hard-syncs the main oscillator to the modulator. | Off / On / Off |
+| Ratio | Modulator/main frequency ratio: whole numbers harmonic, others bell-like. | 0.125x-16x / 1.000x |
+| FM | Linear through-zero FM amount. | I 0-10 / 0 |
+| AM/Ring | Amplitude modulation; 100 % is ring modulation. | 0-100 % / 0 % |
+| Timbre | Sine wavefolder: progressively adds harmonics. | 0-100 % / 0 % |
+| Symmetry | Wavefolder asymmetry. | -100 to +100 % / 0 % |
+| T.Mod | The modulator moves the wavefolder. | 0-100 % / 0 % |
+
+### Osc 2 / Mixer
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Wave menu | Oscillator 2 waveform. | Sine, Triangle, Saw, Square / Saw |
+| Sync (switch) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. | Off / On / Off |
+| Oct | Octave relative to oscillator 1. | -2 to +2 / 0 |
+| Semi | Offset in semitones (7 = fifth, 12 = octave). | -12 to +12 / 0 |
+| Fine | Fine detune; a few cents give beating. | -50 to +50 ct / 0 ct |
+| Osc 2 | Oscillator 2 level. | 0-100 % / 0 % |
+| Sub | Sub-oscillator level (square). | 0-100 % / 0 % |
+| Sub Oct | Sub-oscillator octave. | -1 oct, -2 oct / -1 oct |
+| Noise | Noise level. | 0-100 % / 0 % |
+| Color | White, pink, or LFSR digital noise of 8-bit chips (Short = metallic, tonal, follows the key). | White, Pink, LFSR, LFSR Short / White |
+
+### Filter
+
+The **Sat...** header button opens the **Saturation** dialog: *Filter Input* (Clean Drive switch and Drive) and *Voice
+Saturation* (curve menu and Drive).
+
+| Control | What it does | Range / default |
+|---|---|---|
+| On (header) | Turns the filter on. | Off / On / **On** |
+| Mode menu | Filter model and response (14 modes, below). | / LP 24 |
+| Cutoff | Cutoff frequency. | 20 Hz-20 kHz / 20 kHz |
+| Reso | Emphasis at the cutoff; at maximum the filter self-oscillates. | 0-100 % / 0 % |
+| Drive | Saturation at the filter input. | 0-100 % / 0 % |
+| Env | How far the filter envelope moves the cutoff (+/-5 octaves at +/-100 %). | -100 to +100 % / 0 % |
+| Key | Keyboard tracking; 100 % follows note for note (reference C4). | 0-100 % / 0 % |
+| Vel | Playing harder opens the filter more. | 0-100 % / 0 % |
+| Spread | Distance between the two filters of the Dual modes, centred on Cutoff. | 0-4 oct / 1.00 oct |
+| Sat | Per-voice saturation drive (same parameter as in Sat...). | Off-36 dB / Off |
+| Clean Drive (Sat...) | Off: the input stage always saturates a little, even at Drive 0 %. On: Drive 0 % is linear and saturation fades in over the first 25 % of Drive. | Off / On / **Off** |
+| Voice Sat curve (Sat...) | Soft (tanh, overdriven OTA), Diode (asymmetric, even harmonics), Hard (clipping), Fold (sine wavefolder). | Soft, Diode, Hard, Fold / Soft |
+
+| Mode | Description (item tooltip) |
+|---|---|
+| LP 24 | Ladder, 4 poles (24 dB/oct): the classic Moog low-pass. |
+| LP 12 | Ladder, 2 poles (12 dB/oct). |
+| BP 12 / HP 12 | Ladder band-pass / high-pass. |
+| SVF LP / BP / HP / Notch | State-variable (Oberheim SEM style), 12 dB/oct, smooth; Notch removes a band. |
+| MS-20 LP | Korg35 low-pass of the MS-20: biting resonance that screams. |
+| MS-20 HP | Korg35 high-pass of the MS-20 (6 dB/oct, like the original). |
+| Comb + | Comb resonator: all harmonics of Cutoff (metallic, plucked). Key 100 % to play in tune; Reso = feedback. |
+| Comb - | Negative feedback: odd harmonics only (hollow, like a closed pipe). |
+| Dual BP | Two band-pass filters in parallel, Spread apart: vowel-like formants. |
+| Dual LP | Two low-pass filters in series, Spread apart. |
+
+### Filter Envelope and Amp Envelope
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Filter A / D / S / R | Filter envelope attack, decay, sustain level, release. | A 0.2 ms-5 s / 5 ms; D 0.2 ms-20 s / 300 ms; S 0-100 % / 0 %; R 0.2 ms-20 s / 300 ms |
+| Curve menu (Amp header) | Shape of both envelopes. Linear: straight ramps. Analog RC: CEM3310 curves (attack bends into the peak, decay and release fall fast then slow). | Linear, Analog RC / Linear |
+| Amp A / D / S / R | Volume attack, decay to Sustain, sustain level, release. | A 0.2 ms-5 s / 10 ms; D 0.2 ms-20 s / 100 ms; S 0-100 % / 80 %; R 0.2 ms-20 s / 300 ms |
+| V.Pan | Spreads notes across the stereo field; each new note gets its own position. 0 = all centred. | 0-100 % / 0 % |
+| Pan Mode | Alternate (L, R, L...), Keyboard (C2 left .. C6 right) or Random. | Alternate, Keyboard, Random / Alternate |
+
+### Voice
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Mode menu (header) | Poly: chords (8 voices). Mono: one note, last key wins. Legato: like Mono, overlapping notes slide without restarting the envelopes. | Poly, Mono, Legato / Poly |
+| Glide | Portamento from the last note played (any voice); 0 = off. | 0-2000 ms / 0 ms |
+| Mod Wheel | Mod wheel (CC 1) depth: vibrato up to +/-1 semitone at the LFO 1 rate; works even with LFO 1 off. | 0-100 % / 50 % |
+
+**Edit...** opens the **Synth Voice** dialog:
+
+| Group | Control | What it does | Range / default |
+|---|---|---|---|
+| Aftertouch | AT Filt | Pressure opens the filter (up to +3 octaves). | 0-100 % / 0 % |
+| | AT Vib | Pressure adds vibrato (up to +/-1 st at the LFO 1 rate). | 0-100 % / 0 % |
+| | AT Vol | Pressure makes the note louder (up to +6 dB), like the CS-80. | 0-100 % / 0 % |
+| MPE | MPE switch | Lower zone: channel 1 master, channels 2-16 one note each with its own bend, pressure and CC74 timbre. | Off / On / Off |
+| | Bend | Per-note pitch bend range in MPE mode (MPE standard default 48). | 0-96 st / 48 |
+| Voice Assign | menu | Lowest Free: first idle voice. Reuse Same Note: a repeated key retriggers its own voice (Prophet-5). Round Robin: every note moves to the next voice (Prophet-5 Rev 4 option). | / Lowest Free |
+| Osc Phase | menu | Auto: random if Drift is up, else from zero. Reset: always from zero. Free Running: oscillators keep running between notes. Random: random phase per note. | / Auto |
+| Tolerances | menu | Where the Drift tolerances live. Per Note: new values each note. Per Voice Card: fixed per physical voice. | / Per Note |
+| Analog VCA | Click | Control feedthrough: a thump at each note (strongest with fast attacks). 4 % = worst case of a modern AS3360; 100 % = untrimmed vintage VCA. | 0-100 % / 0 % |
+| | Leak | The VCA never closes: after the release each voice keeps sounding at this level until reused. Uses CPU. | Off, -100 to -30 dB / Off |
+
+Aftertouch uses channel or polyphonic pressure, whichever is larger. MIDI channel, fine tune, bend range (0-24 st,
+default 2) and controller profiles are global: the MIDI button left of the engine selector.
+
+### LFO (LFO 1) and LFO 2
+
+Both LFOs run per voice and restart at each note.
+
+| Control | LFO 1 | LFO 2 |
+|---|---|---|
+| On (header) | Off / On, default Off | Off / On, default Off |
+| Target menu | Vibrato, Tremolo, Filter / Vibrato | Vibrato, Tremolo, Filter, PWM, Osc 2 Pitch, WT Position / Filter |
+| Rate | 0.02-100 Hz / 5.00 Hz (also the speed of mod wheel and aftertouch vibrato) | 0.02-100 Hz / 0.50 Hz |
+| Depth | 0-100 % / 30 % | 0-100 % / 30 % |
+| Shape | Sine, Triangle, Saw, Square, S&H (new random value each cycle), Random (smooth glide between random values) / Sine | same / Sine |
+| Sync | Free (Rate in Hz) or 4/1, 2/1, 1/1, 1/2, 1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32 of the host tempo (Arp BPM in the standalone) / Free | same / Free |
+
+Reach at Depth 100 %: vibrato +/-2 st, tremolo full depth, filter +/-2 octaves; LFO 2 also PWM +/-45 % of width and
+Osc 2 Pitch +/-2 st. LFO 1 also drives the PWM knob of Osc 1.
+
+### Modulation Matrix (Matrix... in the LFO 2 header)
+
+8 slots, each a **source** moving a **destination** for each voice separately, by an **amount** of -100 to +100 %
+(negative inverts). The number in brackets on the button counts the active routes; amber rings on the knobs show
+their modulation range.
+
+| Sources | Destinations (reach at 100 %) |
+|---|---|
+| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note, fixed during the note), Pitch Bend | Pitch and Osc 2 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position |
+
+## Playing it
+
+- **Poly** plays up to 8 voices; **Mono** and **Legato** use a single voice. Unison (Voices) multiplies oscillators
+  inside each voice.
+- **Glide** starts from the last note played, in any voice, and slides exponentially in semitones.
+- **Pitch bend** follows the global Bend Range; in MPE mode each note uses MPE Bend.
+
+Recipe, sync lead:
+1. Osc 2 / Mixer: Osc 2 at 80 %, Sync on, Semi +7 to +12; Osc 1 Level down.
+2. LFO 2 or the matrix (Mod Wheel -> Osc 2 Pitch) to sweep the sync.
+
+Recipe, plucked harpsichord:
+1. String tab: Level 100 %, Decay 4 s, Bright 90 %, Pick 10 %; Osc 1 Level 0 %.
+2. Amp envelope: Attack 1 ms, Sustain 100 %, Release 0.25 s. These are the values of the factory preset
+   **Baroque Harpsichord**; try Excite = Pick for the triangle-shaped pluck.
+
+Recipe, LA-style attack:
+1. Sample tab: load a file, Level up, Length 50-150 ms (the sampled transient).
+2. Osc 1 or Wavetable for the sustained part.
+
+## Analog behaviour of the Synth
+
+These are the Synth's own design choices, not an emulation of a particular unit.
+
+- **Drift** (default 20 %). At 100 %: static detune +/-3 ct and cutoff tolerance +/-10 % per voice; Osc 2 fixed offset
+  +/-2 ct from Osc 1; slow 1/f drift per voice (σ 3 ct), common to all voices of the instance (σ 2 ct) and per Osc 2
+  (σ 2 ct); a thermal scale error of +/-0.52 ct per octave from C4 (residual after the AS3310 exponential converter's
+  compensation: estimated, not measured). At the default 20 %, voice + common drift = 0.72 ct (σ). With Drift up, the
+  oscillators start at a random phase (Osc Phase = Auto).
+- **Tolerances = Per Voice Card** fixes those values per physical voice, like the voice cards of a vintage polysynth;
+  with Round Robin each note then sounds slightly different.
+- **Filter input saturation.** By default the input stage always saturates a little (3rd harmonic of a full-scale sine
+  at about -29 dB). Clean Drive makes Drive 0 % linear for the SVF, comb and dual modes; the ladder and MS-20 keep
+  their core saturation (about -34 dB). The ladder self-oscillates from Reso of about 91 %.
+- **Per-voice saturation** sits between filter and amp, each note on its own, so chords stay free of intermodulation.
+  Off at 0 dB, it fades in over the first 3 dB; level is compensated for Soft, Diode and Hard, not for Fold. Antialiased
+  (ADAA), no added latency.
+- **Analog VCA** (both off by default): Click polarity and amount vary per voice; Leak keeps finished voices sounding.
+- **Reproducible randomness.** Main menu (right-click on the title; Options in the standalone) > **Randomness**:
+  *Reproducible randomness (bounce = what you heard)*, on by default, reseeds every random generator at each transport
+  anchor (start, jump, offline render), and seeds each Synth note by the position of its note-on, so the same project
+  played from the same point gives exactly the same signal. Off: a random session seed, different on every pass, like
+  analog hardware. *New random seed (detune, drift, noise...)* changes the seed. The seed is stored in the project, not
+  in presets: two tracks with the same preset are not correlated.
+
+## Factory presets
+
+161 factory presets have no "engine" value and therefore use the Synth. By category:
+
+| Category | Presets |
+|---|---|
+| Init | Init |
+| Bass | Saw Bass, Wobble, Acid Squelch, Studio Reel, Phasing Saw Bass, Picked Electric Bass, Analog Thump Bass, Model D Bass, Taurus Pedal Bass, Mono Bass 101, Detuned Reese Bass, 808 Sub Bass, House Organ Bass, Hardbass Donk, Blue Monday 88 Bass, Everything Counts Bass, The Model Bass, Europe Endless Bass, Around The World Bass, Acid 303 Bass |
+| Lead | Retro Lead, Supersaw Lab, Ladder Whistle, MS-20 Acid Scream, Wavefold Lead, Valve Clavioline, Modular Lead 1968, Model D Lead, Odyssey Sync Lead, Eight-Voice Sync Lead, Phase Distortion Reso Lead, Fat Mono Lead, Hoover 90s, Numbers Lead, Just Cant Get Enough Lead, New Life Lead, Never Let Me Down Lead, Oxygene IV Lead, Da Funk Lead, Shine On Lead, Digital Sync Lead |
+| Pad | Soft Pad, Space Tape, Cassette Memories, Worn Reel 9.5, PWM Analog Pad, Endless Plate Pad, Barber Pole Drone, PWM Sweep Pad, Notch Sweep Pad, Wavetable Pad PPG, Digital Bell Pad, Gated Supersaw Pad, Vector Wave Pad, Mistress Pad, Voyager Chords, Short Circuit Swell, In The Air Tonight Pad, Fade To Grey Pad, Stranger Things Pad, Harmonic Sweep Pad |
+| Keys | Glass Bell, French Chords, Dusty Vinyl, Funky Clav, Continental Combo Organ, Compact Combo Organ, Tape Flute, Pianet Reed Keys, Reed EP 200A, Suitcase Tine EP, Clavinet D6 Strings, Dub Techno Chord, Spring Dub Stab, Baroque Harpsichord, Neon Lights Keys, Formant Sweep Keys |
+| Brass | Neon Brass, Five-Voice Poly Brass, Poly Brass Stab, Blade Runner Brass, Replicant Brass Swell, Africa Brass, Jump Brass |
+| Strings | String Machine, Synth Pizzicato, Comb Bowed Metal, Shine On Intro Strings, Tears in Rain Strings, Oxygene Phased Strings, Incantations Ensemble, Space Oddity Tape Strings, Warszawa Tape Cello |
+| Pluck | Echo Pluck, Nylon Guitar, Concert Harp, Trance Supersaw Pluck |
+| Sequence | Berlin Sequence, Hardbass Donk Bounce, Robot Arp, On the Run Sequence, Acid Step Line, Irregular 7-Step |
+| Drums | Gabber Kick, Hex Pad Tom, 808-Style Kick, 808-Style Long Boom, 909-Style Kick, 808-Style Snare, 808-Style Tom, 808-Style Conga, 808-Style Rimshot, 808-Style Claves, 808-Style Cowbell, 808-Style Closed Hat, 808-Style Open Hat, FM Ride Cymbal, Analog Hand Clap |
+| FX | Orchestra Hit 8-Bit, Noise Riser, Sub Drop, Underwater Pad, Bode Bells, Sci-Fi Laser Zap |
+| 8-Bit | 8-Bit Power-Up, 8-Bit Hit, 8-Bit Menu Blip, Chip Square Bass, SID-Style Sync Lead, SID-Style PWM Bass, SID-Style Ring Bell |
+| Nature | Field Cricket, Dolbear Cricket 25C, Cicada Buzz, Spring Peeper, Bullfrog Croak, Chickadee Fee-Bee, Syrinx Tweet, Tawny Owl Hoot, Wolf Howl, Cat Meow, Cat Purr, Humpback Moan, Gull Long Call, Rain Drops, Campfire Crackle, Wind Whistle, Thunder Strike, Ocean Surf, Gusting Wind, Distant Thunder |
+| Vocal | Dual Formant Ah, Poly Vox Humana, Choir Aah, Choir Ooh, Vowel Morph Pad, Talk Box Lead |
+| Vocoder | Robot Vocoder, Robot Voice 10-Band, Autobahn Vocoder |
+
+## Limitations
+
+- 8 voices in Poly; Mono and Legato are single-voice. Unison is limited to 7 oscillators per voice.
+- The complex oscillator's 2x decimation filter adds 15 samples at the doubled rate (0.16 ms at 48 kHz).
+- Voice Saturation with the Fold curve is not level-compensated.
+- String Damping: with long Decay times the damping is limited to what can be compensated.
+- VCA Leak keeps released voices running and uses CPU.
+- The Sample source needs your own file; KoniSynth includes no samples.
