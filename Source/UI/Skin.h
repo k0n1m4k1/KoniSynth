@@ -3,13 +3,13 @@
 // Cada color literal de la UI pasa por Skin::c() / Skin::map(): en los monocromos se conserva su luminancia (pesos Rec. 709
 // sobre los valores sRGB, sin linealizar: aproximación) y se pinta en la rampa del fósforo: negro -> fondo tintado, gris medio ->
 // fósforo a media intensidad, blanco -> fósforo "caliente" casi blanco. La jerarquía de contraste de la interfaz se mantiene sin
-// tocar cada componente; el alfa es el del color original. Ajuste global (todas las instancias): %APPDATA%/KoniSynth/skin.txt.
+// tocar cada componente; el alfa es el del color original. Ajuste global (todas las instancias): clave "skin" de %APPDATA%/KoniSynth/config.settings.
 // Extraído como cabecera: se incluye desde KoniSynth.cpp, dentro de la misma unidad de compilación.
 #pragma once
 
 namespace Skin
 {
-enum Id { standard = 0, green, amber, metal, count }; // el orden es el valor guardado en skin.txt
+enum Id { standard = 0, green, amber, metal, count }; // el orden es el valor guardado en config.settings
 
 inline const char* name (int id)
 {
@@ -17,14 +17,23 @@ inline const char* name (int id)
     return names[juce::jlimit (0, (int) count - 1, id)];
 }
 
-inline juce::File file()
+// Valor guardado en config.settings (clave "skin"). Si aún no está, se migra el skin.txt de versiones anteriores y se borra
+inline int load()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("KoniSynth/skin.txt");
+    auto config = openConfig();
+    const auto legacy = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("KoniSynth/skin.txt");
+    if (! config->containsKey ("skin") && legacy.existsAsFile())
+    {
+        config->setValue ("skin", legacy.loadFileAsString().trim().getIntValue());
+        if (config->saveIfNeeded())
+            legacy.deleteFile();
+    }
+    return juce::jlimit (0, (int) count - 1, config->getIntValue ("skin", standard));
 }
 
 inline std::atomic<int>& currentRef()
 {
-    static std::atomic<int> id { juce::jlimit (0, (int) count - 1, file().loadFileAsString().trim().getIntValue()) };
+    static std::atomic<int> id { load() };
     return id;
 }
 
@@ -35,8 +44,8 @@ inline void set (int id)
 {
     id = juce::jlimit (0, (int) count - 1, id);
     currentRef().store (id);
-    file().getParentDirectory().createDirectory();
-    file().replaceWithText (juce::String (id));
+    if (auto config = openConfig())
+        config->setValue ("skin", id); // PropertiesFile guarda al destruirse
 }
 
 // Fondo tintado, fósforo pleno y núcleo saturado ("caliente")
