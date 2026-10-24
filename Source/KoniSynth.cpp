@@ -411,6 +411,10 @@ public:
 
         if (panicRequested.exchange (false))
             panic();
+        // Calidad del ladder pedida: se aplica cuando no suena ninguna voz del Synth (también justo tras un panic). Así todas las
+        // voces usan siempre el mismo modo y ninguna cambia de frecuencia interna ni de estados a mitad de una nota
+        if (const auto q = filterQualityRequested.load(); q != params.ladderQuality.load() && ! anySynthVoiceActive())
+            params.ladderQuality.store (q);
 
         keyboardState.processNextMidiBuffer (midi, 0, numSamples, true); // mezcla las notas del teclado en pantalla
         sessionTransport.captureMidi (midi); // REC: lo que entra al motor (controlador, teclado y .mid), antes de secuenciador y arpegiador
@@ -1071,6 +1075,7 @@ public:
                 presetManager.invalidateSnapshot();
                 perfMacros.update();
                 syncRandomState();
+                filterQualityRequested = juce::jlimit (0, 2, (int) apvts.state.getProperty (filterQualityProp, 0)); // sin ella: Classic
 
                 restoreFiles (apvts.state.getProperty (samplePathProp).toString(), apvts.state.getProperty (wtPathProp).toString());
                 restoreCabIr (apvts.state.getProperty (cabIrPathProp).toString());
@@ -1325,6 +1330,16 @@ private:
     juce::uint64 commonSeed = 0;
 
 public:
+    // ¿Suena alguna voz del Synth (poly o mono, release incluido)? Hilo de audio
+    bool anySynthVoiceActive() const
+    {
+        for (const auto* s : { &synth, &monoSynth })
+            for (int i = 0; i < s->getNumVoices(); ++i)
+                if (s->getVoice (i)->isVoiceActive())
+                    return true;
+        return false;
+    }
+
     // Corta todas las voces sin release (poly y mono) y vacía la pila del modo monofónico. Hilo de audio.
     void allVoicesOff()
     {
@@ -1335,6 +1350,18 @@ public:
 
     // Panic: lo pide la UI (botón) o el CC 120; se ejecuta al principio del siguiente bloque de audio
     void requestPanic() { panicRequested = true; }
+
+    // Calidad del ladder del Synth: 0 Classic (1x), 1 Balanced (2x + ADAA), 2 High Quality (4x). Es de la instancia, como la
+    // afinación: va en el estado del proyecto y los presets no la llevan (no está en su lista de propiedades). Hilo de mensajes
+    void setFilterQuality (int q)
+    {
+        q = juce::jlimit (0, 2, q);
+        apvts.state.setProperty (filterQualityProp, q, nullptr);
+        filterQualityRequested = q;
+    }
+    int getFilterQuality() const { return filterQualityRequested.load(); }
+    bool isFilterQualityPending() const { return filterQualityRequested.load() != params.ladderQuality.load(); }
+    void applyFilterQualityNow() { requestPanic(); } // corta las voces: el modo pedido se aplica en ese mismo bloque
 
     juce::MidiKeyboardState keyboardState;
     SessionTransport sessionTransport; // REC / STOP / PLAY (Transport/SessionTransport.h); inactivo hasta pulsar
@@ -1833,6 +1860,8 @@ private:
     Underwater underwater;
     bool mediaWasOn = false;
     std::atomic<bool> panicRequested { false };
+    static inline const juce::Identifier filterQualityProp { "filterQuality" };
+    std::atomic<int> filterQualityRequested { 0 };
 
     juce::dsp::DelayLine<float, juce::dsp::DelayLineInterpolationTypes::Linear> echo;
     juce::SmoothedValue<float> echoDelay;

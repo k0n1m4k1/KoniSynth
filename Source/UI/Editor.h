@@ -180,8 +180,17 @@ public:
             { "Sample", &sampleSection, "sampleLevel", "sampleMute" }, { "String", &stringSection, "stringLevel", "stringMute" } });
 
         // 2. Forma: filtro + envolventes (sliders verticales, como en un panel de hardware)
+        qualitySelector.addItemList ({ "Classic", "Balanced", "High Quality" }, 1);
+        qualitySelector.setSelectedId (1, juce::dontSendNotification);
+        qualitySelector.setTooltip ("Ladder quality (LP 24, LP 12, BP 12 and HP 12 only). Classic (default): the original filter. "
+                                    "Balanced: 2x oversampling with antialiased drive: much less aliasing on high notes with Drive, moderate CPU. "
+                                    "High Quality: 4x oversampling: the least aliasing, about twice the CPU of the Synth engine. "
+                                    "Each mode has its own tone: the oversampled ones are brighter above the cutoff, Balanced a little less "
+                                    "than High Quality. Saved with the project, not with presets. A change waits until all voices are silent "
+                                    "(or use Apply now).");
+        qualitySelector.onOpen = [this] { showQualityMenu(); };
         filter.withToggle (s, "filterOn").withCombo (s, "filterMode")
-              .withHeaderButton ("Sat...", "Saturation: clean filter input (Drive 0 % linear) and per-voice saturation after the filter "
+              .withHeaderButton ("Saturation...", "Saturation: clean filter input (Drive 0 % linear) and per-voice saturation after the filter "
                                            "(curve Soft, Diode, Hard, Fold, and drive).", [this]
               {
                   openParamPanel ("Saturation", [] (ParamPanel& p, APVTS& st)
@@ -190,6 +199,7 @@ public:
                       p.add ("Voice Saturation").withCombo (st, "voiceSatMode").withKnob (st, "voiceSatDrive", "Drive");
                   });
               })
+              .withHeaderControl ("Ladder quality", qualitySelector, 190)
               .withKnob (s, "cutoff", "Cutoff").withKnob (s, "resonance", "Reso").withKnob (s, "filterDrive", "Drive")
               .withKnob (s, "filterEnv", "Env").withKnob (s, "filterKey", "Key").withKnob (s, "velToFilter", "Vel")
               .withKnob (s, "filterSpread", "Spread").withKnob (s, "voiceSatDrive", "Sat")
@@ -1229,6 +1239,47 @@ private:
     std::vector<juce::Component::SafePointer<Knob>> ringKnobs;
     unsigned lastLiveTick = 0;
     int liveQuietFrames = 100, ringScanCountdown = 0, inertCountdown = 0, lastLearning = -1, shownRoutes = 0;
+    int shownQuality = 0, shownQualityPending = 0; // selector Ladder quality (inicial: Classic, sin cambio pendiente)
+
+    // Selector Ladder quality: aspecto de desplegable, pero abre un menú propio (los modos, el aviso de cambio pendiente y
+    // Apply now). No es un parámetro: el modo es de la instancia (KoniSynth.cpp, setFilterQuality)
+    struct QualitySelector : juce::ComboBox
+    {
+        std::function<void()> onOpen;
+        void showPopup() override { if (onOpen) onOpen(); }
+    };
+    QualitySelector qualitySelector;
+
+    static juce::String qualityText (int q, bool pending)
+    {
+        static const char* names[] { "Classic", "Balanced", "High Quality" };
+        return juce::String (names[juce::jlimit (0, 2, q)]) + (pending ? " (pending)" : "");
+    }
+
+    // Menú del selector: los tres modos y, si el cambio espera a que callen las voces, aplicarlo ya (corta el sonido)
+    void showQualityMenu()
+    {
+        const auto q = koni.getFilterQuality();
+        const auto pending = koni.isFilterQualityPending();
+        juce::PopupMenu m;
+        m.addSectionHeader ("Ladder Quality");
+        m.addItem (1, "Classic (original, 1x)", true, q == 0);
+        m.addItem (2, "Balanced (2x + antialiased drive)", true, q == 1);
+        m.addItem (3, "High Quality (4x)", true, q == 2);
+        if (pending)
+        {
+            m.addSeparator();
+            m.addItem (4, "Pending: applies when all voices are silent", false, false);
+            m.addItem (5, "Apply now (cuts the sound, like PANIC)");
+        }
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&qualitySelector).withMinimumWidth (qualitySelector.getWidth()),
+                         [this] (int r)
+        {
+            qualitySelector.hidePopup(); // el ComboBox marcó su menú como abierto antes de llamar a showPopup
+            if (r >= 1 && r <= 3) koni.setFilterQuality (r - 1);
+            else if (r == 5) koni.applyFilterQualityNow();
+        });
+    }
 
     // Controles que no suenan con los ajustes actuales: atenuados al 35 % (se pueden seguir tocando). Condiciones tomadas
     // del DSP: Dsp/OscillatorCore.h (PW solo en Square), Engines/Synth.h (unísono, Osc 2, sub, ruido, P.Env), Params.h
@@ -1283,6 +1334,15 @@ private:
     {
         if (const auto l = koni.midiLearn.learning.load(); l != lastLearning) { lastLearning = l; panicButton.repaint(); } // marco de MIDI learn
         if (++inertCountdown >= 3) { inertCountdown = 0; updateInert(); } // 10 Hz
+        // Selector Ladder quality de Filter: modo pedido y si espera a que callen las voces
+        if (const auto q = koni.getFilterQuality(), pending = koni.isFilterQualityPending() ? 1 : 0; q != shownQuality || pending != shownQualityPending)
+        {
+            shownQuality = q;
+            shownQualityPending = pending;
+            qualitySelector.setSelectedId (q + 1, juce::dontSendNotification);
+            if (pending != 0)
+                qualitySelector.setText (qualityText (q, true), juce::dontSendNotification);
+        }
         if (--ringScanCountdown <= 0)
         {
             ringScanCountdown = 30;

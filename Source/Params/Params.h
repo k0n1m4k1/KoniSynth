@@ -187,6 +187,9 @@ struct Params
     // escalado por Bend Range; rueda de modulación 0..1). Mismo hilo que las voces.
     std::atomic<float> pitchBend { 0.0f }, modWheel { 0.0f };
     std::atomic<float> stripTouch { 0.0f }; // tira de expresión del Gen X-2 en el pad del Stylophone (-1..1, 0 = sin tocar)
+    // Calidad del ladder del Synth aplicada (0 Classic 1x, 1 Balanced 2x + ADAA, 2 High Quality 4x). No es un parámetro: la
+    // escribe el hilo de audio solo cuando no suena ninguna voz del Synth (todas las voces usan siempre el mismo modo)
+    std::atomic<int> ladderQuality { 0 };
     // Frecuencia de la última nota pulsada (origen del glide); la escriben las voces en startNote (hilo de audio)
     mutable std::atomic<double> lastNoteHz { 0.0 };
     mutable RandomClock randomClock; // Dsp/RandomClock.h: hilo de audio

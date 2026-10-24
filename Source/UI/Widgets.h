@@ -787,6 +787,19 @@ struct Section : juce::Component
         return *this;
     }
 
+    // Selector de cabecera con su etiqueta, tras los botones (un ajuste que no es un parámetro, p. ej. Ladder quality)
+    Section& withHeaderControl (const juce::String& labelText, juce::Component& c, int width)
+    {
+        headerLabel.setText (labelText, juce::dontSendNotification);
+        headerLabel.setFont (juce::FontOptions (13.0f));
+        headerLabel.setJustificationType (juce::Justification::centredRight);
+        addAndMakeVisible (headerLabel);
+        addAndMakeVisible (c);
+        headerControl = &c;
+        headerControlWidth = width;
+        return *this;
+    }
+
     void setInfo (const juce::String& text)
     {
         if (! info.isVisible())
@@ -806,7 +819,7 @@ struct Section : juce::Component
 
         auto r = getLocalBounds().reduced (10).withTrimmedTop (8);
         // Cabecera solo si tiene controles: sin ella, perillas y sliders ganan 28 px de alto
-        if (toggle.isVisible() || combo.isVisible() || extraToggle.isVisible() || ! headerButtons.empty())
+        if (toggle.isVisible() || combo.isVisible() || extraToggle.isVisible() || ! headerButtons.empty() || headerControl != nullptr)
         {
             auto header = r.removeFromTop (24);
             if (toggle.isVisible()) toggle.setBounds (header.removeFromLeft (60));
@@ -814,6 +827,11 @@ struct Section : juce::Component
             if (extraToggle.isVisible()) extraToggle.setBounds (header.removeFromLeft (80).withTrimmedLeft (10));
             for (auto& b : headerButtons)
                 b->setBounds (header.removeFromLeft (buttonWidth (*b)).withTrimmedLeft (6));
+            if (headerControl != nullptr)
+            {
+                headerLabel.setBounds (header.removeFromLeft (headerLabelWidth()));
+                headerControl->setBounds (header.removeFromLeft (headerControlWidth).withTrimmedLeft (4));
+            }
             if (info.isVisible()) info.setBounds (header.withTrimmedLeft (6));
             r.removeFromTop (4);
         }
@@ -893,7 +911,14 @@ struct Section : juce::Component
         for (auto& b : headerButtons)
             headerPx += (float) buttonWidth (*b);
         if (info.isVisible())        headerPx += 110.0f;
+        if (headerControl != nullptr) headerPx += (float) (headerLabelWidth() + headerControlWidth);
         return headerPx;
+    }
+
+    // Etiqueta del selector de cabecera: su texto entero más 18 px de separación
+    int headerLabelWidth() const
+    {
+        return juce::roundToInt (juce::GlyphArrangement::getStringWidth (headerLabel.getFont(), headerLabel.getText())) + 18;
     }
 
     // Unidad máxima de los controles (px por perilla): con pocos controles no se estiran hasta el borde
@@ -938,6 +963,9 @@ private:
     juce::ToggleButton extraToggle;
     std::unique_ptr<APVTS::ButtonAttachment> extraToggleAttachment;
     std::vector<std::unique_ptr<juce::TextButton>> headerButtons;
+    juce::Label headerLabel;                // etiqueta del selector de cabecera (withHeaderControl)
+    juce::Component* headerControl = nullptr; // propiedad del editor
+    int headerControlWidth = 0;
     juce::Label info;
     std::vector<std::unique_ptr<Knob>> knobs;
     std::vector<std::unique_ptr<ListControl>> lists;

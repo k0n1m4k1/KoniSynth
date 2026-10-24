@@ -405,7 +405,7 @@ static juce::String paramHelp (const juce::String& id)
                           "intermodulation). Soft: tanh, like an overdriven OTA. Diode: asymmetric, adds even harmonics. Hard: clipping. "
                           "Fold: sine wavefolder (West Coast); more drive = more folds. Antialiased (ADAA), no added latency." },
         { "voiceSatDrive", "Per-voice saturation drive. Off at 0 dB; fades in over the first 3 dB. Level is compensated for Soft, Diode "
-                           "and Hard (a full-scale oscillator keeps its peak level); Fold is not. Curve: Sat... in the Filter header." },
+                           "and Hard (a full-scale oscillator keeps its peak level); Fold is not. Curve: Saturation... in the Filter header." },
         { "vcaClick", "Analog VCA control feedthrough: the amp envelope leaks into the audio and the output coupling turns it into a "
                       "thump at each note (strongest with fast attacks). 4 %: worst case of a modern AS3360 (10 mV in 10 Vpp); 100 %: an "
                       "untrimmed vintage VCA. Polarity and amount vary per voice (per voice card with Tolerances = Per Voice Card)." },

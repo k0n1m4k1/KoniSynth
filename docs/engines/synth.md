@@ -106,8 +106,9 @@ Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x overs
 
 ### Filter
 
-The **Sat...** header button opens the **Saturation** dialog: *Filter Input* (Clean Drive switch and Drive) and *Voice
-Saturation* (curve menu and Drive).
+The **Saturation...** header button opens the **Saturation** dialog: *Filter Input* (Clean Drive switch and Drive) and *Voice
+Saturation* (curve menu and Drive). The **Ladder quality** selector next to it chooses how the ladder modes are processed; see
+*Ladder quality* below.
 
 | Control | What it does | Range / default |
 |---|---|---|
@@ -120,9 +121,9 @@ Saturation* (curve menu and Drive).
 | Key | Keyboard tracking; 100 % follows note for note (reference C4). | 0-100 % / 0 % |
 | Vel | Playing harder opens the filter more. | 0-100 % / 0 % |
 | Spread | Distance between the two filters of the Dual modes, centred on Cutoff. | 0-4 oct / 1.00 oct |
-| Sat | Per-voice saturation drive (same parameter as in Sat...). | Off-36 dB / Off |
-| Clean Drive (Sat...) | Off: the input stage always saturates a little, even at Drive 0 %. On: Drive 0 % is linear and saturation fades in over the first 25 % of Drive. | Off / On / **Off** |
-| Voice Sat curve (Sat...) | Soft (tanh, overdriven OTA), Diode (asymmetric, even harmonics), Hard (clipping), Fold (sine wavefolder). | Soft, Diode, Hard, Fold / Soft |
+| Sat | Per-voice saturation drive (same parameter as in Saturation...). | Off-36 dB / Off |
+| Clean Drive (Saturation...) | Off: the input stage always saturates a little, even at Drive 0 %. On: Drive 0 % is linear and saturation fades in over the first 25 % of Drive. | Off / On / **Off** |
+| Voice Sat curve (Saturation...) | Soft (tanh, overdriven OTA), Diode (asymmetric, even harmonics), Hard (clipping), Fold (sine wavefolder). | Soft, Diode, Hard, Fold / Soft |
 
 | Mode | Description (item tooltip) |
 |---|---|
@@ -233,6 +234,25 @@ These are the Synth's own design choices, not an emulation of a particular unit.
 - **Filter input saturation.** By default the input stage always saturates a little (3rd harmonic of a full-scale sine
   at about -29 dB). Clean Drive makes Drive 0 % linear for the SVF, comb and dual modes; the ladder and MS-20 keep
   their core saturation (about -34 dB). The ladder self-oscillates from Reso of about 91 %.
+- **Ladder quality** (Filter header > Ladder quality; LP 24, LP 12, BP 12 and HP 12 only; the other modes are not affected).
+  With Drive, high notes fold harmonics back below 20 kHz as inharmonic tones (aliasing). Measured at 48 kHz, sine
+  with Drive 100 %, Reso 80 %, energy of the folded tones relative to the harmonics:
+
+  | Mode | E7 (2637 Hz) | A7 (3520 Hz) | CPU, busiest Synth benchmark (one core) |
+  |---|---|---|---|
+  | **Classic** (default): the original filter | -16 dB | -18 dB | 9.6 % |
+  | **Balanced**: 2x oversampling, antialiased drive | -43 dB | -51 dB | 13.7 % |
+  | **High Quality**: 4x oversampling | -88 dB | -62 dB | 20.0 % |
+
+  Each mode has its own tone, not only less aliasing: the oversampled modes let more treble through above the cutoff
+  (LP 24 at 8 kHz: about +3 dB at 12 kHz and +12 dB at 16 kHz with High Quality), and Balanced softens the very top a
+  little (about -2 dB at 20 kHz for small signals). Tuning, self-oscillation and the harmonics below the aliasing stay
+  the same. The oversampled modes delay the filtered sound by 0.1-0.3 ms (more in the treble); this is not reported
+  to the host as latency.
+
+  The setting belongs to the project, like the tuning: it is saved with it, and loading a preset does not change it.
+  All voices always use the same mode, so a change waits until every voice is silent (the selector shows *(pending)*);
+  *Apply now* in its menu applies it at once by cutting the sound, like PANIC.
 - **Per-voice saturation** sits between filter and amp, each note on its own, so chords stay free of intermodulation.
   Off at 0 dB, it fades in over the first 3 dB; level is compensated for Soft, Diode and Hard, not for Fold. Antialiased
   (ADAA), no added latency.

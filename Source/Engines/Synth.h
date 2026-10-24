@@ -192,6 +192,8 @@ struct SynthVoice : juce::SynthesiserVoice
         modSmoothed  = params.modWheel.load() * params.modWheelDepth->load();
         filter.reset();
         filterR.reset();
+        osL = {};
+        osR = {};
         for (auto& ph : lanes.modPhase)
             ph = 0.0; // modulador en fase con el principal: timbre de FM repetible nota a nota
         decimator.reset();
@@ -298,6 +300,9 @@ struct SynthVoice : juce::SynthesiserVoice
         const auto filterOn   = params.filterOn->load() > 0.5f;
         const auto filterMode = (int) params.filterMode->load();
         const auto filterSpread = params.filterSpread->load();
+        // Calidad del ladder (solo LP 24, LP 12, BP 12 y HP 12; los demás modelos no se sobremuestrean). No cambia mientras
+        // suene alguna voz (KoniSynth.cpp la aplica en silencio)
+        const auto ladderQuality = filterMode < VoiceFilters::svfLp ? params.ladderQuality.load (std::memory_order_relaxed) : 0;
         // k = 4 es el umbral lineal (Reso ≈ 91 %); hasta 4,4 la oscilación crece hasta que la acota tanh
         // (medido en réplica numérica: pico 0,29, afinación < 0,1 Hz de error a 440 Hz–5 kHz)
         const auto k          = 4.4f * params.resonance->load();
@@ -663,8 +668,69 @@ struct SynthVoice : juce::SynthesiserVoice
                         in = 0.5f * x + wetNow * (in - 0.5f * x);
                     return 2.0f * f.process (comp * in, g, kNow, filterMode, fc, (float) sampleRate, filterSpread);
                 };
-                left  = runFilter (filter, left);
-                right = stereo ? runFilter (filterR, right) : left;
+                if (ladderQuality == 0) // Classic: la ruta original, sin cambios
+                {
+                    left  = runFilter (filter, left);
+                    right = stereo ? runFilter (filterR, right) : left;
+                }
+                else
+                {
+                    // Balanced (2x + ADAA en la tanh de entrada) y High Quality (4x): drive + ladder a N·fs entre el interpolador
+                    // y el diezmador IIR de media banda de VoiceSat (4x = dos etapas 2x). g se calcula a la tasa interna, así que la
+                    // respuesta sigue la bilineal a N·fs: por encima del corte deja pasar más agudos que Classic (p. ej. LP 24 a
+                    // 8 kHz: +3,4 dB a 12 kHz y +11,6 dB a 16 kHz, medido). Retardo de grupo del par IIR a 48 kHz: 3,6 → 11,6
+                    // muestras (2x) y 5,4 → 13,8 (4x) de 0,1 a 20 kHz; no se comunica como latencia
+                    const auto factor = ladderQuality == 1 ? 2 : 4;
+                    const auto adaa = ladderQuality == 1;
+                    const auto rateOs = (float) sampleRate * (float) factor;
+                    const auto gOs = std::tan (juce::MathConstants<float>::pi * fc / rateOs);
+                    auto stage = [&] (VoiceFilters::VoiceFilter& f, LadderOs& o, double xs)
+                    {
+                        const auto x = (float) xs;
+                        const auto a = (double) (driveNow * 0.5f * x);
+                        float sat, linear;
+                        if (adaa) // ADAA1 (VoiceSaturator.h): (F(a) - F(a')) / (a - a'), F = log cosh
+                        {
+                            const auto F = VoiceSat::logCosh (a), d = a - o.ax;
+                            sat = (float) (std::abs (d) > 1.0e-5 ? (F - o.af) / d : std::tanh (0.5 * (a + o.ax)));
+                            o.ax = a; o.af = F;
+                            // Rama lineal de Clean Drive alineada con la ADAA: en su límite lineal la ADAA da la media de dos
+                            // muestras (retardo de media muestra y cos(πf/N·fs)); la rama lineal hace lo mismo, a la tasa interna
+                            linear = 0.25f * (x + o.xPrev);
+                            o.xPrev = x;
+                        }
+                        else
+                        {
+                            sat = std::tanh ((float) a);
+                            linear = 0.5f * x;
+                        }
+                        auto in = sat * normNow;
+                        if (cleanDrive)
+                            in = linear + wetNow * (in - linear);
+                        return (double) (2.0f * f.process (comp * in, gOs, kNow, filterMode, fc, rateOs, filterSpread));
+                    };
+                    auto runOs = [&] (VoiceFilters::VoiceFilter& f, LadderOs& o, float x)
+                    {
+                        const auto [e, od] = o.u1.process ((double) x);
+                        if (factor == 2)
+                        {
+                            const auto s0 = stage (f, o, e);
+                            const auto s1 = stage (f, o, od);
+                            return (float) o.d1.process (s0, s1);
+                        }
+                        const auto [e0, o0] = o.u2.process (e);
+                        const auto [e1, o1] = o.u2.process (od);
+                        const auto s0 = stage (f, o, e0);
+                        const auto s1 = stage (f, o, o0);
+                        const auto s2 = stage (f, o, e1);
+                        const auto s3 = stage (f, o, o1);
+                        const auto a = o.d2.process (s0, s1);
+                        const auto b = o.d2.process (s2, s3);
+                        return (float) o.d1.process (a, b);
+                    };
+                    left  = runOs (filter, osL, left);
+                    right = stereo ? runOs (filterR, osR, right) : left;
+                }
             }
 
             if (satOn) // saturación de esta voz, tras el filtro y antes del VCA
@@ -1209,4 +1275,14 @@ private:
     juce::Random rng;
     SynthEnvelope adsr, filterEnv; // lineal o analógica RC (Dsp/AnalogEnvelope.h)
     VoiceFilters::VoiceFilter filter, filterR; // ladder y demás modelos (Dsp/Filters.h); filterR solo con unísono en estéreo
+    // Sobremuestreo del ladder (Balanced / High Quality) por canal: interpoladores y diezmadores de las dos etapas 2x y la
+    // memoria de la ADAA; se vacían en cada note-on
+    struct LadderOs
+    {
+        VoiceSat::Upsampler2x u1, u2;
+        VoiceSat::Downsampler2x d1, d2;
+        double ax = 0.0, af = 0.0;
+        float xPrev = 0.0f;
+    };
+    LadderOs osL, osR;
 };
