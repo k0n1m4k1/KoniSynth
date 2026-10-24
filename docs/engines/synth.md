@@ -234,7 +234,8 @@ These are the Synth's own design choices, not an emulation of a particular unit.
 - **Filter input saturation.** By default the input stage always saturates a little (3rd harmonic of a full-scale sine
   at about -29 dB). Clean Drive makes Drive 0 % linear for the SVF, comb and dual modes; the ladder and MS-20 keep
   their core saturation (about -34 dB). The ladder self-oscillates from Reso of about 91 %.
-- **Ladder quality** (Filter header > Ladder quality; LP 24, LP 12, BP 12 and HP 12 only; the other modes are not affected).
+- **Ladder quality** (Filter header > Ladder quality; LP 24, LP 12, BP 12 and HP 12 only; the other modes are not affected:
+  with them the selector is dimmed but can still be set).
   With Drive, high notes fold harmonics back below 20 kHz as inharmonic tones (aliasing). Measured at 48 kHz, sine
   with Drive 100 %, Reso 80 %, energy of the folded tones relative to the harmonics:
 

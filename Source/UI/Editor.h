@@ -187,7 +187,7 @@ public:
                                     "High Quality: 4x oversampling: the least aliasing, about twice the CPU of the Synth engine. "
                                     "Each mode has its own tone: the oversampled ones are brighter above the cutoff, Balanced a little less "
                                     "than High Quality. Saved with the project, not with presets. A change waits until all voices are silent "
-                                    "(or use Apply now).");
+                                    "(or use Apply now). Dimmed with the other filter modes: it can still be set, and applies to the ladder modes.");
         qualitySelector.onOpen = [this] { showQualityMenu(); };
         filter.withToggle (s, "filterOn").withCombo (s, "filterMode")
               .withHeaderButton ("Saturation...", "Saturation: clean filter input (Drive 0 % linear) and per-voice saturation after the filter "
@@ -1324,6 +1324,8 @@ private:
         dim (echo.knobFor ("echoTime"), v ("echoSync") > 0.5f);
         dim (ambient.knobFor ("reverbDecay"), v ("reverbFreeze") > 0.5f);
         dim (filter.knobFor ("filterSpread"), (int) v ("filterMode") < VoiceFilters::dualBp);
+        // Ladder quality solo actúa en los modos ladder; es de la instancia y se puede elegir siempre: atenuación más suave
+        filter.setHeaderControlAlpha ((int) v ("filterMode") < VoiceFilters::svfLp ? 1.0f : 0.6f);
         const auto mt32Multi = v ("mt32Multi") > 0.5f; // MT-32: con Multi el teclado no se enruta; Program solo en Part 1
         dim (mt32Section.knobFor ("mt32Mode"), mt32Multi);
         dim (mt32Section.listFor ("mt32Program"), mt32Multi || (int) v ("mt32Mode") == 1);

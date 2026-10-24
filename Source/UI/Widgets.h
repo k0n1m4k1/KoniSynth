@@ -800,6 +800,14 @@ struct Section : juce::Component
         return *this;
     }
 
+    // Atenúa el selector de cabecera y su etiqueta sin desactivarlos (sigue respondiendo a los clics)
+    void setHeaderControlAlpha (float alpha)
+    {
+        if (headerControl == nullptr || headerControl->getAlpha() == alpha) return;
+        headerControl->setAlpha (alpha);
+        headerLabel.setAlpha (alpha);
+    }
+
     void setInfo (const juce::String& text)
     {
         if (! info.isVisible())
