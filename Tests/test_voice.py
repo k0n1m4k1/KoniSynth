@@ -97,4 +97,47 @@ for d in (0, 80):
     dec[str(d)] = pitch(x, fs)
 c.check(abs(dec[80] - dec[0]) < 0.5, 'cuerda, Damping 80 %%: caída de la fundamental en 1 s %.2f dB frente a %.2f sin Damping (< 0,5 dB)' % (dec[80], dec[0]))
 c.check(abs(1200 * np.log2(dec['80'] / dec['0'])) < 1.0, 'cuerda, Damping 80 %%: afinación %.3f Hz frente a %.3f Hz (< 1 cent)' % (dec['80'], dec['0']))
+
+# --- Osc 2 en modo Wavetable: misma tabla que la fuente Wavetable, fase y posición propias ---
+WT = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%', 'Wavetable=Harmonic Sweep']
+OSC2 = WT + ['Osc2 Wave=Wavetable', 'Osc2 Level=100%']
+fa = 440 * 2 ** ((57 - 69) / 12)
+
+
+def harmonics(x, fs, f0, n=30):
+    seg = x[int(0.3 * fs):int(1.3 * fs)]; k = np.arange(len(seg)); w = np.kaiser(len(seg), 20)
+    return np.array([abs(np.sum(seg * w * np.exp(-2j * np.pi * h * f0 * k / fs))) for h in range(1, n + 1)])
+
+
+def same_harmonics(a, b):
+    m = db(a) > db(a.max()) - 60
+    return np.abs(db(b[m]) - db(a[m])).max()
+
+
+src, fs = render(WT + ['Wavetable Level=100%', 'Wavetable Position=50%'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')
+o2, _ = render(OSC2 + ['Osc2 WT Position=50%'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')
+d = same_harmonics(harmonics(src, fs, fa), harmonics(o2, fs, fa))
+c.check(d < 0.01, 'Osc 2 Wavetable = fuente Wavetable a la misma posición (50 %%): armónicos a %.3f dB como máximo (< 0,01)' % d)
+h0 = harmonics(render(OSC2 + ['Osc2 WT Position=0%'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fa)
+h1 = harmonics(render(OSC2 + ['Osc2 WT Position=100%'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fa)
+c.check(db(h0[1] / h0[0]) < -100 and db(h1[1] / h1[0]) > -10,
+        'Osc 2 WT Pos mueve la tabla: h2 %.0f dB a 0 %% (seno) y %.1f dB a 100 %%' % (db(h0[1] / h0[0]), db(h1[1] / h1[0])))
+x, _ = render(OSC2 + ['Osc2 Octave=1', 'Osc2 Semi=7', 'Osc2 Fine=10.0 ct'], 1.5, ['69:0.05:1.4:127'], 'osc2wt.wav')
+want = 880 * 2 ** (7.1 / 12); ct = 1200 * np.log2(pitch(x, fs) / want)
+c.check(abs(ct) < 0.05, 'Osc 2 Wavetable sigue Oct +1, Semi +7, Fine +10 ct: %.3f Hz (esperado %.3f, %+.3f ct)' % (pitch(x, fs), want, ct))
+hm = harmonics(render(OSC2 + ['Osc2 WT Position=0%', 'Matrix 1 Source=Velocity', 'Matrix 1 Dest=Osc 2 WT Position', 'Matrix 1 Amount=100%'],
+                      1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fa)
+d = same_harmonics(h1, hm)
+c.check(d < 0.01, 'matriz Velocity -> Osc 2 WT Position 100 %%, velocidad 127 = posición 100 %%: %.3f dB (< 0,01)' % d)
+# Sync: el salto del reinicio va corregido con minBLEP (con la tabla en un seno, igual que el Sine clásico); el salto de
+# pendiente queda sin corregir, como en el Sine y el Triangle clásicos (MinBlep.h). Afecta sobre todo a posiciones brillantes:
+# referencia para un futuro BLAMP (Harmonic Sweep, posición 30 %, Oct +1, Semi +5): C3 -75,4, C4 -52,9, C5 -43,6 dB
+# (sierra clásica con sync: -118,3 / -111,8 / -108,5 dB)
+SYNC = ['Osc2 Level=100%', 'Osc2 Sync=On', 'Osc2 Octave=1', 'Osc2 Semi=5']
+fc4 = 440 * 2 ** ((60 - 69) / 12)
+a_sine = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Sine'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
+a_wt0 = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Wavetable', 'Osc2 WT Position=0%'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
+c.check(abs(a_wt0 - a_sine) < 0.5, 'Osc 2 Wavetable con sync, tabla en seno: aliasing %.1f dB = Sine clásico %.1f dB (±0,5)' % (a_wt0, a_sine))
+a_wt30 = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Wavetable', 'Osc2 WT Position=30%'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
+c.check(a_wt30 < -50, 'Osc 2 Wavetable con sync, posición 30 %%, C4: aliasing %.1f dB (< -50)' % a_wt30)
 sys.exit(c.summary())

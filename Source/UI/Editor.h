@@ -158,7 +158,7 @@ public:
                       .withKnob (s, "symmetry", "Symmetry").withKnob (s, "timbreMod", "T.Mod");
         osc2Section.withCombo (s, "osc2Wave").withExtraToggle (s, "osc2Sync", "Sync")
                    .withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Semi", "Semi").withKnob (s, "osc2Fine", "Fine")
-                   .withKnob (s, "osc2Level", "Osc 2")
+                   .withKnob (s, "osc2WtPosition", "WT Pos").withKnob (s, "osc2Level", "Osc 2")
                    .withKnob (s, "subLevel", "Sub").withKnob (s, "subOctave", "Sub Oct")
                    .withKnob (s, "noiseLevel", "Noise").withKnob (s, "noiseColor", "Color");
         // Sample, Wavetable y Sequencer: sección compacta + panel de edición propio (Edit...)
@@ -1316,6 +1316,7 @@ private:
         dim (&osc2Section.extraToggleComponent(), ! osc2Sounds);
         dim (osc2Section.knobFor ("subOctave"), v ("subLevel") <= 0.0f);
         dim (osc2Section.knobFor ("noiseColor"), v ("noiseLevel") <= 0.0f && ! targeted (ModMatrix::dstNoiseLevel));
+        dim (osc2Section.knobFor ("osc2WtPosition"), (int) v ("osc2Wave") != 4 || ! osc2Sounds); // solo con la forma Wavetable
         const auto theremin = engine == 1; // el Theremin usa LFO 1 con seno fijo y su propia velocidad (sin Shape ni Sync)
         dim (lfo.knobFor ("lfoRate"), ! theremin && v ("lfoSync") > 0.5f);
         dim (lfo.knobFor ("lfoShape"), theremin);

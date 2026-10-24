@@ -25,6 +25,7 @@ inline Target targetFor (int destination)
         case ModMatrix::dstFmIndex:    return { "fmIndex", 0, 1.0f };
         case ModMatrix::dstTimbre:     return { "timbre", 0, 1.0f };
         case ModMatrix::dstWtPosition: return { "wtPosition", 0, 1.0f };
+        case ModMatrix::dstOsc2WtPosition: return { "osc2WtPosition", 0, 1.0f };
         default:                       return { nullptr, 0, 1.0f };
     }
 }

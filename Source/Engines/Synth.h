@@ -337,6 +337,9 @@ struct SynthVoice : juce::SynthesiserVoice
         const auto wtLevel = params.wtLevel->load() * unmuted (params.wtMute);
         const auto wtPositionBase = params.wtPosition->load();
         const auto* blockWavetable = wtLevel > 0.0f ? wavetableSlot.current.load (std::memory_order_acquire) : nullptr;
+        // Osc 2 en modo Wavetable: la misma tabla, con la fase de Osc 2 y su propia posición (sin tabla: Osc 2 calla)
+        const auto osc2WtPositionBase = params.osc2WtPosition->load();
+        mix.osc2Table = mix.osc2Wave == wavetableWave ? wavetableSlot.current.load (std::memory_order_acquire) : nullptr;
         {
             // Filtro de lazo (1 - S) + S·z^-1 y ρ, por bloque con la frecuencia base (vibrato y bend lo mueven < 1 %).
             // g = ganancia por periodo para caer 60 dB en Decay. S = ½ (promedio clásico) con ρ = g / cos(ω/2) si basta;
@@ -627,6 +630,8 @@ struct SynthVoice : juce::SynthesiserVoice
             const auto savedOsc2Level = mix.osc2Level, savedNoiseLevel = mix.noiseLevel; // la matriz los mueve solo en esta muestra
             if (matrix.targets[ModMatrix::dstOsc2Level])  mix.osc2Level = juce::jlimit (0.0f, 1.0f, savedOsc2Level + mtx[ModMatrix::dstOsc2Level]);
             if (matrix.targets[ModMatrix::dstNoiseLevel]) mix.noiseLevel = juce::jlimit (0.0f, 1.0f, savedNoiseLevel + mtx[ModMatrix::dstNoiseLevel]);
+            if (mix.osc2Table != nullptr)
+                mix.osc2WtPos = juce::jlimit (0.0f, 1.0f, osc2WtPositionBase + mtx[ModMatrix::dstOsc2WtPosition]);
             auto monoSources = renderMonoSources (dt, pw, (osc2Semis != 0.0f ? std::exp2 (osc2Semis / 12.0) : 1.0) * osc2Drift);
             mix.osc2Level = savedOsc2Level;
             mix.noiseLevel = savedNoiseLevel;
@@ -912,7 +917,10 @@ private:
         double osc2Ratio = 1.0, subRatio = 0.5;
         bool osc2Sync = false;
         int noiseColor = 0; // 0 blanco, 1 rosa, 2 LFSR largo, 3 LFSR corto
+        const WavetableData* osc2Table = nullptr; // modo Wavetable: tabla del bloque y posición de esta muestra
+        float osc2WtPos = 0.0f;
     };
+    static constexpr int wavetableWave = 4; // osc2Wave = Wavetable (Layout.h: tras Sine, Triangle, Saw y Square)
 
     // Fuentes mono del mezclador. dt = incremento de fase de Osc 1 (con vibrato y drift), así Osc 2 y el sub los siguen.
     //  Osc 2: dt·2^(oct + (semi + fine/100)/12); sync duro a la fundamental de Osc 1 (fase de referencia sin unísono ni FM),
@@ -935,8 +943,14 @@ private:
         lastDt2 = dt2;
         lastSubRatio = mix.subRatio;
 
+        const auto osc2Table = mix.osc2Wave == wavetableWave; // Osc 2 en modo Wavetable (mix.osc2Table puede faltar: calla)
         if (mix.osc2Level > 0.0f)
-            out += mix.osc2Level * oscillator (mix.osc2Wave, osc2Phase, dt2, pw, false);
+        {
+            if (! osc2Table)
+                out += mix.osc2Level * oscillator (mix.osc2Wave, osc2Phase, dt2, pw, false);
+            else if (mix.osc2Table != nullptr)
+                out += mix.osc2Level * readWavetable (*mix.osc2Table, osc2Phase, dt2, mix.osc2WtPos);
+        }
         if (mix.subLevel > 0.0f)
             out += mix.subLevel * oscillator (square, subPhase, dt * mix.subRatio, 0.5f, false);
         if (mix.noiseLevel > 0.0f)
@@ -974,9 +988,20 @@ private:
         // Saltos de este paso para el minBLEP: Osc 2 (con su reinicio si la referencia da la vuelta) y sub
         {
             const auto syncWraps = syncPhase + dt >= 1.0;
-            if (mix.osc2Level > 0.0f)
+            if (mix.osc2Level > 0.0f && ! osc2Table)
                 MinBlep::syncedStep (monoBlep, mix.osc2Wave, osc2Phase, dt2, mix.osc2Sync && syncWraps,
                                      syncWraps ? (1.0 - syncPhase) / dt : 1.0, pw, mix.osc2Level, mix.osc2Level);
+            // Wavetable: la tabla ya está limitada en banda (mipmaps); solo el reinicio del sync es un salto: tabla(0) - tabla(fase
+            // en el instante del reinicio), con la misma posición y el mismo nivel de mipmap
+            if (mix.osc2Level > 0.0f && osc2Table && mix.osc2Table != nullptr && mix.osc2Sync && syncWraps)
+            {
+                const auto f = (1.0 - syncPhase) / dt;
+                auto ta = osc2Phase + dt2 * f;
+                ta -= std::floor (ta);
+                const auto jump = readWavetable (*mix.osc2Table, 0.0, dt2, mix.osc2WtPos)
+                                - readWavetable (*mix.osc2Table, ta, dt2, mix.osc2WtPos);
+                monoBlep.add (f, jump * mix.osc2Level, jump * mix.osc2Level);
+            }
             if (mix.subLevel > 0.0f)
                 MinBlep::segment (monoBlep, square, subPhase, dt * mix.subRatio, 0.0, 1.0, 0.5, mix.subLevel, mix.subLevel);
         }
@@ -1142,21 +1167,28 @@ private:
     // Nyquist). Interpolación lineal entre los dos fotogramas vecinos de Position y dentro de cada tabla (tablas de 2048 + guarda).
     float renderWavetable (const WavetableData& wt, double dt, float position)
     {
+        const auto v = readWavetable (wt, wtPhase, dt, position);
+        wtPhase += dt;
+        wtPhase -= std::floor (wtPhase);
+        return v;
+    }
+
+    // Lectura sin estado (fase dada): la usan la fuente Wavetable (wtPhase) y Osc 2 en modo Wavetable (osc2Phase)
+    static float readWavetable (const WavetableData& wt, double phase, double dt, float position)
+    {
         const auto allowed = juce::jmax (1.0, 0.5 / juce::jmax (1.0e-9, dt));
         const auto mip = juce::jlimit (0, WavetableData::numLevels - 1, (int) std::ceil (std::log2 (1024.0 / allowed)));
         const auto framePos = position * (float) (wt.numFrames - 1);
         const auto f0 = juce::jmin (wt.numFrames - 1, (int) framePos);
         const auto f1 = juce::jmin (wt.numFrames - 1, f0 + 1);
         const auto ff = framePos - (float) f0;
-        const auto x = wtPhase * WavetableData::frameSize;
+        const auto x = phase * WavetableData::frameSize;
         const auto i = (int) x;
         const auto fr = (float) (x - i);
         const auto* a = wt.table (f0, mip);
         const auto* b = wt.table (f1, mip);
         const auto va = a[i] + fr * (a[i + 1] - a[i]);
         const auto vb = b[i] + fr * (b[i + 1] - b[i]);
-        wtPhase += dt;
-        wtPhase -= std::floor (wtPhase);
         return va + ff * (vb - va);
     }
 

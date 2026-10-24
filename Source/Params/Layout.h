@@ -93,7 +93,7 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc1Level", 1 },   "Osc1 Level",  NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "pulseWidth", 1 },  "Pulse Width", NormalisableRange<float> (0.05f, 0.95f), 0.5f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "pwmDepth", 1 },    "PWM Depth",   NormalisableRange<float> (0.0f, 0.45f), 0.0f, percent));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2Wave", 1 },    "Osc2 Wave",   StringArray { "Sine", "Triangle", "Saw", "Square" }, 2));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2Wave", 1 },    "Osc2 Wave",   StringArray { "Sine", "Triangle", "Saw", "Square", "Wavetable" }, 2)); // Wavetable: la tabla de la fuente Wavetable
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2Octave", 1 },  "Osc2 Octave", -2, 2, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2Semi", 1 },    "Osc2 Semi",   -12, 12, 0));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2Fine", 1 },    "Osc2 Fine",   NormalisableRange<float> (-50.0f, 50.0f), 0.0f,
@@ -838,5 +838,8 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "symmetry", 1 },   "Symmetry",  NormalisableRange<float> (-1.0f, 1.0f), 0.0f, bipolar));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "timbreMod", 1 },  "Timbre Mod", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "modSync", 1 },    "Mod Sync", false));
+
+    // Osc 2 en modo Wavetable (osc2Wave = Wavetable): posición propia en la misma tabla que la fuente Wavetable
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2WtPosition", 1 }, "Osc2 WT Position", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     return l;
 }

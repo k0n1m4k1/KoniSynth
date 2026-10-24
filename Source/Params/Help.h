@@ -178,7 +178,10 @@ static juce::String paramHelp (const juce::String& id)
         { "osc1Level", "Oscillator 1 volume in the mixer." },
         { "pulseWidth", "Square wave pulse width: 50 % sounds hollow; extreme values sound thin and nasal." },
         { "pwmDepth", "How much the LFO moves the pulse width (PWM): adds motion and body to the square wave." },
-        { "osc2Wave", "Oscillator 2 waveform." },
+        { "osc2Wave", "Oscillator 2 waveform. Wavetable: plays the table of the Wavetable source (its own position: WT Pos), "
+                      "with its own tuning and phase; Sync works too." },
+        { "osc2WtPosition", "Position of oscillator 2 in the wavetable (Wavetable waveform only): the same table as the "
+                            "Wavetable source, read at its own position. Default 0 %." },
         { "osc2Octave", "Oscillator 2 octave relative to oscillator 1." },
         { "osc2Semi", "Oscillator 2 offset in semitones (7 = fifth, 12 = octave)." },
         { "osc2Fine", "Oscillator 2 fine detune in cents: a few cents give a thick beating sound." },

@@ -18,7 +18,8 @@ enum Source { srcNone = 0, srcLfo1, srcLfo2, srcFilterEnv, srcAmpEnv, srcVelocit
               srcTimbre, srcRandom, srcPitchBend, numSources };
 
 enum Destination { dstNone = 0, dstPitch, dstOsc2Pitch, dstCutoff, dstResonance, dstDrive, dstPulseWidth, dstOsc1Level,
-                   dstOsc2Level, dstNoiseLevel, dstVolume, dstPan, dstFmIndex, dstTimbre, dstWtPosition, numDestinations };
+                   dstOsc2Level, dstNoiseLevel, dstVolume, dstPan, dstFmIndex, dstTimbre, dstWtPosition, dstOsc2WtPosition,
+                   numDestinations }; // los presets guardan el índice: solo se añade al final
 
 inline const juce::StringArray& sourceNames()
 {
@@ -30,7 +31,8 @@ inline const juce::StringArray& sourceNames()
 inline const juce::StringArray& destinationNames()
 {
     static const juce::StringArray n { "None", "Pitch", "Osc 2 Pitch", "Cutoff", "Resonance", "Drive", "Pulse Width", "Osc 1 Level",
-                                       "Osc 2 Level", "Noise Level", "Volume", "Pan", "FM Index", "Timbre", "WT Position" };
+                                       "Osc 2 Level", "Noise Level", "Volume", "Pan", "FM Index", "Timbre", "WT Position",
+                                       "Osc 2 WT Position" };
     return n;
 }
 

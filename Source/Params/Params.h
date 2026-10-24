@@ -47,6 +47,7 @@ struct Params
         osc1Level = get ("osc1Level"); pulseWidth = get ("pulseWidth"); pwmDepth = get ("pwmDepth");
         osc2Wave = get ("osc2Wave"); osc2Octave = get ("osc2Octave"); osc2Semi = get ("osc2Semi"); osc2Fine = get ("osc2Fine");
         osc2Level = get ("osc2Level"); osc2Sync = get ("osc2Sync"); subLevel = get ("subLevel"); subOctave = get ("subOctave");
+        osc2WtPosition = get ("osc2WtPosition");
         noiseLevel = get ("noiseLevel"); noiseColor = get ("noiseColor");
         wtLevel = get ("wtLevel"); wtTable = get ("wtTable"); wtPosition = get ("wtPosition");
         stringLevel = get ("stringLevel"); stringDecay = get ("stringDecay"); stringBright = get ("stringBright"); stringPick = get ("stringPick");
@@ -256,7 +257,7 @@ struct Params
     std::atomic<float> *gain {}, *wave {}, *attack {}, *decay {}, *sustain {}, *release {}, *envCurve {}, *drift {},
                        *unisonVoices {}, *unisonDetune {}, *unisonSpread {}, *voicePan {}, *voicePanMode {},
                        *osc1Level {}, *pulseWidth {}, *pwmDepth {}, *osc2Wave {}, *osc2Octave {}, *osc2Semi {}, *osc2Fine {},
-                       *osc2Level {}, *osc2Sync {}, *subLevel {}, *subOctave {}, *noiseLevel {}, *noiseColor {},
+                       *osc2Level {}, *osc2Sync {}, *subLevel {}, *subOctave {}, *noiseLevel {}, *noiseColor {}, *osc2WtPosition {},
                        *wtLevel {}, *wtTable {}, *wtPosition {},
                        *stringLevel {}, *stringDecay {}, *stringBright {}, *stringPick {},
                        *sampleLevel {}, *sampleLength {}, *sampleRoot {}, *sampleStart {}, *sampleLoop {}, *inputGain {}, *inputMonitor {},

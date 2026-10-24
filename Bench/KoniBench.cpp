@@ -787,6 +787,10 @@ int main (int argc, char** argv)
         { "16. Ampli JCM800 + 4x12 + compresor + limitador 5 ms, 8 notas", { { "Amp On", 1.0f }, { "Amp Gain", 0.8f },
                                                                              { "Comp On", 1.0f }, { "Limiter On", 1.0f },
                                                                              { "Limiter Lookahead", 1.0f } }, 8 },
+        // Osc 2: sierra frente a Wavetable (Osc2 Wave normalizado: Saw = 2/4, Wavetable = 4/4), con sync
+        { "17. Osc 2 sierra + sync, 8 notas", { { "Osc2 Wave", 0.5f }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f } }, 8 },
+        { "18. Osc 2 Wavetable + sync, 8 notas", { { "Osc2 Wave", 1.0f }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f },
+                                                    { "Osc2 WT Position", 0.5f }, { "Wavetable", 0.4f } }, 8 },
     };
 
     for (const auto& s : scenarios)

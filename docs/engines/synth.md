@@ -93,11 +93,12 @@ Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x overs
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 2 waveform. | Sine, Triangle, Saw, Square / Saw |
+| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab, with the tuning, drift and phase of Osc 2 and its own position (WT Pos); Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). | Sine, Triangle, Saw, Square, Wavetable / Saw |
 | Sync (switch) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. | Off / On / Off |
 | Oct | Octave relative to oscillator 1. | -2 to +2 / 0 |
 | Semi | Offset in semitones (7 = fifth, 12 = octave). | -12 to +12 / 0 |
 | Fine | Fine detune; a few cents give beating. | -50 to +50 ct / 0 ct |
+| WT Pos | Position of Osc 2 in the wavetable (Wavetable waveform only): the same table as the Wavetable source, read at its own position, so the two can layer two frames of one table. | 0-100 % / 0 % |
 | Osc 2 | Oscillator 2 level. | 0-100 % / 0 % |
 | Sub | Sub-oscillator level (square). | 0-100 % / 0 % |
 | Sub Oct | Sub-oscillator octave. | -1 oct, -2 oct / -1 oct |
@@ -198,7 +199,7 @@ their modulation range.
 
 | Sources | Destinations (reach at 100 %) |
 |---|---|
-| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note, fixed during the note), Pitch Bend | Pitch and Osc 2 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position |
+| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note, fixed during the note), Pitch Bend | Pitch and Osc 2 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position |
 
 ## Playing it
 
