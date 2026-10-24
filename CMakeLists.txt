@@ -25,6 +25,7 @@ juce_add_plugin(KoniSynth
     NEEDS_MIDI_OUTPUT        FALSE
     IS_MIDI_EFFECT           FALSE
     COPY_PLUGIN_AFTER_BUILD  FALSE
+    ICON_BIG                 Resources/KoniSynth-512.png # icono del ejecutable (JUCE genera el .ico; original: KoniSynth.png)
     FORMATS                  VST3 Standalone)
 
 target_sources(KoniSynth PRIVATE Source/KoniSynth.cpp Source/SimdAvx2.cpp
