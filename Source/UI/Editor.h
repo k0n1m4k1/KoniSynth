@@ -382,6 +382,7 @@ public:
         springSection.withToggle (s, "springOn").withKnob (s, "springDecay", "Decay").withKnob (s, "springMix", "Mix");
         vl1RhythmSection.withCombo (s, "vl1Rhythm")
                         .withKnob (s, "vl1Tempo", "Tempo").withKnob (s, "vl1Balance", "Balance");
+        vl1DisplaySection.withBody (vl1Display, 0, 420); // 9 posiciones de 7 segmentos a ~52 px de alto
 
         // 3. Entrada, vocoder y modulación
         inputSection.withKnob (s, "inputGain", "Gain").withKnob (s, "inputMonitor", "Monitor");
@@ -523,7 +524,7 @@ public:
             rows.addAndMakeVisible (*c);
         rows.addChildComponent (*sourceTabs);
         for (auto* c : std::initializer_list<juce::Component*> { &filter, &complexSection, &osc2Section, &thereminSection,
-                                                                 &vl1Section, &vl1RhythmSection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
+                                                                 &vl1Section, &vl1RhythmSection, &vl1DisplaySection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
                                                                  &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
                                                                  &ampEnvSection })
@@ -895,6 +896,7 @@ private:
         thereminSection.setVisible (thereminMode);
         vl1Section.setVisible (vl1Mode);
         vl1RhythmSection.setVisible (vl1Mode);
+        vl1DisplaySection.setVisible (vl1Mode);
         styloSection.setVisible (engine == 3);
         const auto genx = engine == 3 && (int) koni.apvts.getRawParameterValue ("styloModel")->load() == 1;
         genxOscSection.setVisible (genx);
@@ -1471,7 +1473,7 @@ private:
                               { 1.0f, { &filter, &filterEnvSection, &ampEnvSection }, 0 },
                               { 1.0f, { &controllerSection, &lfo, &lfo2Section }, 0 } };      // voz y modulación: solo actúan en el Synth
             case 1:  return { { 1.0f, { &thereminSection, &lfo }, 1 } };                        // el Theremin usa LFO 1 (vibrato / trémolo)
-            case 2:  return { { 1.0f, { &vl1Section, &vl1RhythmSection }, 1 } };
+            case 2:  return { { 1.0f, { &vl1Section, &vl1RhythmSection, &vl1DisplaySection }, 1 } };
             case 3:  if ((int) koni.apvts.getRawParameterValue ("styloModel")->load() == 1) // Gen X-2: cadena oscilador -> filtro/delay
                          return { { 1.0f, { &styloSection, &genxOscSection, &genxFxSection }, 3 } }; // una fila: cabe con PAD y KEYS
                      return { { 1.0f, { &styloSection }, 1 } };
@@ -2317,6 +2319,7 @@ private:
     BpmDisplay bpmDisplay { koni };
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
+    Vl1Display vl1Display { koni }; // ídem con vl1DisplaySection
     juce::uint32 shownMt32Names = ~0u; // versión de los nombres de programa mostrados en la lista
     std::vector<std::unique_ptr<FloatWindow>> blockWindows; // tras las secciones y el LED: se destruyen antes que ellos
     std::unique_ptr<FloatWindow> bpmWindow, engineWindow;
@@ -2336,7 +2339,7 @@ private:
             pvOscSection { "Polivoks VCO" }, pvFilterSection { "Polivoks Mixer / VCF" }, pvFEnvSection { "Polivoks Filter EG" },
             pvAEnvSection { "Polivoks Amp EG" }, pvLfoSection { "Polivoks LFO" }, ansSection { "ANS" },
             mdSection { "Mega Drive" }, mdLfoSection { "MD LFO" }, mdVoiceSection { "MD Voice" }, mdPsgSection { "MD PSG (SN76489)" }, snesSection { "SNES" }, snesEnvSection { "SNES Envelope" },
-            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, fmDisplaySection { "Display" },
+            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, fmDisplaySection { "Display" }, vl1DisplaySection { "Display" },
             flangerSection { "Flanger" }, fshiftSection { "Freq Shifter" }, leslieSection { "Leslie" }, springSection { "Spring Reverb" }, eqSection { "EQ" },
             transSection { "Transient" }, compSection { "Compressor" }, limiterSection { "Limiter" },
             ampSection { "Amp" };

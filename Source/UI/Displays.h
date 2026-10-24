@@ -600,3 +600,122 @@ private:
     int number = 0;
     bool edited = false;
 };
+
+//==============================================================================
+// Pantalla del Casio VL-1 (VL-1 Operating Manual; páginas impresas): LCD de 7 segmentos sin retroiluminación, 8 dígitos
+// ("Number of digits: 8 digits", p. 32) y una posición más a la izquierda. Contenido, según las figuras del manual:
+//  - Notas: "The last three notes pressed will be displayed ... with the last note pressed on the right" (p. 18). Cada nota
+//    ocupa 3 posiciones: vacía, octava (segmento d = octava baja "_5", segmento a = alta "‾1", nada = la central) y la nota
+//    como número 1-7 (Do-Si) con un ♯ pequeño encima si es tecla negra (figuras: "-_5 3 ‾6", p. 9; "- 1♯ ‾5 _6", p. 18)
+//  - Tempo: "[-2]" a la izquierda, de -9 a +9 (p. 14). El "-" de la primera posición es el indicador de tempo, que parpadea
+//    (los rayos de la figura de la p. 14); aquí, al pulso del ritmo que da el motor (VL1::rhythmPulse)
+// Elecciones de interfaz: el tempo se ve 2 s al cambiarlo; el teclado del VL-1 va de Sol a Si (17 teclas blancas, p. 18) y
+// aquí las notas MIDI 60-71 son la octava central, las de debajo la baja y desde la 72 la alta. Estimado: el tempo positivo
+// sin signo ("[ 2]"). Sin los puntos de más de 100 notas grabadas (p. 18): KoniSynth no graba notas. Colores fijos: no
+// siguen el skin
+class Vl1Display : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit Vl1Display (KoniSynthProcessor& p) : processor (p), tempoParam (p.apvts.getRawParameterValue ("vl1Tempo"))
+    {
+        setTooltip ("The VL-1 display: the last three notes played, the last one on the right (1-7 = C to B; a bar below = "
+                    "low octave, above = high octave; a small # = sharp). Changing the rhythm tempo shows it for 2 s. The "
+                    "mark on the left blinks with the rhythm.");
+        lastTempo = tempo();
+        tempoUntil = juce::Time::getMillisecondCounter(); // vencido: sin tempo al abrir
+        startTimerHz (30);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // 9 posiciones de h de alto, 0,52·h de ancho y 0,8·h de paso; encima, h·0,3 para el ♯. Panel centrado del mayor
+        // tamaño que cabe
+        auto r = getLocalBounds().toFloat();
+        const auto h = juce::jmin ((r.getHeight() - 10.0f) / 1.5f, (r.getWidth() - 10.0f) / 7.8f);
+        if (h < 6.0f)
+            return;
+        const auto step = 0.8f * h, w = 0.52f * h;
+        r = r.withSizeKeepingCentre (7.8f * h + 10.0f, 1.5f * h + 10.0f);
+        g.setColour (juce::Colour (0xff15170f)); // marco
+        g.fillRoundedRectangle (r, 5.0f);
+
+        // LCD reflectante: gris, segmentos casi negros y los apagados apenas visibles
+        const auto glass = r.reduced (5.0f);
+        g.setColour (juce::Colour (0xffaab09f));
+        g.fillRoundedRectangle (glass, 3.0f);
+        const auto on = juce::Colour (0xff1d211a), off = juce::Colour (0xffa5ab9a);
+        const auto x0 = glass.getX() + 0.3f * h + (step - w) * 0.5f, y0 = glass.getY() + 0.3f * h;
+        for (int k = 0; k < 9; ++k)
+        {
+            const auto cell = juce::Rectangle<float> (x0 + step * (float) k, y0, w, h);
+            SevenSegment::draw (g, cell, cells[(size_t) k], on, off);
+            if (sharps[(size_t) k])
+                drawSharp (g, { cell.getCentreX() + 0.12f * w, y0 - 0.15f * h }, 0.2f * h, on);
+        }
+    }
+
+private:
+    // ♯ pequeño: dos verticales inclinadas y dos horizontales subiendo a la derecha, de lado 'size' centrado en c
+    static void drawSharp (juce::Graphics& g, juce::Point<float> c, float size, juce::Colour colour)
+    {
+        const auto s = size * 0.5f, t = juce::jmax (1.0f, size * 0.12f);
+        g.setColour (colour);
+        g.drawLine (c.x - s * 0.3f, c.y + s, c.x - s * 0.1f, c.y - s, t);
+        g.drawLine (c.x + s * 0.2f, c.y + s, c.x + s * 0.4f, c.y - s, t);
+        g.drawLine (c.x - s * 0.8f, c.y - s * 0.25f, c.x + s * 0.8f, c.y - s * 0.45f, t);
+        g.drawLine (c.x - s * 0.8f, c.y + s * 0.45f, c.x + s * 0.8f, c.y + s * 0.25f, t);
+    }
+
+    int tempo() const { return juce::roundToInt (tempoParam->load()); }
+
+    void timerCallback() override
+    {
+        const auto now = juce::Time::getMillisecondCounter();
+        const auto t = tempo();
+        if (t != lastTempo)
+        {
+            lastTempo = t;
+            tempoUntil = now + 2000;
+        }
+
+        std::array<int, 9> c {};
+        std::array<bool, 9> s {};
+        c[0] = processor.getVl1Pulse() == 0 ? 0 : 0x40; // indicador: fijo sin ritmo, intermitente con él
+        if ((int) (tempoUntil - now) > 0) // resta sin signo: válida aunque el contador dé la vuelta
+        {
+            c[1] = 0x39; // '['
+            c[2] = t < 0 ? 0x40 : 0;
+            c[3] = SevenSegment::digitMask[std::abs (t) % 10];
+            c[4] = 0x0f; // ']'
+        }
+        else
+        {
+            static constexpr int degree[12] = { 1, 1, 2, 2, 3, 4, 4, 5, 5, 6, 6, 7 };
+            static constexpr bool black[12] = { false, true, false, true, false, false, true, false, true, false, true, false };
+            const auto notes = processor.getVl1Notes();
+            for (int n = 0; n < 3; ++n) // n = 0: la última, a la derecha
+            {
+                const auto code = (int) ((notes >> (8 * n)) & 0xffu);
+                if (code == 0)
+                    continue;
+                const auto midi = code - 1, pos = 8 - 3 * n;
+                c[(size_t) pos] = SevenSegment::digitMask[degree[midi % 12]];
+                s[(size_t) pos] = black[midi % 12];
+                c[(size_t) pos - 1] = midi < 60 ? 0x08 : (midi >= 72 ? 0x01 : 0); // barra de octava: d abajo, a arriba
+            }
+        }
+        if (c != cells || s != sharps)
+        {
+            cells = c;
+            sharps = s;
+            repaint();
+        }
+    }
+
+    KoniSynthProcessor& processor;
+    std::atomic<float>* tempoParam;
+    int lastTempo = 0;
+    juce::uint32 tempoUntil = 0;
+    std::array<int, 9> cells {};
+    std::array<bool, 9> sharps {};
+};

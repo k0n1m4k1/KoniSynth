@@ -80,7 +80,14 @@ struct VL1
         drumTime = -1;
         lfsr = 0;
         noisePhase = 0.0;
+        shownNotes.store (0, std::memory_order_relaxed);
+        pulse.store (-1, std::memory_order_relaxed);
     }
+
+    // Pantalla (se lee desde la UI): últimas 3 notas pulsadas, un byte por nota (nota MIDI + 1; 0 = ninguna) con la última en
+    // el byte bajo; pulso del ritmo: -1 sin ritmo, 1 encendido, 0 apagado
+    juce::uint32 displayNotes() const noexcept { return shownNotes.load (std::memory_order_relaxed); }
+    int rhythmPulse() const noexcept { return pulse.load (std::memory_order_relaxed); }
 
     void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p)
     {
@@ -112,6 +119,7 @@ struct VL1
             stepCounter = 1;           // el primer tick dispara el paso 0
             tickAcc = tickPeriod;      // primer tick en la primera muestra
             drumTime = -1;
+            beatTicks = -1;            // el primer tick abre el primer pulso
         }
 
         auto midiIt = midi.cbegin();
@@ -132,6 +140,7 @@ struct VL1
                     electroCounter = 8;
                     electroHalf = electro && ! electroHalf;
                 }
+                beatTicks = (beatTicks + 1) % W; // pulso de la pantalla: una negra (W ticks)
                 if (rhythm >= 0 && --stepCounter == 0)
                 {
                     const auto& pat = patterns[rhythm];
@@ -184,6 +193,8 @@ struct VL1
             for (int ch = 0; ch < out.getNumChannels(); ++ch)
                 out.addSample (ch, i, o);
         }
+        // Indicador de tempo: encendido la primera mitad de cada pulso (estimado; el manual solo dice que parpadea)
+        pulse.store (rhythm < 0 ? -1 : (beatTicks < H ? 1 : 0), std::memory_order_relaxed);
     }
 
 private:
@@ -199,6 +210,8 @@ private:
             if (numHeld < (int) held.size())
                 held[(size_t) numHeld++] = m.getNoteNumber();
             startNote (m.getNoteNumber(), pitchMul);
+            const auto shown = shownNotes.load (std::memory_order_relaxed);
+            shownNotes.store (((shown << 8) | (juce::uint32) (m.getNoteNumber() + 1)) & 0xffffffu, std::memory_order_relaxed);
         }
         else if (m.isNoteOff())
         {
@@ -380,7 +393,9 @@ private:
     double tickAcc = 0.0;
     int electroCounter = 8;
     bool electroHalf = false;
-    int rhythm = -1, beat = 0, stepCounter = 1, drumTime = -1;
+    int rhythm = -1, beat = 0, stepCounter = 1, drumTime = -1, beatTicks = -1;
+    std::atomic<juce::uint32> shownNotes { 0 };
+    std::atomic<int> pulse { -1 };
     Drum drum = Pock;
     unsigned lfsr = 0;
     double noisePhase = 0.0;
