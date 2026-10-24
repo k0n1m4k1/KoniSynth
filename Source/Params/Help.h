@@ -500,7 +500,8 @@ static juce::String paramHelp (const juce::String& id)
                          "single partial). On: 4-bit, smoother." },
         { "mt32NiceMix", "Munt beautification, off = as the real unit: partials may mix in counter-phase and cancel out. On: "
                          "always in phase." },
-        { "mt32Program", "Patch of Part 1 (1-128, the MT-32 preset bank). The LCD shows its name." },
+        { "mt32Program", "Patch of Part 1 (1-128, the MT-32 preset bank). The list shows each patch's sound name as stored in "
+                         "your ROMs (or as changed by SysEx)." },
         { "mt32Reverb", "The MT-32's own digital reverb (room, hall, plate, tap delay), as set by the patch or by SysEx." },
         { "mt32Dac", "How the LA32 output reaches the DAC. Auto: as the unit does (Gen 1 for MT-32 v1.x: the famous digital "
                      "overflow distortion on loud notes; Gen 2 for later units). Nice: double volume, clean clipping. Pure: the "

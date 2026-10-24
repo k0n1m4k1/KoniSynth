@@ -36,6 +36,13 @@ public:
         return w;
     }
 
+    float naturalWidth() const override
+    {
+        auto w = 1.3f * 60.0f;
+        for (const auto& src : sources) w = juce::jmax (w, src.section->naturalWidth());
+        return w;
+    }
+
     void resized() override
     {
         // Barra de pestañas de 24 px; el marco de la sección empieza bajo ella (la fila de fuentes tiene más alto)

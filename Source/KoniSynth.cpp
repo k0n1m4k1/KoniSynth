@@ -223,6 +223,9 @@ public:
     void setMt32Folder (const juce::File& folder) { Mt32Machine::setRomFolder (folder); rebuildMt32(); }
     juce::String getMt32Status() const { const juce::ScopedLock sl (sampleInfoLock); return mt32Status; }
     juce::String getMt32Lcd() const { return mt32Engine.lcdText(); }
+    bool getMt32Led() const { return mt32Engine.lcdLed(); }
+    juce::StringArray getMt32ProgramNames() const { return mt32Engine.programNames(); }
+    juce::uint32 getMt32ProgramNamesVersion() const { return mt32Engine.programNamesVersion(); }
     bool hasMt32Machine() const { bool has = false; mt32Engine.slot.withCurrent ([&has] (const Mt32Machine* m) { has = m != nullptr; }); return has; }
 
     juce::String getSampleInfo() const

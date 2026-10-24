@@ -172,10 +172,11 @@ struct Mt32Engine
         if (m == nullptr)
             return;
         auto& synth = m->synth;
-        if (m != lastMachine) // máquina nueva: sus ajustes se reenvían
+        if (m != lastMachine) // máquina nueva: sus ajustes se reenvían y sus nombres de programa se publican
         {
             lastMachine = m;
             lastReverb = lastDac = lastProgram = lastNice = -1;
+            namesRefreshes = 1;
         }
         if (silencePending)
         {
@@ -242,6 +243,7 @@ struct Mt32Engine
             {
                 if (! synth.playSysex (msg.getRawData(), (MT32Emu::Bit32u) msg.getRawDataSize()))
                     synth.playSysexNow (msg.getRawData(), (MT32Emu::Bit32u) msg.getRawDataSize()); // no cabe en el búfer
+                namesRefreshes = 2; // puede reescribir patches o timbres: dos lecturas, por si la cola lo ejecuta más tarde
                 continue;
             }
             const auto* raw = msg.getRawData();
@@ -259,19 +261,66 @@ struct Mt32Engine
         }
         renderTo (n);
 
-        // LCD a ~10 Hz (lo dibuja la UI): seqlock de un escritor
+        // LCD y LED MIDI MESSAGE cada 1200 muestras (25 ms a 48 kHz; lo dibuja la UI): el LED parpadea 80 ms por mensaje
+        // (Display.cpp, BLINK_TIME_MILLIS) y con la lectura antigua a ~10 Hz se perdían parpadeos. Seqlock de un escritor
         lcdCountdown -= n;
         if (lcdCountdown <= 0)
         {
-            lcdCountdown = 4800;
+            lcdCountdown = 1200;
             char text[lcdSize + 1] {};
-            synth.getDisplayState (text, false);
+            led.store (synth.getDisplayState (text, false), std::memory_order_relaxed);
             lcdSeq.fetch_add (1, std::memory_order_acq_rel);
             for (int i = 0; i < (int) lcdSize + 1; ++i)
                 lcd[(size_t) i].store (text[i], std::memory_order_relaxed);
             lcdSeq.fetch_add (1, std::memory_order_release);
+            if (namesRefreshes > 0)
+            {
+                --namesRefreshes;
+                publishProgramNames (synth);
+            }
         }
     }
+
+    // Nombre de cada programa (1-128) según la memoria del aparato: patch -> timbre (grupo A/B/memoria/ritmo y número,
+    // PatchParam en Structures.h) -> nombre del timbre, que viene de la ROM o de un SysEx. Patches en la dirección SysEx
+    // 05 00 00, lineal (5 << 14) = 0x14000 (MT32EMU_MEMADDR, Structures.h), 8 bytes cada uno. ~128 lecturas de memoria
+    void publishProgramNames (MT32Emu::Synth& synth)
+    {
+        namesSeq.fetch_add (1, std::memory_order_acq_rel);
+        for (int p = 0; p < numPrograms; ++p)
+        {
+            MT32Emu::Bit8u patch[2] {};
+            synth.readMemory (0x14000u + (MT32Emu::Bit32u) p * 8u, 2, patch);
+            char name[nameSize + 1] {};
+            if (! synth.getSoundName (name, patch[0], patch[1]))
+                name[0] = 0; // timbre mudo o fuera de rango
+            for (int i = 0; i < nameSize; ++i)
+                names[(size_t) (p * nameSize + i)].store (name[i], std::memory_order_relaxed);
+        }
+        namesSeq.fetch_add (1, std::memory_order_release);
+        namesVersion.fetch_add (1, std::memory_order_release);
+    }
+
+    // Hilo de mensajes: nombres de los 128 programas (vacíos sin máquina) y su versión (cambia al reescribirlos)
+    juce::StringArray programNames() const
+    {
+        char text[numPrograms * nameSize] {};
+        for (int attempt = 0; attempt < 4; ++attempt)
+        {
+            const auto s0 = namesSeq.load (std::memory_order_acquire);
+            if ((s0 & 1) != 0) continue;
+            for (size_t i = 0; i < names.size(); ++i)
+                text[i] = names[i].load (std::memory_order_relaxed);
+            if (namesSeq.load (std::memory_order_acquire) == s0)
+                break;
+        }
+        juce::StringArray out;
+        for (int p = 0; p < numPrograms; ++p)
+            out.add (juce::String (juce::CharPointer_ASCII (text + p * nameSize), (size_t) nameSize).trimEnd()); // se detiene en el nulo
+        return out;
+    }
+    juce::uint32 programNamesVersion() const { return namesVersion.load (std::memory_order_acquire); }
+    bool lcdLed() const { return led.load (std::memory_order_relaxed); }
 
     // Hilo de mensajes: texto del LCD (vacío si aún no hay máquina)
     juce::String lcdText() const
@@ -295,6 +344,11 @@ private:
     const Mt32Machine* lastMachine = nullptr;
     int lastReverb = -1, lastDac = -1, lastProgram = -1, lastNice = -1, lcdCountdown = 0;
     bool silencePending = false;
+    int namesRefreshes = 0; // lecturas pendientes de los nombres de programa (máquina nueva o SysEx)
     std::atomic<juce::uint32> lcdSeq { 0 };
     std::array<std::atomic<char>, lcdSize + 1> lcd {};
+    std::atomic<bool> led { false };
+    static constexpr int numPrograms = 128, nameSize = 10; // TimbreParam::CommonParam::name: 10 caracteres
+    std::atomic<juce::uint32> namesSeq { 0 }, namesVersion { 0 };
+    std::array<std::atomic<char>, (size_t) numPrograms * nameSize> names {};
 };

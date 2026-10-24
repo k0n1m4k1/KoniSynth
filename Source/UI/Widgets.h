@@ -326,6 +326,91 @@ struct Knob : juce::Component, private juce::Timer
     float ringLo = 0.0f, ringHi = 0.0f, ringLive = -1.0f;
 };
 
+// Lista de valores con nombre para un parámetro entero, en la fila de controles (Program del MT-32: "1 - Acou Piano 1"):
+// etiqueta arriba como en las perillas y un desplegable de una línea. Un elemento por paso del parámetro; los textos se
+// cambian con setItemTexts sin tocar la selección. Mismo menú contextual (Reset, valor, MIDI Learn) y ayuda que una perilla
+struct ListControl : juce::Component, private juce::Timer
+{
+    ListControl (APVTS& s, const juce::String& id, const juce::String& text, float weight)
+        : name (text),
+          learn (dynamic_cast<KoniSynthProcessor&> (s.processor).midiLearn),
+          paramIndex (s.getParameter (id)->getParameterIndex()),
+          paramId (id),
+          width (weight)
+    {
+        auto* p = s.getParameter (id);
+        const auto steps = juce::jmax (2, p->getNumSteps());
+        for (int i = 0; i < steps; ++i) // los items deben existir antes del attachment
+            combo.addItem (p->getText ((float) i / (float) (steps - 1), 32), i + 1);
+        attachment = std::make_unique<APVTS::ComboBoxAttachment> (s, id, combo);
+        menu = std::make_unique<ParamMenu> (s, id, combo);
+        const auto tip = paramTooltip (s, id);
+        combo.setTooltip (tip);
+        label.setTooltip (tip);
+        label.setText (text, juce::dontSendNotification);
+        label.setJustificationType (juce::Justification::centred);
+        label.setMinimumHorizontalScale (0.7f);
+        addAndMakeVisible (combo);
+        addAndMakeVisible (label);
+        startTimerHz (5); // refleja asignaciones de MIDI Learn hechas desde el hilo de audio
+    }
+
+    void setItemTexts (const juce::StringArray& texts)
+    {
+        // El elegido se lee antes: getSelectedId/getSelectedItemIndex dan 0/-1 en cuanto el texto visible deja de coincidir
+        // con el del elemento, y changeItemText cambia el elemento pero no el texto visible (juce_ComboBox.cpp)
+        const auto selectedId = combo.getSelectedId();
+        for (int i = 0; i < juce::jmin (texts.size(), combo.getNumItems()); ++i)
+            if (combo.getItemText (i) != texts[i])
+                combo.changeItemText (i + 1, texts[i]);
+        if (selectedId != 0)
+            combo.setSelectedId (selectedId, juce::dontSendNotification);
+        resized(); // el ancho sigue al texto más largo
+        if (auto* parent = getParentComponent()) parent->resized();
+    }
+
+    void timerCallback() override
+    {
+        juce::String text = name;
+        if (learn.learning.load() == paramIndex)
+            text = "Learn...";
+        else if (const auto cc = learn.ccFor (paramIndex); cc >= 0)
+            text << " [" << cc << "]";
+        if (label.getText() != text)
+            label.setText (text, juce::dontSendNotification);
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds();
+        label.setBounds (r.removeFromTop (18));
+        combo.setBounds (r.withSizeKeepingCentre (juce::jmin (r.getWidth() - 8, preferredWidth()), juce::jmin (26, r.getHeight())));
+    }
+
+    // Ancho del texto más largo de la lista más la flecha y los márgenes del ComboBox (~34 px)
+    int preferredWidth() const
+    {
+        const auto font = getLookAndFeel().getComboBoxFont (const_cast<juce::ComboBox&> (combo));
+        float widest = 0.0f;
+        for (int i = 0; i < combo.getNumItems(); ++i)
+            widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, combo.getItemText (i)));
+        return juce::roundToInt (widest) + 34;
+    }
+
+    // Peso en la fila: el de 'width' perillas o lo que pide el texto más largo (60 px por unidad, como layoutWeight de Section)
+    float layoutWeight() const { return juce::jmax (width, (float) preferredWidth() / 60.0f); }
+
+    juce::ComboBox combo;
+    juce::Label label;
+    std::unique_ptr<APVTS::ComboBoxAttachment> attachment; // tras combo: muere antes
+    std::unique_ptr<ParamMenu> menu;
+    juce::String name;
+    MidiLearn& learn;
+    int paramIndex;
+    juce::String paramId;
+    float width;
+};
+
 // UI: aspecto. Interruptores con LED rojo (encendido: rojo con halo; apagado: granate oscuro).
 struct KoniLookAndFeel : juce::LookAndFeel_V4
 {
@@ -648,6 +733,7 @@ struct Section : juce::Component
     {
         knobs.push_back (std::make_unique<Knob> (s, id, text));
         addAndMakeVisible (*knobs.back());
+        row.push_back ({ knobs.back().get(), [k = knobs.back().get()] { return k->layoutWeight(); } });
         return *this;
     }
 
@@ -656,6 +742,27 @@ struct Section : juce::Component
     {
         knobs.push_back (std::make_unique<Knob> (s, id, text, Knob::Style::vertical));
         addAndMakeVisible (*knobs.back());
+        row.push_back ({ knobs.back().get(), [k = knobs.back().get()] { return k->layoutWeight(); } });
+        return *this;
+    }
+
+    // Lista con nombres en la fila de controles (ListControl), con el ancho de 'weight' perillas
+    Section& withList (APVTS& s, const juce::String& id, const juce::String& text, float weight)
+    {
+        lists.push_back (std::make_unique<ListControl> (s, id, text, weight));
+        addAndMakeVisible (*lists.back());
+        row.push_back ({ lists.back().get(), [l = lists.back().get()] { return l->layoutWeight(); } });
+        return *this;
+    }
+
+    // Componente a todo el ancho entre la cabecera y la fila de controles (LCD del MT-32); no es propiedad de la sección.
+    // height 0: ocupa todo el alto disponible. minWidth: el ancho que necesita (cuenta para el ancho y el peso de la sección)
+    Section& withBody (juce::Component& c, int height, int minWidth)
+    {
+        body = &c;
+        bodyHeight = height;
+        bodyMinWidth = minWidth;
+        addAndMakeVisible (c);
         return *this;
     }
 
@@ -709,20 +816,27 @@ struct Section : juce::Component
             if (info.isVisible()) info.setBounds (header.withTrimmedLeft (6));
             r.removeFromTop (4);
         }
+        if (body != nullptr)
+        {
+            body->setBounds (bodyHeight > 0 ? r.removeFromTop (bodyHeight) : r);
+            r.removeFromTop (4);
+        }
 
-        if (knobs.empty())
+        if (row.empty())
             return;
 
-        const auto unit = (float) r.getWidth() / controlsWeight();
-        for (auto& k : knobs)
-            k->setBounds (r.removeFromLeft (juce::roundToInt (unit * k->layoutWeight())));
+        // Como mucho maxControlUnit px por unidad: con pocos controles en una sección ancha no se estiran hasta el borde; el
+        // hueco queda al final (en las filas llenas la unidad real es ~55-70 px y no cambia nada)
+        const auto unit = juce::jmin (maxControlUnit, (float) r.getWidth() / controlsWeight());
+        for (auto& item : row)
+            item.component->setBounds (r.removeFromLeft (juce::roundToInt (unit * item.weight())));
     }
 
     float controlsWeight() const
     {
         float w = 0.0f;
-        for (auto& k : knobs)
-            if (k->isVisible()) w += k->layoutWeight();
+        for (auto& item : row)
+            if (item.component->isVisible()) w += item.weight();
         return w;
     }
 
@@ -735,7 +849,7 @@ struct Section : juce::Component
         toggle.setVisible (on && toggleAttachment != nullptr);
         combo.setVisible (on && (comboAttachment != nullptr || pickAttachment != nullptr));
         extraToggle.setVisible (on && extraToggleAttachment != nullptr);
-        for (auto& k : knobs) k->setVisible (on);
+        for (auto& item : row) item.component->setVisible (on);
         resized();
     }
     bool controlsShown = true;
@@ -751,6 +865,12 @@ struct Section : juce::Component
             if (k->paramId == id) return k.get();
         return nullptr;
     }
+    ListControl* listFor (const juce::String& id)
+    {
+        for (auto& l : lists)
+            if (l->paramId == id) return l.get();
+        return nullptr;
+    }
 
     // Ancho relativo en su fila: el mayor entre sus controles (1 por perilla, 0,75 por slider) y lo que pide la cabecera en
     // píxeles (On 60, selector 110, segundo interruptor 80, botón 64, texto informativo 110, márgenes 20) a 60 px por unidad
@@ -758,14 +878,31 @@ struct Section : juce::Component
     // Mínimo 1,3: con 1 potenciómetro el título ("Master") salía cortado
     virtual float layoutWeight() const
     {
-        auto headerPx = 34.0f; // márgenes: 20 del marco + 14 de la celda en layoutRow (con 20 se cortaba el Edit... del Vocoder)
+        return juce::jmax (controlsWeight(), headerPixels() / 60.0f, ((float) bodyMinWidth + 34.0f) / 60.0f, 1.3f);
+    }
+
+    // Lo que pide la cabecera en píxeles, márgenes incluidos: 20 del marco + 14 de la celda en layoutRow (con 20 se cortaba
+    // el Edit... del Vocoder)
+    float headerPixels() const
+    {
+        auto headerPx = 34.0f;
         if (toggle.isVisible())      headerPx += 60.0f;
         if (combo.isVisible())       headerPx += 110.0f;
         if (extraToggle.isVisible()) headerPx += 80.0f;
         for (auto& b : headerButtons)
             headerPx += (float) buttonWidth (*b);
         if (info.isVisible())        headerPx += 110.0f;
-        return juce::jmax (controlsWeight(), headerPx / 60.0f, 1.3f);
+        return headerPx;
+    }
+
+    // Unidad máxima de los controles (px por perilla): con pocos controles no se estiran hasta el borde
+    static constexpr float maxControlUnit = 110.0f;
+
+    // Ancho natural en px (márgenes incluidos) con la unidad máxima: lo mayor entre cabecera, cuerpo y controles. layoutRow
+    // lo usa cuando todas las secciones de la fila caben así; si no, reparte por layoutWeight
+    virtual float naturalWidth() const
+    {
+        return juce::jmax (headerPixels(), (float) bodyMinWidth + 34.0f, controlsWeight() * maxControlUnit + 34.0f, 1.3f * 60.0f);
     }
 
     // Ancho de un botón de cabecera: 64 px o lo que pida su texto ("Frame Macros...") más el margen izquierdo de 6
@@ -802,6 +939,11 @@ private:
     std::vector<std::unique_ptr<juce::TextButton>> headerButtons;
     juce::Label info;
     std::vector<std::unique_ptr<Knob>> knobs;
+    std::vector<std::unique_ptr<ListControl>> lists;
+    struct RowItem { juce::Component* component; std::function<float()> weight; };
+    std::vector<RowItem> row; // perillas, sliders y listas en el orden en que se añadieron
+    juce::Component* body = nullptr;
+    int bodyHeight = 0, bodyMinWidth = 0;
     std::vector<std::unique_ptr<ParamMenu>> menus;
 };
 

@@ -365,7 +365,8 @@ public:
                            p.add ("Partial Mixing").withToggle (st, "mt32NiceMix");
                        });
                    })
-                   .withKnob (s, "mt32Mode", "Keys").withKnob (s, "mt32Program", "Program").withKnob (s, "mt32Reverb", "Reverb");
+                   .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb");
+        mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")
                   .withHeaderButton ("Edit...", "Open the ANS plate: draw the score (pitch vertically, time horizontally) and set the 20 registers.",
                                      [this] { openAnsPanel(); })
@@ -522,7 +523,7 @@ public:
         rows.addChildComponent (*sourceTabs);
         for (auto* c : std::initializer_list<juce::Component*> { &filter, &complexSection, &osc2Section, &thereminSection,
                                                                  &vl1Section, &vl1RhythmSection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
-                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &pvOscSection, &pvFilterSection,
+                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
                                                                  &ampEnvSection })
             rows.addChildComponent (*c);
@@ -925,6 +926,7 @@ private:
         opllSection.setVisible (engine == 13 && opllModel);
         shownOplModel = (int) koni.apvts.getRawParameterValue ("oplModel")->load();
         mt32Section.setVisible (engine == 14);
+        mt32DisplaySection.setVisible (engine == 14);
         keyboard.setVisible (keyboardMode() == 0); // el piano en todos los motores (el Theremin y el Stylophone lo doblan a su rango)
         styloPad.setVisible (engine == 3 && padMode() == 0);
         padTab->setVisible (engine == 1 || engine == 3);
@@ -1264,7 +1266,7 @@ private:
         dim (filter.knobFor ("filterSpread"), (int) v ("filterMode") < VoiceFilters::dualBp);
         const auto mt32Multi = v ("mt32Multi") > 0.5f; // MT-32: con Multi el teclado no se enruta; Program solo en Part 1
         dim (mt32Section.knobFor ("mt32Mode"), mt32Multi);
-        dim (mt32Section.knobFor ("mt32Program"), mt32Multi || (int) v ("mt32Mode") == 1);
+        dim (mt32Section.listFor ("mt32Program"), mt32Multi || (int) v ("mt32Mode") == 1);
         dim (ampEnvSection.knobFor ("voicePanMode"), std::abs (v ("voicePan")) < 1.0e-4f); // Synth.h: sin V.Pan no hay paneo que repartir
     }
 
@@ -1327,8 +1329,22 @@ private:
     void timerCallback() override
     {
         refreshSampleInfo();
-        if (engine == 14) // LCD del MT-32 (o por qué no suena)
-            mt32Section.setInfo (koni.hasMt32Machine() ? "LCD  " + koni.getMt32Lcd() : juce::String ("no ROMs: see ROMs..."));
+        if (engine == 14) // MT-32: por qué no suena (el LCD lo dibuja mt32Lcd) y nombres de programa según la memoria del aparato
+        {
+            const auto hasMachine = koni.hasMt32Machine();
+            mt32Section.setInfo (hasMachine ? juce::String() : juce::String ("no ROMs: see ROMs..."));
+            const auto namesVersion = hasMachine ? koni.getMt32ProgramNamesVersion() : 0u;            if (namesVersion != shownMt32Names)
+                if (auto* list = mt32Section.listFor ("mt32Program"))
+                {
+                    shownMt32Names = namesVersion;
+                    const auto names = hasMachine ? koni.getMt32ProgramNames() : juce::StringArray();
+                    juce::StringArray texts;
+                    for (int i = 0; i < 128; ++i)
+                        texts.add (names[i].isEmpty() ? juce::String (i + 1) : juce::String (i + 1) + " - " + names[i]);
+                    list->setItemTexts (texts);
+                    resized(); // el ancho natural de la sección sigue al nombre más largo
+                }
+        }
         refreshCabIrInfo();
         refreshTuningLed();
         for (int m = 0; m < PerfMacros::numMacros; ++m) // nombres de las macros (editados en su diálogo o al cargar un preset)
@@ -1470,7 +1486,7 @@ private:
             case 13: if ((int) koni.apvts.getRawParameterValue ("oplModel")->load() >= 2)
                          return { { 1.0f, { &oplSection, &opllSection, &oplLfoSection }, 1 } };
                      return { { 1.0f, { &oplSection, &oplLfoSection }, 1 } };
-            case 14: return { { 1.0f, { &mt32Section }, 1 } };
+            case 14: return { { 1.0f, { &mt32Section, &mt32DisplaySection }, 1 } }; // controles y, a la derecha, el LCD
             default: return { { 1.0f, { &ansSection }, 1 } };
         }
     }
@@ -2086,13 +2102,16 @@ private:
     // Ancho de cada sección proporcional a su peso (≈ número de controles). Las primeras chainLength secciones forman
     // cadena de señal: flecha en el hueco de 14 px entre ellas.
     // Separador entre bloques: 16 px con una línea de 1 px en el centro
+    // Si todas caben con su ancho natural (controles a Section::maxControlUnit como mucho), cada una toma ese ancho y el
+    // hueco queda al final de la fila: con pocos controles el marco no se estira hasta el borde
     void layoutRow (juce::Rectangle<int> row, const RowSpec& spec)
     {
         constexpr int gap = 16;
-        float total = 0.0f;
+        float total = 0.0f, natural = 0.0f;
         for (auto* s : spec.sections)
-            if (s != nullptr) total += s->layoutWeight();
+            if (s != nullptr) { total += s->layoutWeight(); natural += s->naturalWidth(); }
             else row.removeFromRight (gap); // el ancho de los separadores sale del total antes de repartir
+        const auto fitsNatural = natural <= (float) row.getWidth();
 
         const auto unit = (float) row.getWidth() / total;
         for (int index = 0; index < (int) spec.sections.size(); ++index)
@@ -2105,7 +2124,7 @@ private:
                                                                     1.0f, (float) g.getHeight() - 12.0f));
                 continue;
             }
-            const auto cell = row.removeFromLeft (juce::roundToInt (unit * s->layoutWeight()));
+            const auto cell = row.removeFromLeft (juce::roundToInt (fitsNatural ? s->naturalWidth() : unit * s->layoutWeight()));
             s->setBounds (cell.reduced (7, 0));
             if (index >= spec.chainStart && index < spec.chainStart + spec.chain - 1)
             {
@@ -2297,6 +2316,8 @@ private:
     Visualizer scope;
     std::unique_ptr<VisualizerWindow> displayWindow;
     BpmDisplay bpmDisplay { koni };
+    Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
+    juce::uint32 shownMt32Names = ~0u; // versión de los nombres de programa mostrados en la lista
     std::vector<std::unique_ptr<FloatWindow>> blockWindows; // tras las secciones y el LED: se destruyen antes que ellos
     std::unique_ptr<FloatWindow> bpmWindow, engineWindow;
     std::vector<Section*> engineWindowSecs; // secciones que tiene la ventana del motor (para detectar cambio de motor)
@@ -2315,7 +2336,7 @@ private:
             pvOscSection { "Polivoks VCO" }, pvFilterSection { "Polivoks Mixer / VCF" }, pvFEnvSection { "Polivoks Filter EG" },
             pvAEnvSection { "Polivoks Amp EG" }, pvLfoSection { "Polivoks LFO" }, ansSection { "ANS" },
             mdSection { "Mega Drive" }, mdLfoSection { "MD LFO" }, mdVoiceSection { "MD Voice" }, mdPsgSection { "MD PSG (SN76489)" }, snesSection { "SNES" }, snesEnvSection { "SNES Envelope" },
-            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" },
+            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" },
             flangerSection { "Flanger" }, fshiftSection { "Freq Shifter" }, leslieSection { "Leslie" }, springSection { "Spring Reverb" }, eqSection { "EQ" },
             transSection { "Transient" }, compSection { "Compressor" }, limiterSection { "Limiter" },
             ampSection { "Amp" };
