@@ -545,8 +545,14 @@ public:
             koni.apvts.state.setProperty ("displayMode", m, nullptr);
             koni.apvts.state.setProperty ("displayStyle", st, nullptr);
         };
-        scope.setBezel ((bool) koni.apvts.state.getProperty ("displayBezel", true));
-        scope.onBezelChange = [this] (bool on) { koni.apvts.state.setProperty ("displayBezel", on, nullptr); };
+        // Marco del display: displayBezelMode (Auto / Brass / None). Estados anteriores solo tienen displayBezel (latón sí/no):
+        // apagado -> None, encendido -> Auto
+        {
+            const auto& st = koni.apvts.state;
+            scope.setBezel (st.hasProperty ("displayBezelMode") ? (int) st.getProperty ("displayBezelMode")
+                                                                : ((bool) st.getProperty ("displayBezel", true) ? Visualizer::bezelAuto : Visualizer::bezelNone));
+        }
+        scope.onBezelChange = [this] (int b) { koni.apvts.state.setProperty ("displayBezelMode", b, nullptr); };
         content.addAndMakeVisible (bpmDisplay);
         transportPanel.onError = [this] (const juce::String& title, const juce::String& message)
         {

@@ -22,10 +22,11 @@ public:
     void setStyle (int st) { style = juce::jlimit (0, 2, st); spectroImage = {}; repaint(); if (onModeChange) onModeChange (mode, style); }
     int getStyle() const { return style; }
     std::function<void (int, int)> onModeChange;
-    // Marco de latón (steampunk) alrededor de la pantalla
-    void setBezel (bool on) { bezel = on; repaint(); if (onBezelChange) onBezelChange (bezel); }
-    bool getBezel() const { return bezel; }
-    std::function<void (bool)> onBezelChange;
+    // Marco de la pantalla: Auto (el material sigue al skin y al estilo, ver material()), latón (steampunk) o sin marco
+    enum Bezel { bezelAuto, bezelBrass, bezelNone, numBezels };
+    void setBezel (int b) { bezel = juce::jlimit (0, numBezels - 1, b); repaint(); if (onBezelChange) onBezelChange (bezel); }
+    int getBezel() const { return bezel; }
+    std::function<void (int)> onBezelChange;
 
     void mouseUp (const juce::MouseEvent& e) override
     {
@@ -40,7 +41,10 @@ public:
             static const char* styles[3] = { "Style: Modern", "Style: Green phosphor", "Style: Amber phosphor" };
             for (int k = 0; k < 3; ++k)
                 m.addItem (200 + k, styles[k], true, k == style);
-            m.addItem (300, "Brass bezel (steampunk)", true, bezel);
+            m.addSeparator();
+            static const char* bezels[numBezels] = { "Bezel: Auto (follows the skin)", "Bezel: Brass (steampunk)", "Bezel: None" };
+            for (int k = 0; k < numBezels; ++k)
+                m.addItem (300 + k, bezels[k], true, k == bezel);
             if (detach)
             {
                 m.addSeparator();
@@ -51,7 +55,7 @@ public:
                              {
                                  if (safe == nullptr || id == 0) return;
                                  if (id == 100) { if (safe->detach) safe->detach(); }
-                                 else if (id == 300) safe->setBezel (! safe->bezel);
+                                 else if (id >= 300) safe->setBezel (id - 300);
                                  else if (id >= 200) safe->setStyle (id - 200);
                                  else safe->setMode (id - 1);
                              });
@@ -65,10 +69,11 @@ public:
     void paint (juce::Graphics& g) override
     {
         auto r = getLocalBounds().toFloat();
-        if (bezel)
+        const auto framed = bezel != bezelNone;
+        if (framed)
             r = paintBezel (g, r);
-        g.setColour (style == 0 ? juce::Colours::black.withAlpha (0.6f) : ink().withMultipliedBrightness (0.08f).withAlpha (1.0f));
-        g.fillRoundedRectangle (r, 6.0f);
+        g.setColour (style == 0 ? juce::Colours::black.withAlpha (framed ? 0.85f : 0.6f) : ink().withMultipliedBrightness (0.08f).withAlpha (1.0f));
+        g.fillRoundedRectangle (r, framed ? screenRadius : 6.0f);
         const auto full = r;
         r = r.reduced (6.0f);
         switch (mode)
@@ -88,7 +93,7 @@ public:
             paintCrt (g, full);
         else
             Skin::scanlines (g, full.toNearestInt()); // skins de fósforo: barrido también en el estilo normal
-        if (bezel)
+        if (framed)
             paintGlass (g, full);
     }
 
@@ -112,12 +117,92 @@ private:
         g.strokePath (path, juce::PathStrokeType (width));
     }
 
-    // Marco de latón: grosor proporcional al alto (5-12 px), degradado de latón con bisel (arista clara arriba, oscura abajo),
-    // remaches en las esquinas y cada ~140 px en los lados largos y rebaje oscuro alrededor de la pantalla. Devuelve la pantalla
+    // Grosor del marco proporcional al alto (5-12 px), igual en todos los materiales: la pantalla no cambia de tamaño
     static float bezelWidth (juce::Rectangle<float> r) { return juce::jlimit (5.0f, 12.0f, r.getHeight() * 0.09f); }
     static juce::Rectangle<float> bezelScreen (juce::Rectangle<float> r) { return r.reduced (bezelWidth (r)); }
+    static constexpr float screenRadius = 9.0f; // esquinas del cristal con marco: más redondas, como un tubo
 
+    // Material del marco. Auto: acero cepillado con el skin Brushed Metal; carcasa de monitor de terminal con los estilos de
+    // fósforo; grafito con el estilo Modern. Los dos plásticos pasan por Skin::c (se tiñen con los skins de fósforo)
+    enum class Material { brass, graphite, terminal, steel };
+    Material material() const
+    {
+        if (bezel == bezelBrass) return Material::brass;
+        if (Skin::current() == Skin::metal) return Material::steel;
+        return style != 0 ? Material::terminal : Material::graphite;
+    }
+
+    // Devuelve la pantalla (el hueco del marco)
     juce::Rectangle<float> paintBezel (juce::Graphics& g, juce::Rectangle<float> r) const
+    {
+        const auto m = material();
+        if (m == Material::brass)
+            return paintBrass (g, r);
+
+        const auto bw = bezelWidth (r);
+        // Degradado vertical (luz cenital), arista superior clara y contorno oscuro
+        juce::Colour top, bottom;
+        auto lip = 0.18f; // brillo de la arista superior
+        switch (m)
+        {
+            case Material::steel:    top = juce::Colour (0xffd2d6da); bottom = juce::Colour (0xff6c7076); lip = 0.6f; break;
+            case Material::terminal: top = Skin::c (0xff3b3935);      bottom = Skin::c (0xff161513); break;
+            default:                 top = Skin::c (0xff3d434b);      bottom = Skin::c (0xff131519); lip = 0.25f; break;
+        }
+        g.setGradientFill (juce::ColourGradient (top, 0.0f, r.getY(), bottom, 0.0f, r.getBottom(), false));
+        g.fillRoundedRectangle (r, 8.0f);
+        if (m == Material::steel)
+        {
+            // Vetas horizontales del cepillado: una línea por píxel con su brillo (±6 %), semilla fija
+            juce::Graphics::ScopedSaveState save (g);
+            juce::Path outer;
+            outer.addRoundedRectangle (r, 8.0f);
+            g.reduceClipRegion (outer);
+            juce::Random rng (0xB0A5);
+            for (auto y = r.getY(); y < r.getBottom(); y += 1.0f)
+            {
+                const auto v = rng.nextFloat() - 0.5f;
+                g.setColour (v > 0.0f ? juce::Colours::white.withAlpha (0.12f * v) : juce::Colours::black.withAlpha (-0.16f * v));
+                g.fillRect (r.getX(), y, r.getWidth(), 1.0f);
+            }
+        }
+        else if (m == Material::terminal)
+        {
+            // Plástico mate: un brillo ancho y muy tenue en la mitad superior
+            g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.06f), 0.0f, r.getY(), juce::Colours::transparentWhite,
+                                                     0.0f, r.getCentreY(), false));
+            g.fillRoundedRectangle (r, 8.0f);
+        }
+        g.setColour (juce::Colours::white.withAlpha (lip));
+        g.drawLine (r.getX() + 8.0f, r.getY() + 0.8f, r.getRight() - 8.0f, r.getY() + 0.8f, 1.2f);
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
+
+        // Chaflán interior: el marco baja hacia el cristal (oscuro arriba, luz en el labio inferior)
+        const auto screen = r.reduced (bw);
+        g.setColour (juce::Colours::black.withAlpha (0.85f));
+        g.fillRoundedRectangle (screen.expanded (2.0f), screenRadius + 2.0f);
+        g.setColour (juce::Colours::white.withAlpha (m == Material::steel ? 0.35f : 0.12f));
+        g.drawLine (screen.getX() + screenRadius, screen.getBottom() + 1.6f, screen.getRight() - screenRadius, screen.getBottom() + 1.6f, 1.0f);
+
+        if (m == Material::steel) // tornillos de estrella en las esquinas
+            for (auto c : { juce::Point<float> (r.getX() + bw * 0.5f, r.getY() + bw * 0.5f), juce::Point<float> (r.getRight() - bw * 0.5f, r.getY() + bw * 0.5f),
+                            juce::Point<float> (r.getX() + bw * 0.5f, r.getBottom() - bw * 0.5f), juce::Point<float> (r.getRight() - bw * 0.5f, r.getBottom() - bw * 0.5f) })
+            {
+                const auto d = bw * 0.55f;
+                const auto head = juce::Rectangle<float> (d, d).withCentre (c);
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xffeef0f2), head.getX(), head.getY(), juce::Colour (0xff50545a), head.getRight(), head.getBottom(), false));
+                g.fillEllipse (head);
+                g.setColour (juce::Colours::black.withAlpha (0.55f));
+                g.drawLine (c.x - d * 0.3f, c.y, c.x + d * 0.3f, c.y, 1.0f);
+                g.drawLine (c.x, c.y - d * 0.3f, c.x, c.y + d * 0.3f, 1.0f);
+            }
+        return screen;
+    }
+
+    // Marco de latón: degradado de latón con bisel (arista clara arriba, oscura abajo), remaches en las esquinas y cada ~140 px
+    // en los lados largos y rebaje oscuro alrededor de la pantalla. Devuelve la pantalla
+    juce::Rectangle<float> paintBrass (juce::Graphics& g, juce::Rectangle<float> r) const
     {
         const auto bw = bezelWidth (r);
         g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe8c874), 0.0f, r.getY(), juce::Colour (0xff6e4d12), 0.0f, r.getBottom(), false));
@@ -133,7 +218,7 @@ private:
         g.drawRoundedRectangle (r.reduced (0.5f), 8.0f, 1.0f);
         const auto screen = r.reduced (bw);
         g.setColour (juce::Colour (0xff1c1204)); // rebaje
-        g.fillRoundedRectangle (screen.expanded (1.5f), 6.5f);
+        g.fillRoundedRectangle (screen.expanded (1.5f), screenRadius + 1.5f);
         g.setColour (juce::Colour (0xffd9b25a).withAlpha (0.5f));
         g.drawLine (screen.getX() + 4.0f, screen.getBottom() + 1.8f, screen.getRight() - 4.0f, screen.getBottom() + 1.8f, 1.0f); // luz en el labio inferior
         const auto rivet = [&g, bw] (float x, float y)
@@ -157,19 +242,48 @@ private:
         return screen;
     }
 
-    // Vidrio sobre la pantalla: sombra interior del marco arriba y reflejo diagonal tenue
+    // Cristal de monitor (lente CRT) sobre la pantalla con marco, de fuera a dentro:
+    //  1. Barril: viñeta radial que oscurece las esquinas (la curvatura del tubo aleja la luz de los bordes)
+    //  2. Sombra del marco sobre el cristal: 14 px arriba, 10 px a los lados, 8 px abajo
+    //  3. Reflejo curvo de ventana: banda clara bajo una elipse más ancha que la pantalla, en el tercio superior
+    //  4. Punto de brillo arriba a la izquierda y arista inferior del cristal iluminada
     static void paintGlass (juce::Graphics& g, juce::Rectangle<float> screen)
     {
         juce::Graphics::ScopedSaveState save (g);
-        g.reduceClipRegion (screen.toNearestInt());
-        g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.45f), 0.0f, screen.getY(), juce::Colours::transparentBlack, 0.0f,
-                                                 screen.getY() + juce::jmin (10.0f, screen.getHeight() * 0.25f), false));
+        juce::Path glass;
+        glass.addRoundedRectangle (screen, screenRadius);
+        g.reduceClipRegion (glass);
+        const auto x = screen.getX(), y = screen.getY(), w = screen.getWidth(), h = screen.getHeight();
+        const auto c = screen.getCentre();
+
+        juce::ColourGradient barrel (juce::Colours::transparentBlack, c, juce::Colours::black.withAlpha (0.42f), screen.getTopLeft(), true);
+        barrel.addColour (0.6, juce::Colours::transparentBlack);
+        g.setGradientFill (barrel);
         g.fillRect (screen);
-        juce::Path glare;
-        glare.addQuadrilateral (screen.getX() + screen.getWidth() * 0.08f, screen.getY(), screen.getX() + screen.getWidth() * 0.30f, screen.getY(),
-                                screen.getX() + screen.getWidth() * 0.22f, screen.getBottom(), screen.getX(), screen.getBottom());
-        g.setColour (juce::Colours::white.withAlpha (0.05f));
-        g.fillPath (glare);
+
+        const auto edge = [&g] (juce::Rectangle<float> band, juce::Point<float> from, juce::Point<float> to, float alpha)
+        {
+            g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (alpha), from, juce::Colours::transparentBlack, to, false));
+            g.fillRect (band);
+        };
+        const auto t = juce::jmin (14.0f, h * 0.2f), s = juce::jmin (10.0f, w * 0.1f), b = juce::jmin (8.0f, h * 0.12f);
+        edge ({ x, y, w, t }, { 0.0f, y }, { 0.0f, y + t }, 0.55f);
+        edge ({ x, y, s, h }, { x, 0.0f }, { x + s, 0.0f }, 0.35f);
+        edge ({ x + w - s, y, s, h }, { x + w, 0.0f }, { x + w - s, 0.0f }, 0.35f);
+        edge ({ x, y + h - b, w, b }, { 0.0f, y + h }, { 0.0f, y + h - b }, 0.25f);
+
+        juce::Path window; // reflejo: interior de una elipse de 1,6·w × 1,5·h centrada sobre la pantalla
+        window.addEllipse (juce::Rectangle<float> (w * 1.6f, h * 1.5f).withCentre ({ x + w * 0.42f, y - h * 0.48f }));
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.11f), 0.0f, y, juce::Colours::white.withAlpha (0.0f), 0.0f, y + h * 0.3f, false));
+        g.fillPath (window);
+
+        const auto spot = juce::Rectangle<float> (w * 0.16f, h * 0.22f).withCentre ({ x + w * 0.13f, y + h * 0.2f });
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.08f), spot.getCentre(), juce::Colours::transparentWhite,
+                                                 { spot.getRight(), spot.getCentreY() }, true));
+        g.fillEllipse (spot);
+
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.drawLine (x + screenRadius, y + h - 1.0f, x + w - screenRadius, y + h - 1.0f, 1.0f);
     }
 
     // Pantalla CRT: líneas de barrido cada 3 px y viñeta oscura en los bordes
@@ -203,7 +317,7 @@ private:
             computeSpectrum();
         if (mode == arcade) // lienzo de juego: píxel de 2-4 px de pantalla según el alto (unos 35 píxeles de juego de alto)
         {
-            const auto screen = (bezel ? bezelScreen (getLocalBounds().toFloat()) : getLocalBounds().toFloat()).reduced (6.0f);
+            const auto screen = (bezel != bezelNone ? bezelScreen (getLocalBounds().toFloat()) : getLocalBounds().toFloat()).reduced (6.0f);
             const auto px = juce::jmax (2, (int) (screen.getHeight() / 34.0f));
             game.update (bars, 1.0f / 30.0f, juce::jmax (16, (int) (screen.getWidth() / (float) px)), juce::jmax (8, (int) (screen.getHeight() / (float) px)));
         }
@@ -392,8 +506,7 @@ private:
 
     KoniSynthProcessor& processor;
     std::function<void()> detach;
-    int mode = scope, style = 0;
-    bool bezel = true;
+    int mode = scope, style = 0, bezel = bezelAuto;
     ArcadeGame game;
     std::array<float, historySize> left {}, right {};
     juce::dsp::FFT fft { fftOrder };
@@ -407,12 +520,12 @@ private:
 // Ventana propia del display (Open in its own window): redimensionable; doble clic = pantalla completa
 struct VisualizerWindow : juce::DocumentWindow
 {
-    VisualizerWindow (KoniSynthProcessor& p, int mode, int style, bool bezelOn, std::function<void()> onClose)
+    VisualizerWindow (KoniSynthProcessor& p, int mode, int style, int bezelMode, std::function<void()> onClose)
         : juce::DocumentWindow ("KoniSynth Display", juce::Colour (0xff1b1f24), juce::DocumentWindow::allButtons), view (p), closed (std::move (onClose))
     {
         view.setMode (mode);
         view.setStyle (style);
-        view.setBezel (bezelOn);
+        view.setBezel (bezelMode);
         view.setSize (900, 360);
         setContentNonOwned (&view, true);
         setResizable (true, true);
