@@ -142,11 +142,12 @@ void complexStepAvx2 (UnisonLanes& lanes, const ComplexArgs& args, double dtP, f
     for (int h = 0; h < kLanes; h += 4)
     {
         const auto dtPLane = _mm256_mul_pd (set1 (dtP), _mm256_load_pd (lanes.ratio + h));
-        const auto dtM = _mm256_mul_pd (dtPLane, set1 (args.modRatio));
+        const auto dtM = args.external ? set1 (args.extDtM) : _mm256_mul_pd (dtPLane, set1 (args.modRatio));
         auto modPhase = _mm256_load_pd (lanes.modPhase + h);
         auto phase = _mm256_load_pd (lanes.phase + h);
 
-        const auto m = oscillator (args.modWave, modPhase, dtM, 0.5, true); // el modulador usa siempre ancho 0,5 (con PolyBLEP)
+        // El modulador interno usa siempre ancho 0,5 (con PolyBLEP); el externo llega ya evaluado
+        const auto m = args.external ? set1 (args.extMod) : oscillator (args.modWave, modPhase, dtM, 0.5, true);
         if (h == 0)
             firstMod = (float) _mm_cvtsd_f64 (_mm256_castpd256_pd128 (m));
 
@@ -161,15 +162,25 @@ void complexStepAvx2 (UnisonLanes& lanes, const ComplexArgs& args, double dtP, f
         accL = _mm256_add_pd (accL, _mm256_mul_pd (s, _mm256_cvtps_pd (_mm_load_ps (lanes.gainL + h))));
         accR = _mm256_add_pd (accR, _mm256_mul_pd (s, _mm256_cvtps_pd (_mm_load_ps (lanes.gainR + h))));
 
-        // Avance de fases, envoltura en ambos sentidos y sync con la fracción de muestra
-        modPhase = _mm256_add_pd (modPhase, dtM);
-        const auto wrapped = _mm256_cmp_pd (modPhase, one, _CMP_GE_OQ);
-        modPhase = _mm256_sub_pd (modPhase, _mm256_and_pd (wrapped, one));
+        // Avance de fases, envoltura en ambos sentidos y sync con la fracción de muestra (modulador externo: su vuelta y su
+        // fase final llegan dadas, y la fase interna no avanza)
+        __m256d wrapped;
+        if (args.external)
+        {
+            wrapped = args.extWrapped ? _mm256_cmp_pd (one, one, _CMP_EQ_OQ) : _mm256_setzero_pd();
+            modPhase = set1 (args.extPhaseEnd);
+        }
+        else
+        {
+            modPhase = _mm256_add_pd (modPhase, dtM);
+            wrapped = _mm256_cmp_pd (modPhase, one, _CMP_GE_OQ);
+            modPhase = _mm256_sub_pd (modPhase, _mm256_and_pd (wrapped, one));
+            _mm256_store_pd (lanes.modPhase + h, modPhase);
+        }
         phase = frac (_mm256_add_pd (phase, dtInst));
         if (args.sync)
             phase = _mm256_blendv_pd (phase, _mm256_mul_pd (_mm256_div_pd (modPhase, dtM), absInst), wrapped);
 
-        _mm256_store_pd (lanes.modPhase + h, modPhase);
         _mm256_store_pd (lanes.phase + h, phase);
     }
 

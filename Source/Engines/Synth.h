@@ -418,6 +418,8 @@ struct SynthVoice : juce::SynthesiserVoice
         complex.symmetry  = params.symmetry->load();
         complex.timbreMod = params.timbreMod->load();
         complex.sync      = params.modSync->load() > 0.5f;
+        complex.modSource = (int) params.complexModSource->load(); // 0 interno, 1 Osc 2, 2 Osc 3
+        const auto externalMod = complex.on && complex.modSource != 0;
         const auto fmIndexBase = complex.fmIndex; // la matriz modula alrededor de estos valores
         const auto timbreBase = complex.timbre;
 
@@ -549,6 +551,12 @@ struct SynthVoice : juce::SynthesiserVoice
             complex.pw = pw;
             if (matrix.targets[ModMatrix::dstFmIndex]) complex.fmIndex = fmIndexBase + mtx[ModMatrix::dstFmIndex];
             if (matrix.targets[ModMatrix::dstTimbre])  complex.timbre = juce::jlimit (0.0f, 1.0f, timbreBase + mtx[ModMatrix::dstTimbre]);
+            // Osc 2: deriva propia (desafinación fija y 1/f) además de seguir a Osc 1, y su posición WT. Antes de Osc 1: el
+            // Complex puede usarlo como modulador (mismos valores que lee renderMonoSources más abajo)
+            const auto osc2Drift = drift > 0.0f ? std::exp2 ((osc2StaticCents + drift * osc2DriftCents) / 1200.0) : 1.0;
+            const auto osc2Mul = (osc2Semis != 0.0f ? std::exp2 (osc2Semis / 12.0) : 1.0) * osc2Drift;
+            if (mix.osc2Table != nullptr)
+                mix.osc2WtPos = juce::jlimit (0.0f, 1.0f, osc2WtPositionBase + mtx[ModMatrix::dstOsc2WtPosition]);
 
             if (complex.on)
             {
@@ -561,10 +569,12 @@ struct SynthVoice : juce::SynthesiserVoice
                     double ph0[konisimd::kLanes], mp0[konisimd::kLanes];
                     std::copy (std::begin (lanes.phase), std::end (lanes.phase), ph0);
                     std::copy (std::begin (lanes.modPhase), std::end (lanes.modPhase), mp0);
+                    konisimd::ComplexArgs args { complex.wave, complex.modWave, complex.ratio, complex.fmIndex,
+                                                 (double) complex.am, (double) complex.pw, complex.sync };
+                    if (externalMod)
+                        externalModulator (sub, dt, osc2Mul, pw, args);
                     if (simd)
                     {
-                        const konisimd::ComplexArgs args { complex.wave, complex.modWave, complex.ratio, complex.fmIndex,
-                                                           (double) complex.am, (double) complex.pw, complex.sync };
                         konisimd::complexStepAvx2 (lanes, args, 0.5 * dt, subL, subR, firstMod);
                     }
                     else
@@ -572,7 +582,7 @@ struct SynthVoice : juce::SynthesiserVoice
                         for (size_t u = 0; u < (size_t) numUnison; ++u)
                         {
                             float mod;
-                            const auto s = complexSample (u, 0.5 * dt * (numUnison == 1 ? 1.0 : lanes.ratio[u]), mod);
+                            const auto s = complexSample (u, 0.5 * dt * (numUnison == 1 ? 1.0 : lanes.ratio[u]), mod, args);
                             if (u == 0)
                                 firstMod = mod;
                             subL += s * (numUnison == 1 ? 1.0f : lanes.gainL[u]);
@@ -585,13 +595,16 @@ struct SynthVoice : juce::SynthesiserVoice
                     complexBlep.pop (subL, subR);
                     for (int u = 0; u < numUnison; ++u)
                     {
-                        const auto dtM = 0.5 * dt * lanes.ratio[u] * complex.ratio;
-                        const auto wrapped = mp0[u] + dtM >= 1.0;
+                        // Instante de la vuelta del modulador dentro de la submuestra: interno, desde su fase inicial; externo,
+                        // desde lo recorrido tras la vuelta (extPhaseEnd / extDtM submuestras)
+                        const auto dtM = args.external ? args.extDtM : 0.5 * dt * lanes.ratio[u] * complex.ratio;
+                        const auto wrapped = args.external ? args.extWrapped : mp0[u] + dtM >= 1.0;
+                        const auto at = args.external ? juce::jlimit (0.0, 1.0, 1.0 - args.extPhaseEnd / dtM) : (1.0 - mp0[u]) / dtM;
                         const auto amGain = (1.0f - complex.am) + complex.am * (float) lanes.mod[u];
                         const auto gL = (numUnison == 1 ? 1.0f : lanes.gainL[u]) * amGain;
                         const auto gR = (numUnison == 1 ? 1.0f : lanes.gainR[u]) * amGain;
                         MinBlep::syncedStep (complexBlep, complex.wave, ph0[u], lanes.inc[u], complex.sync && wrapped,
-                                             wrapped ? (1.0 - mp0[u]) / dtM : 1.0, complex.pw, gL, gR);
+                                             wrapped ? at : 1.0, complex.pw, gL, gR);
                     }
 
                     // Wavefolder (Timbre) con modulación de timbre desde el modulador del primer oscilador
@@ -639,14 +652,10 @@ struct SynthVoice : juce::SynthesiserVoice
                                                                           : mix.osc1Level;
             left  *= osc1Gain;
             right *= osc1Gain;
-            // Osc 2 deriva por su cuenta (desafinación fija y 1/f propios) además de seguir a Osc 1
-            const auto osc2Drift = drift > 0.0f ? std::exp2 ((osc2StaticCents + drift * osc2DriftCents) / 1200.0) : 1.0;
             const auto savedOsc2Level = mix.osc2Level, savedNoiseLevel = mix.noiseLevel; // la matriz los mueve solo en esta muestra
             if (matrix.targets[ModMatrix::dstOsc2Level])  mix.osc2Level = juce::jlimit (0.0f, 1.0f, savedOsc2Level + mtx[ModMatrix::dstOsc2Level]) * osc2Gate;
             if (matrix.targets[ModMatrix::dstNoiseLevel]) mix.noiseLevel = juce::jlimit (0.0f, 1.0f, savedNoiseLevel + mtx[ModMatrix::dstNoiseLevel]) * noiseGate;
-            if (mix.osc2Table != nullptr)
-                mix.osc2WtPos = juce::jlimit (0.0f, 1.0f, osc2WtPositionBase + mtx[ModMatrix::dstOsc2WtPosition]);
-            auto monoSources = renderMonoSources (dt, pw, (osc2Semis != 0.0f ? std::exp2 (osc2Semis / 12.0) : 1.0) * osc2Drift);
+            auto monoSources = renderMonoSources (dt, pw, osc2Mul, externalMod);
             mix.osc2Level = savedOsc2Level;
             mix.noiseLevel = savedNoiseLevel;
             if (sampleLevel > 0.0f)
@@ -827,7 +836,7 @@ private:
     struct ComplexParams
     {
         bool on = false, sync = false;
-        int wave = 0, modWave = 0;
+        int wave = 0, modWave = 0, modSource = 0; // modSource: 0 modulador interno, 1 Osc 2, 2 Osc 3
         double ratio = 1.0;
         double fmIndex = 0.0;
         float am = 0.0f, timbre = 0.0f, symmetry = 0.0f, timbreMod = 0.0f;
@@ -839,10 +848,12 @@ private:
     //  AM / ring: s·((1 - a) + a·m); a = 1 es modulación en anillo.
     //  Sync duro: al reiniciarse el modulador, la fase del principal vuelve a 0 más el tiempo transcurrido desde el
     //  reinicio (modPhase / dtM muestras), para no cuantizar el instante de sync a la muestra.
-    float complexSample (size_t u, double dtP, float& modOut)
+    //  Modulador externo (args.external, Osc 2 u Osc 3): su valor, incremento y vuelta llegan dados (externalModulator) y
+    //  la fase interna del modulador no avanza.
+    float complexSample (size_t u, double dtP, float& modOut, const konisimd::ComplexArgs& args)
     {
-        const auto dtM = dtP * complex.ratio;
-        const auto m = oscillator (complex.modWave, lanes.modPhase[u], dtM);
+        const auto dtM = args.external ? args.extDtM : dtP * complex.ratio;
+        const auto m = args.external ? (float) args.extMod : oscillator (complex.modWave, lanes.modPhase[u], dtM);
         modOut = m;
 
         const auto dtInst = dtP + complex.fmIndex * dtM * (double) m;
@@ -851,17 +862,62 @@ private:
         lanes.inc[u] = dtInst;
         lanes.mod[u] = m;
 
-        lanes.modPhase[u] += dtM;
-        const auto wrapped = lanes.modPhase[u] >= 1.0;
-        if (wrapped)
-            lanes.modPhase[u] -= 1.0;
+        auto wrapped = args.extWrapped;
+        auto modEnd = args.extPhaseEnd;
+        if (! args.external)
+        {
+            lanes.modPhase[u] += dtM;
+            wrapped = lanes.modPhase[u] >= 1.0;
+            if (wrapped)
+                lanes.modPhase[u] -= 1.0;
+            modEnd = lanes.modPhase[u];
+        }
 
         lanes.phase[u] += dtInst;
         lanes.phase[u] -= std::floor (lanes.phase[u]); // envuelve en ambos sentidos
         if (complex.sync && wrapped)
-            lanes.phase[u] = lanes.modPhase[u] / dtM * std::abs (dtInst);
+            lanes.phase[u] = modEnd / dtM * std::abs (dtInst);
 
         return s;
+    }
+
+    // Modulador externo del Complex (Osc 2 u Osc 3) en la submuestra sub (0, 1) de esta muestra. Se lee de la trayectoria de
+    // fase del oscilador en el instante τ = sub/2 (y τ + 1/2 para su vuelta), sin tocar su estado: renderMonoSources la avanza
+    // después, en la misma muestra. Osc 2 con su sync: se reinicia en f = (1 - syncPhase)/dt y desde ahí su fase es
+    // (τ - f)·dt2 (en τ = 1, el syncPhase/dt·dt2 de renderMonoSources). El valor es la forma de onda evaluada a 2·fs con
+    // PolyBLEP (como el modulador interno), no la salida minBLEP del oscilador audible.
+    void externalModulator (int sub, double dt, double osc2Mul, float pw, konisimd::ComplexArgs& a) const
+    {
+        const auto t0 = 0.5 * sub, t1 = t0 + 0.5;
+        double inc, u0, u1;
+        bool reset = false;
+        if (complex.modSource == 1)
+        {
+            inc = dt * mix.osc2Ratio * osc2Mul; // = dt2 de renderMonoSources
+            const auto syncs = mix.osc2Sync && syncPhase + dt >= 1.0;
+            const auto f = (1.0 - syncPhase) / dt;
+            const auto unwrapped = [&] (double t) { return syncs && t >= f ? (t - f) * inc : osc2Phase + t * inc; };
+            u0 = unwrapped (t0);
+            u1 = unwrapped (t1);
+            reset = syncs && t0 < f && f <= t1;
+        }
+        else
+        {
+            inc = dt * mix.subRatio;
+            u0 = subPhase + t0 * inc;
+            u1 = subPhase + t1 * inc;
+        }
+        const auto p0 = u0 - std::floor (u0);
+        a.external = true;
+        a.extDtM = 0.5 * inc;
+        a.extWrapped = reset || std::floor (u1) > std::floor (u0);
+        a.extPhaseEnd = u1 - std::floor (u1);
+        if (complex.modSource == 2)
+            a.extMod = oscillator (mix.subWave, p0, a.extDtM, 0.5f, true);
+        else if (mix.osc2Wave != wavetableWave)
+            a.extMod = oscillator (mix.osc2Wave, p0, a.extDtM, pw, true);
+        else
+            a.extMod = mix.osc2Table != nullptr ? readWavetable (*mix.osc2Table, p0, a.extDtM, mix.osc2WtPos) : 0.0;
     }
 
     // Wavefolder senoidal: f(v) = sin(a·v), v = x + Symmetry/2, a = π/2·(1 + 9·Timbre). Se evalúa a 2·fs.
@@ -943,11 +999,12 @@ private:
     //    del Sub). minBLEP en sierra y cuadrada, como Osc 1 y Osc 2.
     //  Ruido: blanco uniforme (RMS 0,577) o rosa (filtro "refined" de Paul Kellet, musicdsp.org); medido en réplica:
     //    plano ±0,2 dB por banda de octava de 125 Hz a 4 kHz (-0,7 dB a 8 kHz); ×0,3277 iguala su RMS al del blanco.
-    float renderMonoSources (double dt, float pw, double osc2Mul)
+    // keepPhases: Osc 2 u Osc 3 modulan el Complex; sus fases avanzan aunque su nivel sea 0 (o estén en Mute o fuera del Solo)
+    float renderMonoSources (double dt, float pw, double osc2Mul, bool keepPhases)
     {
         float out = 0.0f, unused = 0.0f;
         monoBlep.pop (out, unused); // cola minBLEP de Osc 2 y sub (saltos de muestras anteriores)
-        if (mix.osc2Level <= 0.0f && mix.subLevel <= 0.0f && mix.noiseLevel <= 0.0f)
+        if (mix.osc2Level <= 0.0f && mix.subLevel <= 0.0f && mix.noiseLevel <= 0.0f && ! keepPhases)
         {
             syncPhase += dt; // mantiene la referencia de sync en fase aunque Osc 2 esté a 0
             syncPhase -= std::floor (syncPhase);

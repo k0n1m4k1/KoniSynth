@@ -182,7 +182,7 @@ struct Params
         reverbWidth = get ("reverbWidth"); reverbFreeze = get ("reverbFreeze");
         complexOn = get ("complexOn"); modWave = get ("modWave"); modRatio = get ("modRatio"); fmIndex = get ("fmIndex");
         amDepth = get ("amDepth"); timbre = get ("timbre"); symmetry = get ("symmetry"); timbreMod = get ("timbreMod");
-        modSync = get ("modSync");
+        modSync = get ("modSync"); complexModSource = get ("complexModSource");
     }
 
     // Interpretación (no son parámetros): los escribe processBlock desde el MIDI entrante (pitch bend en semitonos ya
@@ -304,5 +304,5 @@ struct Params
                        *reverbDecay {}, *reverbPredelay {}, *reverbDiffusion {}, *reverbDamp {}, *reverbTone {},
                        *reverbMod {}, *reverbWidth {}, *reverbFreeze {},
                        *complexOn {}, *modWave {}, *modRatio {}, *fmIndex {}, *amDepth {}, *timbre {}, *symmetry {},
-                       *timbreMod {}, *modSync {};
+                       *timbreMod {}, *modSync {}, *complexModSource {};
 };

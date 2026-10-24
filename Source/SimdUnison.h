@@ -24,6 +24,13 @@ struct ComplexArgs
     int wave, modWave;
     double modRatio, fmIndex, am, pw;
     bool sync;
+    // Modulador externo (complexModSource = Osc 2 u Osc 3): un mismo valor para todos los carriles en esta submuestra, en
+    // lugar del modulador interno (modWave, modRatio y modPhase por carril, que entonces no avanza)
+    bool external = false;
+    double extMod = 0.0;      // valor del modulador
+    double extDtM = 0.0;      // su incremento de fase en esta submuestra (> 0)
+    bool extWrapped = false;  // dio la vuelta (o lo reinició su propio sync) dentro de esta submuestra
+    double extPhaseEnd = 0.0; // su fase al final de la submuestra: tras una vuelta, lo recorrido desde ella
 };
 
 // Una muestra del unísono (sin modo complejo): suma estéreo y avance de fases. Misma semántica que la ruta escalar.

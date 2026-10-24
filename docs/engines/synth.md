@@ -80,6 +80,7 @@ Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x overs
 | Control | What it does | Range / default |
 |---|---|---|
 | On (header) | Turns the complex oscillator on for oscillator 1. | Off / On / Off |
+| Mod Src | Which oscillator is the modulator: the internal one (Mod Wave and Ratio) or Osc 2 / Osc 3 exactly as tuned in their tabs (wave, Oct, Semi, Fine, drift, WT Pos, and the sync of Osc 2). With Osc 2 or Osc 3, Mod Wave and Ratio are dimmed. See the notes below. | Internal, Osc 2, Osc 3 / Internal |
 | Mod Wave menu | Modulator waveform. | Sine, Triangle, Saw, Square / Sine |
 | Sync (switch) | Hard-syncs the main oscillator to the modulator. | Off / On / Off |
 | Ratio | Modulator/main frequency ratio: whole numbers harmonic, others bell-like. | 0.125x-16x / 1.000x |
@@ -88,6 +89,21 @@ Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x overs
 | Timbre | Sine wavefolder: progressively adds harmonics. | 0-100 % / 0 % |
 | Symmetry | Wavefolder asymmetry. | -100 to +100 % / 0 % |
 | T.Mod | The modulator moves the wavefolder. | 0-100 % / 0 % |
+
+Notes on **Mod Src** = Osc 2 or Osc 3:
+
+- The oscillator modulates even at level 0, muted or silenced by another source's solo: turn its level down to hear only
+  the modulation, or up to hear it as well. A sine Osc 2 one octave up gives exactly the same sound as the internal sine
+  at Ratio 2.
+- The sync of Osc 2 is followed inside the oversampled step, at the exact reset instant.
+- The modulator is the oscillator's waveform evaluated at the doubled rate with a short polynomial correction, like the
+  internal modulator; it is not the band-limited (minBLEP) signal you hear from the Osc 2 / Osc 3 output. The resets of
+  Osc 2 sync are not corrected in the modulator.
+- One modulator serves every unison voice (the internal one follows each voice's detune). The carrier is continuous when
+  you switch the source while a note sounds; the modulator value jumps, which can click with AM/Ring or T.Mod. The
+  internal modulator pauses while Osc 2 or Osc 3 is used and resumes from where it stopped.
+- CPU: the same as the internal modulator with the same wave and ratio (measured with unison 7 and 8 notes: 8.68 % with
+  Osc 2 saw and sync against 8.70 % with the internal saw at 1.498x).
 
 ### Source tabs: Osc 2, Osc 3, Noise
 

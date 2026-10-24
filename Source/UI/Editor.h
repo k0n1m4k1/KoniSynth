@@ -153,7 +153,7 @@ public:
            .withKnob (s, "pulseWidth", "PW").withKnob (s, "pwmDepth", "PWM").withKnob (s, "drift", "Drift")
            .withKnob (s, "pitchEnvAmount", "P.Env").withKnob (s, "pitchEnvDecay", "P.Decay");
         complexSection.withToggle (s, "complexOn").withCombo (s, "modWave").withExtraToggle (s, "modSync", "Sync")
-                      .withKnob (s, "modRatio", "Ratio").withKnob (s, "fmIndex", "FM")
+                      .withKnob (s, "complexModSource", "Mod Src").withKnob (s, "modRatio", "Ratio").withKnob (s, "fmIndex", "FM")
                       .withKnob (s, "amDepth", "AM/Ring").withKnob (s, "timbre", "Timbre")
                       .withKnob (s, "symmetry", "Symmetry").withKnob (s, "timbreMod", "T.Mod");
         // Segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), con Mute/Solo como las fuentes de Osc 1
@@ -1309,8 +1309,14 @@ private:
         };
         constexpr int square = 3;
         const auto osc1Sounds = v ("osc1Level") > 0.0f || targeted (ModMatrix::dstOsc1Level);
-        const auto osc2Sounds = v ("osc2Level") > 0.0f || targeted (ModMatrix::dstOsc2Level);
-        const auto pwUsed = ((int) v ("wave") == square && osc1Sounds) || (v ("complexOn") > 0.5f && (int) v ("modWave") == square)
+        // Complex con Osc 2 u Osc 3 de modulador: Mod Wave y Ratio no actúan, y ese oscilador cuenta aunque su nivel sea 0
+        const auto externalMod = (int) v ("complexModSource") != 0;
+        const auto complexOn = v ("complexOn") > 0.5f;
+        const auto osc2Sounds = v ("osc2Level") > 0.0f || targeted (ModMatrix::dstOsc2Level) || (complexOn && (int) v ("complexModSource") == 1);
+        const auto osc3Sounds = v ("subLevel") > 0.0f || (complexOn && (int) v ("complexModSource") == 2);
+        dim (complexSection.knobFor ("modRatio"), externalMod);
+        dim (&complexSection.comboComponent(), externalMod);
+        const auto pwUsed = ((int) v ("wave") == square && osc1Sounds) || (complexOn && ! externalMod && (int) v ("modWave") == square)
                          || ((int) v ("osc2Wave") == square && osc2Sounds);
         dim (osc.knobFor ("pulseWidth"), ! pwUsed);
         dim (osc.knobFor ("pwmDepth"), ! pwUsed);
@@ -1323,8 +1329,8 @@ private:
         dim (&osc2Section.comboComponent(), ! osc2Sounds);
         dim (&osc2Section.extraToggleComponent(), ! osc2Sounds);
         for (const auto* id : { "subOctave", "osc3Semi", "osc3Fine" })
-            dim (osc3Section.knobFor (id), v ("subLevel") <= 0.0f);
-        dim (&osc3Section.comboComponent(), v ("subLevel") <= 0.0f);
+            dim (osc3Section.knobFor (id), ! osc3Sounds);
+        dim (&osc3Section.comboComponent(), ! osc3Sounds);
         dim (&noiseSection.comboComponent(), v ("noiseLevel") <= 0.0f && ! targeted (ModMatrix::dstNoiseLevel));
         dim (osc2Section.knobFor ("osc2WtPosition"), (int) v ("osc2Wave") != 4 || ! osc2Sounds); // solo con la forma Wavetable
         const auto theremin = engine == 1; // el Theremin usa LFO 1 con seno fijo y su propia velocidad (sin Shape ni Sync)

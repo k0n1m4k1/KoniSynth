@@ -91,8 +91,8 @@ static void complexStepScalar (konisimd::UnisonLanes& l, const konisimd::Complex
     for (int u = 0; u < konisimd::kLanes; ++u)
     {
         const auto dtPLane = dtP * l.ratio[u];
-        const auto dtM = dtPLane * a.modRatio;
-        const auto m = oscillator (a.modWave, l.modPhase[u], dtM);
+        const auto dtM = a.external ? a.extDtM : dtPLane * a.modRatio;
+        const auto m = a.external ? (float) a.extMod : oscillator (a.modWave, l.modPhase[u], dtM);
         if (u == 0)
             firstMod = m;
         const auto dtInst = dtPLane + a.fmIndex * dtM * (double) m;
@@ -103,14 +103,20 @@ static void complexStepScalar (konisimd::UnisonLanes& l, const konisimd::Complex
         left  += s * l.gainL[u];
         right += s * l.gainR[u];
 
-        l.modPhase[u] += dtM;
-        const auto wrapped = l.modPhase[u] >= 1.0;
-        if (wrapped)
-            l.modPhase[u] -= 1.0;
+        auto wrapped = a.extWrapped;
+        auto modEnd = a.extPhaseEnd;
+        if (! a.external)
+        {
+            l.modPhase[u] += dtM;
+            wrapped = l.modPhase[u] >= 1.0;
+            if (wrapped)
+                l.modPhase[u] -= 1.0;
+            modEnd = l.modPhase[u];
+        }
         l.phase[u] += dtInst;
         l.phase[u] -= std::floor (l.phase[u]);
         if (a.sync && wrapped)
-            l.phase[u] = l.modPhase[u] / dtM * std::abs (dtInst);
+            l.phase[u] = modEnd / dtM * std::abs (dtInst);
     }
 }
 
@@ -211,7 +217,8 @@ static void fmRenderScalar (konisimd::FmLanes& l, const konisimd::FmArgs& a, int
 }
 
 // Autoprueba (una vez por proceso, en el primer prepareToPlay): compara AVX2 con la referencia escalar en
-// 4 ondas × {unísono, complejo, complejo + sync} × 2000 pasos desde estados aleatorios idénticos. Tolerancia 1e-4
+// 4 ondas × {unísono, complejo, complejo + sync, modulador externo, externo + sync} × 2000 pasos desde estados
+// aleatorios idénticos. Tolerancia 1e-4
 // (el seno AVX2 es un polinomio con error < 6e-8; el resto son diferencias de redondeo float/double).
 // Con la variable de entorno KONISYNTH_SIMD_BENCH, mide además ambas rutas y escribe
 // %APPDATA%\KoniSynth\simd-selftest.txt (permite medir dentro de un host sin un ejecutable propio).
@@ -246,15 +253,26 @@ static void runSimdSelfTest()
 
     for (int wave = 0; wave < 4; ++wave)
     {
-        for (int mode = 0; mode < 3; ++mode) // 0 unísono, 1 complejo, 2 complejo + sync
+        for (int mode = 0; mode < 5; ++mode) // 0 unísono, 1 complejo, 2 complejo + sync, 3 modulador externo, 4 externo + sync
         {
             auto a = randomLanes();
             auto b = a;
-            const konisimd::ComplexArgs args { wave, (wave + 1) % 4, 1.37, 1.5, 0.3, (double) pw, mode == 2 };
+            konisimd::ComplexArgs args { wave, (wave + 1) % 4, 1.37, 1.5, 0.3, (double) pw, mode == 2 || mode == 4 };
+            double extPhase = 0.3; // modulador externo simulado: seno a 1,61 veces la portadora
 
             for (int i = 0; i < 2000; ++i)
             {
                 float l1, r1, l2, r2, m1 = 0.0f, m2 = 0.0f;
+                if (mode >= 3)
+                {
+                    args.external = true;
+                    args.extDtM = 0.5 * dt * 1.61;
+                    args.extMod = std::sin (juce::MathConstants<double>::twoPi * extPhase);
+                    extPhase += args.extDtM;
+                    args.extWrapped = extPhase >= 1.0;
+                    extPhase -= std::floor (extPhase);
+                    args.extPhaseEnd = extPhase;
+                }
                 if (mode == 0)
                 {
                     unisonStepScalar (a, wave, dt, pw, l1, r1);

@@ -853,5 +853,8 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc2Mute", 1 },  "Osc2 Mute", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc3Mute", 1 },  "Osc3 Mute", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "noiseMute", 1 }, "Noise Mute", false));
+
+    // Modulador del Complex Oscillator: el interno (Mod Wave, Ratio) o Osc 2 / Osc 3 tal como suenan (afinación, forma, tabla)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "complexModSource", 1 }, "Complex Mod Source", StringArray { "Internal", "Osc 2", "Osc 3" }, 0));
     return l;
 }

@@ -1,4 +1,5 @@
-# Voz del Synth: saturación por voz (intermodulación, aliasing, nivel), VCA analógico (Click, Leak) y microafinación Scala
+# Voz del Synth: saturación por voz (intermodulación, aliasing, nivel), VCA analógico (Click, Leak), microafinación Scala,
+# cuerda, Osc 2 Wavetable, Osc 3, Mute y Osc 2 / Osc 3 como modulador del Complex
 import sys
 import numpy as np
 from common import render, db, Checker
@@ -184,4 +185,71 @@ for src in ('Osc 1', 'Osc 2', 'Noise'):
     x, _ = render(WT + ['%s Level=0%%' % pid, '%s Mute=On' % pid, 'Matrix 1 Source=Velocity', 'Matrix 1 Dest=%s Level' % src, 'Matrix 1 Amount=100%'],
                   1.2, MN, 'mute.wav')
     c.check(np.abs(x).max() == 0.0, 'Mute de %s con la matriz Velocity -> %s Level al 100 %%: pico %.2e (silencio)' % (src, src, np.abs(x).max()))
+
+# --- Complex Mod Source: Osc 2 u Osc 3 como modulador del Complex (sus fases avanzan aunque estén a nivel 0 o en Mute) ---
+CX = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Wave=Sine', 'Complex On=On']
+NA = ['57:0.05:1.4:127']
+ref, fs = render(CX + ['FM Index=I 3.00', 'Mod Ratio=2.000x'], 1.5, NA, 'xmod.wav')
+for name, args in (('Osc 2 seno +1 oct', ['Complex Mod Source=Osc 2', 'Osc2 Wave=Sine', 'Osc2 Octave=1', 'Osc2 Level=0%']),
+                   ('Osc 3 seno -1 oct +24 st', ['Complex Mod Source=Osc 3', 'Osc3 Wave=Sine', 'Osc3 Semi=24', 'Sub Level=0%'])):
+    x, _ = render(CX + ['FM Index=I 3.00'] + args, 1.5, NA, 'xmod.wav')
+    c.check(sha(x) == sha(ref), 'FM con %s a nivel 0 = modulador interno seno x2 (bit a bit)' % name)
+O2M = CX + ['FM Index=I 2.00', 'Complex Mod Source=Osc 2', 'Osc2 Semi=7']
+c.check(sha(render(O2M + ['Osc2 Level=50%', 'Osc2 Mute=On'], 1.5, NA, 'xmod.wav')[0]) == sha(render(O2M + ['Osc2 Level=0%'], 1.5, NA, 'xmod.wav')[0]),
+        'Osc 2 modulando en Mute (nivel 50 %) = a nivel 0 (bit a bit)')
+x, _ = render(CX + ['AM Depth=100%', 'Complex Mod Source=Osc 2', 'Osc2 Wave=Sine', 'Osc2 Semi=7', 'Osc2 Level=0%'], 1.5, NA, 'xmod.wav')
+f1, f2 = 220.0, 220.0 * 2 ** (7 / 12)
+seg = x[int(0.3 * fs):int(1.3 * fs)]; k = np.arange(len(seg)); w = np.kaiser(len(seg), 20)
+amp = lambda f: abs(np.sum(seg * w * np.exp(-2j * np.pi * f * k / fs)))
+side = min(amp(f2 - f1), amp(f1 + f2)); rest = max(amp(f1), amp(f2), amp(2 * f1))
+hp = lambda f: f / np.hypot(f, 10.0)  # bloqueo de DC de 10 Hz tras el Complex: -0,036 dB a 110 Hz, -0,001 dB a 550 Hz
+bal = db(amp(f2 - f1) / hp(f2 - f1) / (amp(f1 + f2) / hp(f1 + f2)))
+c.check(abs(bal) < 0.01 and db(rest / side) < -140,
+        'ring con Osc 2 (+7 st): f2-f1 y f1+f2 a %.3f dB entre sí (con el bloqueo de DC descontado); f1, f2 y 2·f1 a %.1f dB (< -140)'
+        % (bal, db(rest / side)))
+# Sync de Osc 2 entre submuestras. Oráculo: y(τ) = sin(2π f1 τ) · sin(2π f2 (τ - τk)) a 2·fs, τk = k/f1 exacto; FIR de media banda
+# de la voz (31 coeficientes, Kaiser β = 7), diezmado 2:1 y bloqueo de DC a 10 Hz. Con el reinicio cuantizado a la submuestra
+# el residuo es -24,2 dB (a la muestra, -18,7 dB)
+x, fs = render(CX + ['AM Depth=100%', 'Complex Mod Source=Osc 2', 'Osc2 Wave=Sine', 'Osc2 Octave=1', 'Osc2 Semi=7', 'Osc2 Sync=On',
+                     'Osc2 Level=0%'], 1.5, ['81:0.05:1.4:127'], 'xmod.wav')
+dt, inc = 880.0 / fs, 1760.0 * 2 ** (7 / 12) / fs
+tau = np.arange(int(1.4 * fs) * 2) / 2.0  # muestras desde el inicio de la nota, en pasos de submuestra
+y2 = np.sin(2 * np.pi * tau * dt) * np.sin(2 * np.pi * ((tau - np.floor(tau * dt) / dt) * inc % 1.0))
+kk = np.arange(31) - 15.0
+hb = np.where(kk == 0, 0.5, np.sin(np.pi * kk / 2) / (np.pi * np.where(kk == 0, 1, kk))) * np.kaiser(31, 7.0)
+y = np.convolve(y2, hb / hb.sum())[1::2][:len(tau) // 2]  # la salida de cada muestra sale tras su segunda submuestra
+cf, z, xp, yp = 1 - 2 * np.pi * 10 / fs, np.zeros_like(y), 0.0, 0.0
+for i, v in enumerate(y):
+    yp = v - xp + cf * yp; xp = v; z[i] = yp
+a, b, n0 = int(0.3 * fs), int(1.3 * fs), int(round(0.05 * fs))
+seg, r = x[a:b], z[a - n0:b - n0]
+res = db(np.sqrt(np.mean((seg - np.dot(seg, r) / np.dot(r, r) * r) ** 2)) / np.sqrt(np.mean(seg ** 2)))
+c.check(res < -100, 'ring con Osc 2 en sync (880 Hz, +1 oct +7 st): residuo frente al oráculo con el reinicio exacto %.1f dB (< -100)' % res)
+# AVX2 frente a escalar con modulador externo (useAvx2 en config.settings, con copia y restauración byte a byte)
+import os
+CFG = os.path.join(os.environ['APPDATA'], 'KoniSynth', 'config.settings')
+XS = {'Osc 2 sierra con sync, FM, unísono 5': ['Unison Voices=5', 'Wave=Saw', 'FM Index=I 2.00', 'Complex Mod Source=Osc 2', 'Osc2 Wave=Saw',
+                                              'Osc2 Sync=On', 'Osc2 Semi=7', 'Osc2 Level=30%', 'Mod Sync=On'],
+      'Osc 2 Wavetable, AM, unísono 7': ['Unison Voices=7', 'Wave=Square', 'AM Depth=100%', 'FM Index=I 1.00', 'Complex Mod Source=Osc 2',
+                                         'Wavetable=Harmonic Sweep', 'Osc2 Wave=Wavetable', 'Osc2 WT Position=40%'],
+      'Osc 3 triángulo, FM, unísono 3': ['Unison Voices=3', 'FM Index=I 3.00', 'Complex Mod Source=Osc 3', 'Osc3 Wave=Triangle', 'Osc3 Semi=19',
+                                         'Mod Sync=On']}
+XN = ['48:0.05:0.9:110', '55:0.3:0.7:90', '64:0.6:0.6:127']
+orig = open(CFG, 'rb').read() if os.path.exists(CFG) else None
+out = {}
+try:
+    for avx in (1, 0):
+        os.makedirs(os.path.dirname(CFG), exist_ok=True)
+        with open(CFG, 'w', encoding='utf-8', newline='\n') as f:
+            f.write('<?xml version="1.0" encoding="UTF-8"?>\n\n<PROPERTIES>\n  <VALUE name="useAvx2" val="%d"/>\n</PROPERTIES>\n' % avx)
+        for name, args in XS.items():
+            out[(name, avx)] = render(CX[:4] + ['Drift=30%', 'Complex On=On'] + args, 1.5, XN, 'xmod.wav')[0]
+finally:
+    if orig is None:
+        os.remove(CFG)
+    else:
+        open(CFG, 'wb').write(orig)
+for name in XS:
+    d = db(np.abs(out[(name, 1)] - out[(name, 0)]).max() / np.abs(out[(name, 0)]).max())
+    c.check(d < -100, 'AVX2 = escalar con %s: diferencia máxima %.1f dB del pico (< -100)' % (name, d))
 sys.exit(c.summary())

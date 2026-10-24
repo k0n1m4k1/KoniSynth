@@ -606,6 +606,10 @@ static juce::String paramHelp (const juce::String& id)
         { "mdAms", "Tremolo depth from the LFO on operators with AM on (0-3: 0, 1.4, 5.9, 11.8 dB)." },
         { "mdVelocity", "Key velocity lowers the carriers' level (KoniSynth's driver; the chip itself has no velocity)." },
         { "modSync", "Hard-syncs the main oscillator to the modulator." },
+        { "complexModSource", "Which oscillator modulates oscillator 1 in the complex oscillator. Internal (default): its own "
+                              "modulator (Mod Wave and Ratio). Osc 2 or Osc 3: that oscillator with its tuning, wave and "
+                              "wavetable position (Mod Wave and Ratio do nothing); it modulates even at level 0 or muted, so "
+                              "turn its level down to hear only the modulation." },
     };
     const auto it = help.find (id);
     if (it != help.end())

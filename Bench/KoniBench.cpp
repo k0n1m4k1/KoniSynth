@@ -794,6 +794,14 @@ int main (int argc, char** argv)
         // El 2 con Osc 3 en sierra a +1 octava (Sub Octave -1, Semi +24: normalizado 1): coste de Osc 3 frente al 2
         { "19. Unisono 7 + filtro + Osc 3 sierra, 8 notas", { { "Unison Voices", 1.0f }, { "Resonance", 0.5f }, { "Filter Drive", 0.5f },
                                                               { "Sub Level", 1.0f }, { "Osc3 Wave", 2.0f / 3.0f }, { "Osc3 Semi", 1.0f } }, 8 },
+        // El 3 con Osc 2 / Osc 3 como modulador del Complex (Complex Mod Source: Osc 2 = 1/2, Osc 3 = 2/2), a nivel 0: coste del
+        // modulador externo frente al interno
+        { "20. Complex 2x + unisono 7, modulador Osc 2 sierra + sync", { { "Complex On", 1.0f }, { "Unison Voices", 1.0f }, { "FM Index", 0.5f },
+                                                                        { "Timbre", 0.6f }, { "AM Depth", 0.3f }, { "Complex Mod Source", 0.5f },
+                                                                        { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f } }, 8 },
+        { "21. Complex 2x + unisono 7, modulador Osc 3", { { "Complex On", 1.0f }, { "Unison Voices", 1.0f }, { "FM Index", 0.5f },
+                                                          { "Timbre", 0.6f }, { "AM Depth", 0.3f }, { "Complex Mod Source", 1.0f },
+                                                          { "Osc3 Semi", 1.0f } }, 8 },
     };
 
     for (const auto& s : scenarios)
