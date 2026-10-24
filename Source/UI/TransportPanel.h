@@ -45,11 +45,12 @@ public:
     void paint (juce::Graphics& g) override
     {
         const auto r = getLocalBounds().toFloat();
-        g.setColour (Skin::c (0xff120607));
+        // LED rojo fijo, como el del BPM: no sigue el skin
+        g.setColour (juce::Colour (0xff120607));
         g.fillRoundedRectangle (r, 6.0f);
-        g.setColour (Skin::white().withAlpha (0.08f));
+        g.setColour (juce::Colours::white.withAlpha (0.08f));
         g.drawRoundedRectangle (r.reduced (0.5f), 6.0f, 1.0f);
-        const auto lit = Skin::c (0xffff2a1a), dim = Skin::c (0xff7a2a22);
+        const auto lit = juce::Colour (0xffff2a1a), dim = juce::Colour (0xff7a2a22);
         const auto recording = transport.isRecording();
         // Tiempo: grabado (REC) o posición / duración de la fuente
         const auto text = recording ? "REC " + clock (transport.recordedSeconds())
@@ -109,7 +110,7 @@ private:
             switch (icon)
             {
                 case Icon::rec:
-                    g.setColour (active ? Skin::c (0xffff2a1a) : Skin::c (0xffb03a30));
+                    g.setColour (active ? juce::Colour (0xffff2a1a) : juce::Colour (0xffb03a30)); // rojo fijo, como los LED
                     g.fillEllipse (b);
                     break;
                 case Icon::stop:

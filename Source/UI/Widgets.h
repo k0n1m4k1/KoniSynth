@@ -557,14 +557,15 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         const auto led = juce::Rectangle<float> (d, d).withCentre ({ r.getX() + 4.0f + d * 0.5f, r.getCentreY() });
         const auto on = b.getToggleState();
 
+        // LED rojo fijo: no sigue el skin (el contraste del rojo sobre los skins monocromos)
         if (on)
         {
-            g.setColour (Skin::c (0xffff3030).withAlpha (0.35f));
+            g.setColour (juce::Colour (0xffff3030).withAlpha (0.35f));
             g.fillEllipse (led.expanded (3.0f)); // halo
         }
-        g.setGradientFill (juce::ColourGradient (on ? Skin::c (0xffff8a80) : Skin::c (0xff5a1e1e),
+        g.setGradientFill (juce::ColourGradient (on ? juce::Colour (0xffff8a80) : juce::Colour (0xff5a1e1e),
                                                  led.getX() + d * 0.3f, led.getY() + d * 0.3f,
-                                                 on ? Skin::c (0xffd01010) : Skin::c (0xff2a0c0c),
+                                                 on ? juce::Colour (0xffd01010) : juce::Colour (0xff2a0c0c),
                                                  led.getRight(), led.getBottom(), true));
         g.fillEllipse (led);
         g.setColour (Skin::black().withAlpha (0.6f));
