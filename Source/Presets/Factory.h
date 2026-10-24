@@ -33,7 +33,7 @@ static const juce::StringArray& presetCategories()
 static const std::vector<FactoryPreset>& factoryPresets()
 {
     static const std::vector<FactoryPreset> list {
-        { "Init", "Init", {} },
+        { "Init", "Init", { { "osc3Wave", 0 } } }, // Osc 3 en seno; los presets sin osc3Wave cargan la cuadrada (el Sub de siempre)
         { "Soft Pad", "Pad",   { { "wave", 1 }, { "attack", 0.8f }, { "decay", 0.5f }, { "sustain", 0.8f }, { "release", 2.0f }, { "drift", 0.35f },
                           { "filterMode", 1 }, { "cutoff", 1800.0f }, { "resonance", 0.15f }, { "filterEnv", 0.2f },
                           { "filterAttack", 1.0f }, { "filterDecay", 2.0f },

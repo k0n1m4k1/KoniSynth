@@ -28,6 +28,9 @@ static juce::String paramHelp (const juce::String& id)
         { "wtMute", "Silences the wavetable without changing its level." },
         { "sampleMute", "Silences the sample without changing its level." },
         { "stringMute", "Silences the plucked string without changing its level." },
+        { "osc2Mute", "Silences Oscillator 2 without changing its level (tab right-click: Mute / Solo)." },
+        { "osc3Mute", "Silences Oscillator 3 without changing its level (tab right-click: Mute / Solo)." },
+        { "noiseMute", "Silences the noise without changing its level (tab right-click: Mute / Solo)." },
         { "monoOut", "Sums left and right to mono at the very end, to check how the sound holds up in mono." },
         { "mdOutput", "Mega Drive output. Stereo: Model 1 headphone jack or Model 2 AV. Mono: Model 1 AV and RF outputs, as most people heard it on a TV." },
         { "snesOutput", "SNES output. Stereo: AV (multi-out). Mono: RF to the TV aerial input." },
@@ -180,15 +183,22 @@ static juce::String paramHelp (const juce::String& id)
         { "pwmDepth", "How much the LFO moves the pulse width (PWM): adds motion and body to the square wave." },
         { "osc2Wave", "Oscillator 2 waveform. Wavetable: plays the table of the Wavetable source (its own position: WT Pos), "
                       "with its own tuning and phase; Sync works too." },
-        { "osc2WtPosition", "Position of oscillator 2 in the wavetable (Wavetable waveform only): the same table as the "
-                            "Wavetable source, read at its own position. Default 0 %." },
+        { "osc2WtPosition", "Position of oscillator 2 in the wavetable (Wavetable waveform only). The table is the one chosen "
+                            "in the Wavetable tab (next to Osc 1), read here at its own position; muting the Wavetable tab "
+                            "does not mute oscillator 2. Default 0 %." },
         { "osc2Octave", "Oscillator 2 octave relative to oscillator 1." },
         { "osc2Semi", "Oscillator 2 offset in semitones (7 = fifth, 12 = octave)." },
         { "osc2Fine", "Oscillator 2 fine detune in cents: a few cents give a thick beating sound." },
         { "osc2Level", "Oscillator 2 volume in the mixer." },
         { "osc2Sync", "Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the classic metallic sync lead." },
-        { "subLevel", "Sub-oscillator volume (square wave one or two octaves down): adds weight to the bass." },
-        { "subOctave", "Sub-oscillator at -1 or -2 octaves." },
+        { "subLevel", "Oscillator 3 volume. By default it is the classic sub-oscillator (square one octave down) that adds weight "
+                      "to the bass; its wave and tuning (Wave, Semi, Fine) make it a third oscillator." },
+        { "subOctave", "Oscillator 3 base octave: -1 or -2 octaves below oscillator 1. Semi adds up to +/-24 semitones "
+                       "(-1 oct + 12 st = same octave, + 24 st = one octave up)." },
+        { "osc3Wave", "Oscillator 3 waveform. Square (default, 50 % pulse) is the classic sub-oscillator; Sine gives a clean "
+                      "fundamental (the Init preset uses it)." },
+        { "osc3Semi", "Oscillator 3 offset in semitones from its base octave, -24 to +24. Default 0." },
+        { "osc3Fine", "Oscillator 3 fine detune in cents, -50 to +50. Default 0." },
         { "noiseLevel", "Noise volume in the mixer (wind, percussion, breath)." },
         { "noiseColor", "Noise colour: white (bright hiss), pink (darker, like rain) or LFSR digital noise from 8-bit game chips (Short = metallic, tonal noise that follows the key)." },
         { "wtLevel", "Wavetable oscillator volume in the mixer: a stack of waveforms you can sweep through (Position)." },

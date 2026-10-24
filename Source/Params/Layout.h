@@ -841,5 +841,17 @@ static APVTS::ParameterLayout createLayout()
 
     // Osc 2 en modo Wavetable (osc2Wave = Wavetable): posición propia en la misma tabla que la fuente Wavetable
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2WtPosition", 1 }, "Osc2 WT Position", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
+
+    // Osc 3: el Sub ampliado (subLevel y subOctave siguen siendo su nivel y su octava base). Por defecto, la cuadrada al 50 % de
+    // siempre; f3 = f1 · 2^(octava + (semi + fine/100)/12): con -1 oct, Semi -24..+24 cubre de -3 a +1 octavas
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc3Wave", 1 }, "Osc3 Wave", StringArray { "Sine", "Triangle", "Saw", "Square" }, 3));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc3Semi", 1 }, "Osc3 Semi", -24, 24, 0));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc3Fine", 1 }, "Osc3 Fine", NormalisableRange<float> (-50.0f, 50.0f), 0.0f,
+                                                   parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " ct"; }))));
+
+    // Mute de las fuentes del segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), como osc1Mute, wtMute, sampleMute y stringMute
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc2Mute", 1 },  "Osc2 Mute", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc3Mute", 1 },  "Osc3 Mute", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "noiseMute", 1 }, "Noise Mute", false));
     return l;
 }

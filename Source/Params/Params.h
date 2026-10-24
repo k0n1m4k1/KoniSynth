@@ -21,6 +21,7 @@ struct Params
             mtxAmt[(size_t) m] = get ("mtxAmt" + juce::String (m + 1));
         }
         osc1Mute = get ("osc1Mute"); wtMute = get ("wtMute"); sampleMute = get ("sampleMute"); stringMute = get ("stringMute");
+        osc2Mute = get ("osc2Mute"); osc3Mute = get ("osc3Mute"); noiseMute = get ("noiseMute");
         mdOutput = get ("mdOutput"); snesOutput = get ("snesOutput"); chipOutput = get ("chipOutput");
         n64Source = get ("n64Source"); n64SourceRate = get ("n64SourceRate"); n64OutputRate = get ("n64OutputRate"); n64Adpcm = get ("n64Adpcm"); n64Dac = get ("n64Dac");
         n64Attack = get ("n64Attack"); n64Decay = get ("n64Decay"); n64Release = get ("n64Release"); n64AttackVolume = get ("n64AttackVolume");
@@ -47,7 +48,7 @@ struct Params
         osc1Level = get ("osc1Level"); pulseWidth = get ("pulseWidth"); pwmDepth = get ("pwmDepth");
         osc2Wave = get ("osc2Wave"); osc2Octave = get ("osc2Octave"); osc2Semi = get ("osc2Semi"); osc2Fine = get ("osc2Fine");
         osc2Level = get ("osc2Level"); osc2Sync = get ("osc2Sync"); subLevel = get ("subLevel"); subOctave = get ("subOctave");
-        osc2WtPosition = get ("osc2WtPosition");
+        osc2WtPosition = get ("osc2WtPosition"); osc3Wave = get ("osc3Wave"); osc3Semi = get ("osc3Semi"); osc3Fine = get ("osc3Fine");
         noiseLevel = get ("noiseLevel"); noiseColor = get ("noiseColor");
         wtLevel = get ("wtLevel"); wtTable = get ("wtTable"); wtPosition = get ("wtPosition");
         stringLevel = get ("stringLevel"); stringDecay = get ("stringDecay"); stringBright = get ("stringBright"); stringPick = get ("stringPick");
@@ -251,13 +252,17 @@ struct Params
     std::array<std::atomic<float>*, 20> ansReg {};
     std::atomic<float> *arpOn {}, *arpMode {}, *arpRate {}, *arpOctaves {}, *arpGate {}, *arpLatch {}, *arpBpm {}, *arpOneShot {};
     std::atomic<float> *monoOut {}, *mdOutput {}, *snesOutput {}, *chipOutput {};
-    std::atomic<float> *osc1Mute {}, *wtMute {}, *sampleMute {}, *stringMute {};
+    std::atomic<float> *osc1Mute {}, *wtMute {}, *sampleMute {}, *stringMute {}, *osc2Mute {}, *osc3Mute {}, *noiseMute {};
+    // Solo de las pestañas de fuentes, compartido por los dos grupos: -1 ninguno; 0 Osc 1, 1 Wavetable, 2 Sample, 3 String,
+    // 4 Osc 2, 5 Osc 3, 6 Noise. Transitorio: no es un parámetro, no se guarda y no toca los Mute (el motor lo combina con ellos)
+    mutable std::atomic<int> soloSource { -1 };
+    enum SourceIndex { srcOsc1 = 0, srcWavetable, srcSample, srcString, srcOsc2, srcOsc3, srcNoise };
     std::atomic<float> *n64Source {}, *n64SourceRate {}, *n64OutputRate {}, *n64Adpcm {}, *n64Dac {}, *n64Attack {}, *n64Decay {}, *n64Release {},
                        *n64AttackVolume {}, *n64DecayVolume {}, *n64Volume {}, *n64Pan {}, *n64Spread {}, *n64Fx {}, *n64FxMix {}, *n64Velocity {};
     std::atomic<float> *gain {}, *wave {}, *attack {}, *decay {}, *sustain {}, *release {}, *envCurve {}, *drift {},
                        *unisonVoices {}, *unisonDetune {}, *unisonSpread {}, *voicePan {}, *voicePanMode {},
                        *osc1Level {}, *pulseWidth {}, *pwmDepth {}, *osc2Wave {}, *osc2Octave {}, *osc2Semi {}, *osc2Fine {},
-                       *osc2Level {}, *osc2Sync {}, *subLevel {}, *subOctave {}, *noiseLevel {}, *noiseColor {}, *osc2WtPosition {},
+                       *osc2Level {}, *osc2Sync {}, *subLevel {}, *subOctave {}, *noiseLevel {}, *noiseColor {}, *osc2WtPosition {}, *osc3Wave {}, *osc3Semi {}, *osc3Fine {},
                        *wtLevel {}, *wtTable {}, *wtPosition {},
                        *stringLevel {}, *stringDecay {}, *stringBright {}, *stringPick {},
                        *sampleLevel {}, *sampleLength {}, *sampleRoot {}, *sampleStart {}, *sampleLoop {}, *inputGain {}, *inputMonitor {},

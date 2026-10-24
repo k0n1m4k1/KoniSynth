@@ -319,22 +319,36 @@ struct SynthVoice : juce::SynthesiserVoice
         const auto velAmount  = params.velToFilter->load();
         const auto envOctaves = 5.0f * params.filterEnv->load() * (1.0f - velAmount + velAmount * noteVelocity);
 
-        const auto unmuted = [] (const std::atomic<float>* mute) { return mute->load() > 0.5f ? 0.0f : 1.0f; }; // pestañas: Mute
-        mix.osc1Level  = params.osc1Level->load() * unmuted (params.osc1Mute);
+        // Pestañas de fuentes: con Solo solo suena esa fuente; si no, cada una según su Mute (sin Mute ni Solo, ×1,0: bit a bit igual)
+        const auto solo = params.soloSource.load (std::memory_order_relaxed);
+        const auto unmuted = [solo] (int source, const std::atomic<float>* mute)
+        {
+            return solo >= 0 ? (solo == source ? 1.0f : 0.0f) : (mute->load() > 0.5f ? 0.0f : 1.0f);
+        };
+        // Factores de Mute/Solo de las fuentes con destino en la matriz: se aplican también tras la modulación (si no, la matriz
+        // devolvería el nivel a una fuente silenciada)
+        const auto osc1Gate = unmuted (Params::srcOsc1, params.osc1Mute);
+        const auto osc2Gate = unmuted (Params::srcOsc2, params.osc2Mute);
+        const auto noiseGate = unmuted (Params::srcNoise, params.noiseMute);
+        mix.osc1Level  = params.osc1Level->load() * osc1Gate;
         mix.pulseWidth = params.pulseWidth->load();
         mix.pwmDepth   = params.pwmDepth->load();
         mix.osc2Wave   = (int) params.osc2Wave->load();
         mix.osc2Ratio  = std::exp2 ((double) params.osc2Octave->load()
                                     + ((double) params.osc2Semi->load() + (double) params.osc2Fine->load() / 100.0) / 12.0);
-        mix.osc2Level  = params.osc2Level->load();
+        mix.osc2Level  = params.osc2Level->load() * osc2Gate;
         mix.osc2Sync   = params.osc2Sync->load() > 0.5f;
-        mix.subLevel   = params.subLevel->load();
-        mix.subRatio   = (int) params.subOctave->load() == 0 ? 0.5 : 0.25;
-        mix.noiseLevel = params.noiseLevel->load();
+        mix.subLevel   = params.subLevel->load() * unmuted (Params::srcOsc3, params.osc3Mute);
+        // Osc 3 (el Sub ampliado): octava base -1/-2 y Semi/Fine encima. Con Semi 0 y Fine 0, exp2(0) = 1 exacto: la relación es la
+        // de siempre (0,5 o 0,25) bit a bit
+        mix.subRatio   = ((int) params.subOctave->load() == 0 ? 0.5 : 0.25)
+                       * std::exp2 (((double) params.osc3Semi->load() + (double) params.osc3Fine->load() / 100.0) / 12.0);
+        mix.subWave    = (int) params.osc3Wave->load();
+        mix.noiseLevel = params.noiseLevel->load() * noiseGate;
         mix.noiseColor = (int) params.noiseColor->load();
-        const auto sampleLevel = params.sampleLevel->load() * unmuted (params.sampleMute);
-        const auto stringLevel = params.stringLevel->load() * unmuted (params.stringMute);
-        const auto wtLevel = params.wtLevel->load() * unmuted (params.wtMute);
+        const auto sampleLevel = params.sampleLevel->load() * unmuted (Params::srcSample, params.sampleMute);
+        const auto stringLevel = params.stringLevel->load() * unmuted (Params::srcString, params.stringMute);
+        const auto wtLevel = params.wtLevel->load() * unmuted (Params::srcWavetable, params.wtMute);
         const auto wtPositionBase = params.wtPosition->load();
         const auto* blockWavetable = wtLevel > 0.0f ? wavetableSlot.current.load (std::memory_order_acquire) : nullptr;
         // Osc 2 en modo Wavetable: la misma tabla, con la fase de Osc 2 y su propia posición (sin tabla: Osc 2 calla)
@@ -621,15 +635,15 @@ struct SynthVoice : juce::SynthesiserVoice
                 osc1Blep.pop (left, right);
 
             // Mezclador: Osc 1 (con unísono/complejo, estéreo) + Osc 2, sub, ruido y sample (mono, al centro)
-            const auto osc1Gain = matrix.targets[ModMatrix::dstOsc1Level] ? juce::jlimit (0.0f, 1.0f, mix.osc1Level + mtx[ModMatrix::dstOsc1Level])
+            const auto osc1Gain = matrix.targets[ModMatrix::dstOsc1Level] ? juce::jlimit (0.0f, 1.0f, mix.osc1Level + mtx[ModMatrix::dstOsc1Level]) * osc1Gate
                                                                           : mix.osc1Level;
             left  *= osc1Gain;
             right *= osc1Gain;
             // Osc 2 deriva por su cuenta (desafinación fija y 1/f propios) además de seguir a Osc 1
             const auto osc2Drift = drift > 0.0f ? std::exp2 ((osc2StaticCents + drift * osc2DriftCents) / 1200.0) : 1.0;
             const auto savedOsc2Level = mix.osc2Level, savedNoiseLevel = mix.noiseLevel; // la matriz los mueve solo en esta muestra
-            if (matrix.targets[ModMatrix::dstOsc2Level])  mix.osc2Level = juce::jlimit (0.0f, 1.0f, savedOsc2Level + mtx[ModMatrix::dstOsc2Level]);
-            if (matrix.targets[ModMatrix::dstNoiseLevel]) mix.noiseLevel = juce::jlimit (0.0f, 1.0f, savedNoiseLevel + mtx[ModMatrix::dstNoiseLevel]);
+            if (matrix.targets[ModMatrix::dstOsc2Level])  mix.osc2Level = juce::jlimit (0.0f, 1.0f, savedOsc2Level + mtx[ModMatrix::dstOsc2Level]) * osc2Gate;
+            if (matrix.targets[ModMatrix::dstNoiseLevel]) mix.noiseLevel = juce::jlimit (0.0f, 1.0f, savedNoiseLevel + mtx[ModMatrix::dstNoiseLevel]) * noiseGate;
             if (mix.osc2Table != nullptr)
                 mix.osc2WtPos = juce::jlimit (0.0f, 1.0f, osc2WtPositionBase + mtx[ModMatrix::dstOsc2WtPosition]);
             auto monoSources = renderMonoSources (dt, pw, (osc2Semis != 0.0f ? std::exp2 (osc2Semis / 12.0) : 1.0) * osc2Drift);
@@ -913,7 +927,7 @@ private:
     struct MixParams
     {
         float osc1Level = 1.0f, pulseWidth = 0.5f, pwmDepth = 0.0f, osc2Level = 0.0f, subLevel = 0.0f, noiseLevel = 0.0f;
-        int osc2Wave = saw;
+        int osc2Wave = saw, subWave = square; // subWave: forma de Osc 3
         double osc2Ratio = 1.0, subRatio = 0.5;
         bool osc2Sync = false;
         int noiseColor = 0; // 0 blanco, 1 rosa, 2 LFSR largo, 3 LFSR corto
@@ -925,7 +939,8 @@ private:
     // Fuentes mono del mezclador. dt = incremento de fase de Osc 1 (con vibrato y drift), así Osc 2 y el sub los siguen.
     //  Osc 2: dt·2^(oct + (semi + fine/100)/12); sync duro a la fundamental de Osc 1 (fase de referencia sin unísono ni FM),
     //    reiniciando con la fracción de muestra transcurrida desde el reinicio.
-    //  Sub: cuadrada (minBLEP, como Osc 1 y Osc 2) a -1 o -2 octavas.
+    //  Sub / Osc 3: -1 o -2 octavas más Semi (±24) y Fine; seno, triángulo, sierra o cuadrada al 50 % (por defecto, la cuadrada
+    //    del Sub). minBLEP en sierra y cuadrada, como Osc 1 y Osc 2.
     //  Ruido: blanco uniforme (RMS 0,577) o rosa (filtro "refined" de Paul Kellet, musicdsp.org); medido en réplica:
     //    plano ±0,2 dB por banda de octava de 125 Hz a 4 kHz (-0,7 dB a 8 kHz); ×0,3277 iguala su RMS al del blanco.
     float renderMonoSources (double dt, float pw, double osc2Mul)
@@ -951,8 +966,8 @@ private:
             else if (mix.osc2Table != nullptr)
                 out += mix.osc2Level * readWavetable (*mix.osc2Table, osc2Phase, dt2, mix.osc2WtPos);
         }
-        if (mix.subLevel > 0.0f)
-            out += mix.subLevel * oscillator (square, subPhase, dt * mix.subRatio, 0.5f, false);
+        if (mix.subLevel > 0.0f) // Osc 3: la cuadrada va siempre al 50 % (no sigue al mando PW, como el Sub)
+            out += mix.subLevel * oscillator (mix.subWave, subPhase, dt * mix.subRatio, 0.5f, false);
         if (mix.noiseLevel > 0.0f)
         {
             const auto w = 2.0f * rng.nextFloat() - 1.0f;
@@ -1003,7 +1018,7 @@ private:
                 monoBlep.add (f, jump * mix.osc2Level, jump * mix.osc2Level);
             }
             if (mix.subLevel > 0.0f)
-                MinBlep::segment (monoBlep, square, subPhase, dt * mix.subRatio, 0.0, 1.0, 0.5, mix.subLevel, mix.subLevel);
+                MinBlep::segment (monoBlep, mix.subWave, subPhase, dt * mix.subRatio, 0.0, 1.0, 0.5, mix.subLevel, mix.subLevel);
         }
 
         // Avance de fases (después de leer: mismo convenio que Osc 1)

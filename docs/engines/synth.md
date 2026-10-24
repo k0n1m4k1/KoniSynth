@@ -2,8 +2,8 @@
 
 The Synth is KoniSynth's own polyphonic synthesizer. It does not emulate a specific instrument: it is a subtractive
 design with its own personality, combining four summed sources (a minBLEP oscillator with unison, a wavetable, a
-sample player and a Karplus-Strong plucked string), a Buchla 259-style complex oscillator, a second oscillator with
-sub and noise, 14 filter modes, per-voice saturation, two LFOs, an 8-slot modulation matrix and an analog-style drift
+sample player and a Karplus-Strong plucked string), a Buchla 259-style complex oscillator, a second oscillator
+(classic waves or wavetable), a third oscillator that grows from the classic sub, noise, 14 filter modes, per-voice saturation, two LFOs, an 8-slot modulation matrix and an analog-style drift
 model. Use it for basses, leads, pads, keys, plucks, sound effects and anything the emulated engines do not cover.
 
 Unlike the emulated engines, the Synth is not bound to an original. Its analog behaviours (drift, filter input
@@ -17,7 +17,7 @@ for the **User File** wavetable.
 
 ## Controls
 
-The Synth fills three rows: sources -> Complex Oscillator -> Osc 2 / Mixer; Filter, Filter Envelope, Amp Envelope;
+The Synth fills three rows: sources -> Complex Oscillator -> Osc 2 / Osc 3 / Noise; Filter, Filter Envelope, Amp Envelope;
 Voice, LFO, LFO 2. Voice, LFO 2 and the matrix act only in the Synth.
 
 ### Source tabs: Osc 1, Wavetable, Sample, String
@@ -89,21 +89,42 @@ Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x overs
 | Symmetry | Wavefolder asymmetry. | -100 to +100 % / 0 % |
 | T.Mod | The modulator moves the wavefolder. | 0-100 % / 0 % |
 
-### Osc 2 / Mixer
+### Source tabs: Osc 2, Osc 3, Noise
+
+A second group of tabs with the same behaviour: all three sound together with Osc 1, Wavetable, Sample and String; each
+tab has its own level, LED and **Mute / Solo** (right-click). Solo is shared by both groups: soloing any source leaves
+only that one sounding, and removing the solo brings every source back to its own Mute (solo does not change the mutes
+and is not saved). The LED is lit only while the source really sounds (level above 0, not muted, not silenced by
+another source's solo).
+
+**Osc 2**
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab, with the tuning, drift and phase of Osc 2 and its own position (WT Pos); Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). | Sine, Triangle, Saw, Square, Wavetable / Saw |
+| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). | Sine, Triangle, Saw, Square, Wavetable / Saw |
 | Sync (switch) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. | Off / On / Off |
+| Level | Oscillator 2 level. | 0-100 % / 0 % |
 | Oct | Octave relative to oscillator 1. | -2 to +2 / 0 |
 | Semi | Offset in semitones (7 = fifth, 12 = octave). | -12 to +12 / 0 |
 | Fine | Fine detune; a few cents give beating. | -50 to +50 ct / 0 ct |
-| WT Pos | Position of Osc 2 in the wavetable (Wavetable waveform only): the same table as the Wavetable source, read at its own position, so the two can layer two frames of one table. | 0-100 % / 0 % |
-| Osc 2 | Oscillator 2 level. | 0-100 % / 0 % |
-| Sub | Sub-oscillator level (square). | 0-100 % / 0 % |
-| Sub Oct | Sub-oscillator octave. | -1 oct, -2 oct / -1 oct |
-| Noise | Noise level. | 0-100 % / 0 % |
-| Color | White, pink, or LFSR digital noise of 8-bit chips (Short = metallic, tonal, follows the key). | White, Pink, LFSR, LFSR Short / White |
+| WT Pos | Position of Osc 2 in the wavetable (Wavetable waveform only), so one table can sound at two positions. | 0-100 % / 0 % |
+
+**Osc 3** (grows from the classic sub-oscillator and follows Osc 1)
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Wave menu | Waveform; the square stays at 50 % (it does not follow PW). By default it is the classic sub (square one octave down); the Init preset sets Sine, and presets saved before Osc 3 keep the Square. | Sine, Triangle, Saw, Square / Square |
+| Level | Oscillator 3 level. | 0-100 % / 0 % |
+| Oct | Base octave below Osc 1. | -1 oct, -2 oct / -1 oct |
+| Semi | Semitones on top of the base octave: from -1 oct, +12 = same octave as Osc 1 and +24 = one octave up. | -24 to +24 / 0 |
+| Fine | Fine detune. | -50 to +50 ct / 0 ct |
+
+**Noise**
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Color menu | White, pink, or LFSR digital noise of 8-bit chips (Short = metallic, tonal, follows the key). | White, Pink, LFSR, LFSR Short / White |
+| Level | Noise level. | 0-100 % / 0 % |
 
 ### Filter
 
@@ -209,7 +230,7 @@ their modulation range.
 - **Pitch bend** follows the global Bend Range; in MPE mode each note uses MPE Bend.
 
 Recipe, sync lead:
-1. Osc 2 / Mixer: Osc 2 at 80 %, Sync on, Semi +7 to +12; Osc 1 Level down.
+1. Osc 2 tab: Level at 80 %, Sync on, Semi +7 to +12; Osc 1 Level down.
 2. LFO 2 or the matrix (Mod Wheel -> Osc 2 Pitch) to sweep the sync.
 
 Recipe, plucked harpsichord:

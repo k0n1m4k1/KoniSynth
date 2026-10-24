@@ -791,6 +791,9 @@ int main (int argc, char** argv)
         { "17. Osc 2 sierra + sync, 8 notas", { { "Osc2 Wave", 0.5f }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f } }, 8 },
         { "18. Osc 2 Wavetable + sync, 8 notas", { { "Osc2 Wave", 1.0f }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f },
                                                     { "Osc2 WT Position", 0.5f }, { "Wavetable", 0.4f } }, 8 },
+        // El 2 con Osc 3 en sierra a +1 octava (Sub Octave -1, Semi +24: normalizado 1): coste de Osc 3 frente al 2
+        { "19. Unisono 7 + filtro + Osc 3 sierra, 8 notas", { { "Unison Voices", 1.0f }, { "Resonance", 0.5f }, { "Filter Drive", 0.5f },
+                                                              { "Sub Level", 1.0f }, { "Osc3 Wave", 2.0f / 3.0f }, { "Osc3 Semi", 1.0f } }, 8 },
     };
 
     for (const auto& s : scenarios)

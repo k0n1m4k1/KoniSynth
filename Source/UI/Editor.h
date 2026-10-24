@@ -156,11 +156,17 @@ public:
                       .withKnob (s, "modRatio", "Ratio").withKnob (s, "fmIndex", "FM")
                       .withKnob (s, "amDepth", "AM/Ring").withKnob (s, "timbre", "Timbre")
                       .withKnob (s, "symmetry", "Symmetry").withKnob (s, "timbreMod", "T.Mod");
+        // Segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), con Mute/Solo como las fuentes de Osc 1
         osc2Section.withCombo (s, "osc2Wave").withExtraToggle (s, "osc2Sync", "Sync")
-                   .withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Semi", "Semi").withKnob (s, "osc2Fine", "Fine")
-                   .withKnob (s, "osc2WtPosition", "WT Pos").withKnob (s, "osc2Level", "Osc 2")
-                   .withKnob (s, "subLevel", "Sub").withKnob (s, "subOctave", "Sub Oct")
-                   .withKnob (s, "noiseLevel", "Noise").withKnob (s, "noiseColor", "Color");
+                   .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Semi", "Semi")
+                   .withKnob (s, "osc2Fine", "Fine").withKnob (s, "osc2WtPosition", "WT Pos");
+        osc3Section.withCombo (s, "osc3Wave")
+                   .withKnob (s, "subLevel", "Level").withKnob (s, "subOctave", "Oct").withKnob (s, "osc3Semi", "Semi")
+                   .withKnob (s, "osc3Fine", "Fine");
+        noiseSection.withCombo (s, "noiseColor").withKnob (s, "noiseLevel", "Level");
+        mixerTabs = std::make_unique<SourceTabs> (s, std::vector<SourceTabs::Source> {
+            { "Osc 2", &osc2Section, "osc2Level", "osc2Mute" }, { "Osc 3", &osc3Section, "subLevel", "osc3Mute" },
+            { "Noise", &noiseSection, "noiseLevel", "noiseMute" } }, Params::srcOsc2, koni.getParams().soloSource);
         // Sample, Wavetable y Sequencer: sección compacta + panel de edición propio (Edit...)
         sampleSection.withHeaderButton ("Edit...", "Open the sample editor: load a file, see its waveform, set Start, Length and Loop.",
                                         [this] { openSamplePanel(); })
@@ -177,7 +183,8 @@ public:
         // Fuentes en pestañas: suenan sumadas; cada una con su nivel, LED y Mute/Solo
         sourceTabs = std::make_unique<SourceTabs> (s, std::vector<SourceTabs::Source> {
             { "Osc 1", &osc, "osc1Level", "osc1Mute" }, { "Wavetable", &wavetableSection, "wtLevel", "wtMute" },
-            { "Sample", &sampleSection, "sampleLevel", "sampleMute" }, { "String", &stringSection, "stringLevel", "stringMute" } });
+            { "Sample", &sampleSection, "sampleLevel", "sampleMute" }, { "String", &stringSection, "stringLevel", "stringMute" } },
+            Params::srcOsc1, koni.getParams().soloSource);
 
         // 2. Forma: filtro + envolventes (sliders verticales, como en un panel de hardware)
         qualitySelector.addItemList ({ "Classic", "Balanced", "High Quality" }, 1);
@@ -534,7 +541,8 @@ public:
                          &transSection, &compSection, &limiterSection, &ampSection })
             rows.addAndMakeVisible (*c);
         rows.addChildComponent (*sourceTabs);
-        for (auto* c : std::initializer_list<juce::Component*> { &filter, &complexSection, &osc2Section, &thereminSection,
+        rows.addChildComponent (*mixerTabs);
+        for (auto* c : std::initializer_list<juce::Component*> { &filter, &complexSection, &thereminSection,
                                                                  &vl1Section, &vl1RhythmSection, &vl1DisplaySection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
                                                                  &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
@@ -952,7 +960,7 @@ private:
         styloPad.setVisible (engine == 3 && padMode() == 0);
         padTab->setVisible (engine == 1 || engine == 3);
         syncFloatingPad();
-        for (auto* c : std::initializer_list<juce::Component*> { sourceTabs.get(), &filter, &complexSection, &osc2Section, &filterEnvSection, &ampEnvSection,
+        for (auto* c : std::initializer_list<juce::Component*> { sourceTabs.get(), &filter, &complexSection, mixerTabs.get(), &filterEnvSection, &ampEnvSection,
                                                                  &lfo2Section, &controllerSection })
             c->setVisible (synthMode); // layoutContent las vuelve a ocultar si su grupo está plegado
         lfo.setVisible (synthMode || thereminMode); // LFO 1 solo actúa en el Synth y el Theremin (filas de ENGINE)
@@ -1314,8 +1322,10 @@ private:
             dim (osc2Section.knobFor (id), ! osc2Sounds);
         dim (&osc2Section.comboComponent(), ! osc2Sounds);
         dim (&osc2Section.extraToggleComponent(), ! osc2Sounds);
-        dim (osc2Section.knobFor ("subOctave"), v ("subLevel") <= 0.0f);
-        dim (osc2Section.knobFor ("noiseColor"), v ("noiseLevel") <= 0.0f && ! targeted (ModMatrix::dstNoiseLevel));
+        for (const auto* id : { "subOctave", "osc3Semi", "osc3Fine" })
+            dim (osc3Section.knobFor (id), v ("subLevel") <= 0.0f);
+        dim (&osc3Section.comboComponent(), v ("subLevel") <= 0.0f);
+        dim (&noiseSection.comboComponent(), v ("noiseLevel") <= 0.0f && ! targeted (ModMatrix::dstNoiseLevel));
         dim (osc2Section.knobFor ("osc2WtPosition"), (int) v ("osc2Wave") != 4 || ! osc2Sounds); // solo con la forma Wavetable
         const auto theremin = engine == 1; // el Theremin usa LFO 1 con seno fijo y su propia velocidad (sin Shape ni Sync)
         dim (lfo.knobFor ("lfoRate"), ! theremin && v ("lfoSync") > 0.5f);
@@ -1539,7 +1549,7 @@ private:
     {
         switch (engine)
         {
-            case 0:  return { { 1.35f, { sourceTabs.get(), &complexSection, &osc2Section }, 3 },  // fuentes -> complejo -> Osc 2
+            case 0:  return { { 1.35f, { sourceTabs.get(), &complexSection, mixerTabs.get() }, 3 },  // fuentes -> complejo -> Osc 2 / Osc 3 / Noise
                               { 1.0f, { &filter, &filterEnvSection, &ampEnvSection }, 0 },
                               { 1.0f, { &controllerSection, &lfo, &lfo2Section }, 0 } };      // voz y modulación: solo actúan en el Synth
             case 1:  return { { 1.0f, { &thereminSection, &lfo }, 1 } };                        // el Theremin usa LFO 1 (vibrato / trémolo)
@@ -2384,6 +2394,7 @@ private:
     juce::Component::SafePointer<juce::Component> hookedWindow, hookedOptions, hookedNotification;
     PresetBar presetBar;
     std::unique_ptr<SourceTabs> sourceTabs; // contiene osc, wavetableSection, sampleSection y stringSection (se crea en el constructor)
+    std::unique_ptr<SourceTabs> mixerTabs;  // contiene osc2Section, osc3Section y noiseSection
     Visualizer scope;
     std::unique_ptr<VisualizerWindow> displayWindow;
     BpmDisplay bpmDisplay { koni };
@@ -2400,7 +2411,7 @@ private:
             echo { "Tape Echo" }, crushSection { "Crush" }, phaserSection { "Phaser" }, lfo2Section { "LFO 2" },
             formantSection { "Formant" }, ambient { "Plate Reverb" }, tube { "Tube" }, thereminSection { "Theremin" },
             chorusSection { "Chorus" }, mediaSection { "Media" }, complexSection { "Complex Oscillator" },
-            osc2Section { "Osc 2 / Mixer" }, vl1Section { "Casio VL-1" }, vl1RhythmSection { "VL-1 Rhythm" },
+            osc2Section { "Osc 2" }, osc3Section { "Osc 3" }, noiseSection { "Noise" }, vl1Section { "Casio VL-1" }, vl1RhythmSection { "VL-1 Rhythm" },
             sampleSection { "Sample" }, vocoderSection { "Vocoder" }, inputSection { "Input" },
             filterEnvSection { "Filter Envelope" }, ampEnvSection { "Amp Envelope" }, controllerSection { "Voice" },
             stringSection { "Plucked String" }, arpSection { "Arpeggiator" }, wavetableSection { "Wavetable" },

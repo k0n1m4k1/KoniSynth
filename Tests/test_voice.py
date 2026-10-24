@@ -140,4 +140,48 @@ a_wt0 = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Wavetable', 'Osc2 WT Position
 c.check(abs(a_wt0 - a_sine) < 0.5, 'Osc 2 Wavetable con sync, tabla en seno: aliasing %.1f dB = Sine clásico %.1f dB (±0,5)' % (a_wt0, a_sine))
 a_wt30 = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Wavetable', 'Osc2 WT Position=30%'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
 c.check(a_wt30 < -50, 'Osc 2 Wavetable con sync, posición 30 %%, C4: aliasing %.1f dB (< -50)' % a_wt30)
+
+# --- Osc 3 (el Sub ampliado): f3 = f1 · 2^(octava + (semi + fine/100)/12); por defecto, la cuadrada de siempre (bit a bit:
+# comprobado contra el binario anterior en 5 configuraciones del Sub al integrarlo) ---
+O3 = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%', 'Sub Level=100%']
+SHAPE = {'Sine': [None, None, None, None], 'Triangle': [None, -19.08, None, -27.96], 'Saw': [-6.02, -9.54, -12.04, -13.98],
+         'Square': [None, -9.54, None, -13.98]}  # h2..h5 respecto a h1 (dB); None = ausente (< -100)
+for wave, shape in SHAPE.items():
+    x, fs = render(O3 + ['Osc3 Wave=' + wave, 'Osc3 Semi=12', 'Osc3 Fine=10.0 ct'], 1.5, ['57:0.05:1.4:127'], 'osc3.wav')
+    want = 220 * 2 ** (10 / 1200); ct = 1200 * np.log2(pitch(x, fs) / want)
+    h = harmonics(x, fs, want, 5); h = db(h[1:] / h[0])
+    ok = all((v < -100) if s is None else abs(v - s) < 0.1 for v, s in zip(h, shape))
+    c.check(abs(ct) < 0.05 and ok, 'Osc 3 %s, -1 oct + 12 st + 10 ct: %+.3f ct; h2..h5 %s dB' % (wave, ct, ' '.join('%.1f' % v for v in h)))
+x, _ = render(O3 + ['Sub Octave=-2 oct', 'Osc3 Wave=Sine', 'Osc3 Semi=-24'], 1.5, ['81:0.05:1.4:127'], 'osc3.wav')
+ct = 1200 * np.log2(pitch(x, fs) / 55.0)
+c.check(abs(ct) < 0.05, 'Osc 3 en el extremo grave (-2 oct - 24 st = -4 oct de A5): %.3f Hz (55, %+.3f ct)' % (pitch(x, fs), ct))
+# Agudo (+1 oct de C7 = 4186 Hz): sierra y cuadrada con minBLEP; el triángulo, sin corregir su pendiente, igual que el de Osc 2
+f8 = 440 * 2 ** (39 / 12)  # C8, una octava sobre la nota C7 tocada
+for wave in ('Saw', 'Square', 'Triangle'):
+    a3 = alias_ratio(render(O3 + ['Osc3 Wave=' + wave, 'Osc3 Semi=24'], 1.5, ['96:0.05:1.4:127'], 'osc3.wav')[0], fs, f8)
+    if wave != 'Triangle':
+        c.check(a3 < -90, 'Osc 3 %s a %.0f Hz: aliasing %.1f dB (< -90, minBLEP)' % (wave, f8, a3))
+    else:
+        a2 = alias_ratio(render(O3[:-1] + ['Osc2 Level=100%', 'Osc2 Wave=Triangle', 'Osc2 Octave=1'], 1.5, ['96:0.05:1.4:127'], 'osc3.wav')[0], fs, f8)
+        c.check(abs(a3 - a2) < 0.5, 'Osc 3 Triangle a %.0f Hz: aliasing %.1f dB = Osc 2 Triangle %.1f dB (±0,5)' % (f8, a3, a2))
+
+# --- Mute por fuente (bit a bit): silencia la contribución de su fuente, no el recurso compartido (la tabla) ---
+import hashlib
+sha = lambda x: hashlib.sha256(x.tobytes()).hexdigest()
+MN = ['57:0.05:1.0:127', '64:0.3:0.8:100']
+WTS = ['Wavetable Level=100%', 'Wavetable Position=60%']
+O2W = ['Osc2 Wave=Wavetable', 'Osc2 Level=100%', 'Osc2 WT Position=20%']
+c.check(sha(render(WT + WTS + O2W + ['Wavetable Mute=On'], 1.2, MN, 'mute.wav')[0]) == sha(render(WT + O2W, 1.2, MN, 'mute.wav')[0]),
+        'Mute de Wavetable con Osc 2 en la misma tabla: suena solo Osc 2 (bit a bit)')
+c.check(sha(render(WT + WTS + O2W + ['Osc2 Mute=On'], 1.2, MN, 'mute.wav')[0]) == sha(render(WT + WTS, 1.2, MN, 'mute.wav')[0]),
+        'Mute de Osc 2: suena solo la fuente Wavetable (bit a bit)')
+O3S = ['Sub Level=100%', 'Osc3 Wave=Saw']
+c.check(sha(render(WT + O3S + ['Noise Level=50%', 'Noise Mute=On', 'Osc2 Level=60%', 'Osc2 Mute=On'], 1.2, MN, 'mute.wav')[0])
+        == sha(render(WT + O3S, 1.2, MN, 'mute.wav')[0]), 'Mute de Osc 2 y Noise: igual que sin ellos (bit a bit)')
+# La matriz no devuelve el nivel a una fuente en Mute (antes de los Mute de Osc 2 / Osc 3 / Noise, Osc 1 sí sonaba: RMS 0,054)
+for src in ('Osc 1', 'Osc 2', 'Noise'):
+    pid = src.replace(' ', '')
+    x, _ = render(WT + ['%s Level=0%%' % pid, '%s Mute=On' % pid, 'Matrix 1 Source=Velocity', 'Matrix 1 Dest=%s Level' % src, 'Matrix 1 Amount=100%'],
+                  1.2, MN, 'mute.wav')
+    c.check(np.abs(x).max() == 0.0, 'Mute de %s con la matriz Velocity -> %s Level al 100 %%: pico %.2e (silencio)' % (src, src, np.abs(x).max()))
 sys.exit(c.summary())
