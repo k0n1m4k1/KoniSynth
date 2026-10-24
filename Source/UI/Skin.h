@@ -100,9 +100,81 @@ inline juce::Colour accent()
     }
 }
 
+// Placa de circuito (solo Phosphor Green): pistas a 0°/45°/90° sobre una rejilla de 8 px que acaban en pads o vías, y huellas
+// de chips con sus patillas, en el color del fósforo al 7-13 %. Mosaico de 512 × 512 con semilla fija, dibujado una vez; cada
+// elemento se dibuja también desplazado ±512 px para que no haya cortes en los bordes del mosaico
+inline const juce::Image& circuitTile()
+{
+    static juce::Image img;
+    if (img.isValid())
+        return img;
+    constexpr int size = 512, grid = 8;
+    img = juce::Image (juce::Image::ARGB, size, size, true);
+    juce::Graphics g (img);
+    const auto copper = juce::Colour (0xff33ff66);
+    juce::Random rng (0xB0A2D);
+    const auto wrapped = [&g] (auto&& draw)
+    {
+        for (int dx = -1; dx <= 1; ++dx)
+            for (int dy = -1; dy <= 1; ++dy)
+            {
+                juce::Graphics::ScopedSaveState state (g);
+                g.addTransform (juce::AffineTransform::translation ((float) (dx * size), (float) (dy * size)));
+                draw();
+            }
+    };
+    const auto gridPoint = [&rng] { return juce::Point<float> ((float) (grid * rng.nextInt (size / grid)), (float) (grid * rng.nextInt (size / grid))); };
+
+    for (int k = 0; k < 7; ++k) // chips: contorno y patillas arriba y abajo cada 6 px
+    {
+        const auto w = (float) (grid * rng.nextInt ({ 4, 9 })), h = (float) (grid * rng.nextInt ({ 3, 6 }));
+        const auto at = gridPoint();
+        wrapped ([&]
+        {
+            g.setColour (copper.withAlpha (0.07f));
+            g.drawRect (juce::Rectangle<float> (at.x, at.y, w, h), 1.0f);
+            g.setColour (copper.withAlpha (0.11f));
+            for (auto px = at.x + 4.0f; px < at.x + w - 2.0f; px += 6.0f)
+            {
+                g.fillRect (px - 1.5f, at.y - 5.0f, 3.0f, 4.0f);
+                g.fillRect (px - 1.5f, at.y + h + 1.0f, 3.0f, 4.0f);
+            }
+        });
+    }
+
+    static const int dirs[8][2] = { { 1, 0 }, { 1, 1 }, { 0, 1 }, { -1, 1 }, { -1, 0 }, { -1, -1 }, { 0, -1 }, { 1, -1 } };
+    for (int k = 0; k < 90; ++k) // pistas: 2-4 tramos con giros de 45°; 1 de cada 6, ancha (alimentación)
+    {
+        const auto start = gridPoint();
+        auto end = start;
+        auto d = rng.nextInt (4) * 2; // empieza en horizontal o vertical
+        juce::Path p;
+        p.startNewSubPath (start);
+        for (int s = rng.nextInt ({ 2, 5 }); s > 0; --s)
+        {
+            end += juce::Point<float> ((float) dirs[d][0], (float) dirs[d][1]) * (float) (grid * rng.nextInt ({ 2, 10 }));
+            p.lineTo (end);
+            d = (d + (rng.nextBool() ? 1 : 7)) % 8;
+        }
+        const auto width = rng.nextInt (6) == 0 ? 3.0f : 1.5f;
+        const auto via = rng.nextBool();
+        wrapped ([&]
+        {
+            g.setColour (copper.withAlpha (0.09f));
+            g.strokePath (p, juce::PathStrokeType (width, juce::PathStrokeType::mitered, juce::PathStrokeType::rounded));
+            g.setColour (copper.withAlpha (0.13f));
+            g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (start));
+            if (via) g.drawEllipse (juce::Rectangle<float> (6.0f, 6.0f).withCentre (end), 1.5f);
+            else     g.fillRect (juce::Rectangle<float> (5.0f, 5.0f).withCentre (end));
+        });
+    }
+    return img;
+}
+
 // Fondo de ventana. Default: el color plano de siempre. Fósforo: fondo tintado con textura de tubo: grano (ruido de ±4 % por
 // píxel, mosaico de 128 × 128 generado una vez por skin con semilla fija), una línea de barrido cada 3 px, brillo central
-// tenue y viñeta hacia los bordes. Coste: un relleno en mosaico y dos degradados por repintado del fondo
+// tenue y viñeta hacia los bordes; en Green, además, la placa de circuito (circuitTile). Coste: uno o dos rellenos en mosaico
+// y dos degradados por repintado del fondo
 inline void paintBackground (juce::Graphics& g, juce::Rectangle<int> area, juce::Colour plain)
 {
     if (current() == metal)
@@ -160,6 +232,11 @@ inline void paintBackground (juce::Graphics& g, juce::Rectangle<int> area, juce:
     }
     g.setTiledImageFill (img, area.getX(), area.getY(), 1.0f);
     g.fillRect (area);
+    if (current() == green) // placa de circuito bajo el brillo y la viñeta
+    {
+        g.setTiledImageFill (circuitTile(), area.getX(), area.getY(), 1.0f);
+        g.fillRect (area);
+    }
     const auto c = area.toFloat().getCentre();
     const auto radius = 0.75f * std::hypot ((float) area.getWidth(), (float) area.getHeight());
     g.setGradientFill (juce::ColourGradient (r.phosphor.withAlpha (0.07f), c, r.phosphor.withAlpha (0.0f), c.translated (0.0f, radius * 0.5f), true));
