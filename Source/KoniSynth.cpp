@@ -143,7 +143,7 @@ public:
         monoSynth.addSound (new SynthSound());
         perfMacros.attach (apvts);
         undoHistory.attach (*this, apvts, { PerfMacros::mapProp, PerfMacros::namesProp, chipMacrosProp, mdMacrosProp, snesMacrosProp,
-                                            "presetName", "presetFactory" });
+                                            "presetName", "presetFactory", "dx7Voice" });
         presetManager.onBulkChange = [this] (bool begin) { if (begin) undoHistory.beginGroup(); else undoHistory.endGroup(); };
 
         if (auto config = openConfig())

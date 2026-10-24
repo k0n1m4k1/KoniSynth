@@ -367,6 +367,7 @@ public:
                    })
                    .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb");
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
+        fmDisplaySection.withBody (dx7Display, 0, 560); // 16 × 2 caracteres y el LED de 2 dígitos a ~4,6 px por punto
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")
                   .withHeaderButton ("Edit...", "Open the ANS plate: draw the score (pitch vertically, time horizontally) and set the 20 registers.",
                                      [this] { openAnsPanel(); })
@@ -523,7 +524,7 @@ public:
         rows.addChildComponent (*sourceTabs);
         for (auto* c : std::initializer_list<juce::Component*> { &filter, &complexSection, &osc2Section, &thereminSection,
                                                                  &vl1Section, &vl1RhythmSection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
-                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &pvOscSection, &pvFilterSection,
+                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
                                                                  &ampEnvSection })
             rows.addChildComponent (*c);
@@ -905,6 +906,7 @@ private:
         drumPatternSection.setVisible (engine == 5);
         fmSection.setVisible (engine == 6);
         fmLfoSection.setVisible (engine == 6);
+        fmDisplaySection.setVisible (engine == 6);
         chipSection.setVisible (engine == 7);
         chipDriverSection.setVisible (engine == 7);
         chipStereoSection.setVisible (engine == 7);
@@ -1188,7 +1190,7 @@ private:
                 }
                 if (voices->size() == 1)
                 {
-                    safe->applyDx7Voice ((*voices)[0]);
+                    safe->applyDx7Voice ((*voices)[0], 0); // voz suelta: sin número en el LED
                     return;
                 }
                 juce::PopupMenu menu;
@@ -1199,14 +1201,16 @@ private:
                     [safe, voices] (int result)
                     {
                         if (safe != nullptr && result > 0 && result <= (int) voices->size())
-                            safe->applyDx7Voice ((*voices)[(size_t) result - 1]);
+                            safe->applyDx7Voice ((*voices)[(size_t) result - 1], result);
                     });
             });
     }
 
-    void applyDx7Voice (const Dx7Syx::Voice& voice)
+    // number: posición en el banco (1-32) o 0 si era una voz suelta. La pantalla del DX7 la muestra como voz de cartucho
+    void applyDx7Voice (const Dx7Syx::Voice& voice, int number)
     {
         const auto ignored = Dx7Syx::apply (voice, koni.apvts);
+        koni.apvts.state.setProperty ("dx7Voice", juce::String (number) + "|" + voice.name, nullptr); // tras los parámetros
         if (ignored.isNotEmpty())
             overlay = Overlay::create (*this, "DX7 voice \"" + voice.name + "\" loaded",
                                        "Not modelled by the FM 6-Op engine, so it sounds without: " + ignored + ".",
@@ -1477,7 +1481,7 @@ private:
                      return { { 1.0f, { &styloSection }, 1 } };
             case 4:  return { { 1.0f, { &omniSection, &omniRhythmSection }, 1 } };
             case 5:  return { { 1.0f, { &drumSection, &drumPatternSection }, 1 } };
-            case 6:  return { { 1.0f, { &fmSection, &fmLfoSection }, 1 } };
+            case 6:  return { { 1.0f, { &fmSection, &fmLfoSection, &fmDisplaySection }, 1 } };
             case 7:  return { { 1.0f, { &chipSection, &chipDriverSection, &chipVrc6Section, &chipStereoSection }, 1 } };
             case 8:  return { { 1.0f, { &pvOscSection, &pvFilterSection }, 2 }, { 1.0f, { &pvFEnvSection, &pvAEnvSection, &pvLfoSection }, 0 } };
             case 10: return { { 1.0f, { &mdSection, &mdLfoSection }, 1 }, { 1.0f, { &mdVoiceSection, &mdPsgSection }, 0 } };
@@ -2125,8 +2129,7 @@ private:
                 continue;
             }
             const auto cell = row.removeFromLeft (juce::roundToInt (fitsNatural ? s->naturalWidth() : unit * s->layoutWeight()));
-            s->setBounds (cell.reduced (7, 0));
-            if (index >= spec.chainStart && index < spec.chainStart + spec.chain - 1)
+            s->setBounds (cell.reduced (7, 0));            if (index >= spec.chainStart && index < spec.chainStart + spec.chain - 1)
             {
                 const juce::Point<float> at ((float) cell.getRight(), (float) cell.getY() + 24.0f);
                 rows.arrows.push_back (at);
@@ -2317,6 +2320,7 @@ private:
     std::unique_ptr<VisualizerWindow> displayWindow;
     BpmDisplay bpmDisplay { koni };
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
+    Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
     juce::uint32 shownMt32Names = ~0u; // versión de los nombres de programa mostrados en la lista
     std::vector<std::unique_ptr<FloatWindow>> blockWindows; // tras las secciones y el LED: se destruyen antes que ellos
     std::unique_ptr<FloatWindow> bpmWindow, engineWindow;
@@ -2336,7 +2340,7 @@ private:
             pvOscSection { "Polivoks VCO" }, pvFilterSection { "Polivoks Mixer / VCF" }, pvFEnvSection { "Polivoks Filter EG" },
             pvAEnvSection { "Polivoks Amp EG" }, pvLfoSection { "Polivoks LFO" }, ansSection { "ANS" },
             mdSection { "Mega Drive" }, mdLfoSection { "MD LFO" }, mdVoiceSection { "MD Voice" }, mdPsgSection { "MD PSG (SN76489)" }, snesSection { "SNES" }, snesEnvSection { "SNES Envelope" },
-            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" },
+            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, fmDisplaySection { "Display" },
             flangerSection { "Flanger" }, fshiftSection { "Freq Shifter" }, leslieSection { "Leslie" }, springSection { "Spring Reverb" }, eqSection { "EQ" },
             transSection { "Transient" }, compSection { "Compressor" }, limiterSection { "Limiter" },
             ampSection { "Amp" };

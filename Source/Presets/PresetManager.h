@@ -173,12 +173,13 @@ private:
     }
 
 public:
-    // Propiedades de estado de texto que forman parte de un preset: macros por frame de cada motor de consola y
-    // asignaciones y nombres de las macros de interpretación (Params/PerfMacros.h)
+    // Propiedades de estado de texto que forman parte de un preset: macros por frame de cada motor de consola,
+    // asignaciones y nombres de las macros de interpretación (Params/PerfMacros.h) y la voz DX7 cargada de un .syx
+    // ("n|NOMBRE", pantalla del FM 6-Op; vacía en los de fábrica)
     // (array estático: un std::initializer_list devuelto por valor apuntaría a un array temporal ya destruido)
-    static const std::array<const char*, 5>& textProperties()
+    static const std::array<const char*, 6>& textProperties()
     {
-        static const std::array<const char*, 5> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames" };
+        static const std::array<const char*, 6> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice" };
         return list;
     }
 
