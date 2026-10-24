@@ -144,6 +144,9 @@ struct Mt32Machine
         // Synth.h): aquí arranca apagado, como el aparato (NicePanning y NicePartialMixing ya vienen apagados). Los tres son
         // parámetros (mt32Nice*) que aplica el render. El retardo MIDI de cable (DELAY_SHORT_MESSAGES_ONLY) se conserva
         m->synth.setNiceAmpRampEnabled (false);
+        // Los mensajes pasan por la cola de Munt (render): búfer de SysEx preasignado para no reservar memoria en el hilo de
+        // audio (sin él, Munt hace new por cada SysEx encolado). 32 KB: varios volcados completos de parches
+        m->synth.configureMIDIEventQueueSysexStorage (32768);
         m->converter = std::make_unique<SampleRateConverter> (m->synth, hostRate, SamplerateConversionQuality_GOOD);
         m->description = juce::String (control->info->description) + " + " + pcm->info->description;
         report = (model == 1) != m->cm32l ? m->description + juce::String (" (the other model was not found)") : m->description;
@@ -177,6 +180,7 @@ struct Mt32Engine
         if (silencePending)
         {
             silencePending = false;
+            synth.flushMIDIQueue(); // lo que quede en la cola se ejecuta ya: ninguna nota encolada suena después del silencio
             for (juce::uint32 ch = 0; ch < 16; ++ch)
             {
                 synth.playMsgNow (0xB0 | ch | (123u << 8)); // All Notes Off
@@ -231,9 +235,13 @@ struct Mt32Engine
         {
             renderTo (juce::jlimit (0, n, meta.samplePosition));
             const auto msg = meta.getMessage();
+            // Todo por la cola de Munt, en orden de llegada. Con playMsgNow, si la nota necesita abortar una poly (single-assign o
+            // sin parciales libres) Munt sale sin tocarla (Part::playPoly) y se pierde: medido, 1 de cada 2 notas repetidas. La
+            // cola la reintenta al terminar el aborto (Synth.cpp, doRenderStreams) y aplica el retardo MIDI de cable
             if (msg.isSysEx())
             {
-                synth.playSysexNow (msg.getRawData(), (MT32Emu::Bit32u) msg.getRawDataSize());
+                if (! synth.playSysex (msg.getRawData(), (MT32Emu::Bit32u) msg.getRawDataSize()))
+                    synth.playSysexNow (msg.getRawData(), (MT32Emu::Bit32u) msg.getRawDataSize()); // no cabe en el búfer
                 continue;
             }
             const auto* raw = msg.getRawData();
@@ -246,7 +254,8 @@ struct Mt32Engine
             if (mode == 0 && (status & 0xF0) == 0xC0)
                 continue; // en Part 1 el programa lo fija el panel (Program)
             const auto d1 = size > 1 ? (juce::uint32) raw[1] : 0u, d2 = size > 2 ? (juce::uint32) raw[2] : 0u;
-            synth.playMsgNow (status | (d1 << 8) | (d2 << 16));
+            if (! synth.playMsg (status | (d1 << 8) | (d2 << 16)))
+                synth.playMsgNow (status | (d1 << 8) | (d2 << 16)); // cola llena (1024 eventos)
         }
         renderTo (n);
 
