@@ -1,3 +1,4 @@
+User/
 build/
 build-clap/
 dist/
@@ -7,3 +8,4 @@ build-linux/
 .venv/
 .mcp.json
 *.zip
+CLAUDE.md

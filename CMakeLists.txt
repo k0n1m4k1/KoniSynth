@@ -7,6 +7,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Runtime de C++ estático (/MT): los binarios no dependen de MSVCP140/VCRUNTIME140 (sin Redistributable en el
 # equipo de destino). Antes de FetchContent para que JUCE use el mismo runtime.
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# MSVC: /Gy (una sección COMDAT por función) en todo, también en JUCE y dependencias: sin ella el enlazador descarta el
+# LTCG incremental de KONISYNTH_FAST_LINK ("Not all modules are compiled with -Gy"). Antes de FetchContent para que les alcance
+if(MSVC)
+    add_compile_options($<$<CONFIG:Release>:/Gy>)
+endif()
 
 include(FetchContent)
 FetchContent_Declare(JUCE
@@ -61,6 +66,20 @@ if(KONISYNTH_CLAP)
     clap_juce_extensions_plugin(TARGET KoniSynth
         CLAP_ID "com.konisynth.konisynth"
         CLAP_FEATURES instrument synthesizer stereo)
+endif()
+
+# Solo desarrollo (MSVC): LTCG incremental. JUCE enlaza con /LTCG completo y cada formato repite toda la generación de
+# código (≈ 57 s por formato). Con /LTCG:INCREMENTAL el enlazador guarda .iobj/.ipdb y solo regenera las funciones que
+# cambian. Medido (cambio en Displays.h, VST3 + Standalone, /m:1 CL_MPCount=6): 130 s → 34 s, renders de regresión
+# idénticos, pero +18-23 % de CPU en los escenarios pesados de KoniBench. Apagado por defecto: las
+# releases y las medidas de CPU se hacen con el LTCG completo
+option(KONISYNTH_FAST_LINK "Incremental LTCG for faster development rebuilds (slower binaries; never for releases)" OFF)
+if(MSVC AND KONISYNTH_FAST_LINK)
+    foreach(t KoniSynth_VST3 KoniSynth_Standalone KoniSynth_CLAP)
+        if(TARGET ${t})
+            target_link_options(${t} PRIVATE $<$<CONFIG:Release>:/LTCG:INCREMENTAL>)
+        endif()
+    endforeach()
 endif()
 
 # Ruta AVX2: solo este fichero se compila con AVX2 y sin LTCG (/GL-), para que ningún código AVX2 se inline ni se
