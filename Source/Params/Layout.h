@@ -576,6 +576,16 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmLfoPmd", 1 },   "FM LFO Pitch Depth", 0, 99, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmLfoAmd", 1 },   "FM LFO Amp Depth", 0, 99, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmLfoPms", 1 },   "FM Pitch Mod Sens", 0, 7, 3));
+    // Resto de la voz del DX7 (VCED 126-133 pitch EG, 136 osc key sync, 141 LFO key sync, 144 transpose). Por defecto, el
+    // INIT VOICE del DX7: pitch EG plano (L = 50, sin efecto), osc sync on, LFO sync on (manual p. 43) y transpose 0
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmTranspose", 1 }, "FM Transpose", -24, 24, 0));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmOscSync", 1 },   "FM Osc Key Sync", true));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmLfoSync", 1 },   "FM LFO Key Sync", true));
+    for (int k = 1; k <= 4; ++k)
+    {
+        l.add (std::make_unique<AudioParameterInt> (ParameterID { "fmPR" + String (k), 1 }, "FM Pitch EG Rate " + String (k), 0, 99, 99));
+        l.add (std::make_unique<AudioParameterInt> (ParameterID { "fmPL" + String (k), 1 }, "FM Pitch EG Level " + String (k), 0, 99, 50));
+    }
     for (int op = 1; op <= 6; ++op)
     {
         const auto id = [op] (const char* name) { return ParameterID { "fm" + String (op) + name, 1 }; };

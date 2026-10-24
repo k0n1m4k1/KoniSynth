@@ -91,7 +91,7 @@ struct Dx7Syx
     }
 
     // Escribe la voz en los parámetros del motor FM. Devuelve lo que el motor no modela (vacío si nada)
-    static juce::String apply (const Voice& v, juce::AudioProcessorValueTreeState& apvts)
+    static void apply (const Voice& v, juce::AudioProcessorValueTreeState& apvts)
     {
         const auto set = [&apvts] (const juce::String& id, int value)
         {
@@ -125,16 +125,13 @@ struct Dx7Syx
         set ("fmFeedback", e[135]);
         set ("fmLfoSpeed", e[137]); set ("fmLfoDelay", e[138]); set ("fmLfoPmd", e[139]); set ("fmLfoAmd", e[140]);
         set ("fmLfoWave", e[142]);  set ("fmLfoPms", e[143]);
-
-        juce::StringArray ignored;
-        if (e[130] != 50 || e[131] != 50 || e[132] != 50 || e[133] != 50)
-            ignored.add ("pitch envelope");
-        if (e[144] != 24)
-            ignored.add ("transpose " + juce::String ((int) e[144] - 24) + " st");
-        if (e[136] == 0)
-            ignored.add ("oscillator key sync off");
-        if (e[141] != 0)
-            ignored.add ("LFO key sync");
-        return ignored.joinIntoString (", ");
+        for (int k = 0; k < 4; ++k)
+        {
+            set ("fmPR" + juce::String (k + 1), e[126 + k]);
+            set ("fmPL" + juce::String (k + 1), e[130 + k]);
+        }
+        set ("fmOscSync", e[136]);
+        set ("fmLfoSync", e[141]);
+        set ("fmTranspose", (int) e[144] - 24); // 24 = sin transponer
     }
 };

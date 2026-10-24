@@ -2,7 +2,8 @@
 // compilación; usa las declaraciones previas de KoniSynth.cpp (JUCE, Params, utilidades). No es una cabecera independiente.
 #pragma once
 
-// Editor FM: cabecera (algoritmo, feedback y su diagrama en texto) y una columna por operador, OP1 a OP6
+// Editor FM: cabecera (algoritmo, feedback, ajustes de la voz, envolvente de tono y el diagrama en texto) y una columna por
+// operador, OP1 a OP6
 class FmPanel : public juce::Component, private juce::Timer
 {
 public:
@@ -11,6 +12,11 @@ public:
         auto& s = p.apvts;
         header.withKnob (s, "fmAlgorithm", "Algorithm").withKnob (s, "fmFeedback", "Feedback");
         addAndMakeVisible (header);
+        voice.withExtraToggle (s, "fmOscSync", "Osc Sync").withKnob (s, "fmTranspose", "Transpose");
+        addAndMakeVisible (voice);
+        for (int k = 1; k <= 4; ++k) pitchEg.withSlider (s, "fmPR" + juce::String (k), "R" + juce::String (k));
+        for (int k = 1; k <= 4; ++k) pitchEg.withSlider (s, "fmPL" + juce::String (k), "L" + juce::String (k));
+        addAndMakeVisible (pitchEg);
         diagram.setJustificationType (juce::Justification::centredLeft);
         diagram.setFont (juce::FontOptions (17.0f));
         addAndMakeVisible (diagram);
@@ -57,8 +63,10 @@ public:
     void resized() override
     {
         auto r = getLocalBounds();
-        auto top = r.removeFromTop (130);
-        header.setBounds (top.removeFromLeft (260));
+        auto top = r.removeFromTop (150);
+        header.setBounds (top.removeFromLeft (220));
+        voice.setBounds (top.removeFromLeft (190).withTrimmedLeft (8));
+        pitchEg.setBounds (top.removeFromLeft (440).withTrimmedLeft (8));
         diagram.setBounds (top.reduced (16, 0));
         r.removeFromTop (8);
         grid = r;
@@ -113,7 +121,7 @@ private:
     };
 
     KoniSynthProcessor& koni;
-    Section header { "FM 6-Op" };
+    Section header { "FM 6-Op" }, voice { "Voice" }, pitchEg { "Pitch EG" };
     juce::Label diagram;
     std::array<Column, 6> columns;
     std::array<bool, 6> carrier {};

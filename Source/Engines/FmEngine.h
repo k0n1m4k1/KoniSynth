@@ -51,6 +51,16 @@ struct FmEngine
         srScale = 44100.0 / opRate;
         bendCoef = 1.0f - (float) std::exp (-1.0 / (0.005 * opRate));
         readPatch (p);
+        // Redondeo, no truncado: el valor por defecto llega desnormalizado de 50/99 como 49,9999… y (int) lo dejaría en 49
+        // (medido: pitch EG desafinado 1/32 de octava)
+        transpose = juce::jlimit (-24, 24, juce::roundToInt (p.fmTranspose->load()));
+        oscSync = p.fmOscSync->load() > 0.5f;
+        lfoSync = p.fmLfoSync->load() > 0.5f;
+        for (int k = 0; k < 4; ++k)
+        {
+            pitchRates[(size_t) k] = juce::jlimit (0, 99, juce::roundToInt (p.fmPitchRate[(size_t) k]->load()));
+            pitchLevels[(size_t) k] = juce::jlimit (0, 99, juce::roundToInt (p.fmPitchLevel[(size_t) k]->load()));
+        }
         const auto alg = juce::jlimit (0, 31, (int) p.fmAlgorithm->load() - 1);
         const auto fb = (int) p.fmFeedback->load();
         const auto fbScale = fb > 0 ? std::exp2 ((double) fb - 8.0) : 0.0;
@@ -352,12 +362,23 @@ private:
         int outlevel = 0, rateScaling = 0;
     };
 
+    // Envolvente de tono del DX7 (pitchenv.cc de msfa): nivel en unidades de 2^-24 octava, 4 etapas como la EG de amplitud
+    struct PitchEnv
+    {
+        double level = 0.0, target = 0.0, inc = 0.0;
+        int ix = 0;
+        bool rising = false, down = true;
+    };
+
     struct Voice
     {
         bool active = false, keyDown = false, sustained = false;
         int note = 60, velocity = 100;
+        int playNote = 60; // nota que suena: la MIDI más el transpose de la voz (note sigue siendo la MIDI, para el note off)
         std::uint64_t age = 0;
         std::array<Op, 6> ops; // índice 0 = OP6 ... 5 = OP1, como en fm_core.cc
+        PitchEnv pitchEnv;
+        std::array<float, 6> baseInc {}; // incremento de fase sin envolvente de tono
     };
 
     static int scaleOutLevel (int ol)
@@ -480,37 +501,93 @@ private:
         auto& v = *target;
         const auto vi = (size_t) (&v - voices.data());
         const auto wasActive = v.active;
-        // Retardo del LFO: se reinicia si no había otra tecla pulsada
+        // LFO (lfo.cc keydown, llamado si no había otra tecla pulsada): el retardo vuelve a empezar y, con LFO key sync, la
+        // fase va a (2^31 - 1) / 2^32, la mitad del ciclo
         if (std::none_of (voices.begin(), voices.end(), [] (const Voice& o) { return o.active && o.keyDown; }))
+        {
             lfoDelay = 0.0;
+            if (lfoSync)
+                lfoPhase = 2147483647.0 / 4294967296.0;
+        }
         v.active = v.keyDown = true;
         v.sustained = false;
         v.note = note;
+        // Transpose de la voz (VCED 144, 24 = sin cambio): la nota transpuesta es la que usan frecuencia, level scaling y rate
+        // scaling (Dexed lo suma a la nota antes de Dx7Note::init)
+        v.playNote = juce::jlimit (0, 127, note + transpose);
         v.velocity = velocity;
         v.age = ++ageCounter;
         for (int k = 0; k < 6; ++k)
         {
             auto& op = v.ops[(size_t) k];
             const auto& pk = patch[(size_t) k];
-            auto ol = std::min (127, scaleOutLevel (pk.outLevel) + scaleLevel (note, pk));
+            auto ol = std::min (127, scaleOutLevel (pk.outLevel) + scaleLevel (v.playNote, pk));
             op.outlevel = std::max (0, (ol << 5) + scaleVelocity (velocity, pk.velSens));
-            op.rateScaling = (pk.rateScale * juce::jlimit (0, 31, note / 3 - 7)) >> 3;
+            op.rateScaling = (pk.rateScale * juce::jlimit (0, 31, v.playNote / 3 - 7)) >> 3;
             if (! wasActive)
             {
                 op.env = {};
                 lanesOf (vi).amp[k][laneOf (vi)] = lanesOf (vi).y1[k][laneOf (vi)] = lanesOf (vi).y2[k][laneOf (vi)] = 0.0f;
             }
-            lanesOf (vi).phase[k][laneOf (vi)] = 0.0f; // OSC KEY SYNC: fase a 0 en cada nota
+            if (oscSync) // OSC KEY SYNC: fase a 0 en cada nota; sin él, los osciladores siguen libres
+                lanesOf (vi).phase[k][laneOf (vi)] = 0.0f;
             advance (op, pk, 0);
         }
+        // Envolvente de tono: empieza en L4 y va hacia L1 (PitchEnv::set en cada Dx7Note::init)
+        v.pitchEnv = {};
+        v.pitchEnv.level = pitchEnvTab[pitchLevels[3]] * 524288.0; // << 19
+        pitchAdvance (v.pitchEnv, 0);
         updateFrequencies (v);
+    }
+
+    // Tablas de pitchenv.cc (msfa): velocidad por rate 0..99 y nivel por level 0..99 (en 2^-5 octava; 50 = 0)
+    static constexpr std::uint8_t pitchEnvRate[100] = {
+        1, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 16, 16, 17, 18, 18, 19, 20,
+        21, 22, 23, 24, 25, 26, 27, 28, 30, 31, 33, 34, 36, 37, 38, 39, 41, 42, 44, 46, 47, 49, 51, 53, 54, 56, 58, 60, 62, 64,
+        66, 68, 70, 72, 74, 76, 79, 82, 85, 88, 91, 94, 98, 102, 106, 110, 115, 120, 125, 130, 135, 141, 147, 153, 159, 165,
+        171, 178, 185, 193, 202, 211, 232, 243, 254, 255 };
+    static constexpr std::int8_t pitchEnvTab[100] = {
+        -128, -116, -104, -95, -85, -76, -68, -61, -56, -52, -49, -46, -43, -41, -39, -37, -35, -33, -32, -31, -30, -29, -28,
+        -27, -26, -25, -24, -23, -22, -21, -20, -19, -18, -17, -16, -15, -14, -13, -12, -11, -10, -9, -8, -7, -6, -5, -4, -3,
+        -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+        30, 31, 32, 33, 34, 35, 38, 40, 43, 46, 49, 53, 58, 65, 73, 82, 92, 103, 115, 127 };
+
+    // PitchEnv::advance: objetivo y velocidad de la etapa ix (0..3; 4 = fin). Velocidad por muestra de operador:
+    // pitchenv_rate · 2^24 / (21,3 · fs) (msfa la aplica cada 64 muestras con unit_ = 64 · 2^24 / (21,3 · fs))
+    void pitchAdvance (PitchEnv& e, int ix) const
+    {
+        e.ix = ix;
+        if (ix >= 4)
+            return;
+        e.target = pitchEnvTab[pitchLevels[(size_t) ix]] * 524288.0;
+        e.rising = e.target > e.level;
+        e.inc = pitchEnvRate[pitchRates[(size_t) ix]] * 16777216.0 / (21.3 * opRate);
+    }
+
+    // PitchEnv::getsample avanzando n muestras; devuelve octavas
+    double pitchStep (PitchEnv& e, int n) const
+    {
+        if (e.ix < 3 || (e.ix < 4 && ! e.down))
+        {
+            if (e.rising)
+            {
+                e.level += e.inc * n;
+                if (e.level >= e.target) { e.level = e.target; pitchAdvance (e, e.ix + 1); }
+            }
+            else
+            {
+                e.level -= e.inc * n;
+                if (e.level <= e.target) { e.level = e.target; pitchAdvance (e, e.ix + 1); }
+            }
+        }
+        return e.level / 16777216.0;
     }
 
     // Frecuencia de cada operador (dx7note.cc osc_freq): ratio = coarse (0 = 0,5) · (1 + fine/100) con detune empírico de Dexed;
     // fixed = 10^(coarse%4 + fine/100) Hz. Por bloque y en cada nota: el patch puede cambiar mientras suena
     void updateFrequencies (Voice& v)
     {
-        const auto base = 440.0 * std::exp2 ((v.note - 69) / 12.0) * KoniTuning::ratio (v.note);
+        const auto base = 440.0 * std::exp2 ((v.playNote - 69) / 12.0) * KoniTuning::ratio (v.playNote);
         const auto l = std::log2 (base);
         const auto detuneStep = 0.0209 * std::exp (-0.396 * l) / 7.0 * l;
         for (int k = 0; k < 6; ++k)
@@ -519,7 +596,8 @@ private:
             const auto hz = pk.fixed ? std::pow (10.0, (pk.coarse & 3) + pk.fine / 100.0) * std::exp2 (std::max (0, pk.detune) * 13457.0 / 16777216.0)
                                      : base * std::exp2 (detuneStep * pk.detune) * (pk.coarse == 0 ? 0.5 : (double) pk.coarse) * (1.0 + pk.fine / 100.0);
             const auto vi = (size_t) (&v - voices.data());
-            lanesOf (vi).inc[k][laneOf (vi)] = (float) (hz / opRate);
+            v.baseInc[(size_t) k] = (float) (hz / opRate);
+            lanesOf (vi).inc[k][laneOf (vi)] = v.baseInc[(size_t) k];
         }
     }
 
@@ -527,6 +605,11 @@ private:
     {
         for (int k = 0; k < 6; ++k)
             advance (v.ops[(size_t) k], patch[(size_t) k], 3);
+        if (v.pitchEnv.down) // PitchEnv::keydown (false): a la etapa 4
+        {
+            v.pitchEnv.down = false;
+            pitchAdvance (v.pitchEnv, 3);
+        }
     }
 
     // env.cc advance(): objetivo y velocidad de la etapa ix (0..3); ix 4 = fin
@@ -576,6 +659,11 @@ private:
         }
         static constexpr double amsTab[4] = { 0.0, 66.0 / 255.0, 109.0 / 255.0, 1.0 }; // ampmodsenstab de msfa
         const auto down = v.keyDown || v.sustained;
+        // Envolvente de tono del subbloque: solo en los operadores en modo razón (dx7note.cc: los de frecuencia fija solo
+        // siguen el pitch bend)
+        const auto pitchMul = (float) std::exp2 (pitchStep (v.pitchEnv, n));
+        for (int k = 0; k < 6; ++k)
+            lanesOf (vi).inc[k][laneOf (vi)] = patch[(size_t) k].fixed ? v.baseInc[(size_t) k] : v.baseInc[(size_t) k] * pitchMul;
         bool anyAudible = false;
         std::array<float, 6> target {};
         for (int k = 0; k < 6; ++k)
@@ -600,6 +688,9 @@ private:
 
     double sampleRate = 44100.0, srScale = 1.0, lfoPhase = 0.0, lfoDelay = 0.0;
     int shState = 0;
+    int transpose = 0;
+    bool oscSync = true, lfoSync = true;
+    std::array<int, 4> pitchRates { 99, 99, 99, 99 }, pitchLevels { 50, 50, 50, 50 };
     bool sustainPedal = false;
     std::uint64_t ageCounter = 0;
     std::array<Voice, kVoices> voices;

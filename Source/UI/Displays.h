@@ -448,7 +448,8 @@ private:
     // Parámetros que el DX7 tiene en su memoria de voz (no fmMode: la emulación "Clean" es de KoniSynth)
     static bool isDx7Param (const juce::String& id)
     {
-        return id == "fmAlgorithm" || id == "fmFeedback" || id.startsWith ("fmLfo")
+        return id == "fmAlgorithm" || id == "fmFeedback" || id.startsWith ("fmLfo") || id == "fmTranspose" || id == "fmOscSync"
+               || id.startsWith ("fmPR") || id.startsWith ("fmPL")
                || (id.length() > 3 && id.startsWith ("fm") && id[2] >= '1' && id[2] <= '6');
     }
 
@@ -489,6 +490,11 @@ private:
         if (id == "fmLfoPmd")   return juce::String::formatted ("LFO PM DEPTH =%2d", n);
         if (id == "fmLfoAmd")   return juce::String::formatted ("LFO AM DEPTH =%2d", n);
         if (id == "fmLfoPms")   return juce::String::formatted ("P MOD SENS.  =%d", n);
+        if (id == "fmLfoSync")  return juce::String ("LFO KEY SYNC=") + (n != 0 ? "ON" : "OFF");
+        if (id == "fmOscSync")  return juce::String ("OSC KEY SYNC=") + (n != 0 ? "ON" : "OFF");                   // estimada
+        if (id == "fmTranspose") return "MIDDLE C = " + yamahaNote (60 + n);                                       // estimada
+        if (id.startsWith ("fmPR")) return juce::String::formatted ("P EG RATE %d  =%2d", id[4] - '0', n);         // estimada
+        if (id.startsWith ("fmPL")) return juce::String::formatted ("P EG LEVEL %d =%2d", id[4] - '0', n);         // estimada
 
         const auto op = juce::String::charToString (id[2]);
         const auto suffix = id.substring (3);

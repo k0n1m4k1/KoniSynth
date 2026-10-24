@@ -108,6 +108,12 @@ struct Params
         leslieOn = get ("leslieOn"); leslieSpeed = get ("leslieSpeed"); leslieDrive = get ("leslieDrive"); leslieMix = get ("leslieMix");
         springOn = get ("springOn"); springDecay = get ("springDecay"); springMix = get ("springMix"); fmFeedback = get ("fmFeedback"); fmLfoWave = get ("fmLfoWave"); fmLfoSpeed = get ("fmLfoSpeed");
         fmLfoDelay = get ("fmLfoDelay"); fmLfoPmd = get ("fmLfoPmd"); fmLfoAmd = get ("fmLfoAmd"); fmLfoPms = get ("fmLfoPms");
+        fmTranspose = get ("fmTranspose"); fmOscSync = get ("fmOscSync"); fmLfoSync = get ("fmLfoSync");
+        for (int k = 0; k < 4; ++k)
+        {
+            fmPitchRate[(size_t) k] = get ("fmPR" + juce::String (k + 1));
+            fmPitchLevel[(size_t) k] = get ("fmPL" + juce::String (k + 1));
+        }
         mdModel = get ("mdModel"); mdAlgorithm = get ("mdAlgorithm"); mdFeedback = get ("mdFeedback"); mdLfo = get ("mdLfo");
         mdPms = get ("mdPms"); mdAms = get ("mdAms"); mdVelocity = get ("mdVelocity"); mdPan = get ("mdPan");
         styloRange = get ("styloRange"); styloRegister = get ("styloRegister");
@@ -216,6 +222,8 @@ struct Params
                            *breakPoint {}, *leftDepth {}, *rightDepth {}, *leftCurve {}, *rightCurve {};
     };
     std::array<FmOp, 6> fmOp {}; // índice 0 = OP1
+    std::atomic<float> *fmTranspose {}, *fmOscSync {}, *fmLfoSync {};
+    std::array<std::atomic<float>*, 4> fmPitchRate {}, fmPitchLevel {}; // pitch EG del DX7
     struct MdOp { std::atomic<float> *tl {}, *ar {}, *dr {}, *sr {}, *sl {}, *rr {}, *mul {}, *dt {}, *ks {}, *am {}, *ssg {}; };
     std::array<MdOp, 4> mdOp {}; // índice 0 = OP1
     std::atomic<float> *mdModel {}, *mdAlgorithm {}, *mdFeedback {}, *mdLfo {}, *mdPms {}, *mdAms {}, *mdVelocity {}, *mdPan {};

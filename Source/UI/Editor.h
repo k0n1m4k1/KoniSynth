@@ -240,13 +240,13 @@ public:
                           .withKnob (s, "drumTempo", "Tempo").withKnob (s, "drumSwing", "Swing");
         fmSection.withHeaderButton ("Edit...", "Open the FM editor: ratio, level, envelope and keyboard scaling of the 6 operators.",
                                     [this] { openFmPanel(); })
-                 .withHeaderButton ("Load .syx...", "Load a Yamaha DX7 voice or 32-voice bank (SysEx .syx file) into the 6 operators. "
-                                    "Pitch envelope, transpose and LFO key sync are not modelled; you are told if the voice uses them.",
+                 .withHeaderButton ("Load .syx...", "Load a Yamaha DX7 voice or 32-voice bank (SysEx .syx file): operators, "
+                                    "algorithm, LFO, pitch envelope, transpose and key sync, as stored in the voice.",
                                     [this] { chooseDx7Syx(); })
                  .withKnob (s, "fmMode", "Mode").withKnob (s, "fmAlgorithm", "Algorithm").withKnob (s, "fmFeedback", "Feedback");
         for (int op = 1; op <= 6; ++op)
             fmSection.withKnob (s, "fm" + juce::String (op) + "Level", "OP" + juce::String (op));
-        fmLfoSection.withCombo (s, "fmLfoWave")
+        fmLfoSection.withCombo (s, "fmLfoWave").withExtraToggle (s, "fmLfoSync", "Sync")
                     .withKnob (s, "fmLfoSpeed", "Speed").withKnob (s, "fmLfoDelay", "Delay").withKnob (s, "fmLfoPmd", "PMD")
                     .withKnob (s, "fmLfoAmd", "AMD").withKnob (s, "fmLfoPms", "PMS");
         // Datos de cada chip: NESdev (CPU, 2A03, APU Mixer), Pan Docs (Specifications, Audio details), AtariAge (ports PAL)
@@ -1209,12 +1209,8 @@ private:
     // number: posición en el banco (1-32) o 0 si era una voz suelta. La pantalla del DX7 la muestra como voz de cartucho
     void applyDx7Voice (const Dx7Syx::Voice& voice, int number)
     {
-        const auto ignored = Dx7Syx::apply (voice, koni.apvts);
+        Dx7Syx::apply (voice, koni.apvts);
         koni.apvts.state.setProperty ("dx7Voice", juce::String (number) + "|" + voice.name, nullptr); // tras los parámetros
-        if (ignored.isNotEmpty())
-            overlay = Overlay::create (*this, "DX7 voice \"" + voice.name + "\" loaded",
-                                       "Not modelled by the FM 6-Op engine, so it sounds without: " + ignored + ".",
-                                       std::nullopt, "OK", {}, [this] (bool, const juce::String&, int) { overlay.reset(); });
     }
 
     // Anillos de modulación (UI/MatrixPanel.h), 30 Hz: rango de cada destino según las ranuras activas y punto en vivo de la
