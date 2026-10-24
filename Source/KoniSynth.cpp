@@ -228,6 +228,7 @@ public:
     juce::uint32 getMt32ProgramNamesVersion() const { return mt32Engine.programNamesVersion(); }
     juce::uint32 getVl1Notes() const { return vl1.displayNotes(); }
     int getVl1Pulse() const { return vl1.rhythmPulse(); }
+    int getDrumLed() const { return drumMachine.currentLed(); }
     bool hasMt32Machine() const { bool has = false; mt32Engine.slot.withCurrent ([&has] (const Mt32Machine* m) { has = m != nullptr; }); return has; }
 
     juce::String getSampleInfo() const

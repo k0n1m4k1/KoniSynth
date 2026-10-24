@@ -602,6 +602,58 @@ private:
 };
 
 //==============================================================================
+// LED de los 16 botones STEP de la Roland TR-808 (TR-808 Owner's Manual, p. 11): "While the Rhythm is running you will notice
+// that the LED indicators on the STEP buttons flash in sequence from the left to the right of the unit". El manual no describe
+// un LED de tempo (pp. 3-5: solo los STEP y los de variación A/B). Aquí, una fila de LED rojos pequeños con la luz en el
+// paso que da el motor (DrumMachine::currentLed), separados en grupos de 4 como los colores de los botones; todos apagados
+// sin patrón. Elección de interfaz: también con los kits CR-78 y Mini Pops (el contador de 16 posiciones es el mismo).
+// Colores fijos: no siguen el skin
+class DrumStepLeds : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit DrumStepLeds (KoniSynthProcessor& p) : processor (p)
+    {
+        setTooltip ("Step lights, as on the TR-808: while a pattern runs, the light moves across the 16 steps of the measure.");
+        startTimerHz (60);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        // Paso de 22 px como mucho, centrado; 4 px más entre grupos de 4
+        const auto r = getLocalBounds().toFloat();
+        const auto step = juce::jmin (22.0f, (r.getWidth() - 12.0f) / 16.0f);
+        const auto d = juce::jlimit (4.0f, 8.0f, juce::jmin (r.getHeight() - 2.0f, step * 0.45f));
+        const auto x0 = r.getCentreX() - (16.0f * step + 12.0f) * 0.5f + step * 0.5f;
+        for (int k = 0; k < 16; ++k)
+        {
+            const auto c = juce::Point<float> (x0 + step * (float) k + 4.0f * (float) (k / 4), r.getCentreY());
+            const auto led = juce::Rectangle<float> (d, d).withCentre (c);
+            if (k == lit)
+            {
+                g.setColour (juce::Colour (0xffff2a1a).withAlpha (0.3f));
+                g.fillEllipse (led.expanded (2.0f));
+            }
+            g.setColour (k == lit ? juce::Colour (0xffff2a1a) : juce::Colour (0xff3a0d0a));
+            g.fillEllipse (led);
+        }
+    }
+
+private:
+    void timerCallback() override
+    {
+        const auto now = processor.getDrumLed();
+        if (now != lit)
+        {
+            lit = now;
+            repaint();
+        }
+    }
+
+    KoniSynthProcessor& processor;
+    int lit = -1;
+};
+
+//==============================================================================
 // Pantalla del Casio VL-1 (VL-1 Operating Manual; páginas impresas): LCD de 7 segmentos sin retroiluminación, 8 dígitos
 // ("Number of digits: 8 digits", p. 32) y una posición más a la izquierda. Contenido, según las figuras del manual:
 //  - Notas: "The last three notes pressed will be displayed ... with the last note pressed on the right" (p. 18). Cada nota

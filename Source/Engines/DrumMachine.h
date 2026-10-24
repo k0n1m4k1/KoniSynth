@@ -482,7 +482,10 @@ struct DrumMachine
 {
     void prepare (double sr) { sampleRate = sr; kit.prepare (sr); reset(); }
     void reseed (juce::int64 seed) { kit.reseed (seed); }
-    void reset() { kit.reset(); clock.restart(); pattern = pattern2 = -2; }
+    void reset() { kit.reset(); clock.restart(); pattern = pattern2 = -2; ledStep.store (-1, std::memory_order_relaxed); }
+
+    // LED encendido de la fila de pasos (se lee desde la UI): posición en el compás del último paso, 0..15; -1 parado
+    int currentLed() const noexcept { return ledStep.load (std::memory_order_relaxed); }
 
     void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const StepClock::Transport& transport)
     {
@@ -583,6 +586,10 @@ struct DrumMachine
             for (int ch = 0; ch < out.getNumChannels(); ++ch)
                 out.addSample (ch, i, y);
         }
+        // Luz que recorre los pasos: posición entre las que suenan (un compás de 12 pasos usa los LED 1-12, como la TR-808
+        // con PRE-SCALE de tresillo). Parado sin patrón o con el transporte del host detenido
+        const auto running = (pattern >= 0 || pattern2 >= 0) && numPlayable > 0 && clock.lastFired >= 0;
+        ledStep.store (running ? (int) (clock.lastFired % numPlayable) : -1, std::memory_order_relaxed);
     }
 
     // Posiciones (de 16) que salta cada tipo de patrón: 12 pasos a 3 por tiempo = tresillo; 12 a 4 por tiempo = vals
@@ -597,4 +604,5 @@ struct DrumMachine
     DrumKit kit;
     StepClock clock;
     int pattern = -2, pattern2 = -2;
+    std::atomic<int> ledStep { -1 };
 };

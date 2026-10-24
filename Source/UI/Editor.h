@@ -237,7 +237,8 @@ public:
                    .withKnob (s, "drumTune", "Tune").withKnob (s, "drumDecay", "Decay").withKnob (s, "drumTone", "Tone")
                    .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent");
         drumPatternSection.withSortedCombo (s, "drumPattern").withKnob (s, "drumPattern2", "+ Pattern")
-                          .withKnob (s, "drumTempo", "Tempo").withKnob (s, "drumSwing", "Swing");
+                          .withKnob (s, "drumTempo", "Tempo").withKnob (s, "drumSwing", "Swing")
+                          .withBody (drumLeds, 12, 0); // fila de LED de los pasos sobre las perillas
         fmSection.withHeaderButton ("Edit...", "Open the FM editor: ratio, level, envelope and keyboard scaling of the 6 operators.",
                                     [this] { openFmPanel(); })
                  .withHeaderButton ("Load .syx...", "Load a Yamaha DX7 voice or 32-voice bank (SysEx .syx file): operators, "
@@ -2320,6 +2321,7 @@ private:
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
     Vl1Display vl1Display { koni }; // ídem con vl1DisplaySection
+    DrumStepLeds drumLeds { koni }; // ídem con drumPatternSection
     juce::uint32 shownMt32Names = ~0u; // versión de los nombres de programa mostrados en la lista
     std::vector<std::unique_ptr<FloatWindow>> blockWindows; // tras las secciones y el LED: se destruyen antes que ellos
     std::unique_ptr<FloatWindow> bpmWindow, engineWindow;
