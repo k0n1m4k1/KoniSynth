@@ -82,7 +82,7 @@ struct SampleImport
         if (spc == nullptr)
             return nullptr;
         const auto index = itemValue (item, "sample", spc->samples.front().index);
-        const auto it = std::find_if (spc->samples.begin(), spc->samples.end(), [index] (const SpcFile::Sample& s) { return s.index == index; });
+        const auto it = std::find_if (spc->samples.begin(), spc->samples.end(), [index] (const SpcFile::Sample& s) { return s.hasIndex (index); });
         if (it == spc->samples.end())
         {
             error = "Sample " + juce::String (index) + " not found in " + file.getFileName();

@@ -10,8 +10,11 @@ struct SpcFile
 {
     struct Sample
     {
-        int index = 0, start = 0, blocks = 0, loopBlock = -1;
+        int index = 0, start = 0, loop = 0, blocks = 0, loopBlock = -1;
         int voice = -1; // voz (0-7) que lo tenía asignado (registro SRCN) en la instantánea, -1 si ninguna
+        std::vector<int> aliases; // otras entradas del directorio con el mismo inicio y bucle (el juego puede usar cualquiera)
+
+        bool hasIndex (int i) const { return index == i || std::find (aliases.begin(), aliases.end(), i) != aliases.end(); }
     };
 
     juce::MemoryBlock data;
@@ -41,6 +44,7 @@ struct SpcFile
         const auto* dsp = bytes + kDsp;
         const auto dir = (size_t) dsp[0x5d] << 8;
         const auto* ram = spc->ram();
+        const auto voiceOf = [dsp] (int srcn) { for (int v = 0; v < 8; ++v) if (dsp[v * 0x10 + 4] == srcn) return v; return -1; };
         for (int i = 0; i < 256; ++i)
         {
             const auto entry = dir + (size_t) i * 4;
@@ -53,17 +57,26 @@ struct SpcFile
             const auto blocks = Brr::chainLength (ram + start, 0x10000 - (size_t) start, true);
             if (blocks == 0)
                 continue;
-            if (std::any_of (spc->samples.begin(), spc->samples.end(), [start] (const Sample& s) { return s.start == start; }))
+            // Misma entrada (inicio y bucle) con otro índice: se lista una vez y el índice queda como alias. Con otro bucle
+            // suena distinto en el chip (el bucle sale del directorio), así que es un sample aparte
+            const auto same = std::find_if (spc->samples.begin(), spc->samples.end(),
+                                            [start, loop] (const Sample& s) { return s.start == start && s.loop == loop; });
+            if (same != spc->samples.end())
+            {
+                same->aliases.push_back (i);
+                if (same->voice < 0)
+                    same->voice = voiceOf (i);
                 continue;
+            }
             Sample s;
             s.index = i;
             s.start = start;
+            s.loop = loop;
             s.blocks = blocks;
             const auto endHeader = ram[start + (blocks - 1) * 9];
             if ((endHeader & 2) && loop >= start && (loop - start) % 9 == 0 && (loop - start) / 9 < blocks)
                 s.loopBlock = (loop - start) / 9;
-            for (int v = 0; v < 8; ++v)
-                if (dsp[v * 0x10 + 4] == i) { s.voice = v; break; }
+            s.voice = voiceOf (i);
             spc->samples.push_back (s);
         }
         if (spc->samples.empty())
