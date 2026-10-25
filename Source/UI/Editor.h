@@ -1315,7 +1315,6 @@ private:
         {
             if (c != nullptr && c->getAlpha() != (inert ? 0.35f : 1.0f)) c->setAlpha (inert ? 0.35f : 1.0f);
         };
-        constexpr int square = 3;
         const auto osc1Sounds = v ("osc1Level") > 0.0f || targeted (ModMatrix::dstOsc1Level);
         // Complex con Osc 2 u Osc 3 de modulador: Mod Wave y Ratio no actúan, y ese oscilador cuenta aunque su nivel sea 0
         const auto externalMod = (int) v ("complexModSource") != 0;
@@ -1324,8 +1323,9 @@ private:
         const auto osc3Sounds = v ("subLevel") > 0.0f || (complexOn && (int) v ("complexModSource") == 2);
         dim (complexSection.knobFor ("modRatio"), externalMod);
         dim (&complexSection.comboComponent(), externalMod);
-        const auto pwUsed = ((int) v ("wave") == square && osc1Sounds) || (complexOn && ! externalMod && (int) v ("modWave") == square)
-                         || ((int) v ("osc2Wave") == square && osc2Sounds);
+        const auto pwUsed = (waveUsesPw (waveFromChoice ((int) v ("wave"))) && osc1Sounds)
+                         || (complexOn && ! externalMod && waveUsesPw (waveFromChoice ((int) v ("modWave"))))
+                         || (waveUsesPw ((int) v ("osc2Wave")) && osc2Sounds);
         dim (osc.knobFor ("pulseWidth"), ! pwUsed);
         dim (osc.knobFor ("pwmDepth"), ! pwUsed);
         const auto unison = v ("unisonVoices") > 1.5f;

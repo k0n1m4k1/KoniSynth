@@ -142,14 +142,16 @@ struct Ring
     int pos = 0;
 };
 
-// Forma ingenua (sin corrección), mismos valores que oscillator(): sierra 2t - 1; pulso 0,7·(±1 - (2d - 1)); triángulo; seno
+// Forma ingenua (sin corrección), mismos valores que oscillator(): sierra 2t - 1; pulso 0,7·(±1 - (2d - 1)); triángulo; seno;
+// mezclas (Tri-Saw y combinaciones de sierra, triángulo y pulso)
 inline float naive (int wave, double t, double pw)
 {
+    if (isMixWave (wave))
+        return oscillator (wave, t, 0.0, (float) pw, false);
     switch (wave)
     {
         case triangle: return (float) (1.0 - 4.0 * std::abs (t - 0.5));
         case saw:      return (float) (2.0 * t - 1.0);
-        case triSaw:   return (float) (triSawSaw * (2.0 * t - 1.0) + triSawTri * (1.0 - 4.0 * std::abs (t - 0.5)));
         case square:   return 0.7f * ((t < pw ? 1.0f : -1.0f) - (float) (2.0 * pw - 1.0));
         default:       return (float) std::sin (juce::MathConstants<double>::twoPi * t);
     }
@@ -158,11 +160,12 @@ inline float naive (int wave, double t, double pw)
 // Saltos de valor de la forma ingenua mientras la fase recorre linealmente de t0 (instante f0) a t0 + inc·(f1 - f0)
 // (instante f1); instantes en fracciones de muestra tras la última muestra entregada. inc puede ser negativo (FM que
 // atraviesa cero). Sierra: salto -2 al cruzar un entero subiendo. Pulso: +1,4 en el entero y -1,4 en el ancho d.
-// Triángulo/sierra: el salto de su parte de sierra, -2·10/57; sus esquinas, como las del triángulo, sin corregir.
+// Mezclas: -2·(sierra + pulso) en el entero y +2·pulso en 1 - d (pesos de konisimd::kWaveMix); las esquinas de su parte de
+// triángulo, como las del triángulo, sin corregir.
 // Seno y triángulo no tienen saltos de valor (el triángulo tiene saltos de pendiente: su aliasing cae 12 dB/oct, sin corregir)
 inline void segment (Ring& ring, int wave, double t0, double inc, double f0, double f1, double pw, float gL, float gR)
 {
-    if ((wave != saw && wave != square && wave != triSaw) || inc == 0.0) return;
+    if ((wave != saw && wave != square && ! isMixWave (wave)) || inc == 0.0) return;
     const auto t1 = t0 + inc * (f1 - f0);
     auto edge = [&] (double c, float deltaUp)
     {
@@ -175,8 +178,13 @@ inline void segment (Ring& ring, int wave, double t0, double inc, double f0, dou
     };
     if (wave == saw)
         edge (0.0, -2.0f);
-    else if (wave == triSaw)
-        edge (0.0, (float) (-2.0 * triSawSaw));
+    else if (isMixWave (wave))
+    {
+        const auto& m = waveMix (wave);
+        edge (0.0, (float) (-2.0 * (m.saw + m.pulse)));
+        if (m.pulse != 0.0)
+            edge (1.0 - pw, (float) (2.0 * m.pulse));
+    }
     else
     {
         edge (0.0, 1.4f);

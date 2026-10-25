@@ -7,6 +7,27 @@ namespace konisimd
 {
 constexpr int kLanes = 8;
 
+// Formas mezcla (códigos de Wave 6..11, Dsp/OscillatorCore.h): pesos de la sierra 2t - 1, del triángulo 1 - 4|t - 0,5| y
+// del pulso de ancho d alto al final de la rampa (t >= 1 - d), sin su media 2d - 1. Solo datos (sin funciones inline
+// compartidas con SimdAvx2.cpp). Fuentes y derivación de cada fila en Dsp/OscillatorCore.h
+struct WaveMix { double saw, tri, pulse; };
+// Prophet-5 rev 1/2 (amplitudes de pico en V): sierra 5, pulso 3,75, triángulo 5 (invertido: máximo en el salto de la
+// sierra). Osc B: sierra y pulso al búfer por 10 kΩ con 200 kΩ a masa; búfer por 10 kΩ y triángulo por 3,3 kΩ al nodo
+constexpr double kP5Buf = 3.3 / 13.3, kP5Tri = 5.0 * 10.0 / 13.3;
+constexpr double kP5SawOnly = 5.0 * 200.0 / 210.0 * kP5Buf, kP5PulseOnly = 3.75 * 200.0 / 210.0 * kP5Buf;
+constexpr double kP5SawBoth = 5.0 / 2.05 * kP5Buf, kP5PulseBoth = 3.75 / 2.05 * kP5Buf;
+constexpr double kP5SumST = kP5SawOnly + kP5Tri, kP5SumTP = kP5PulseOnly + kP5Tri, kP5SumAll = kP5SawBoth + kP5PulseBoth + kP5Tri;
+constexpr int kFirstMixWave = 6;
+constexpr WaveMix kWaveMix[] = {
+    { 10.0 / 57.0, 47.0 / 57.0, 0.0 },                                         // 6  Tri-Saw (Minimoog)
+    { 5.0 / 8.75, 0.0, 3.75 / 8.75 },                                          // 7  Saw+Pulse (Prophet-5)
+    { kP5SawOnly / kP5SumST, -kP5Tri / kP5SumST, 0.0 },                        // 8  Saw+Tri (Prophet-5, osc B)
+    { 0.0, -kP5Tri / kP5SumTP, kP5PulseOnly / kP5SumTP },                      // 9  Tri+Pulse (osc B)
+    { kP5SawBoth / kP5SumAll, -kP5Tri / kP5SumAll, kP5PulseBoth / kP5SumAll }, // 10 Saw+Tri+Pulse (osc B)
+    { 0.5, 0.0, 0.5 },                                                         // 11 Saw+Pulse (Juno-106, medido)
+};
+constexpr int kLastMixWave = kFirstMixWave + (int) (sizeof (kWaveMix) / sizeof (kWaveMix[0])) - 1;
+
 // Estado del unísono de una voz. Carriles inactivos: ganancia 0 y relación 1 (se calculan igualmente).
 struct UnisonLanes
 {

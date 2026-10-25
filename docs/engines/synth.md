@@ -29,7 +29,7 @@ silences the source without changing its level; mutes are off by default and pre
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 1 waveform: sine pure, triangle soft, saw bright, square hollow, Tri-Saw (see below). | Sine, Triangle, Saw, Square, Tri-Saw / Sine |
+| Wave menu | Oscillator 1 waveform: sine pure, triangle soft, saw bright, square hollow, Tri-Saw and the Saw/Tri/Pulse mixes (see below). | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Sine |
 | Level | Oscillator 1 volume in the mixer. | 0-100 % / 100 % |
 | Voices | Oscillators per note (unison): wider and thicker, more CPU. | 1-7 / 1 |
 | Detune | Detune between the unison oscillators. | 0-50 ct / 12 ct |
@@ -78,6 +78,25 @@ mixed passively at the waveform switch, 10/57 saw and 47/57 triangle (47 kΩ and
 Model D: harmonics 2 to 10 within 1.05 dB RMS. Softer than Saw, with a little more edge than Triangle; it aliases like the
 triangle (its saw jump is corrected, its corners are not).
 
+**Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse** (all four menus) are the waveforms a Prophet-5 oscillator plays when
+several of its waveform switches are on, in the proportions of its circuit (rev 1/2 service manual, voice schematic):
+saw 10 V and pulse 7.5 V peak to peak, averaged through equal 10 kΩ resistors; on oscillator B the triangle (10 V, its
+peak at the saw reset) joins through 3.3 kΩ against 10 kΩ for the buffered saw/pulse, so it dominates the mixes that
+include it. The pulse is high at the end of the ramp and follows Pulse Width and PWM (Osc 3: 50 %).
+
+| Waveform | Saw | Triangle | Pulse |
+|---|---|---|---|
+| Saw+Pulse | 0.571 | - | 0.429 |
+| Saw+Tri | 0.239 | 0.761 | - |
+| Tri+Pulse | - | 0.809 | 0.191 |
+| Saw+Tri+Pulse | 0.126 | 0.780 | 0.094 |
+| Saw+Pulse (Juno) | 0.5 | - | 0.5 |
+
+**Saw+Pulse (Juno)** is the Juno-106 saw and pulse switched on together. Its mix happens inside the voice chip, so it was
+measured on a recording (C1, chorus off): pulse and saw at equal peak level (0.99 ± 0.02), in phase, which lifts the odd
+harmonics 9.5 dB above the even ones (8.0 dB in the Prophet-5 mix). The jumps of all the mixes are corrected with minBLEP;
+the ones with triangle alias like the triangle (its corners are not corrected).
+
 ### Complex Oscillator
 
 Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x oversampling.
@@ -86,7 +105,7 @@ Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x overs
 |---|---|---|
 | On (header) | Turns the complex oscillator on for oscillator 1. | Off / On / Off |
 | Mod Src | Which oscillator is the modulator: the internal one (Mod Wave and Ratio) or Osc 2 / Osc 3 exactly as tuned in their tabs (wave, Oct, Semi, Fine, drift, WT Pos, and the sync of Osc 2). With Osc 2 or Osc 3, Mod Wave and Ratio are dimmed. See the notes below. | Internal, Osc 2, Osc 3 / Internal |
-| Mod Wave menu | Modulator waveform. | Sine, Triangle, Saw, Square, Tri-Saw / Sine |
+| Mod Wave menu | Modulator waveform. | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Sine |
 | Sync (switch) | Hard-syncs the main oscillator to the modulator. | Off / On / Off |
 | Ratio | Modulator/main frequency ratio: whole numbers harmonic, others bell-like. | 0.125x-16x / 1.000x |
 | FM | Linear through-zero FM amount. | I 0-10 / 0 |
@@ -125,7 +144,7 @@ another source's solo).
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Wavetable, Sample, Tri-Saw / Saw |
+| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Wavetable, Sample, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Saw |
 | Edit... (header) | Opens the sample editor of Osc 2 (Sample waveform only; dimmed otherwise). | - |
 | Sync (switch) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. | Off / On / Off |
 | Level | Oscillator 2 level. | 0-100 % / 0 % |
@@ -169,7 +188,7 @@ editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loo
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Waveform; the square stays at 50 % (it does not follow PW). By default it is the classic sub (square one octave down); the Init preset sets Sine, and presets saved before Osc 3 keep the Square. | Sine, Triangle, Saw, Square, Tri-Saw / Square |
+| Wave menu | Waveform; the square and the pulse of the mixes stay at 50 % (they do not follow PW). By default it is the classic sub (square one octave down); the Init preset sets Sine, and presets saved before Osc 3 keep the Square. | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Square |
 | Level | Oscillator 3 level. | 0-100 % / 0 % |
 | Oct | Base octave below Osc 1. | -1 oct, -2 oct / -1 oct |
 | Semi | Semitones on top of the base octave: from -1 oct, +12 = same octave as Osc 1 and +24 = one octave up. | -24 to +24 / 0 |

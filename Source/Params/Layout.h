@@ -80,9 +80,10 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "engine", 1 }, "Engine", StringArray { "Synth", "Theremin", "Casio VL-1", "Stylophone", "Omnichord", "Drum Machine", "FM 6-Op", "8-Bit (NES / Game Boy)", "Polivoks", "ANS", "Mega Drive", "SNES", "N64", "OPL (AdLib / Sound Blaster)", "Roland MT-32" }, 0));
 
     // Oscilador + envolvente. Drift: deriva 1/f por voz, común y de Osc 2 (modelo y cifras: Synth.h, comentario de updateDrift)
-    // Tri-Saw (triángulo/sierra del Minimoog) añadida al final de wave, osc2Wave, osc3Wave y modWave en la 1.0.0-alpha: los
-    // presets guardan el índice y no cambian; las automatizaciones grabadas sí (JUCE normaliza como índice / (n - 1))
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "wave", 1 }, "Wave", StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw" }, 0));
+    // Tri-Saw (triángulo/sierra del Minimoog) y después las mezclas Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse (Prophet-5) y
+    // Saw+Pulse (Juno) añadidas al final de wave, osc2Wave, osc3Wave y modWave en la 1.0.0-alpha: los presets guardan el
+    // índice y no cambian; las automatizaciones grabadas sí (JUCE normaliza como índice / (n - 1))
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "wave", 1 }, "Wave", StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw", "Saw+Pulse", "Saw+Tri", "Tri+Pulse", "Saw+Tri+Pulse", "Saw+Pulse (Juno)" }, 0));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "attack", 1 },  "Attack",  skewed (0.0002f, 5.0f, 0.2f), 0.01f, seconds));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "decay", 1 },   "Decay",   skewed (0.0002f, 20.0f, 0.2f), 0.1f,  seconds));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "sustain", 1 }, "Sustain", NormalisableRange<float> (0.0f, 1.0f), 0.8f, percent));
@@ -96,7 +97,7 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "pulseWidth", 1 },  "Pulse Width", NormalisableRange<float> (0.05f, 0.95f), 0.5f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "pwmDepth", 1 },    "PWM Depth",   NormalisableRange<float> (0.0f, 0.45f), 0.0f, percent));
     // Wavetable: la tabla de la fuente Wavetable. Sample: un fichero propio (osc2SamplePath en el estado), distinto del de la fuente Sample
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2Wave", 1 },    "Osc2 Wave",   StringArray { "Sine", "Triangle", "Saw", "Square", "Wavetable", "Sample", "Tri-Saw" }, 2));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2Wave", 1 },    "Osc2 Wave",   StringArray { "Sine", "Triangle", "Saw", "Square", "Wavetable", "Sample", "Tri-Saw", "Saw+Pulse", "Saw+Tri", "Tri+Pulse", "Saw+Tri+Pulse", "Saw+Pulse (Juno)" }, 2));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2Octave", 1 },  "Osc2 Octave", -2, 2, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2Semi", 1 },    "Osc2 Semi",   -12, 12, 0));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2Fine", 1 },    "Osc2 Fine",   NormalisableRange<float> (-50.0f, 50.0f), 0.0f,
@@ -833,7 +834,7 @@ static APVTS::ParameterLayout createLayout()
     auto bipolar = parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
         { return String (roundToInt (v * 100.0f)) + " %"; }));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "complexOn", 1 },  "Complex On", false));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "modWave", 1 },    "Mod Wave", StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "modWave", 1 },    "Mod Wave", StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw", "Saw+Pulse", "Saw+Tri", "Tri+Pulse", "Saw+Tri+Pulse", "Saw+Pulse (Juno)" }, 0));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "modRatio", 1 },   "Mod Ratio", skewed (0.125f, 16.0f, 1.0f), 1.0f, ratio));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "fmIndex", 1 },    "FM Index",  skewed (0.0f, 10.0f, 2.0f), 0.0f, index));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "amDepth", 1 },    "AM Depth",  NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
@@ -847,7 +848,7 @@ static APVTS::ParameterLayout createLayout()
 
     // Osc 3: el Sub ampliado (subLevel y subOctave siguen siendo su nivel y su octava base). Por defecto, la cuadrada al 50 % de
     // siempre; f3 = f1 · 2^(octava + (semi + fine/100)/12): con -1 oct, Semi -24..+24 cubre de -3 a +1 octavas
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc3Wave", 1 }, "Osc3 Wave", StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw" }, 3));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc3Wave", 1 }, "Osc3 Wave", StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw", "Saw+Pulse", "Saw+Tri", "Tri+Pulse", "Saw+Tri+Pulse", "Saw+Pulse (Juno)" }, 3));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc3Semi", 1 }, "Osc3 Semi", -24, 24, 0));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc3Fine", 1 }, "Osc3 Fine", NormalisableRange<float> (-50.0f, 50.0f), 0.0f,
                                                    parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " ct"; }))));

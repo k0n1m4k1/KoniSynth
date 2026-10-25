@@ -45,29 +45,55 @@ static float polyBlep (double t, double dt)
     return 0.0f;
 }
 
-// triSaw = 6: el mismo código que su opción en osc2Wave (tras Wavetable 4 y Sample 5); en las listas de 4 formas (wave,
-// osc3Wave, modWave) es la opción 4 (waveFromChoice)
-enum Wave { sine, triangle, saw, square, triSaw = 6 };
-static int waveFromChoice (int choice) { return choice == 4 ? triSaw : choice; }
+// Formas mezcla, códigos 6..11 (konisimd::kWaveMix): los mismos que sus opciones en osc2Wave (tras Wavetable 4 y Sample 5);
+// en las listas sin Wavetable ni Sample (wave, osc3Wave, modWave) son las opciones 4..9 (waveFromChoice)
+enum Wave { sine, triangle, saw, square, triSaw = 6, sawPulse, sawTri, triPulse, sawTriPulse, sawPulseJuno };
+static int waveFromChoice (int choice) { return choice >= 4 ? choice + 2 : choice; }
+static bool isMixWave (int wave) { return wave >= konisimd::kFirstMixWave && wave <= konisimd::kLastMixWave; }
+static const konisimd::WaveMix& waveMix (int wave) { return konisimd::kWaveMix[wave - konisimd::kFirstMixWave]; }
+// La forma sigue al mando Pulse Width (cuadrada o mezcla con pulso)
+static bool waveUsesPw (int wave) { return wave == square || (isMixWave (wave) && waveMix (wave).pulse != 0.0); }
 
 // Triángulo/sierra del Minimoog (osciladores 1 y 2): mezcla pasiva de sierra y triángulo en el selector de forma, sierra
 // por 47 kΩ y triángulo por 10 kΩ -> pesos 10/57 y 47/57 (2AMLogic/gf180-monosynth, issue #48, que cita a Esqueda, Bilbao
 // y Välimäki 2016). Comprobado contra un Model D grabado ("The Moog Minimoog Sawtooth-Triangular Waveform", YouTube,
 // AutomaticGainsay): h2..h10 a 1,0 dB RMS del modelo. El triángulo es el plegado de la sierra (mínimo en su salto), como en
 // el VCO; la polaridad relativa no se distingue por los armónicos. Rango -1..+0,825, sin continua
-constexpr double triSawSaw = 10.0 / 57.0, triSawTri = 47.0 / 57.0;
-
+//
+// Prophet-5 rev 1/2 (Sequential Circuits, Service Manual, esquema SD411 "Voice 1" y §2-28): SSM2030 con sierra 0-10 V
+// (R453/R444 22 kΩ), pulso 0-7,5 V, alto cuando la sierra supera la tensión de anchura (100 % con 0 V), y en el osc B
+// un triángulo bipolar = 4·máx(sierra, 5 V) - 2·sierra - 15 (U457: R445 10 kΩ, R446/R447 20 kΩ; pseudo-triángulo
+// sujeto a 5 V por R489 15 kΩ / R487 7,5 kΩ): pendientes ±2 V/V, 10 V pico a pico y máximo en el salto de la sierra
+// (derivado del esquema con TRI SYM ajustado a pendientes iguales; el manual no da su amplitud). Interruptores 4016 /
+// 13202; osc A: sierra y pulso por 10 kΩ cada uno al mismo nodo (promedio 10 : 7,5); osc B: sierra y pulso por 10 kΩ al
+// búfer U456 (200 kΩ a masa), y búfer por 10 kΩ y triángulo por 3,3 kΩ al nodo de salida. Pesos en konisimd::kWaveMix,
+// normalizados a suma 1. La rev 3 (CEM3340) no está comprobada.
+//
+// Juno-106: el módulo de voz (80017A) suma sierra y pulso por dentro y el manual de servicio no da sus valores. Medido en
+// una grabación sin chorus (YouTube luUkWW8j7HQ, Juno-106 frente a Super JX, Do1 = 32,7 Hz): con la función de transferencia
+// de su sierra sola, la mezcla da pulso/sierra = 0,99 ± 0,02 en amplitud de pico (h3..h15) y la fase de cada impar
+// coincide con la de la sierra en menos de 4°: el pulso está alto al final de la rampa, como en el Prophet-5. Pesos 1 : 1.
+//
 // pw: ancho de pulso de la cuadrada (0,5 = cuadrada simétrica). El pulso de ancho d tiene media 2d - 1:
 // se resta para que PWM no mueva el DC (que el filtro y la válvula verían como un desplazamiento lento).
 // blep = false: forma ingenua (el motor Synth corrige los saltos con minBLEP, Dsp/MinBlep.h)
 static float oscillator (int wave, double t, double dt, float pw = 0.5f, bool blep = true)
 {
+    if (isMixWave (wave))
+    {
+        // Saltos: -2·(sierra + pulso) en t = 0 y +2·pulso en t = 1 - d
+        const auto& m = waveMix (wave);
+        const auto d = (double) pw;
+        auto v = m.saw * (2.0 * t - 1.0) + m.tri * (1.0 - 4.0 * std::abs (t - 0.5))
+               + m.pulse * ((t >= 1.0 - d ? 1.0 : -1.0) - (2.0 * d - 1.0));
+        if (blep)
+            v += -(m.saw + m.pulse) * polyBlep (t, dt) + m.pulse * polyBlep (std::fmod (t + d, 1.0), dt);
+        return (float) v;
+    }
     switch (wave)
     {
         case triangle: return (float) (1.0 - 4.0 * std::abs (t - 0.5));
         case saw:      return (float) (2.0 * t - 1.0) - (blep ? polyBlep (t, dt) : 0.0f);
-        case triSaw:   return (float) (triSawSaw * (2.0 * t - 1.0) + triSawTri * (1.0 - 4.0 * std::abs (t - 0.5)))
-                            - (blep ? (float) triSawSaw * polyBlep (t, dt) : 0.0f);
         case square:
         {
             const auto d = (double) pw;
@@ -263,15 +289,16 @@ static void runSimdSelfTest()
     const auto pw = 0.3f;
     double maxErr = 0.0;
 
-    constexpr int waves[] = { sine, triangle, saw, square, triSaw };
-    for (int w = 0; w < 5; ++w)
+    constexpr int waves[] = { sine, triangle, saw, square, triSaw, sawPulse, sawTri, triPulse, sawTriPulse, sawPulseJuno };
+    constexpr int numWaves = (int) std::size (waves);
+    for (int w = 0; w < numWaves; ++w)
     {
         const auto wave = waves[w];
         for (int mode = 0; mode < 5; ++mode) // 0 unísono, 1 complejo, 2 complejo + sync, 3 modulador externo, 4 externo + sync
         {
             auto a = randomLanes();
             auto b = a;
-            konisimd::ComplexArgs args { wave, waves[(w + 1) % 5], 1.37, 1.5, 0.3, (double) pw, mode == 2 || mode == 4 };
+            konisimd::ComplexArgs args { wave, waves[(w + 1) % numWaves], 1.37, 1.5, 0.3, (double) pw, mode == 2 || mode == 4 };
             double extPhase = 0.3; // modulador externo simulado: seno a 1,61 veces la portadora
 
             for (int i = 0; i < 2000; ++i)

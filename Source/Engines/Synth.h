@@ -251,7 +251,7 @@ struct SynthVoice : juce::SynthesiserVoice
         updateEnvelopes(); // los potenciómetros se leen una vez por bloque
 
         const auto sampleRate = getSampleRate();
-        const auto wave       = waveFromChoice ((int) params.wave->load()); // Tri-Saw: opción 4 -> código 6
+        const auto wave       = waveFromChoice ((int) params.wave->load()); // mezclas: opciones 4..9 -> códigos 6..11
         const auto drift      = params.drift->load();
         const auto lfoOn      = params.lfoOn->load() > 0.5f;
         const auto pitchEnvAmount = params.pitchEnvAmount->load();

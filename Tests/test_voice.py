@@ -368,4 +368,36 @@ c.check(rms < 1.5, 'Tri-Saw frente al Model D grabado: h2..h10 %s dB, %.2f dB RM
 al = {w: alias_ratio(render(TS + ['Wave=' + w], 1.5, ['84:0.05:1.4:100'], 'trisaw.wav')[0], fs, 440 * 2 ** (15 / 12)) for w in ('Triangle', 'Tri-Saw')}
 c.check(abs(al['Tri-Saw'] - al['Triangle']) < 1.0, 'Tri-Saw a C6: aliasing %.1f dB, como el triángulo %.1f dB (±1; el salto va con minBLEP, las esquinas no)'
         % (al['Tri-Saw'], al['Triangle']))
+
+# --- Mezclas Saw/Tri/Pulse (Prophet-5 rev 1/2 y Juno-106; derivación en Dsp/OscillatorCore.h) ---
+# Pulso de la mezcla, alto al final de la rampa con ancho d = -Square(PW = 1 - d) / 0,7; triángulo del Prophet-5 invertido
+buf, tri = 3.3 / 13.3, 5 * 10 / 13.3
+sO, pO, sB, pB = 5 * 200 / 210 * buf, 3.75 * 200 / 210 * buf, 5 / 2.05 * buf, 3.75 / 2.05 * buf
+MIX = {'Saw+Pulse': (5 / 8.75, 0, 3.75 / 8.75), 'Saw+Tri': (sO / (sO + tri), -tri / (sO + tri), 0),
+       'Tri+Pulse': (0, -tri / (pO + tri), pO / (pO + tri)),
+       'Saw+Tri+Pulse': (sB / (sB + pB + tri), -tri / (sB + pB + tri), pB / (sB + pB + tri)), 'Saw+Pulse (Juno)': (0.5, 0, 0.5)}
+for name, pre, wid in (('Osc 1', [], 'Wave'), ('Osc 2', ['Osc1 Level=0%', 'Osc2 Level=100%'], 'Osc2 Wave'),
+                       ('Osc 3', ['Osc1 Level=0%', 'Sub Level=100%', 'Osc3 Semi=12'], 'Osc3 Wave'),
+                       ('modulador del Complex (ring)', ['Complex On=On', 'AM Depth=100%', 'Wave=Sine'], 'Mod Wave')):
+    part = {w: render(TS + pre + ['%s=%s' % (wid, w)], 1.5, NT, 'mixwave.wav')[0] for w in ['Saw', 'Triangle', 'Square'] + list(MIX)}
+    worst = max(rel(part[w], ws * part['Saw'] + wt * part['Triangle'] - wp * part['Square'] / 0.7) for w, (ws, wt, wp) in MIX.items())
+    c.check(worst < -100, 'mezclas en %s = suma ponderada de sierra, triángulo y pulso: peor %.1f dB (< -100)' % (name, worst))
+# El pulso de las mezclas sigue a Pulse Width (Osc 1): Saw+Pulse con PW 30 % = sierra - Square(PW 70 %) con sus pesos
+x30 = render(TS + ['Wave=Saw+Pulse', 'Pulse Width=30%'], 1.5, NT, 'mixwave.wav')[0]
+q70 = render(TS + ['Wave=Square', 'Pulse Width=70%'], 1.5, NT, 'mixwave.wav')[0]
+saw = render(TS + ['Wave=Saw'], 1.5, NT, 'mixwave.wav')[0]
+d = rel(x30, MIX['Saw+Pulse'][0] * saw - MIX['Saw+Pulse'][2] * q70 / 0.7)
+c.check(d < -100, 'Saw+Pulse con PW 30 %%: pulso alto en el 30 %% final de la rampa: %.1f dB (< -100)' % d)
+# Juno-106 grabado (YouTube luUkWW8j7HQ, Do1, sin chorus): mezcla/sierra sola, impares frente a pares = 9,47 ± 0,19 dB (h1..h16)
+jm, js = (harmonics(render(TS + ['Wave=' + w], 1.5, ['36:0.05:1.4:100'], 'mixwave.wav')[0], fs, 65.41, 16) for w in ('Saw+Pulse (Juno)', 'Saw'))
+r = jm / js; k = np.arange(1, 17); g = db(r[k % 2 == 1] / np.median(r[k % 2 == 0]))
+c.check(abs(g.mean() - 9.47) < 0.5, 'Saw+Pulse (Juno): impares/pares %.2f dB frente a 9,47 del Juno-106 grabado (±0,5)' % g.mean())
+# Aliasing a C6: los saltos van con minBLEP (Saw+Pulse como la sierra); con triángulo mandan sus esquinas sin corregir
+al = {w: alias_ratio(render(TS + ['Wave=' + w], 1.5, ['84:0.05:1.4:100'], 'mixwave.wav')[0], fs, 440 * 2 ** (15 / 12))
+      for w in ('Saw', 'Triangle', 'Saw+Pulse', 'Saw+Pulse (Juno)', 'Saw+Tri', 'Tri+Pulse', 'Saw+Tri+Pulse')}
+c.check(max(al['Saw+Pulse'], al['Saw+Pulse (Juno)']) < al['Saw'] + 1.0, 'Saw+Pulse a C6: aliasing %.1f / %.1f dB (Juno), no mayor que la sierra %.1f dB (+1)'
+        % (al['Saw+Pulse'], al['Saw+Pulse (Juno)'], al['Saw']))
+c.check(max(al['Saw+Tri'], al['Tri+Pulse'], al['Saw+Tri+Pulse']) < al['Triangle'] + 1.0,
+        'mezclas con triángulo a C6: aliasing %.1f / %.1f / %.1f dB, no mayor que el triángulo %.1f dB (+1)'
+        % (al['Saw+Tri'], al['Tri+Pulse'], al['Saw+Tri+Pulse'], al['Triangle']))
 sys.exit(c.summary())
