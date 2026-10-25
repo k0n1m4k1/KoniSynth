@@ -106,7 +106,9 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
     struct Event { double time; juce::MidiMessage message; };
     std::vector<Event> events;
     auto stereo = false; // --stereo: WAV de 2 canales (por defecto, solo el izquierdo, como siempre)
-    // Propiedades del estado del plugin: --sample=<wav> (samplePath, el sample del panel Sample) y --prop=<nombre>=<valor>
+    auto rate = kSampleRate; // --rate=<Hz>: frecuencia de muestreo del render (por defecto 48 kHz)
+    // Propiedades del estado del plugin: --sample=<wav> (samplePath, el sample del panel Sample), --osc2-sample=<wav>
+    // (osc2SamplePath, el de Osc 2 en modo Sample) y --prop=<nombre>=<valor>
     std::vector<std::pair<juce::String, juce::String>> props;
     juce::File dumpState; // --dump-state=<fichero>: estado del plugin (tras parámetros y propiedades) en el formato de filterState del standalone
     for (int a = 5; a < argc; ++a)
@@ -114,8 +116,11 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
         const juce::String arg = juce::String::fromUTF8 (argv[a]);
         if (arg == "--stereo")
             stereo = true;
-        else if (arg.startsWith ("--sample="))
-            props.push_back ({ "samplePath", juce::File::getCurrentWorkingDirectory().getChildFile (arg.fromFirstOccurrenceOf ("=", false, false)).getFullPathName() });
+        else if (arg.startsWith ("--rate="))
+            rate = arg.fromFirstOccurrenceOf ("=", false, false).getDoubleValue();
+        else if (arg.startsWith ("--sample=") || arg.startsWith ("--osc2-sample="))
+            props.push_back ({ arg.startsWith ("--sample=") ? "samplePath" : "osc2SamplePath",
+                               juce::File::getCurrentWorkingDirectory().getChildFile (arg.fromFirstOccurrenceOf ("=", false, false)).getFullPathName() });
         else if (arg.startsWith ("--dump-state="))
             dumpState = juce::File::getCurrentWorkingDirectory().getChildFile (arg.fromFirstOccurrenceOf ("=", false, false));
         else if (arg.startsWith ("--param=")) // parámetro por su ID y valor real (como en los presets de fábrica)
@@ -207,8 +212,8 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
             dumpState.replaceWithText (inner.toBase64Encoding());
     }
 
-    plugin.prepareToPlay (kSampleRate, kBlockSize);
-    const auto total = (int) (seconds * kSampleRate);
+    plugin.prepareToPlay (rate, kBlockSize);
+    const auto total = (int) (seconds * rate);
     const auto outChannels = stereo ? 2 : 1;
     juce::AudioBuffer<float> result (outChannels, total);
     juce::AudioBuffer<float> buffer (2, kBlockSize);
@@ -219,12 +224,12 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
         midi.clear();
         for (const auto& note : notes)
         {
-            const auto on = (int) (note.start * kSampleRate), off = (int) ((note.start + note.length) * kSampleRate);
+            const auto on = (int) (note.start * rate), off = (int) ((note.start + note.length) * rate);
             if (on >= pos && on < pos + n)   midi.addEvent (juce::MidiMessage::noteOn (note.channel, note.note, (juce::uint8) note.velocity), on - pos);
             if (off >= pos && off < pos + n) midi.addEvent (juce::MidiMessage::noteOff (note.channel, note.note), off - pos);
         }
         for (const auto& e : events)
-            if (const auto at = (int) (e.time * kSampleRate); at >= pos && at < pos + n)
+            if (const auto at = (int) (e.time * rate); at >= pos && at < pos + n)
                 midi.addEvent (e.message, at - pos);
         buffer.setSize (2, n, false, false, true);
         buffer.clear();
@@ -237,7 +242,7 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
     out.deleteFile();
     juce::WavAudioFormat wav;
     std::unique_ptr<juce::OutputStream> stream (out.createOutputStream());
-    auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions().withSampleRate (kSampleRate).withNumChannels (outChannels).withBitsPerSample (24));
+    auto writer = wav.createWriterFor (stream, juce::AudioFormatWriterOptions().withSampleRate (rate).withNumChannels (outChannels).withBitsPerSample (24));
     if (writer == nullptr || ! writer->writeFromAudioSampleBuffer (result, 0, total))
     {
         std::printf ("no se pudo escribir %s\n", out.getFullPathName().toRawUTF8());

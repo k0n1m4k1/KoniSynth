@@ -20,8 +20,9 @@ public:
         int engine = 0; // índice del parámetro "engine" que deja el preset (navegador: filtro por motor)
     };
 
-    // 1: hasta la 0.6 (sin atributo). 2: formatVersion y pluginVersion; thereminOn ya migrado a engine
-    static constexpr int formatVersion = 2;
+    // 1: hasta la 0.6 (sin atributo). 2: formatVersion y pluginVersion; thereminOn ya migrado a engine. 3: Osc 2 en modo Sample, con su
+    // fichero (atributo osc2SamplePath)
+    static constexpr int formatVersion = 3;
 
     explicit PresetManager (APVTS& s) : apvts (s)
     {
@@ -159,16 +160,22 @@ private:
         markClean();
 
 
-        // Ficheros del preset de usuario (sample y wavetable). Los presets anteriores a la 0.3 no tienen estos atributos:
-        // entonces no se tocan los ficheros cargados. Los de fábrica no usan ficheros.
+        // Ficheros del preset (sample, wavetable, IR). Los presets de usuario anteriores a la 0.3 no tienen estos atributos:
+        // entonces no se tocan los ficheros cargados; los de fábrica no usan ficheros. El de Osc 2 en modo Sample no se hereda
+        // nunca: sin el atributo (formato < 3 o de fábrica) se quita, para que un preset no se guarde con el fichero de otro
         if (! preset.factory)
             if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr && xml->hasAttribute ("ansUser"))
                 apvts.state.setProperty ("ansUser", xml->getStringAttribute ("ansUser"), nullptr);
-        if (! preset.factory && onUserPresetFiles)
-            if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr)
-                onUserPresetFiles (xml->hasAttribute (sampleAttribute) ? std::optional<juce::String> (xml->getStringAttribute (sampleAttribute)) : std::nullopt,
-                                   xml->hasAttribute (wavetableAttribute) ? std::optional<juce::String> (xml->getStringAttribute (wavetableAttribute)) : std::nullopt,
-                                   xml->hasAttribute (cabIrAttribute) ? std::optional<juce::String> (xml->getStringAttribute (cabIrAttribute)) : std::nullopt);
+        if (onPresetFiles)
+        {
+            if (preset.factory)
+                onPresetFiles (std::nullopt, std::nullopt, std::nullopt, juce::String());
+            else if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr)
+                onPresetFiles (xml->hasAttribute (sampleAttribute) ? std::optional<juce::String> (xml->getStringAttribute (sampleAttribute)) : std::nullopt,
+                               xml->hasAttribute (wavetableAttribute) ? std::optional<juce::String> (xml->getStringAttribute (wavetableAttribute)) : std::nullopt,
+                               xml->hasAttribute (cabIrAttribute) ? std::optional<juce::String> (xml->getStringAttribute (cabIrAttribute)) : std::nullopt,
+                               xml->getStringAttribute (osc2SampleAttribute));
+        }
         return juce::Result::ok();
     }
 
@@ -183,9 +190,10 @@ public:
         return list;
     }
 
-    // Lo instala el procesador: aplica las rutas de fichero de un preset de usuario (hilo de mensajes)
+    // Lo instala el procesador: aplica las rutas de fichero de un preset (hilo de mensajes). nullopt = no tocar ese fichero;
+    // osc2SamplePath siempre llega (vacía = sin fichero)
     std::function<void (std::optional<juce::String> samplePath, std::optional<juce::String> wavetablePath,
-                        std::optional<juce::String> cabIrPath)> onUserPresetFiles;
+                        std::optional<juce::String> cabIrPath, juce::String osc2SamplePath)> onPresetFiles;
 
     juce::Result validateName (const juce::String& name) const
     {
@@ -312,8 +320,9 @@ private:
         for (const auto& l : lines)
             if (l.trim().isNotEmpty()) favorites.insert (l.trim());
     }
-    // Mismos nombres que las propiedades de estado del procesador (samplePathProp, wtPathProp)
+    // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, wtPathProp)
     static constexpr const char* sampleAttribute = "samplePath";
+    static constexpr const char* osc2SampleAttribute = "osc2SamplePath";
     static constexpr const char* wavetableAttribute = "wtPath";
     static constexpr const char* cabIrAttribute = "cabIrPath";
 
@@ -355,6 +364,8 @@ private:
         if (from < 2) // 1 -> 2: presets anteriores a "engine": thereminOn = 1 -> engine = Theremin
             if (real.count ("engine") == 0 && real.count ("thereminOn") != 0)
                 real["engine"] = real["thereminOn"] > 0.5f ? 1.0f : 0.0f;
+        // 2 -> 3: ningún valor cambia. osc2Wave no podía valer Sample (5) y los parámetros osc2Sample* ausentes toman su valor
+        // por defecto; el fichero de Osc 2 (osc2SamplePath) ausente se quita al cargar (loadInternal)
     }
 
     // Valores normalizados que deja el preset; los ausentes vuelven al valor por defecto. note: aviso para la UI (formato
@@ -385,7 +396,7 @@ private:
             if (note != nullptr)
             {
                 // Atributos que no son parámetros ni propiedades conocidas: de una versión posterior o renombrados
-                juce::StringArray known { formatAttribute, versionAttribute, categoryAttribute, sampleAttribute, wavetableAttribute,
+                juce::StringArray known { formatAttribute, versionAttribute, categoryAttribute, sampleAttribute, osc2SampleAttribute, wavetableAttribute,
                                           cabIrAttribute, "ansUser", "thereminOn" };
                 for (const auto* prop : textProperties()) known.add (prop);
                 for (auto* p : rangedParameters()) known.add (p->getParameterID());
@@ -423,6 +434,7 @@ private:
         xml.setAttribute (categoryAttribute, category);
         // Rutas de los ficheros (no son parámetros: van en el estado). Vacías = sin fichero
         xml.setAttribute (sampleAttribute, apvts.state.getProperty (sampleAttribute).toString());
+        xml.setAttribute (osc2SampleAttribute, apvts.state.getProperty (osc2SampleAttribute).toString());
         xml.setAttribute (wavetableAttribute, apvts.state.getProperty (wavetableAttribute).toString());
         xml.setAttribute (cabIrAttribute, apvts.state.getProperty (cabIrAttribute).toString());
         if (const auto ans = apvts.state.getProperty ("ansUser").toString(); ans.isNotEmpty())

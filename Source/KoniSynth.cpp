@@ -133,13 +133,13 @@ public:
     {
         for (int i = 0; i < 8; ++i)
         {
-            auto* voice = new SynthVoice (params, sampleSlot, wavetableSlot);
+            auto* voice = new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot);
             voice->cardIndex = i; // tarjeta de voz física (Tolerances: Per Voice Card)
             synth.addVoice (voice);
         }
         synth.addSound (new SynthSound());
         synth.assignMode = params.voiceAssign;
-        monoSynth.addVoice (new SynthVoice (params, sampleSlot, wavetableSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
+        monoSynth.addVoice (new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
         monoSynth.addSound (new SynthSound());
         perfMacros.attach (apvts);
         undoHistory.attach (*this, apvts, { PerfMacros::mapProp, PerfMacros::namesProp, chipMacrosProp, mdMacrosProp, snesMacrosProp,
@@ -155,12 +155,13 @@ public:
 
         syncRandomState(); // semilla de la aleatoriedad reproducible (Dsp/RandomClock.h)
         startTimer (100); // libera datos retirados (DataSlot::collect) y genera la wavetable incluida elegida
-        presetManager.onUserPresetFiles = [this] (std::optional<juce::String> sample, std::optional<juce::String> wavetable,
-                                                  std::optional<juce::String> cabIr)
+        presetManager.onPresetFiles = [this] (std::optional<juce::String> sample, std::optional<juce::String> wavetable,
+                                              std::optional<juce::String> cabIr, juce::String osc2SamplePath)
         {
             if (sample.has_value())    restoreSample (*sample);
             if (wavetable.has_value()) restoreWavetable (*wavetable);
             if (cabIr.has_value())     restoreCabIr (*cabIr);
+            restoreSample (osc2SamplePath, osc2Sample);
         };
         tuning.setMtsEnabled (true); // MTS-ESP por defecto: sin maestro (o sin LIBMTS instalada) no cambia nada
         actionPoll.tick = [this] { pollActions(); };
@@ -169,9 +170,13 @@ public:
 
     ~KoniSynthProcessor() override { stopTimer(); }
 
+    // Los dos samples del motor Synth (which): 0 = la fuente Sample (también la "User Sample" de los motores de consola y el
+    // DPCM), 1 = Osc 2 en modo Sample. Mismo código para los dos; cada uno con su DataSlot, su ruta en el estado y su aviso
+    static constexpr int sourceSample = 0, osc2Sample = 1;
+
     // Carga un sample (cualquier hilo salvo el de audio). item: elemento de un banco .sf2/.spc (Import/SampleImport.h).
     // Devuelve el error o una cadena vacía.
-    juce::String loadSample (const juce::File& file, const juce::String& item = {})
+    juce::String loadSample (const juce::File& file, const juce::String& item = {}, int which = sourceSample)
     {
         juce::String error;
         auto data = SampleImport::load (file, item, error);
@@ -180,12 +185,13 @@ public:
 
         {
             const juce::ScopedLock sl (sampleInfoLock);
-            sampleInfo = data->name + (data->truncated ? " (truncated to 60 s)" : "");
-            sampleRootKey = data->rootKey;
-            sampleHasLoop = data->loopStart >= 0;
+            auto& info = sampleInfos[(size_t) which];
+            info.text = data->name + (data->truncated ? " (truncated to 60 s)" : "");
+            info.rootKey = data->rootKey;
+            info.hasLoop = data->loopStart >= 0;
         }
-        sampleSlot.replace (std::move (data));
-        apvts.state.setProperty (samplePathProp, SampleImport::pathOf (file, item), nullptr);
+        slotFor (which).replace (std::move (data));
+        apvts.state.setProperty (pathPropFor (which), SampleImport::pathOf (file, item), nullptr);
         return {};
     }
 
@@ -193,19 +199,19 @@ public:
     void setStyloStrip (float v) { params.stripTouch.store (juce::jlimit (-1.0f, 1.0f, v)); }
 
     // Del último sample cargado: nota raíz del formato (-1 = desconocida) y si trae bucle propio
-    std::pair<int, bool> getSampleFormatInfo() const
+    std::pair<int, bool> getSampleFormatInfo (int which = sourceSample) const
     {
         const juce::ScopedLock sl (sampleInfoLock);
-        return { sampleRootKey, sampleHasLoop };
+        return { sampleInfos[(size_t) which].rootKey, sampleInfos[(size_t) which].hasLoop };
     }
 
-    void clearSample()
+    void clearSample (int which = sourceSample)
     {
-        sampleSlot.replace (nullptr);
-        if (apvts.state.hasProperty (samplePathProp)) // vacía = ausente: cargar un estado sin la propiedad no la crea
-            apvts.state.setProperty (samplePathProp, juce::String(), nullptr);
+        slotFor (which).replace (nullptr);
+        if (apvts.state.hasProperty (pathPropFor (which))) // vacía = ausente: cargar un estado sin la propiedad no la crea
+            apvts.state.setProperty (pathPropFor (which), juce::String(), nullptr);
         const juce::ScopedLock sl (sampleInfoLock);
-        sampleInfo = {};
+        sampleInfos[(size_t) which].text = {};
     }
 
     // MT-32 (cualquier hilo salvo el de audio): busca las ROM y publica la máquina. Un intento por modelo y frecuencia; "Rescan"
@@ -231,10 +237,10 @@ public:
     int getDrumLed() const { return drumMachine.currentLed(); }
     bool hasMt32Machine() const { bool has = false; mt32Engine.slot.withCurrent ([&has] (const Mt32Machine* m) { has = m != nullptr; }); return has; }
 
-    juce::String getSampleInfo() const
+    juce::String getSampleInfo (int which = sourceSample) const
     {
         const juce::ScopedLock sl (sampleInfoLock);
-        return sampleInfo;
+        return sampleInfos[(size_t) which].text;
     }
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override
@@ -956,6 +962,7 @@ public:
         if (auto* tap = agentTapActive.load (std::memory_order_acquire)) // control por agente (F3); desactivado: nulo
             tap->push (buffer);
         sampleSlot.blocksDone.fetch_add (1, std::memory_order_release); // ver DataSlot
+        osc2SampleSlot.blocksDone.fetch_add (1, std::memory_order_release);
         ansSlot.blocksDone.fetch_add (1, std::memory_order_release);
         chipMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
         mdMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
@@ -1078,6 +1085,7 @@ public:
                 filterQualityRequested = juce::jlimit (0, 2, (int) apvts.state.getProperty (filterQualityProp, 0)); // sin ella: Classic
 
                 restoreFiles (apvts.state.getProperty (samplePathProp).toString(), apvts.state.getProperty (wtPathProp).toString());
+                restoreSample (apvts.state.getProperty (osc2SamplePathProp).toString(), osc2Sample); // sin la propiedad (proyectos anteriores): sin fichero
                 restoreCabIr (apvts.state.getProperty (cabIrPathProp).toString());
                 restoreTuning();
                 // El host debe releer los valores: el wrapper CLAP lo traduce a params->rescan (clap-validator,
@@ -1129,25 +1137,25 @@ public:
         restoreWavetable (wavetablePath);
     }
 
-    void restoreSample (const juce::String& samplePath)
+    void restoreSample (const juce::String& samplePath, int which = sourceSample)
     {
         if (samplePath.isEmpty())
         {
-            clearSample();
+            clearSample (which);
         }
         else
         {
             const auto file = SampleImport::fileOf (samplePath);
-            const auto error = file.existsAsFile() ? loadSample (file, SampleImport::itemOf (samplePath)) : juce::String ("File not found");
+            const auto error = file.existsAsFile() ? loadSample (file, SampleImport::itemOf (samplePath), which) : juce::String ("File not found");
             if (error.isNotEmpty())
             {
-                sampleSlot.replace (nullptr);
-                apvts.state.setProperty (samplePathProp, samplePath, nullptr);
+                slotFor (which).replace (nullptr);
+                apvts.state.setProperty (pathPropFor (which), samplePath, nullptr);
                 {
                     const juce::ScopedLock sl (sampleInfoLock);
-                    sampleInfo = (file.existsAsFile() ? "(unreadable) " : "(missing) ") + file.getFileName();
+                    sampleInfos[(size_t) which].text = (file.existsAsFile() ? "(unreadable) " : "(missing) ") + file.getFileName();
                 }
-                reportMissing (MissingFile::Kind::sample, file, file.existsAsFile());
+                reportMissing (which == osc2Sample ? MissingFile::Kind::osc2Sample : MissingFile::Kind::sample, file, file.existsAsFile());
             }
         }
     }
@@ -1224,7 +1232,7 @@ public:
     // y los consume el editor, uno a uno
     struct MissingFile
     {
-        enum class Kind { sample, wavetable, cabIr };
+        enum class Kind { sample, wavetable, cabIr, osc2Sample };
         Kind kind;
         juce::File file;
         bool unreadable = false;
@@ -1614,17 +1622,20 @@ private:
     std::array<float, 2> crushHeld {};
     std::vector<float> inputMono;
     float lastInputGain = 1.0f;
-    SampleSlot sampleSlot;
+    SampleSlot sampleSlot, osc2SampleSlot;
     WavetableSlot wavetableSlot;
     juce::CriticalSection missingLock;
     std::vector<MissingFile> missing;
     std::atomic<int> builtInLoaded { -1 };
     static inline const juce::Identifier wtPathProp { "wtPath" };
     juce::CriticalSection sampleInfoLock;
-    juce::String sampleInfo;
-    int sampleRootKey = -1;
-    bool sampleHasLoop = false;
-    static inline const juce::Identifier samplePathProp { "samplePath" };
+    // Por sample (sourceSample, osc2Sample): texto para la UI, nota raíz del formato (-1 = desconocida) y bucle propio
+    struct SampleInfo { juce::String text; int rootKey = -1; bool hasLoop = false; };
+    std::array<SampleInfo, 2> sampleInfos;
+    static inline const juce::Identifier samplePathProp { "samplePath" }, osc2SamplePathProp { "osc2SamplePath" };
+    SampleSlot& slotFor (int which) { return which == osc2Sample ? osc2SampleSlot : sampleSlot; }
+    const SampleSlot& slotFor (int which) const { return which == osc2Sample ? osc2SampleSlot : sampleSlot; }
+    static const juce::Identifier& pathPropFor (int which) { return which == osc2Sample ? osc2SamplePathProp : samplePathProp; }
     static inline const juce::Identifier cabIrPathProp { "cabIrPath" }; // mismo nombre que el atributo del preset
     static inline const juce::Identifier tuningSclProp { "tuningScl" }, tuningKbmProp { "tuningKbm" }, tuningNameProp { "tuningName" },
                                          mtsProp { "mtsEsp" };
@@ -1651,6 +1662,7 @@ private:
     void timerCallback() override
     {
         sampleSlot.collect();
+        osc2SampleSlot.collect();
         wavetableSlot.collect();
         ansSlot.collect();
         updateAnsScore();
@@ -1824,12 +1836,12 @@ public:
     }
 
     // Resumen de la forma de onda del sample para dibujarla: pares (mín, máx) por columna, y duración en muestras / frecuencia
-    std::vector<std::pair<float, float>> getSampleOverview (int columns, int& lengthOut, double& rateOut) const
+    std::vector<std::pair<float, float>> getSampleOverview (int columns, int& lengthOut, double& rateOut, int which = sourceSample) const
     {
         std::vector<std::pair<float, float>> out;
         lengthOut = 0;
         rateOut = 44100.0;
-        sampleSlot.withCurrent ([&] (const SampleData* d)
+        slotFor (which).withCurrent ([&] (const SampleData* d)
         {
             if (d == nullptr || columns <= 0)
                 return;

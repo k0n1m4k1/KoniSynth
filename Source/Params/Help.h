@@ -182,7 +182,9 @@ static juce::String paramHelp (const juce::String& id)
         { "pulseWidth", "Square wave pulse width: 50 % sounds hollow; extreme values sound thin and nasal." },
         { "pwmDepth", "How much the LFO moves the pulse width (PWM): adds motion and body to the square wave." },
         { "osc2Wave", "Oscillator 2 waveform. Wavetable: plays the table of the Wavetable source (its own position: WT Pos), "
-                      "with its own tuning and phase; Sync works too." },
+                      "with its own tuning and phase; Sync works too. Sample: plays its own audio file (Edit... in the header: Load, "
+                      "Root, Start, Length, Loop), a different one from the Sample tab, with the tuning, drift, level and mute of "
+                      "Osc 2; Sync restarts it from Start every cycle of Osc 1. Default: Saw." },
         { "osc2WtPosition", "Position of oscillator 2 in the wavetable (Wavetable waveform only). The table is the one chosen "
                             "in the Wavetable tab (next to Osc 1), read here at its own position; muting the Wavetable tab "
                             "does not mute oscillator 2. Default 0 %." },
@@ -213,6 +215,12 @@ static juce::String paramHelp (const juce::String& id)
         { "sampleStart", "Sample playback start point." },
         { "sampleLength", "Cuts the sample after this time with a short fade (0 = full sample). Short values give LA-style synthesis: a sampled attack transient over a synthesized sustain, as on the Roland MT-32 and D-50." },
         { "sampleLoop", "Loops the sample from Start to the end while the note is held." },
+        { "osc2SampleRoot", "Osc 2 Sample: the note at which its file plays at its original pitch (before the Oct, Semi and Fine "
+                            "of Osc 2). Default: C4." },
+        { "osc2SampleStart", "Osc 2 Sample: playback start point, also where Sync restarts it. Default: 0 %." },
+        { "osc2SampleLength", "Osc 2 Sample: cuts the file after this time with a short fade (Full = the whole file). Default: Full." },
+        { "osc2SampleLoop", "Osc 2 Sample: loops the file from Start to the end (or its own loop, if the file has one) while "
+                            "the note is held. Default: Off." },
         { "inputGain", "Audio input gain (mic or line). Raise it if your mic is quiet." },
         { "inputMonitor", "Sends the input into the effects chain: your voice or instrument with echo, reverb, tape..." },
         { "vocoderOn", "Turns the vocoder on: your voice (input) shapes the synth sound. Play notes while you speak." },

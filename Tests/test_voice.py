@@ -252,4 +252,99 @@ finally:
 for name in XS:
     d = db(np.abs(out[(name, 1)] - out[(name, 0)]).max() / np.abs(out[(name, 0)]).max())
     c.check(d < -100, 'AVX2 = escalar con %s: diferencia máxima %.1f dB del pico (< -100)' % (name, d))
+
+# --- Osc 2 en modo Sample: su propio fichero, con la afinación, el nivel y el Mute de Osc 2 ---
+# Ficheros sintéticos propios (en Tests/renders): A = tono armónico en C4 a 44,1 kHz con un golpe de ruido inicial; B = tono de
+# armónicos impares en A3 a 48 kHz (0,8 s); S = seno de 440 Hz a 48 kHz (3 s)
+import wave
+from common import RENDERS
+
+
+def write_wav(name, x, rate):
+    path = os.path.join(RENDERS, name)
+    with wave.open(path, 'wb') as w:
+        w.setnchannels(1); w.setsampwidth(2); w.setframerate(rate)
+        w.writeframes((np.clip(x, -1, 1) * 32767).astype('<i2').tobytes())
+    return path
+
+
+t = np.arange(44100) / 44100.0
+xa = sum(np.sin(2 * np.pi * k * c4 * t) / k for k in range(1, 11)) * np.exp(-t / 0.8)
+xa[:441] += 0.3 * np.random.default_rng(1).standard_normal(441)
+FA = write_wav('o2s_A.wav', 0.5 * xa, 44100)
+t = np.arange(38400) / 48000.0
+FB = write_wav('o2s_B.wav', 0.5 * sum(np.sin(2 * np.pi * k * 220.0 * t) / k for k in range(1, 12, 2)) * np.minimum(1, t / 0.005), 48000)
+FS = write_wav('o2s_S.wav', 0.5 * np.sin(2 * np.pi * 440.0 * np.arange(144000) / 48000.0), 48000)
+SB = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%']
+O2S = ['Osc2 Wave=Sample', 'Osc2 Level=100%']
+NC = ['60:0.05:1.4:127']
+rel = lambda a, b: db(np.abs(a - b).max() / max(np.abs(b).max(), 1e-12))
+s1, fs = render(SB + ['Sample Level=100%', '--sample=' + FA], 1.5, NC, 'o2s.wav')
+s2, _ = render(SB + O2S + ['--osc2-sample=' + FA], 1.5, NC, 'o2s.wav')
+c.check(sha(s1) == sha(s2), 'Osc 2 Sample = fuente Sample con el mismo fichero, raíz y afinación (bit a bit)')
+ob = SB + O2S + ['Osc2 Sample Root=A3', 'Osc2 Semi=7', '--osc2-sample=' + FB]
+a, _ = render(SB + ['Sample Level=100%', '--sample=' + FA], 1.5, NC, 'o2s.wav')
+b, _ = render(ob, 1.5, NC, 'o2s.wav')
+ab, _ = render(SB + ['Sample Level=100%', '--sample=' + FA] + ob[len(SB):], 1.5, NC, 'o2s.wav')
+d = rel(ab, a + b)
+c.check(d < -100, 'dos ficheros a la vez (Sample A en C4, Osc 2 Sample B en A3 +7 st) = la suma de cada uno: %.1f dB (< -100)' % d)
+x, _ = render(SB + O2S + ['Osc2 Sample Root=A4', 'Osc2 Semi=7', 'Osc2 Fine=10.0 ct', '--osc2-sample=' + FS], 1.5, NC, 'o2s.wav')
+want = c4 * 2 ** (7.1 / 12); ct = 1200 * np.log2(pitch(x, fs) / want)
+c.check(abs(ct) < 0.05, 'Osc 2 Sample (seno, raíz A4) con +7 st +10 ct en C4: %.3f Hz (esperado %.3f, %+.3f ct)' % (pitch(x, fs), want, ct))
+x, _ = render(SB + O2S + ['Osc2 Mute=On', '--osc2-sample=' + FA], 1.5, NC, 'o2s.wav')
+c.check(np.abs(x).max() == 0.0, 'Osc 2 Sample en Mute: pico %.1e (silencio)' % np.abs(x).max())
+# Fin, bucle, Length y sync (B dura 0,8 s a su raíz: tocado en A3 termina a 0,85 s)
+NB = ['57:0.05:1.4:127']
+rms = lambda x, t0, t1: np.sqrt(np.mean(x[int(t0 * fs):int(t1 * fs)] ** 2))
+OB = SB + O2S + ['Osc2 Sample Root=A3', '--osc2-sample=' + FB]
+end, _ = render(OB, 1.5, NB, 'o2s.wav')
+loop, _ = render(OB + ['Osc2 Sample Loop=On'], 1.5, NB, 'o2s.wav')
+cut, _ = render(OB + ['Osc2 Sample Length=150 ms'], 1.5, NB, 'o2s.wav')
+syn, _ = render(OB + ['Osc2 Sync=On', 'Osc2 Octave=1'], 1.5, NB, 'o2s.wav')
+syncut, _ = render(OB + ['Osc2 Sync=On', 'Osc2 Octave=1', 'Osc2 Sample Length=150 ms'], 1.5, NB, 'o2s.wav')
+c.check(rms(end, 0.9, 1.4) == 0.0 and rms(loop, 0.9, 1.4) > 0.5 * rms(loop, 0.2, 0.7),
+        'Osc 2 Sample: sin Loop calla al acabar el fichero (RMS %.1e); con Loop sigue (%.3f frente a %.3f)'
+        % (rms(end, 0.9, 1.4), rms(loop, 0.9, 1.4), rms(loop, 0.2, 0.7)))
+c.check(rms(cut, 0.25, 1.4) == 0.0 and rms(syncut, 0.25, 1.4) == 0.0 and rms(syn, 0.9, 1.4) > 0.5 * rms(syn, 0.2, 0.7),
+        'Osc 2 Sample: Length 150 ms calla después (con y sin sync); el sync lo reinicia en cada ciclo (RMS %.3f tras el final del fichero)'
+        % rms(syn, 0.9, 1.4))
+# Sync: el salto del reinicio va corregido con minBLEP; queda el salto de pendiente (sin BLAMP), como en Wavetable con sync.
+# Medido al integrarlo (A en bucle, Oct +1, Semi +5): sin la corrección, C4 -33,7 dB a 44,1 kHz y -34,4 dB a 48 kHz
+for rate, lim in ((44100, -45), (48000, -50)):
+    x, fr = render(SB + O2S + ['Osc2 Sample Loop=On', 'Osc2 Sync=On', 'Osc2 Octave=1', 'Osc2 Semi=5', '--osc2-sample=' + FA, '--rate=%d' % rate],
+                   1.5, NC, 'o2s.wav')
+    al = alias_ratio(x, fr, c4)
+    c.check(al < lim, 'Osc 2 Sample con sync a %.1f kHz, C4: aliasing %.1f dB (< %d)' % (rate / 1000, al, lim))
+# Como modulador del Complex: el seno muestreado (raíz A4) = Osc 2 Sine, con la misma afinación, también con sync (el cursor se
+# lee en el instante de cada submuestra). Ventana hasta 0,9 s: el fichero de 3 s tocado a x3 (nota 81) dura 1 s
+CS = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Wave=Sine', 'Complex On=On', 'Complex Mod Source=Osc 2',
+      'Osc2 Level=0%', 'Osc2 Semi=7']
+for name, extra in (('ring', ['AM Depth=100%']), ('FM I 2', ['FM Index=I 2.00']), ('ring con sync', ['AM Depth=100%', 'Osc2 Sync=On', 'Osc2 Octave=1'])):
+    for note in (57, 81):
+        x1, _ = render(CS + extra + ['Osc2 Wave=Sine'], 1.0, ['%d:0.05:0.9:127' % note], 'o2s.wav')
+        x2, _ = render(CS + extra + ['Osc2 Wave=Sample', 'Osc2 Sample Root=A4', '--osc2-sample=' + FS], 1.0, ['%d:0.05:0.9:127' % note], 'o2s.wav')
+        d = rel(x2[int(0.06 * fs):int(0.9 * fs)], x1[int(0.06 * fs):int(0.9 * fs)])
+        c.check(d < -50, 'Complex %s, nota %d, modulador Osc 2 Sample (seno) = Osc 2 Sine: %.1f dB (< -50)' % (name, note, d))
+x0, _ = render(CS + ['AM Depth=100%', 'Osc2 Wave=Sample', '--osc2-sample=' + FS], 1.0, ['57:0.05:0.9:127'], 'o2s.wav')
+xm, _ = render(CS[:-2] + ['Osc2 Level=50%', 'Osc2 Mute=On', 'Osc2 Semi=7', 'AM Depth=100%', 'Osc2 Wave=Sample', '--osc2-sample=' + FS], 1.0,
+               ['57:0.05:0.9:127'], 'o2s.wav')
+c.check(sha(x0) == sha(xm) and np.abs(x0).max() > 0.01, 'Osc 2 Sample modulando en Mute (nivel 50 %) = a nivel 0 (bit a bit)')
+# Estado: la ruta viaja en el estado; sin fichero (o sin la propiedad, proyectos anteriores) Osc 2 Sample calla
+st = os.path.join(RENDERS, 'o2s_state.txt')
+render(SB + O2S + ['--osc2-sample=' + FB, '--dump-state=' + st], 0.1, [], 'o2s.wav')
+
+
+def juce_base64(text):
+    """MemoryBlock::toBase64Encoding de JUCE: "<bytes>." + 6 bits por carácter (tabla .A-Za-z0-9+), en orden little-endian."""
+    size, data = text.strip().split('.', 1)
+    table = '.ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+'
+    acc = sum(table.index(ch) << (6 * i) for i, ch in enumerate(data))
+    return acc.to_bytes(int(size), 'little')
+
+
+state = juce_base64(open(st).read())
+c.check(('osc2SamplePath="%s"' % FB).encode() in state, 'el estado guarda osc2SamplePath con la ruta del fichero')
+x, _ = render(SB + O2S, 1.0, NC, 'o2s.wav')
+y, _ = render(SB + O2S + ['--osc2-sample=' + os.path.join(RENDERS, 'no_such_file.wav')], 1.0, NC, 'o2s.wav')
+c.check(np.abs(x).max() == 0.0 and np.abs(y).max() == 0.0, 'Osc 2 Sample sin fichero y con un fichero que no existe: silencio, sin fallo')
 sys.exit(c.summary())

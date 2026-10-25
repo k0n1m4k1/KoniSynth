@@ -43,7 +43,8 @@ struct VoiceLfo
 // Voz: VCO (con drift) -> VCF (ladder + envolvente AD) -> VCA (ADSR). LFO propio con key sync.
 struct SynthVoice : juce::SynthesiserVoice
 {
-    SynthVoice (const Params& p, const SampleSlot& s, const WavetableSlot& w) : params (p), sampleSlot (s), wavetableSlot (w) { rng.setSeedRandomly(); }
+    SynthVoice (const Params& p, const SampleSlot& s, const SampleSlot& s2, const WavetableSlot& w)
+        : params (p), sampleSlot (s), osc2SampleSlot (s2), wavetableSlot (w) { rng.setSeedRandomly(); }
 
     bool canPlaySound (juce::SynthesiserSound* s) override { return dynamic_cast<SynthSound*> (s) != nullptr; }
 
@@ -354,6 +355,8 @@ struct SynthVoice : juce::SynthesiserVoice
         // Osc 2 en modo Wavetable: la misma tabla, con la fase de Osc 2 y su propia posición (sin tabla: Osc 2 calla)
         const auto osc2WtPositionBase = params.osc2WtPosition->load();
         mix.osc2Table = mix.osc2Wave == wavetableWave ? wavetableSlot.current.load (std::memory_order_acquire) : nullptr;
+        // Osc 2 en modo Sample: su propio fichero (sin fichero: Osc 2 calla)
+        mix.osc2Sample = mix.osc2Wave == sampleWave ? osc2SampleSlot.current.load (std::memory_order_acquire) : nullptr;
         {
             // Filtro de lazo (1 - S) + S·z^-1 y ρ, por bloque con la frecuencia base (vibrato y bend lo mueven < 1 %).
             // g = ganancia por periodo para caer 60 dB en Decay. S = ½ (promedio clásico) con ρ = g / cos(ω/2) si basta;
@@ -402,7 +405,8 @@ struct SynthVoice : juce::SynthesiserVoice
             }
             stringPickupPos = params.stringPickup->load();
         }
-        sampleLoop = params.sampleLoop->load() > 0.5f;
+        sample.loop = params.sampleLoop->load() > 0.5f;
+        osc2Sample.loop = params.osc2SampleLoop->load() > 0.5f;
         const auto* blockSample = sampleSlot.current.load (std::memory_order_acquire);
         const auto baseCutoff = params.cutoff->load() * cutoffSpread
                               * std::exp2 (params.filterKey->load() * keyOctaves);
@@ -659,7 +663,7 @@ struct SynthVoice : juce::SynthesiserVoice
             mix.osc2Level = savedOsc2Level;
             mix.noiseLevel = savedNoiseLevel;
             if (sampleLevel > 0.0f)
-                monoSources += sampleLevel * renderSample (dt, blockSample);
+                monoSources += sampleLevel * sample.render (dt, blockSample);
             if (stringLevel > 0.0f && stringActive)
                 monoSources += stringLevel * renderString (dt);
             if (blockWavetable != nullptr)
@@ -891,11 +895,11 @@ private:
         const auto t0 = 0.5 * sub, t1 = t0 + 0.5;
         double inc, u0, u1;
         bool reset = false;
+        const auto syncs = mix.osc2Sync && syncPhase + dt >= 1.0;
+        const auto f = (1.0 - syncPhase) / dt;
         if (complex.modSource == 1)
         {
             inc = dt * mix.osc2Ratio * osc2Mul; // = dt2 de renderMonoSources
-            const auto syncs = mix.osc2Sync && syncPhase + dt >= 1.0;
-            const auto f = (1.0 - syncPhase) / dt;
             const auto unwrapped = [&] (double t) { return syncs && t >= f ? (t - f) * inc : osc2Phase + t * inc; };
             u0 = unwrapped (t0);
             u1 = unwrapped (t1);
@@ -914,6 +918,22 @@ private:
         a.extPhaseEnd = u1 - std::floor (u1);
         if (complex.modSource == 2)
             a.extMod = oscillator (mix.subWave, p0, a.extDtM, 0.5f, true);
+        else if (mix.osc2Wave == sampleWave)
+        {
+            // Sample: el cursor en el instante τ (tras el reinicio del sync, desde Start), con su final, su bucle y el fundido de
+            // Length; la fase nominal de Osc 2 sigue dando el incremento (escala del índice FM) y la vuelta (Mod Sync)
+            a.extMod = 0.0;
+            const auto& r = osc2Sample;
+            if (mix.osc2Sample != nullptr && r.data == mix.osc2Sample)
+            {
+                const auto afterReset = syncs && t0 >= f;
+                const auto at = afterReset ? r.loopStart + (t0 - f) * inc * r.data->sampleRate / r.rootHz
+                                           : r.pos + t0 * inc * r.data->sampleRate / r.rootHz;
+                const auto p = (afterReset ? ! r.cut : r.playing) ? r.place (at) : -1.0;
+                if (p >= 0.0)
+                    a.extMod = r.valueAt (p) * r.fade();
+            }
+        }
         else if (mix.osc2Wave != wavetableWave)
             a.extMod = oscillator (mix.osc2Wave, p0, a.extDtM, pw, true);
         else
@@ -989,8 +1009,10 @@ private:
         int noiseColor = 0; // 0 blanco, 1 rosa, 2 LFSR largo, 3 LFSR corto
         const WavetableData* osc2Table = nullptr; // modo Wavetable: tabla del bloque y posición de esta muestra
         float osc2WtPos = 0.0f;
+        const SampleData* osc2Sample = nullptr; // modo Sample: fichero del bloque
     };
     static constexpr int wavetableWave = 4; // osc2Wave = Wavetable (Layout.h: tras Sine, Triangle, Saw y Square)
+    static constexpr int sampleWave = 5;    // osc2Wave = Sample
 
     // Fuentes mono del mezclador. dt = incremento de fase de Osc 1 (con vibrato y drift), así Osc 2 y el sub los siguen.
     //  Osc 2: dt·2^(oct + (semi + fine/100)/12); sync duro a la fundamental de Osc 1 (fase de referencia sin unísono ni FM),
@@ -1016,12 +1038,29 @@ private:
         lastSubRatio = mix.subRatio;
 
         const auto osc2Table = mix.osc2Wave == wavetableWave; // Osc 2 en modo Wavetable (mix.osc2Table puede faltar: calla)
+        const auto osc2Sampled = mix.osc2Wave == sampleWave;  // Osc 2 en modo Sample (mix.osc2Sample puede faltar: calla)
         if (mix.osc2Level > 0.0f)
         {
-            if (! osc2Table)
+            if (! osc2Table && ! osc2Sampled)
                 out += mix.osc2Level * oscillator (mix.osc2Wave, osc2Phase, dt2, pw, false);
-            else if (mix.osc2Table != nullptr)
+            else if (osc2Table && mix.osc2Table != nullptr)
                 out += mix.osc2Level * readWavetable (*mix.osc2Table, osc2Phase, dt2, mix.osc2WtPos);
+        }
+        // Osc 2 Sample: avanza siempre que se llega aquí (también a nivel 0, en Mute o como modulador del Complex), como su fase.
+        // Con sync, el salto entre el valor en el instante del reinicio (f = (1 - syncPhase)/dt) y el de Start se mide antes de
+        // avanzar y se corrige con minBLEP más abajo; sin sync el sample suena tal cual
+        float osc2SampleJump = 0.0f;
+        const auto osc2SyncAt = syncPhase + dt >= 1.0 ? (1.0 - syncPhase) / dt : 1.0;
+        if (osc2Sampled)
+        {
+            if (mix.osc2Level > 0.0f && mix.osc2Sync && syncPhase + dt >= 1.0)
+            {
+                const auto before = osc2Sample.playing && osc2Sample.data == mix.osc2Sample
+                                  ? osc2Sample.place (osc2Sample.pos + osc2SyncAt * dt2 * osc2Sample.data->sampleRate / osc2Sample.rootHz) : -1.0;
+                const auto after = osc2Sample.canRestart (mix.osc2Sample) ? osc2Sample.valueAt (osc2Sample.loopStart) : 0.0f;
+                osc2SampleJump = osc2Sample.fade() * (after - (before >= 0.0 ? osc2Sample.valueAt (before) : 0.0f));
+            }
+            out += mix.osc2Level * osc2Sample.render (dt2, mix.osc2Sample);
         }
         if (mix.subLevel > 0.0f) // Osc 3: la cuadrada va siempre al 50 % (no sigue al mando PW, como el Sub)
             out += mix.subLevel * oscillator (mix.subWave, subPhase, dt * mix.subRatio, 0.5f, false);
@@ -1060,7 +1099,7 @@ private:
         // Saltos de este paso para el minBLEP: Osc 2 (con su reinicio si la referencia da la vuelta) y sub
         {
             const auto syncWraps = syncPhase + dt >= 1.0;
-            if (mix.osc2Level > 0.0f && ! osc2Table)
+            if (mix.osc2Level > 0.0f && ! osc2Table && ! osc2Sampled)
                 MinBlep::syncedStep (monoBlep, mix.osc2Wave, osc2Phase, dt2, mix.osc2Sync && syncWraps,
                                      syncWraps ? (1.0 - syncPhase) / dt : 1.0, pw, mix.osc2Level, mix.osc2Level);
             // Wavetable: la tabla ya está limitada en banda (mipmaps); solo el reinicio del sync es un salto: tabla(0) - tabla(fase
@@ -1074,6 +1113,9 @@ private:
                                 - readWavetable (*mix.osc2Table, ta, dt2, mix.osc2WtPos);
                 monoBlep.add (f, jump * mix.osc2Level, jump * mix.osc2Level);
             }
+            // Sample: el mismo tratamiento (el fichero ya está limitado en banda por su nivel diezmado)
+            if (osc2SampleJump != 0.0f)
+                monoBlep.add (osc2SyncAt, osc2SampleJump * mix.osc2Level, osc2SampleJump * mix.osc2Level);
             if (mix.subLevel > 0.0f)
                 MinBlep::segment (monoBlep, mix.subWave, subPhase, dt * mix.subRatio, 0.0, 1.0, 0.5, mix.subLevel, mix.subLevel);
         }
@@ -1085,7 +1127,11 @@ private:
         osc2Phase += dt2;
         osc2Phase -= std::floor (osc2Phase);
         if (mix.osc2Sync && syncWrapped)
+        {
             osc2Phase = syncPhase / dt * dt2;
+            if (osc2Sampled) // de nuevo desde Start, en el instante exacto: lo recorrido tras el reinicio
+                osc2Sample.restart (syncPhase / dt * dt2, mix.osc2Sample);
+        }
         subPhase += dt * mix.subRatio;
         subPhase -= std::floor (subPhase);
 
@@ -1104,25 +1150,131 @@ private:
 
     static constexpr int maxUnison = 7;
 
-    // Fuente Sample: lee el sample a f / f_raíz · fs_archivo / fs_host muestras por muestra, desde el nivel diezmado
-    // elegido al pulsar la nota (relación ≤ 1,06 en ese nivel: margen de +1 semitono para vibrato y drift).
-    // Si el sample cambia durante la nota, esa nota deja de leerlo (nunca usa un puntero retirado).
+    // Reproductor de un sample: la fuente Sample y Osc 2 en modo Sample, cada uno con su fichero. Lee a
+    // f / f_raíz · fs_archivo / fs_host muestras por muestra, desde el nivel diezmado elegido al pulsar la nota (relación ≤ 1,06
+    // en ese nivel: margen de +1 semitono para vibrato y drift). Si el sample cambia durante la nota, esa nota deja de leerlo
+    // (nunca usa un puntero retirado).
+    struct SampleReader
+    {
+        const SampleData* data = nullptr;
+        bool playing = false, loop = false;
+        bool cut = false; // terminó el fundido de Length: el sync de Osc 2 ya no lo reanuda
+        int levelIndex = 0, cutoffSamples = -1, fadeSamples = 480, elapsed = 0;
+        double pos = 0.0, loopStart = 0.0, rootHz = 261.63;
+
+        // hz: frecuencia de la nota al pulsarla (la de Osc 2, con su afinación, para su sample)
+        void start (const SampleData* d, double hz, int root, float startFraction, float lengthMs, double hostRate)
+        {
+            data = d;
+            playing = data != nullptr;
+            cut = false;
+            if (! playing)
+                return;
+
+            rootHz = juce::MidiMessage::getMidiNoteInHertz (juce::jlimit (0, 127, root));
+            const auto ratio = hz / rootHz * data->sampleRate / hostRate;
+            levelIndex = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::ceil (std::log2 (juce::jmax (1.0e-9, ratio * 1.06))));
+            loopStart = juce::jlimit (0.0, (double) data->length() - 2.0, startFraction * (double) data->length());
+            pos = loopStart;
+            cutoffSamples = lengthMs >= 0.5f ? (int) (0.001 * lengthMs * hostRate) : -1;
+            fadeSamples = (int) (0.010 * hostRate);
+            elapsed = 0;
+        }
+
+        // Valor en la posición p (muestras del nivel 0), en el nivel diezmado de la nota
+        float valueAt (double p) const
+        {
+            const auto scale = 1.0 / (double) (1 << levelIndex);
+            return data->read (levelIndex, p * scale);
+        }
+
+        // Fin y comienzo del bucle: el bucle propio del formato (SoundFont, BRR) si lo trae y empieza tras Start; si no, de
+        // Start al final
+        void bounds (double& end, double& loopFrom) const
+        {
+            const auto native = loop && data->loopStart >= 0 && data->loopStart >= (int) loopStart;
+            end = native ? (double) data->loopEnd : (double) data->length();
+            loopFrom = native ? (double) data->loopStart : loopStart;
+        }
+
+        // Muestra actual y avance; dt = f / fs_host de lo que suena (la nota, u Osc 2 con su afinación y deriva)
+        float render (double dt, const SampleData* blockData)
+        {
+            if (! playing || blockData != data)
+            {
+                playing = false;
+                return 0.0f;
+            }
+
+            auto s = valueAt (pos);
+            if (cutoffSamples >= 0) // modo LA: fundido lineal de 10 ms tras Length
+            {
+                const auto over = ++elapsed - cutoffSamples;
+                if (over >= fadeSamples)
+                {
+                    playing = false;
+                    cut = true;
+                    return 0.0f;
+                }
+                if (over > 0)
+                    s *= 1.0f - (float) over / (float) fadeSamples;
+            }
+            pos += dt * data->sampleRate / rootHz;
+            double end, loopFrom;
+            bounds (end, loopFrom);
+            if (pos >= end)
+            {
+                if (loop && end - loopFrom > 1.0)
+                    pos = loopFrom + std::fmod (pos - loopFrom, end - loopFrom);
+                else
+                    playing = false;
+            }
+            return s;
+        }
+
+        // Sin tocar el estado (modulador del Complex, salto del sync): la posición p ya con el final y el bucle aplicados,
+        // o -1 si ahí ya no suena
+        double place (double p) const
+        {
+            double end, loopFrom;
+            bounds (end, loopFrom);
+            if (p < end)
+                return p;
+            return loop && end - loopFrom > 1.0 ? loopFrom + std::fmod (p - loopFrom, end - loopFrom) : -1.0;
+        }
+
+        // Ganancia del fundido de Length en la muestra actual (la que aplicará render)
+        float fade() const
+        {
+            const auto over = elapsed + 1 - cutoffSamples;
+            return cutoffSamples < 0 || over <= 0 ? 1.0f : juce::jmax (0.0f, 1.0f - (float) over / (float) fadeSamples);
+        }
+
+        bool canRestart (const SampleData* blockData) const { return data != nullptr && blockData == data && ! cut; }
+
+        // Sync de Osc 2: vuelve a Start más lo recorrido desde el reinicio (phaseSinceReset = tiempo · f / fs_host)
+        void restart (double phaseSinceReset, const SampleData* blockData)
+        {
+            if (! canRestart (blockData))
+                return;
+            const auto p = place (loopStart + phaseSinceReset * data->sampleRate / rootHz);
+            playing = p >= 0.0;
+            if (playing)
+                pos = p;
+        }
+    };
+
     void startSample (int note)
     {
-        sampleData = sampleSlot.current.load (std::memory_order_acquire);
-        samplePlaying = sampleData != nullptr;
-        if (! samplePlaying)
-            return;
-
-        sampleRootHz = juce::MidiMessage::getMidiNoteInHertz (juce::jlimit (0, 127, (int) params.sampleRoot->load()));
-        const auto ratio = juce::MidiMessage::getMidiNoteInHertz (note) * KoniTuning::ratio (note) / sampleRootHz * sampleData->sampleRate / getSampleRate();
-        sampleLevelIndex = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::ceil (std::log2 (juce::jmax (1.0e-9, ratio * 1.06))));
-        sampleLoopStart = juce::jlimit (0.0, (double) sampleData->length() - 2.0, params.sampleStart->load() * (double) sampleData->length());
-        samplePos = sampleLoopStart;
-        const auto lengthMs = params.sampleLength->load();
-        sampleCutoffSamples = lengthMs >= 0.5f ? (int) (0.001 * lengthMs * getSampleRate()) : -1;
-        sampleFadeSamples = (int) (0.010 * getSampleRate());
-        sampleElapsed = 0;
+        const auto hz = juce::MidiMessage::getMidiNoteInHertz (note) * KoniTuning::ratio (note);
+        sample.start (sampleSlot.current.load (std::memory_order_acquire), hz, (int) params.sampleRoot->load(),
+                      params.sampleStart->load(), params.sampleLength->load(), getSampleRate());
+        // Osc 2: el nivel diezmado se elige con su afinación al pulsar (Oct, Semi y Fine). La deriva, el LFO 2 y la matriz lo
+        // mueven después, como el vibrato a la fuente Sample: por encima del margen de +1 semitono el nivel no se cambia (aliasing)
+        const auto osc2Ratio = std::exp2 ((double) params.osc2Octave->load()
+                                          + ((double) params.osc2Semi->load() + (double) params.osc2Fine->load() / 100.0) / 12.0);
+        osc2Sample.start (osc2SampleSlot.current.load (std::memory_order_acquire), hz * osc2Ratio, (int) params.osc2SampleRoot->load(),
+                          params.osc2SampleStart->load(), params.osc2SampleLength->load(), getSampleRate());
     }
 
     // Cuerda pulsada: Karplus-Strong extendido (Jaffe y Smith 1983; ccrma.stanford.edu/~jos/pasp, EKS).
@@ -1264,42 +1416,6 @@ private:
         return va + ff * (vb - va);
     }
 
-    float renderSample (double dt, const SampleData* blockData)
-    {
-        if (! samplePlaying || blockData != sampleData)
-        {
-            samplePlaying = false;
-            return 0.0f;
-        }
-
-        const auto scale = 1.0 / (double) (1 << sampleLevelIndex);
-        auto s = sampleData->read (sampleLevelIndex, samplePos * scale);
-        if (sampleCutoffSamples >= 0) // modo LA: fundido lineal de 10 ms tras Length
-        {
-            const auto over = ++sampleElapsed - sampleCutoffSamples;
-            if (over >= sampleFadeSamples)
-            {
-                samplePlaying = false;
-                return 0.0f;
-            }
-            if (over > 0)
-                s *= 1.0f - (float) over / (float) sampleFadeSamples;
-        }
-        samplePos += dt * sampleData->sampleRate / sampleRootHz; // dt = f / fs_host
-        // Bucle propio del formato (SoundFont, BRR) si lo trae y empieza tras Start; si no, de Start al final
-        const auto native = sampleLoop && sampleData->loopStart >= 0 && sampleData->loopStart >= (int) sampleLoopStart;
-        const auto end = native ? (double) sampleData->loopEnd : (double) sampleData->length();
-        const auto loopFrom = native ? (double) sampleData->loopStart : sampleLoopStart;
-        if (samplePos >= end)
-        {
-            if (sampleLoop && end - loopFrom > 1.0)
-                samplePos = loopFrom + std::fmod (samplePos - loopFrom, end - loopFrom);
-            else
-                samplePlaying = false;
-        }
-        return s;
-    }
-
     static constexpr int stringSize = 8192; // potencia de 2: 8192 muestras = 5,9 Hz a 48 kHz (más grave que cualquier nota MIDI útil)
     std::array<float, stringSize> stringBuffer {};
     int stringWrite = 0;
@@ -1313,6 +1429,7 @@ private:
 
     const Params& params;
     const SampleSlot& sampleSlot;
+    const SampleSlot& osc2SampleSlot;
     const WavetableSlot& wavetableSlot;
     double wtPhase = 0.0;
     float bendTarget = 0.0f, modTarget = 0.0f, bendSmoothed = 0.0f, modSmoothed = 0.0f, controlCoef = 1.0f;
@@ -1321,10 +1438,7 @@ private:
     float polyPressure = 0.0f, channelPressure = 0.0f, pressureSmoothed = 0.0f;
     unsigned lfsr = 1u; // 15 bits, nunca 0 (estado bloqueado del LFSR)
     double lfsrPhase = 0.0;
-    const SampleData* sampleData = nullptr;
-    bool samplePlaying = false, sampleLoop = false;
-    int sampleLevelIndex = 0, sampleCutoffSamples = -1, sampleFadeSamples = 480, sampleElapsed = 0;
-    double samplePos = 0.0, sampleLoopStart = 0.0, sampleRootHz = 261.63;
+    SampleReader sample, osc2Sample; // fuente Sample y Osc 2 en modo Sample
     VoiceLfo lfo1, lfo2;
     double frequency = 440.0;
     konisimd::UnisonLanes lanes {}; // fases, relaciones y ganancias del unísono (8 carriles; usa maxUnison = 7)

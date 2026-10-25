@@ -93,7 +93,8 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc1Level", 1 },   "Osc1 Level",  NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "pulseWidth", 1 },  "Pulse Width", NormalisableRange<float> (0.05f, 0.95f), 0.5f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "pwmDepth", 1 },    "PWM Depth",   NormalisableRange<float> (0.0f, 0.45f), 0.0f, percent));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2Wave", 1 },    "Osc2 Wave",   StringArray { "Sine", "Triangle", "Saw", "Square", "Wavetable" }, 2)); // Wavetable: la tabla de la fuente Wavetable
+    // Wavetable: la tabla de la fuente Wavetable. Sample: un fichero propio (osc2SamplePath en el estado), distinto del de la fuente Sample
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2Wave", 1 },    "Osc2 Wave",   StringArray { "Sine", "Triangle", "Saw", "Square", "Wavetable", "Sample" }, 2));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2Octave", 1 },  "Osc2 Octave", -2, 2, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2Semi", 1 },    "Osc2 Semi",   -12, 12, 0));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2Fine", 1 },    "Osc2 Fine",   NormalisableRange<float> (-50.0f, 50.0f), 0.0f,
@@ -856,5 +857,14 @@ static APVTS::ParameterLayout createLayout()
 
     // Modulador del Complex Oscillator: el interno (Mod Wave, Ratio) o Osc 2 / Osc 3 tal como suenan (afinación, forma, tabla)
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "complexModSource", 1 }, "Complex Mod Source", StringArray { "Internal", "Osc 2", "Osc 3" }, 0));
+
+    // Osc 2 en modo Sample (osc2Wave = Sample): mismos controles que la fuente Sample, con su propio fichero (osc2SamplePath) y
+    // la afinación, la deriva, el nivel y el Mute de Osc 2
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2SampleRoot", 1 },  "Osc2 Sample Root", 0, 127, 60, noteName));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2SampleStart", 1 }, "Osc2 Sample Start", NormalisableRange<float> (0.0f, 0.99f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc2SampleLoop", 1 },  "Osc2 Sample Loop", false));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2SampleLength", 1 }, "Osc2 Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
+        parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
     return l;
 }

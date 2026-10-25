@@ -120,13 +120,45 @@ another source's solo).
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). | Sine, Triangle, Saw, Square, Wavetable / Saw |
+| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Wavetable, Sample / Saw |
+| Edit... (header) | Opens the sample editor of Osc 2 (Sample waveform only; dimmed otherwise). | - |
 | Sync (switch) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. | Off / On / Off |
 | Level | Oscillator 2 level. | 0-100 % / 0 % |
 | Oct | Octave relative to oscillator 1. | -2 to +2 / 0 |
 | Semi | Offset in semitones (7 = fifth, 12 = octave). | -12 to +12 / 0 |
 | Fine | Fine detune; a few cents give beating. | -50 to +50 ct / 0 ct |
 | WT Pos | Position of Osc 2 in the wavetable (Wavetable waveform only), so one table can sound at two positions. | 0-100 % / 0 % |
+
+**Osc 2 Sample** (Wave = Sample). A second sample player with its own file, independent of the Sample tab: two different
+files can sound at once. It uses the Level, Oct, Semi, Fine, drift and Mute of Osc 2; Edit... opens the same sample
+editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loop), working on the Osc 2 file.
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Root (editor) | Note at which the file plays at its original pitch, before Oct, Semi and Fine. | C-1 to G9 / C4 |
+| Start (editor) | Playback start point; also where Sync restarts it. | 0-99 % / 0 % |
+| Length (editor) | Cuts the file after this time (counted from the note) with a short fade. | Full, up to 2000 ms / Full |
+| Loop (editor) | Loops from Start to the end (or the file's own loop, if it has one) while the note is held. | Off / On / Off |
+
+- **Sync** restarts the file from Start at every cycle of Osc 1, at the exact instant: a long sample may never play to
+  the end, it is reread from its beginning every cycle (a pitched buzz with the colour of its first milliseconds). This
+  is deliberate. It also brings back a file that has reached its end, but not one cut by Length. The jump of each
+  restart is corrected; the corner left by the change of slope is not, as with the Wavetable waveform. Measured with a
+  harmonic test file (Oct +1, Semi +5, loop on), energy outside the harmonics of the note: C4 -49.0 dB at 44.1 kHz and
+  -53.8 dB at 48 kHz (without the correction: -33.7 and -34.4 dB; a synced Saw: -103.8 and -111.8 dB).
+- As the **Complex Mod Source** (Osc 2), the file itself modulates oscillator 1, read at the doubled rate with the
+  same cursor that plays it (it keeps moving at level 0 or muted, and follows the end, the loop and Sync). FM Index is
+  scaled by the nominal frequency of Osc 2 (the note with Oct, Semi and Fine), not by any pitch found in the file; Mod
+  Sync follows that nominal frequency too. A file without a clear pitch gives inharmonic, noisy FM: the 2x step does
+  not remove every alias with such a modulator.
+- The decimated level of the file (anti-aliasing for upward transposition) is chosen when the note starts, with the
+  tuning of Osc 2 at that moment and a margin of +1 semitone; raising Oct or Semi during the note can alias.
+- Loading another file while a note sounds silences that note's Osc 2 (it never reads a file being replaced).
+- CPU (8 notes, unison 7): Osc 2 Sample 3.98 % of a core against 4.35 % for Osc 2 Saw; as the Complex modulator,
+  8.97 % against 8.62 %.
+- Presets save the path of the Osc 2 file (preset format 3). Presets without it (older ones and factory presets) load
+  with no Osc 2 file, so a preset never inherits the file of the previous one. A missing file asks to Locate it, as
+  with the Sample tab.
 
 **Osc 3** (grows from the classic sub-oscillator and follows Osc 1)
 
