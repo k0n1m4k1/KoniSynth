@@ -100,6 +100,22 @@ struct SynthVoice : juce::SynthesiserVoice
         }
         pitchEnvValue = 1.0f;
 
+        // Redisparo en Mono/Legato (stopNote): tono, velocity y envolventes de la nota nueva sin reiniciar fases, filtro, deriva
+        // ni unísono; las envolventes arrancan su ataque desde el nivel que tenían y el nivel de velocity se alcanza en 5 ms
+        if (std::exchange (pendingRetrigger, false) && (int) params.voiceMode->load() != 0)
+        {
+            frequency = newHz;
+            keyOctaves = (float) (note - 60) / 12.0f;
+            levelTarget = 0.2f * velocity;
+            noteVelocity = velocity;
+            startSample (note);
+            startString (juce::MidiMessage::getMidiNoteInHertz (note) * KoniTuning::ratio (note));
+            updateEnvelopes();
+            adsr.noteOn();
+            filterEnv.noteOn();
+            return;
+        }
+
         // Unísono: el número de osciladores se fija al pulsar la nota. Con más de uno, fases aleatorias:
         // evita que todos arranquen en fase (pico de nivel y filtrado en peine al inicio) y abre el estéreo.
         // Free Running (Osc Phase): fases y relaciones de la nota anterior antes de reiniciarlas abajo
@@ -157,7 +173,7 @@ struct SynthVoice : juce::SynthesiserVoice
         lfo2.reset (rng);
         frequency = newHz;
         keyOctaves = (float) (note - 60) / 12.0f;
-        level = 0.2f * velocity; // 0.2 deja margen para 5 voces a velocity 1 sin clipping
+        level = levelTarget = 0.2f * velocity; // 0.2 deja margen para 5 voces a velocity 1 sin clipping
         noteVelocity = velocity;
         osc2Phase = drift > 0.0f ? rng.nextDouble() : 0.0;
         subPhase = syncPhase = 0.0;
@@ -223,6 +239,15 @@ struct SynthVoice : juce::SynthesiserVoice
             pendingLegato = true;
             clearCurrentNote();
         }
+        else if ((int) params.voiceMode->load() != 0 && adsr.isActive())
+        {
+            // Robo en Mono/Legato de la voz que aún suena (en su release: notas sin solapar, como al arrastrar por el
+            // teclado). Antes se cortaba a 0 y se reiniciaban filtro y fases: un escalón (clic medido de +25 dB sobre los
+            // saltos propios de la sierra). Como en un monofónico analógico, la nota nueva redispara las envolventes desde
+            // su nivel actual con el filtro y los osciladores en marcha. Si no llega (panic), renderNextBlock las reinicia
+            pendingRetrigger = true;
+            clearCurrentNote();
+        }
         else
         {
             adsr.reset();
@@ -240,7 +265,8 @@ struct SynthVoice : juce::SynthesiserVoice
     {
         if (! isVoiceActive())
         {
-            if (std::exchange (pendingLegato, false)) // legato pendiente que no llegó (panic, cambio de modo)
+            // legato o redisparo pendiente que no llegó (panic, cambio de modo)
+            if (std::exchange (pendingLegato, false) | std::exchange (pendingRetrigger, false))
             {
                 adsr.reset();
                 filterEnv.reset();
@@ -452,6 +478,8 @@ struct SynthVoice : juce::SynthesiserVoice
             auto freq = frequency;
             const auto ampEnvValue = adsr.getNextSample();
             const auto filterEnvValue = filterEnv.getNextSample(); // también fuente de la matriz (antes solo con el filtro encendido)
+            if (level != levelTarget) // solo tras un redisparo con otra velocity (polo de 5 ms, como la rueda)
+                level += controlCoef * (levelTarget - level);
             auto amp  = level * ampEnvValue;
             float lfoOctaves = 0.0f, lfoValue = 0.0f;
 
@@ -1453,6 +1481,8 @@ private:
     float bendTarget = 0.0f, modTarget = 0.0f, bendSmoothed = 0.0f, modSmoothed = 0.0f, controlCoef = 1.0f;
     float glideSemis = 0.0f, pitchEnvValue = 0.0f;
     bool pendingLegato = false;
+    bool pendingRetrigger = false; // Mono/Legato: voz robada mientras sonaba; la nota nueva la redispara sin cortarla
+    float levelTarget = 0.0f;      // nivel por velocity; tras un redisparo, 'level' lo alcanza en 5 ms (sin escalón)
     float polyPressure = 0.0f, channelPressure = 0.0f, pressureSmoothed = 0.0f;
     unsigned lfsr = 1u; // 15 bits, nunca 0 (estado bloqueado del LFSR)
     double lfsrPhase = 0.0;
