@@ -39,6 +39,8 @@ silences the source without changing its level; mutes are off by default and pre
 | Drift | Analog instability: slow random detuning (see Drift below). | 0-100 % / 20 % |
 | P.Env | Pitch drop or rise at the start of each note: kicks, toms, laser zaps. | -48 to +48 st / 0 st |
 | P.Decay | How fast the pitch envelope returns to the note's pitch. | 1-2000 ms / 50 ms |
+| Tri Sym | Triangle waveform only: makes the triangle slightly lopsided like an analog one (even harmonics; see Analog triangle below). | 0-100 % / 0 % |
+| Tri Rnd | Triangle waveform only: rounds its tips (weaker odd harmonics); 100 % is a sine. | 0-100 % / 0 % |
 
 **Wavetable** (Edit... opens the wavetable editor: the frames in perspective, the table menu, Level, Position and a
 **Load** button for a WAV with 2048 samples per frame, the Serum format, or a single cycle)
@@ -77,6 +79,14 @@ Loop, Level, Root, Start, Length and a **Load** button. The file chooser accepts
 mixed passively at the waveform switch, 10/57 saw and 47/57 triangle (47 kΩ and 10 kΩ resistors). Checked against a recorded
 Model D: harmonics 2 to 10 within 1.05 dB RMS. Softer than Saw, with a little more edge than Triangle; it aliases like the
 triangle (its saw jump is corrected, its corners are not).
+
+**Analog triangle** (Tri Sym and Tri Rnd, one pair per oscillator, Triangle waveform only). Measured on two Minimoog Model D
+(raw waveforms at C3): their triangles carry even harmonics (h2 -24/-27 dB, h4 -41/-42 dB) that an ideal triangle lacks,
+and their odd harmonics sit 3 to 7 dB lower (h3 -22/-26 dB against -19.1 dB). Tri Rnd blends the triangle with a sine
+(rounded tips); Tri Sym adds a squared term (lopsided shape) with no DC offset. The filter input stage already rounds the
+tips a little (h3 -22 dB with the ideal triangle), so through the filter Tri Sym 50-60 % and Tri Rnd 0-20 % match harmonics
+2 to 8 of the two instruments within 1.4 to 3.0 dB RMS (Sym 60 % / Rnd 0 %: 1.4 dB against one of them). With Filter off,
+Tri Rnd 30-50 % does that job. At 0 % both, the triangle is the ideal one.
 
 **Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse** (all four menus) are the waveforms a Prophet-5 oscillator plays when
 several of its waveform switches are on, in the proportions of its circuit (rev 1/2 service manual, voice schematic):
@@ -152,6 +162,7 @@ another source's solo).
 | Semi | Offset in semitones (7 = fifth, 12 = octave). | -12 to +12 / 0 |
 | Fine | Fine detune; a few cents give beating. | -50 to +50 ct / 0 ct |
 | WT Pos | Position of Osc 2 in the wavetable (Wavetable waveform only), so one table can sound at two positions. | 0-100 % / 0 % |
+| Tri Sym / Tri Rnd | Analog triangle of Osc 2 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
 
 **Osc 2 Sample** (Wave = Sample). A second sample player with its own file, independent of the Sample tab: two different
 files can sound at once. It uses the Level, Oct, Semi, Fine, drift and Mute of Osc 2; Edit... opens the same sample
@@ -193,6 +204,7 @@ editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loo
 | Oct | Base octave below Osc 1. | -1 oct, -2 oct / -1 oct |
 | Semi | Semitones on top of the base octave: from -1 oct, +12 = same octave as Osc 1 and +24 = one octave up. | -24 to +24 / 0 |
 | Fine | Fine detune. | -50 to +50 ct / 0 ct |
+| Tri Sym / Tri Rnd | Analog triangle of Osc 3 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
 
 **Noise**
 

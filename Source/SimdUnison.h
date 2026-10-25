@@ -56,7 +56,9 @@ struct ComplexArgs
 
 // Una muestra del unísono (sin modo complejo): suma estéreo y avance de fases. Misma semántica que la ruta escalar.
 // La portadora sale sin corregir (forma ingenua): el antialiasing lo añade el minBLEP de la voz (Dsp/MinBlep.h).
-void unisonStepAvx2 (UnisonLanes& lanes, int wave, double dt, double pw, float& left, float& right);
+// triA, triR, triM: forma del triángulo (TriShape en Dsp/OscillatorCore.h), solo con wave = Triangle; 0, 0 = sin cambios
+void unisonStepAvx2 (UnisonLanes& lanes, int wave, double dt, double pw, float& left, float& right,
+                     double triA = 0.0, double triR = 0.0, double triM = 0.0);
 
 // Una submuestra del oscilador complejo (dtP ya incluye el factor 1/2 del sobremuestreo 2x).
 void complexStepAvx2 (UnisonLanes& lanes, const ComplexArgs& args, double dtP, float& left, float& right, float& firstMod);

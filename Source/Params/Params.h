@@ -49,6 +49,8 @@ struct Params
         osc2Wave = get ("osc2Wave"); osc2Octave = get ("osc2Octave"); osc2Semi = get ("osc2Semi"); osc2Fine = get ("osc2Fine");
         osc2Level = get ("osc2Level"); osc2Sync = get ("osc2Sync"); subLevel = get ("subLevel"); subOctave = get ("subOctave");
         osc2WtPosition = get ("osc2WtPosition"); osc3Wave = get ("osc3Wave"); osc3Semi = get ("osc3Semi"); osc3Fine = get ("osc3Fine");
+        osc1TriSym = get ("osc1TriSym"); osc1TriRound = get ("osc1TriRound"); osc2TriSym = get ("osc2TriSym"); osc2TriRound = get ("osc2TriRound");
+        osc3TriSym = get ("osc3TriSym"); osc3TriRound = get ("osc3TriRound");
         noiseLevel = get ("noiseLevel"); noiseColor = get ("noiseColor");
         wtLevel = get ("wtLevel"); wtTable = get ("wtTable"); wtPosition = get ("wtPosition");
         stringLevel = get ("stringLevel"); stringDecay = get ("stringDecay"); stringBright = get ("stringBright"); stringPick = get ("stringPick");
@@ -264,6 +266,7 @@ struct Params
                        *unisonVoices {}, *unisonDetune {}, *unisonSpread {}, *voicePan {}, *voicePanMode {},
                        *osc1Level {}, *pulseWidth {}, *pwmDepth {}, *osc2Wave {}, *osc2Octave {}, *osc2Semi {}, *osc2Fine {},
                        *osc2Level {}, *osc2Sync {}, *subLevel {}, *subOctave {}, *noiseLevel {}, *noiseColor {}, *osc2WtPosition {}, *osc3Wave {}, *osc3Semi {}, *osc3Fine {},
+                       *osc1TriSym {}, *osc1TriRound {}, *osc2TriSym {}, *osc2TriRound {}, *osc3TriSym {}, *osc3TriRound {},
                        *wtLevel {}, *wtTable {}, *wtPosition {},
                        *stringLevel {}, *stringDecay {}, *stringBright {}, *stringPick {},
                        *sampleLevel {}, *sampleLength {}, *sampleRoot {}, *sampleStart {}, *sampleLoop {}, *inputGain {}, *inputMonitor {},

@@ -333,6 +333,10 @@ struct SynthVoice : juce::SynthesiserVoice
         const auto noiseGate = unmuted (Params::srcNoise, params.noiseMute);
         mix.osc1Level  = params.osc1Level->load() * osc1Gate;
         mix.pulseWidth = params.pulseWidth->load();
+        mix.osc1Tri.set (params.osc1TriSym->load(), params.osc1TriRound->load());
+        mix.osc2Tri.set (params.osc2TriSym->load(), params.osc2TriRound->load());
+        mix.osc3Tri.set (params.osc3TriSym->load(), params.osc3TriRound->load());
+        const auto tri1 = mix.osc1Tri.active && wave == triangle; // el oscilador complejo no la usa
         mix.pwmDepth   = params.pwmDepth->load();
         mix.osc2Wave   = (int) params.osc2Wave->load();
         mix.osc2Ratio  = std::exp2 ((double) params.osc2Octave->load()
@@ -628,12 +632,17 @@ struct SynthVoice : juce::SynthesiserVoice
             else if (numUnison == 1)
             {
                 left = right = oscillator (wave, lanes.phase[0], dt, pw, false);
+                if (tri1)
+                    left = right = mix.osc1Tri (left);
             }
             else if (simd)
             {
                 double ph0[konisimd::kLanes];
                 std::copy (std::begin (lanes.phase), std::end (lanes.phase), ph0);
-                konisimd::unisonStepAvx2 (lanes, wave, dt, (double) pw, left, right); // avanza las fases
+                if (tri1)
+                    konisimd::unisonStepAvx2 (lanes, wave, dt, (double) pw, left, right, mix.osc1Tri.a, mix.osc1Tri.r, mix.osc1Tri.m);
+                else
+                    konisimd::unisonStepAvx2 (lanes, wave, dt, (double) pw, left, right); // avanza las fases
                 osc1Blep.pop (left, right);
                 for (int u = 0; u < numUnison; ++u)
                     MinBlep::segment (osc1Blep, wave, ph0[u], dt * lanes.ratio[u], 0.0, 1.0, pw, lanes.gainL[u], lanes.gainR[u]);
@@ -642,7 +651,9 @@ struct SynthVoice : juce::SynthesiserVoice
             {
                 for (size_t u = 0; u < (size_t) numUnison; ++u)
                 {
-                    const auto s = oscillator (wave, lanes.phase[u], dt * lanes.ratio[u], pw, false);
+                    auto s = oscillator (wave, lanes.phase[u], dt * lanes.ratio[u], pw, false);
+                    if (tri1)
+                        s = mix.osc1Tri (s);
                     left  += s * lanes.gainL[u];
                     right += s * lanes.gainR[u];
                 }
@@ -1010,6 +1021,7 @@ private:
         const WavetableData* osc2Table = nullptr; // modo Wavetable: tabla del bloque y posición de esta muestra
         float osc2WtPos = 0.0f;
         const SampleData* osc2Sample = nullptr; // modo Sample: fichero del bloque
+        TriShape osc1Tri, osc2Tri, osc3Tri;     // forma del triángulo (TriSym, TriRound); inactiva a 0 %
     };
     static constexpr int wavetableWave = 4; // osc2Wave = Wavetable (Layout.h: tras Sine, Triangle, Saw y Square)
     static constexpr int sampleWave = 5;    // osc2Wave = Sample
@@ -1042,7 +1054,10 @@ private:
         if (mix.osc2Level > 0.0f)
         {
             if (! osc2Table && ! osc2Sampled)
-                out += mix.osc2Level * oscillator (mix.osc2Wave, osc2Phase, dt2, pw, false);
+            {
+                const auto s = oscillator (mix.osc2Wave, osc2Phase, dt2, pw, false);
+                out += mix.osc2Level * (mix.osc2Tri.active && mix.osc2Wave == triangle ? mix.osc2Tri (s) : s);
+            }
             else if (osc2Table && mix.osc2Table != nullptr)
                 out += mix.osc2Level * readWavetable (*mix.osc2Table, osc2Phase, dt2, mix.osc2WtPos);
         }
@@ -1063,7 +1078,10 @@ private:
             out += mix.osc2Level * osc2Sample.render (dt2, mix.osc2Sample);
         }
         if (mix.subLevel > 0.0f) // Osc 3: la cuadrada va siempre al 50 % (no sigue al mando PW, como el Sub)
-            out += mix.subLevel * oscillator (mix.subWave, subPhase, dt * mix.subRatio, 0.5f, false);
+        {
+            const auto s = oscillator (mix.subWave, subPhase, dt * mix.subRatio, 0.5f, false);
+            out += mix.subLevel * (mix.osc3Tri.active && mix.subWave == triangle ? mix.osc3Tri (s) : s);
+        }
         if (mix.noiseLevel > 0.0f)
         {
             const auto w = 2.0f * rng.nextFloat() - 1.0f;

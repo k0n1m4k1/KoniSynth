@@ -126,16 +126,22 @@ inline __m256 sin2piPs (__m256 t)
 }
 } // namespace
 
-void unisonStepAvx2 (UnisonLanes& lanes, int wave, double dt, double pw, float& left, float& right)
+void unisonStepAvx2 (UnisonLanes& lanes, int wave, double dt, double pw, float& left, float& right, double triA, double triR, double triM)
 {
     auto accL = _mm256_setzero_pd(), accR = _mm256_setzero_pd();
     const auto one = set1 (1.0);
+    const auto shaped = wave == kTriangle && (triA != 0.0 || triR != 0.0);
 
     for (int h = 0; h < kLanes; h += 4)
     {
         auto phase = _mm256_load_pd (lanes.phase + h);
         const auto inc = _mm256_mul_pd (set1 (dt), _mm256_load_pd (lanes.ratio + h));
-        const auto s = oscillator (wave, phase, inc, pw, false);
+        auto s = oscillator (wave, phase, inc, pw, false);
+        if (shaped) // TriShape: y = (1 - r)·x + r·sin(π/2·x); y + a·(y² - m). sin(π/2·x) = sin(2π·x/4)
+        {
+            const auto y = _mm256_add_pd (_mm256_mul_pd (set1 (1.0 - triR), s), _mm256_mul_pd (set1 (triR), sin2pi (_mm256_mul_pd (s, set1 (0.25)))));
+            s = _mm256_add_pd (y, _mm256_mul_pd (set1 (triA), _mm256_sub_pd (_mm256_mul_pd (y, y), set1 (triM))));
+        }
 
         accL = _mm256_add_pd (accL, _mm256_mul_pd (s, _mm256_cvtps_pd (_mm_load_ps (lanes.gainL + h))));
         accR = _mm256_add_pd (accR, _mm256_mul_pd (s, _mm256_cvtps_pd (_mm_load_ps (lanes.gainR + h))));
@@ -240,7 +246,7 @@ void fmRenderAvx2 (FmLanes& l, const FmArgs& a, int numSamples, float* out)
 // falso y se usa la ruta escalar); existen para enlazar
 namespace konisimd
 {
-void unisonStepAvx2 (UnisonLanes&, int, double, double, float& left, float& right) { left = right = 0.0f; }
+void unisonStepAvx2 (UnisonLanes&, int, double, double, float& left, float& right, double, double, double) { left = right = 0.0f; }
 void complexStepAvx2 (UnisonLanes&, const ComplexArgs&, double, float& left, float& right, float& firstMod) { left = right = firstMod = 0.0f; }
 void fmRenderAvx2 (FmLanes&, const FmArgs&, int numSamples, float* out) { for (int i = 0; i < numSamples; ++i) out[i] = 0.0f; }
 } // namespace konisimd

@@ -170,7 +170,8 @@ public:
         osc.withCombo (s, "wave")
            .withKnob (s, "osc1Level", "Level").withKnob (s, "unisonVoices", "Voices").withKnob (s, "unisonDetune", "Detune").withKnob (s, "unisonSpread", "Spread")
            .withKnob (s, "pulseWidth", "PW").withKnob (s, "pwmDepth", "PWM").withKnob (s, "drift", "Drift")
-           .withKnob (s, "pitchEnvAmount", "P.Env").withKnob (s, "pitchEnvDecay", "P.Decay");
+           .withKnob (s, "pitchEnvAmount", "P.Env").withKnob (s, "pitchEnvDecay", "P.Decay")
+           .withKnob (s, "osc1TriSym", "Tri Sym").withKnob (s, "osc1TriRound", "Tri Rnd");
         complexSection.withToggle (s, "complexOn").withCombo (s, "modWave").withExtraToggle (s, "modSync", "Sync")
                       .withKnob (s, "complexModSource", "Mod Src").withKnob (s, "modRatio", "Ratio").withKnob (s, "fmIndex", "FM")
                       .withKnob (s, "amDepth", "AM/Ring").withKnob (s, "timbre", "Timbre")
@@ -180,10 +181,11 @@ public:
                    .withHeaderButton ("Edit...", "Open the sample editor of Osc 2 (Sample waveform): load its own file, see its waveform, "
                                       "set Root, Start, Length and Loop.", [this] { openSamplePanel (KoniSynthProcessor::osc2Sample); })
                    .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Semi", "Semi")
-                   .withKnob (s, "osc2Fine", "Fine").withKnob (s, "osc2WtPosition", "WT Pos");
+                   .withKnob (s, "osc2Fine", "Fine").withKnob (s, "osc2WtPosition", "WT Pos")
+                   .withKnob (s, "osc2TriSym", "Tri Sym").withKnob (s, "osc2TriRound", "Tri Rnd");
         osc3Section.withCombo (s, "osc3Wave")
                    .withKnob (s, "subLevel", "Level").withKnob (s, "subOctave", "Oct").withKnob (s, "osc3Semi", "Semi")
-                   .withKnob (s, "osc3Fine", "Fine");
+                   .withKnob (s, "osc3Fine", "Fine").withKnob (s, "osc3TriSym", "Tri Sym").withKnob (s, "osc3TriRound", "Tri Rnd");
         noiseSection.withCombo (s, "noiseColor").withKnob (s, "noiseLevel", "Level");
         mixerTabs = std::make_unique<SourceTabs> (s, std::vector<SourceTabs::Source> {
             { "Osc 2", &osc2Section, "osc2Level", "osc2Mute" }, { "Osc 3", &osc3Section, "subLevel", "osc3Mute" },
@@ -1397,6 +1399,13 @@ private:
         dim (&osc3Section.comboComponent(), ! osc3Sounds);
         dim (&noiseSection.comboComponent(), v ("noiseLevel") <= 0.0f && ! targeted (ModMatrix::dstNoiseLevel));
         dim (osc2Section.knobFor ("osc2WtPosition"), (int) v ("osc2Wave") != 4 || ! osc2Sounds); // solo con la forma Wavetable
+        // Forma del triángulo: solo con la forma Triangle (índice 1 en las tres listas); en Osc 1, no con el oscilador complejo
+        const auto tri1 = (int) v ("wave") == 1 && osc1Sounds && ! complexOn;
+        const auto tri2 = (int) v ("osc2Wave") == 1 && osc2Sounds;
+        const auto tri3 = (int) v ("osc3Wave") == 1 && osc3Sounds;
+        dim (osc.knobFor ("osc1TriSym"), ! tri1);         dim (osc.knobFor ("osc1TriRound"), ! tri1);
+        dim (osc2Section.knobFor ("osc2TriSym"), ! tri2); dim (osc2Section.knobFor ("osc2TriRound"), ! tri2);
+        dim (osc3Section.knobFor ("osc3TriSym"), ! tri3); dim (osc3Section.knobFor ("osc3TriRound"), ! tri3);
         dim (osc2Section.headerButton (0), (int) v ("osc2Wave") != 5); // Edit... (fichero de Osc 2): solo con la forma Sample
         const auto theremin = engine == 1; // el Theremin usa LFO 1 con seno fijo y su propia velocidad (sin Shape ni Sync)
         dim (lfo.knobFor ("lfoRate"), ! theremin && v ("lfoSync") > 0.5f);

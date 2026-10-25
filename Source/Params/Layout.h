@@ -853,6 +853,16 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc3Fine", 1 }, "Osc3 Fine", NormalisableRange<float> (-50.0f, 50.0f), 0.0f,
                                                    parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " ct"; }))));
 
+    // Forma del triángulo por oscilador (Dsp/OscillatorCore.h, shapeTriangle): asimetría (armónicos pares) y redondeo de las
+    // puntas (impares más bajos). 0 % = triángulo ideal de siempre; Sym 50-60 % y Round 0-20 % = el medido en dos Minimoog Model D a través del filtro
+    // (su etapa tanh ya redondea las puntas; con el filtro apagado, Round 30-50 %)
+    for (const auto* o : { "osc1", "osc2", "osc3" })
+    {
+        const auto n = String (o).replace ("osc", "Osc");
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { String (o) + "TriSym", 1 },   n + " Tri Symmetry", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
+        l.add (std::make_unique<AudioParameterFloat> (ParameterID { String (o) + "TriRound", 1 }, n + " Tri Round",    NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
+    }
+
     // Mute de las fuentes del segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), como osc1Mute, wtMute, sampleMute y stringMute
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc2Mute", 1 },  "Osc2 Mute", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc3Mute", 1 },  "Osc3 Mute", false));

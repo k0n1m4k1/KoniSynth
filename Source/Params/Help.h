@@ -206,6 +206,18 @@ static juce::String paramHelp (const juce::String& id)
                       "the Prophet-5 and Juno-106 ones (see Wave), with the pulse at 50 %." },
         { "osc3Semi", "Oscillator 3 offset in semitones from its base octave, -24 to +24. Default 0." },
         { "osc3Fine", "Oscillator 3 fine detune in cents, -50 to +50. Default 0." },
+        { "osc1TriSym", "Triangle symmetry of Oscillator 1 (Triangle waveform only): adds the even harmonics of an analog triangle "
+                        "that is slightly lopsided. About 50-60 % matches a Minimoog Model D. Default 0 % (ideal triangle)." },
+        { "osc1TriRound", "Rounds the tips of the Oscillator 1 triangle (Triangle waveform only): softer, with weaker odd harmonics; "
+                          "100 % is a sine. The filter already rounds them a little: about 0-20 % matches a Minimoog Model D (30-50 % with Filter off). Default 0 % (sharp tips)." },
+        { "osc2TriSym", "Triangle symmetry of Oscillator 2 (Triangle waveform only): adds the even harmonics of an analog triangle "
+                        "that is slightly lopsided. About 50-60 % matches a Minimoog Model D. Default 0 % (ideal triangle)." },
+        { "osc2TriRound", "Rounds the tips of the Oscillator 2 triangle (Triangle waveform only): softer, with weaker odd harmonics; "
+                          "100 % is a sine. The filter already rounds them a little: about 0-20 % matches a Minimoog Model D (30-50 % with Filter off). Default 0 % (sharp tips)." },
+        { "osc3TriSym", "Triangle symmetry of Oscillator 3 (Triangle waveform only): adds the even harmonics of an analog triangle "
+                        "that is slightly lopsided. About 50-60 % matches a Minimoog Model D. Default 0 % (ideal triangle)." },
+        { "osc3TriRound", "Rounds the tips of the Oscillator 3 triangle (Triangle waveform only): softer, with weaker odd harmonics; "
+                          "100 % is a sine. The filter already rounds them a little: about 0-20 % matches a Minimoog Model D (30-50 % with Filter off). Default 0 % (sharp tips)." },
         { "noiseLevel", "Noise volume in the mixer (wind, percussion, breath)." },
         { "noiseColor", "Noise colour: white (bright hiss), pink (darker, like rain) or LFSR digital noise from 8-bit game chips (Short = metallic, tonal noise that follows the key)." },
         { "wtLevel", "Wavetable oscillator volume in the mixer: a stack of waveforms you can sweep through (Position)." },

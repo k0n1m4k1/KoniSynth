@@ -106,14 +106,43 @@ static float oscillator (int wave, double t, double dt, float pw = 0.5f, bool bl
     }
 }
 
+// Forma del triángulo analógico (mandos TriSym y TriRound por oscilador; solo la forma Triangle). Medido en dos Minimoog
+// Model D (YouTube CD89Mt1TRnU, 24:27, Do3 = 128,5 Hz): h2 -24/-27 dB y h4 -41/-42 dB (el ideal no tiene pares), h3 -22/-26 dB
+// (ideal -19,1). Modelo, ajustado a h2..h8 con error RMS 1,3 / 1,6 dB:
+//   redondeo r: y = (1 - r)·x + r·sin(π/2·x)  (puntas suaves; r = 1 es un seno). Aparatos medidos: r = 0,29 / 0,52
+//   asimetría a: y + a·(y² - m)  (armónicos pares). Aparatos medidos: a = 0,115 / 0,105; a = 0,22·TriSym (50 % ≈ Model D)
+// m es la media de y² (x recorre [-1, 1] de forma uniforme): m = (1 - r)²/3 + r²/2 + 8·r·(1 - r)/π², sin continua.
+// En el plugin, la etapa tanh de la entrada del filtro ya redondea las puntas (triángulo ideal a 130,8 Hz: h3 -22 dB con el
+// filtro, -19 dB sin él; medido con KoniBench): a través del filtro, Sym 50-60 % y Round 0-20 % dan 1,4-3,0 dB RMS (h2..h8)
+// Con TriSym = TriRound = 0 no se llama: el triángulo de siempre, bit a bit
+struct TriShape
+{
+    float a = 0.0f, r = 0.0f, m = 1.0f / 3.0f;
+    bool active = false;
+    void set (float sym, float round)
+    {
+        a = 0.22f * sym; r = round;
+        m = (1.0f - r) * (1.0f - r) / 3.0f + 0.5f * r * r + 8.0f * r * (1.0f - r) / (juce::MathConstants<float>::pi * juce::MathConstants<float>::pi);
+        active = sym > 0.0f || round > 0.0f;
+    }
+    float operator() (float x) const
+    {
+        const auto y = (1.0f - r) * x + r * std::sin (juce::MathConstants<float>::halfPi * x);
+        return y + a * (y * y - m);
+    }
+};
+
 //==============================================================================
 // Referencia escalar sobre UnisonLanes: misma semántica que la voz (bucle del unísono y complexSample).
-static void unisonStepScalar (konisimd::UnisonLanes& l, int wave, double dt, float pw, float& left, float& right)
+static void unisonStepScalar (konisimd::UnisonLanes& l, int wave, double dt, float pw, float& left, float& right, const TriShape& tri = {})
 {
     left = right = 0.0f;
+    const auto shaped = tri.active && wave == triangle;
     for (int u = 0; u < konisimd::kLanes; ++u)
     {
-        const auto s = oscillator (wave, l.phase[u], dt * l.ratio[u], pw, false);
+        auto s = oscillator (wave, l.phase[u], dt * l.ratio[u], pw, false);
+        if (shaped)
+            s = tri (s);
         left  += s * l.gainL[u];
         right += s * l.gainR[u];
         l.phase[u] += dt * l.ratio[u];
@@ -294,8 +323,12 @@ static void runSimdSelfTest()
     for (int w = 0; w < numWaves; ++w)
     {
         const auto wave = waves[w];
-        for (int mode = 0; mode < 5; ++mode) // 0 unísono, 1 complejo, 2 complejo + sync, 3 modulador externo, 4 externo + sync
+        // 0 unísono, 1 complejo, 2 complejo + sync, 3 modulador externo, 4 externo + sync, 5 unísono con TriShape (50 %, 40 %)
+        for (int mode = 0; mode < 6; ++mode)
         {
+            TriShape tri;
+            if (mode == 5)
+                tri.set (0.5f, 0.4f);
             auto a = randomLanes();
             auto b = a;
             konisimd::ComplexArgs args { wave, waves[(w + 1) % numWaves], 1.37, 1.5, 0.3, (double) pw, mode == 2 || mode == 4 };
@@ -314,10 +347,10 @@ static void runSimdSelfTest()
                     extPhase -= std::floor (extPhase);
                     args.extPhaseEnd = extPhase;
                 }
-                if (mode == 0)
+                if (mode == 0 || mode == 5)
                 {
-                    unisonStepScalar (a, wave, dt, pw, l1, r1);
-                    konisimd::unisonStepAvx2 (b, wave, dt, (double) pw, l2, r2);
+                    unisonStepScalar (a, wave, dt, pw, l1, r1, tri);
+                    konisimd::unisonStepAvx2 (b, wave, dt, (double) pw, l2, r2, tri.a, tri.r, tri.m);
                 }
                 else
                 {
