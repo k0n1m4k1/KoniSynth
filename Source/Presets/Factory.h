@@ -843,30 +843,19 @@ static const std::vector<FactoryPreset>& factoryPresets()
         // rangos aleatorios; conversiones calc: f = 3528·(b² + 0,001) Hz, etapa = 2,268·x² s. Los slides lineales de sfxr (D st en T s)
         // se aproximan con la envolvente de tono exponencial: Amount = D, τ = T/2 (falta un 13 % del recorrido al final de T).
         // Crush a 4 bits (Drive +12 dB por defecto) = 16 niveles de volumen de NES/Game Boy.
-            // pulsar F#6 + B6 ~125 ms. sfxr pickup: base 1494 Hz ≈ F#6, salto +2,7 st (rango 0,6–6,8) tras 73 ms; intervalo +5 st elegido
-            // dentro del rango. El arp repite mientras se mantiene (falta arp de un solo disparo)
-            // tocar G#6. sfxr jump: duty 0,35, base 718 Hz, subida +61 st/s durante 0,233 s = +14,2 st
-            // tocar C#5. sfxr laserShoot: base 1988 Hz, bajada -119 st/s en 181 ms = -21,6 st, duty 0,375
-            // cualquier nota. sfxr explosion: ruido, base 32,1 Hz × 32 valores por periodo = 1027 Hz de retención; NES: 2349 Hz (periodo $C)
         { "8-Bit Power-Up", "8-Bit", { { "wave", 3 }, { "pulseWidth", 0.35f }, { "attack", 0.001f }, { "decay", 0.2f }, { "sustain", 0.5f }, { "release", 0.1f },
                           { "pitchEnvAmount", -15.0f }, { "pitchEnvDecay", 37.0f }, { "arpOn", 1 }, { "arpMode", 0 }, { "arpRate", 3 }, { "arpBpm", 205.0f },
                           { "arpOctaves", 2 }, { "arpGate", 1.0f }, { "gain", 0.26f } }, {}, "Press a triad around A4 for ~300 ms", 69, 76 },
             // pulsar una tríada en A4 ~300 ms. sfxr powerup: base 436 Hz, +206 st/s, repetición 73 ms = +15 st por repetición; la tríada
             // arpegiada sustituye a la repetición (cada paso redispara la envolvente de tono)
-            // pulsar una tríada mayor ~1 s. Sin generador de sfxr para "1-up": receta estimada (solo los 4 bits son verificados)
         { "8-Bit Hit", "8-Bit", { { "wave", 3 }, { "pulseWidth", 0.35f }, { "attack", 0.001f }, { "decay", 0.1f }, { "sustain", 0.0f }, { "release", 0.02f },
                           { "pitchEnvAmount", 48.0f }, { "pitchEnvDecay", 25.0f } }, {}, "Play A1 (the drop starts at A5)", 33, 33 },
             // tocar A1 (empieza en A5). sfxr hitHurt: base 886 Hz, -954 st/s; sfxr baja hasta -92 st, KoniSynth llega a 48
         { "8-Bit Menu Blip", "8-Bit", { { "wave", 3 }, { "pulseWidth", 0.35f }, { "attack", 0.001f }, { "decay", 0.07f }, { "sustain", 0.0f }, { "release", 0.02f } }, {}, "Play C#5", 73, 73 },
             // tocar C#5. sfxr blipSelect: base 568 Hz, 51 + 23 ms, duty 0,35
-            // C5–C6. NES pulso: duty 12,5 %, modo de volumen constante, 54,6 Hz–12,4 kHz
-            // C4–C6. Game Boy: duty 25 %, envolvente pace 3 = 15·3/64 = 703 ms (en el hardware la caída es lineal en 16 escalones)
         { "Chip Square Bass", "8-Bit", { { "voiceMode", 1 }, { "wave", 3 }, { "attack", 0.001f }, { "decay", 0.15f }, { "sustain", 0.7f }, { "release", 0.03f },
                           { "crushOn", 1 }, { "crushBits", 4.0f } }, {}, "Play A1-A3", 33, 57 },
             // A1–A3. NES pulso 50 % (no baja de 54,6 Hz ≈ A1); ADSR estimado
-            // A0–A3. NES triángulo: 32 escalones de 4 bits, sin control de volumen (solo puerta), desde 27,3 Hz. Drive +14 dB (×5) lleva
-            // ±0,2 a ±1: 16 niveles = 32 escalones por ciclo
-            // pulsar una tríada. Acorde arpegiado de tracker: 1/32 a 240 BPM = 31 ms (los trackers lo hacen por frame de 16,7 ms)
         { "SID-Style Sync Lead", "8-Bit", { { "voiceMode", 2 }, { "glide", 60.0f }, { "wave", 2 }, { "osc1Level", 0.0f }, { "osc2Wave", 2 }, { "osc2Level", 1.0f },
                           { "osc2Sync", 1 }, { "osc2Octave", 1 }, { "osc2Semi", 7 }, { "attack", 0.002f }, { "decay", 0.204f }, { "sustain", 0.67f },
                           { "release", 0.114f }, { "filterMode", 1 }, { "cutoff", 2000.0f }, { "resonance", 0.5f }, { "filterEnv", 0.3f } }, {}, "Play C4-C5", 60, 72 },
