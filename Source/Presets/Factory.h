@@ -180,16 +180,16 @@ static const std::vector<FactoryPreset>& factoryPresets()
         { "Omnichord Deep Jukebox", "Machines", { { "engine", 4 }, { "omniHarpOctave", -1 }, { "omniSustain", 1.0f },
                           { "ambientOn", 1 }, { "ambientSize", 0.8f }, { "ambientMix", 0.4f } }, {}, "Hold a chord key below C4; strum the keys from C4 up" },
         // Cajas de ritmos (kits de los service notes de Roland)
-        { "808 Electro", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 5 }, { "drumTempo", 112.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
-        { "808 Long Boom", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumDecay", 0.6f }, { "drumTone", 0.3f },
+        { "808 Electro", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 5 }, { "drumTempo", 112.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
+        { "808 Long Boom", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumDecay", 0.6f }, { "drumTone", 0.3f },
                           { "drumPattern", 6 }, { "drumTempo", 90.0f }, { "drumSwing", 0.12f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
-        { "808 Synth Pop", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 7 }, { "drumTempo", 118.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
+        { "808 Synth Pop", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 7 }, { "drumTempo", 118.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
         { "CR-78 Rock", "Drums", { { "engine", 5 }, { "drumKit", 1 }, { "drumPattern", 1 }, { "drumTempo", 120.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
         // Mini Pops 7: Oxygène IV = Slow Rock + Rock sujetos con cinta; Oxygène VI = Rumba + Bossa Nova (entrevista a
         // Jarre en newagemusic.guide). Solo se combinan ritmos de la misma fila (manual de Bucket Pops) y en la de Slow Rock
         // están Rock 2 y Rock 4: se usa Rock 2 (deducción). Tempos estimados; patrones propios, no los del hardware
-        { "Oxygene IV Rhythm", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 19 }, { "drumPattern2", 2 }, { "drumTempo", 96.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
-        { "Oxygene VI Rhythm", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 22 }, { "drumPattern2", 8 }, { "drumTempo", 120.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
+        { "Oxygene IV Rhythm", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 19 }, { "drumPattern2", 2 }, { "drumTempo", 96.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
+        { "Oxygene VI Rhythm", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 22 }, { "drumPattern2", 8 }, { "drumTempo", 120.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
         { "CR-78 Bossa", "Drums", { { "engine", 5 }, { "drumKit", 1 }, { "drumPattern", 8 }, { "drumTempo", 126.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
         // FM 6-Op. E.Piano: algoritmo 5 con el modulador del "tine" a ratio 14 (Paul Colbert, One Two Testing, nov. 1983)
         // y niveles/decays de DecentSampler fm6op (portadoras 0,90/0,70/0,55; moduladores 0,55/0,40/0,30, decay 0,25-0,40 s, sustain 0).
@@ -636,7 +636,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
         { "Children Acoustic Guitar", "Pluck", { { "osc1Level", 0.0f }, { "stringLevel", 1.0f }, { "stringExcite", 1 }, { "stringDecay", 3.5f }, { "stringBright", 0.3f }, { "stringPick", 0.05f }, { "drift", 0.05f }, { "attack", 0.001f }, { "decay", 5.0f }, { "sustain", 0.0f }, { "release", 0.4f }, { "ambientOn", 1 }, { "ambientSize", 0.5f }, { "ambientMix", 0.2f }, { "reverbDecay", 1.8f }, { "eqOn", 1 }, { "eqHighFreq", 3000.0f }, { "eqHighGain", 12.0f }, { "envCurve", 1 }, { "filterOn", 0 }, { "gain", 0.23f } }, {}, "Strum chords, F3-Ab4 (eighth notes)", 53, 68 },
         // Bombo 808 a -2 st, decay 0,15 y válvula 18 dB. Referencia (20-350 Hz): cola 49,8 Hz, -10 dB a 312 ms; render: 50,2 Hz (+14 ct),
         // 307 ms (-2 %), octavas |Δ| 2,8 dB. Por encima de 350 Hz la referencia está tapada por el resto de la mezcla
-        { "Children 808 Kick", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 0 }, { "drumTune", -2.0f }, { "drumDecay", 0.15f }, { "drumTone", 0.5f }, { "tubeOn", 1 }, { "tubeDrive", 18.0f }, { "gain", 0.25f } }, {}, "C2 kick, one per beat", 36, 36 },
+        { "Children 808 Kick", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 0 }, { "drumTune", -2.0f }, { "drumDecay", 0.15f }, { "drumTone", 0.5f }, { "tubeOn", 1 }, { "tubeDrive", 18.0f }, { "gain", 0.25f } }, {}, "C2 kick, one per beat", 36, 36 },
         // Bombo Synth: seno con caída de tono de +24 st en 30 ms y saturación por voz de 12 dB. Misma referencia: cola 49,5 Hz (-11 ct),
         // -10 dB a 333 ms (+7 %), octavas |Δ| 0,6 dB
         { "Children Boom Kick", "Drums", { { "voiceMode", 1 }, { "wave", 0 }, { "drift", 0.0f }, { "attack", 0.0005f }, { "decay", 0.5f }, { "sustain", 0.0f }, { "release", 0.1f }, { "pitchEnvAmount", 24.0f }, { "pitchEnvDecay", 30.0f }, { "filterOn", 0 }, { "voiceSatMode", 0 }, { "voiceSatDrive", 12.0f }, { "gain", 0.7f } }, {}, "G1, one note per beat", 31, 31 },
@@ -645,7 +645,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
         { "Children Offbeat Bass", "Bass", { { "voiceMode", 1 }, { "wave", 2 }, { "unisonVoices", 5 }, { "unisonDetune", 18.0f }, { "unisonSpread", 0.5f }, { "drift", 0.1f }, { "attack", 0.02f }, { "decay", 0.15f }, { "sustain", 0.7f }, { "release", 0.05f }, { "cutoff", 420.0f }, { "resonance", 0.15f }, { "filterEnv", 0.2f }, { "filterAttack", 0.001f }, { "filterDecay", 0.15f }, { "filterSustain", 0.0f }, { "filterKey", 0.3f }, { "gain", 0.71f } }, {}, "F2 on the offbeats (eighth notes)", 36, 48 },
         // Charles abierto 808 (decay -0,6). Elegido de oído: falla la tolerancia de octavas (|Δ| 9,7 dB; le falta la banda de 3-6 kHz).
         // Referencia: -20 dB a 200 ms, centroide 6900 Hz; render: 212 ms (+6 %), 7602 Hz (+10 %)
-        { "Children 808 Open Hat", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 0 }, { "drumDecay", -0.6f }, { "drumTone", 0.5f }, { "gain", 0.29f } }, {}, "F#2 open hat, on the offbeats", 46, 46 },
+        { "Children 808 Open Hat", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 0 }, { "drumDecay", -0.6f }, { "drumTone", 0.5f }, { "gain", 0.29f } }, {}, "F#2 open hat, on the offbeats", 46, 46 },
         // FM 6-Op, algoritmo 5: par 1:4 (moduladora con caída rápida) + portadora OP3 a ×4 = 1er sobretono de la lámina, afinado a
         // 2 octavas (dato de la literatura de marimbas; no verificado en esta sesión). Diseño propio
         { "FM Marimba", "Pluck", { { "engine", 6 }, { "fmAlgorithm", 5 },
@@ -668,8 +668,8 @@ static const std::vector<FactoryPreset>& factoryPresets()
                           { "filterKey", 0.5f }, { "lfoOn", 1 }, { "lfoRate", 5.2f }, { "lfoDepth", 0.04f }, { "atVibrato", 0.5f },
                           { "echoOn", 1 }, { "echoSync", 2 }, { "echoFeedback", 0.3f }, { "echoMix", 0.2f } }, {}, "Mono lead, C3-C5", 48, 72 },
         // Patrones de RhythmPatterns.h sin preset: Funk (4), Reggae (14), Shuffle (18). Tempos estimados
-        { "808 Funk", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 4 }, { "drumTempo", 104.0f }, { "drumSwing", 0.1f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
-        { "808 Dub Reggae", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 14 }, { "drumTempo", 76.0f }, { "drumTune", -2.0f },
+        { "808 Funk", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 4 }, { "drumTempo", 104.0f }, { "drumSwing", 0.1f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
+        { "808 Dub Reggae", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 14 }, { "drumTempo", 76.0f }, { "drumTune", -2.0f },
                           { "springOn", 1 }, { "springMix", 0.35f }, { "springDecay", 3.5f },
                           { "echoOn", 1 }, { "echoSync", 2 }, { "echoFeedback", 0.45f }, { "echoMix", 0.2f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
         { "CR-78 Shuffle", "Drums", { { "engine", 5 }, { "drumKit", 1 }, { "drumPattern", 18 }, { "drumTempo", 100.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
@@ -744,10 +744,10 @@ static const std::vector<FactoryPreset>& factoryPresets()
         { "Electric Donk Bass", "Bass", { { "wave", 1 }, { "complexOn", 1 }, { "modWave", 0 }, { "modRatio", 2.0f }, { "fmIndex", 1.37f }, { "mtxSrc1", 3 }, { "mtxDst1", 12 }, { "mtxAmt1", 1.0f }, { "attack", 0.0002f }, { "decay", 0.117f }, { "sustain", 0.074f }, { "release", 0.3f }, { "filterOn", 1 }, { "filterMode", 1 }, { "cutoff", 500.0f }, { "resonance", 0.45f }, { "filterEnv", 0.28f }, { "filterAttack", 0.0002f }, { "filterDecay", 0.4f }, { "filterSustain", 0.0f }, { "stringLevel", 0.35f }, { "stringDecay", 0.1f }, { "stringBright", 0.85f }, { "stringPick", 0.08f }, { "formantOn", 1 }, { "formantVoice", 0 }, { "formantVowel", 3.0f }, { "formantShift", -4.0f }, { "formantMix", 0.45f }, { "tubeOn", 1 }, { "tubeDrive", 9.0f }, { "gain", 0.6f } }, {}, "Offbeat notes around G2", 40, 47 },
         // El mismo donk a contratiempo: pasos 3, 7, 11 y 15 (Producer School; Bonedo), 155 BPM (hardbass: 150-175)
         { "Hardbass Donk Bounce", "Sequence", { { "wave", 1 }, { "complexOn", 1 }, { "modWave", 0 }, { "modRatio", 2.0f }, { "fmIndex", 1.2f }, { "pitchEnvAmount", 19.0f }, { "pitchEnvDecay", 30.0f }, { "attack", 0.0002f }, { "decay", 0.065f }, { "sustain", 0.08f }, { "release", 0.3f }, { "filterOn", 1 }, { "filterMode", 1 }, { "cutoff", 750.0f }, { "resonance", 0.45f }, { "filterEnv", 0.7f }, { "filterAttack", 0.0002f }, { "filterDecay", 0.08f }, { "filterSustain", 0.0f }, { "stringLevel", 0.35f }, { "stringDecay", 0.1f }, { "stringBright", 0.85f }, { "stringPick", 0.08f }, { "formantOn", 1 }, { "formantVoice", 0 }, { "formantVowel", 3.0f }, { "formantShift", -4.0f }, { "formantMix", 0.7f }, { "tubeOn", 1 }, { "tubeDrive", 9.0f }, { "seqOn", 1 }, { "seqSteps", 16 }, { "seqRate", 3 }, { "seqGate", 0.9f }, { "arpBpm", 155.0f }, { "stepOn1", 0 }, { "stepOn2", 0 }, { "stepOn3", 1 }, { "stepOn4", 0 }, { "stepOn5", 0 }, { "stepOn6", 0 }, { "stepOn7", 1 }, { "stepOn8", 0 }, { "stepOn9", 0 }, { "stepOn10", 0 }, { "stepOn11", 1 }, { "stepOn12", 0 }, { "stepOn13", 0 }, { "stepOn14", 0 }, { "stepOn15", 1 }, { "stepOn16", 0 } }, {}, "Hold G2 (the sequencer plays the offbeats)", 43, 43 },
-        { "Hardbass Kit", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumPattern", 29 }, { "drumTempo", 155.0f }, { "drumTone", 0.7f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
+        { "Hardbass Kit", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumPattern", 29 }, { "drumTempo", 155.0f }, { "drumTone", 0.7f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
         // Kit TR-808 sin patrón (lo carga el selector de motor): bombo de decay largo, su rasgo más conocido (Wikipedia
         // "Roland TR-808"; MusicRadar)
-        { "808 Kit", "Drums", { { "engine", 5 }, { "drumKit", 0 }, { "drumDecay", 0.4f } }, {}, "Drum keys: C2 kick, D2 snare, F#2 closed hat, A#2 open hat", 35, 75 },
+        { "808 Kit", "Drums", { { "engine", 5 }, { "drumKit", 2 }, { "drumDecay", 0.4f } }, {}, "Drum keys: C2 kick, D2 snare, F#2 closed hat, A#2 open hat", 35, 75 },
         // CR-78, preset Disco a 96 BPM (Phil Collins, "In the Air Tonight": Wikipedia "Roland CR-78" y "In the Air Tonight"; Reverb)
         { "CR-78 Disco", "Drums", { { "engine", 5 }, { "drumKit", 1 }, { "drumPattern", 3 }, { "drumTempo", 96.0f } }, {}, "The pattern starts by itself; keys play the kit (C2 kick)" },
         // CR-78, Cha-Cha + Rumba a la vez (Blondie, "Heart of Glass": Roland Cloud; happymag). Tempo no publicado: el por defecto

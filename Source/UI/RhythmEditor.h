@@ -59,7 +59,7 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const auto kit = juce::jlimit (0, 2, (int) koni.apvts.getRawParameterValue ("drumKit")->load());
+        const auto kit = kitFromParam (koni.apvts.getRawParameterValue ("drumKit")->load());
         const auto n = rhythm.numSteps;
         const auto perBar = rhythm.isWaltz() ? 12 : rhythm.stepsPerBeat == 3 ? 12 : 16;
         g.setFont (juce::FontOptions (13.0f));

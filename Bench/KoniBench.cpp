@@ -895,7 +895,7 @@ int main (int argc, char** argv)
         { "7. Stylophone", { { "Engine", 3.0f / 9.0f } }, 8 },
         { "8. Omnichord Rock 1, acorde", { { "Engine", 4.0f / 9.0f }, { "Omnichord Rhythm", 1.0f / 12.0f } }, 1 },
         { "9. Drum Machine 808 Electro", { { "Engine", 5.0f / 9.0f }, { "Drum Pattern", 5.0f / 28.0f } }, 0 },
-        { "9b. Mini Pops Slow Rock + Rock 1", { { "Engine", 5.0f / 9.0f }, { "Drum Kit", 1.0f }, { "Drum Pattern", 19.0f / 28.0f },
+        { "9b. Mini Pops Slow Rock + Rock 1", { { "Engine", 5.0f / 9.0f }, { "Drum Kit", 0.0f }, { "Drum Pattern", 19.0f / 28.0f },
                                                 { "Drum Pattern 2", 1.0f / 28.0f } }, 0 },
         { "10. FM 6-Op alg 32, 6 op, 8 notas", { { "Engine", 6.0f / 9.0f }, { "FM Algorithm", 1.0f }, { "FM OP2 Level", 0.9f },
                                                  { "FM OP3 Level", 0.9f }, { "FM OP4 Level", 0.9f }, { "FM OP5 Level", 0.9f },

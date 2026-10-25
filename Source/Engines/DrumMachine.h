@@ -406,6 +406,9 @@ private:
 };
 
 // Instrumento de patrón -> voz de cada kit (-1: el kit no lo tiene)
+// Parámetro drumKit (por año en la UI: Mini Pops 7, CR-78, TR-808) -> kit interno (0 TR-808, 1 CR-78, 2 Mini Pops 7)
+static int kitFromParam (float value) { return 2 - juce::jlimit (0, 2, (int) value); }
+
 static int slotVoice (int kit, DrumSlot slot)
 {
     using V = DrumVoice;
@@ -502,7 +505,7 @@ struct DrumMachine
     void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const StepClock::Transport& transport,
                  const UserRhythms::Bank* userBank)
     {
-        const auto kitIndex = juce::jlimit (0, 2, (int) p.drumKit->load());
+        const auto kitIndex = kitFromParam (p.drumKit->load());
         DrumKit::Settings s;
         s.tune = std::exp2 (p.drumTune->load() / 12.0);
         s.decay = std::exp2 (2.0 * p.drumDecay->load()); // -1..1 -> ×0,25..×4

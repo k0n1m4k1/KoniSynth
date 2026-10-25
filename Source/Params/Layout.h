@@ -281,7 +281,7 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "omniRhythmLevel", 1 }, "Omnichord Rhythm Level", NormalisableRange<float> (0.0f, 1.0f), 0.7f, percent));
 
     // Caja de ritmos: kit TR-808 / CR-78 desde el teclado (mapa GM) y patrones
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "drumKit", 1 }, "Drum Kit", StringArray { "TR-808", "CR-78", "Mini Pops 7" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "drumKit", 1 }, "Drum Kit", StringArray { "Mini Pops 7 (1966)", "CR-78 (1978)", "TR-808 (1980)" }, 2)); // por año (DrumMachine.h kitFromParam)
     {
         StringArray patterns { "Off" };
         for (const auto& r : drumPatterns()) patterns.add (r.name);

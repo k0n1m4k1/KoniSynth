@@ -22,7 +22,7 @@ two sections side by side.
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Kit menu (header) | Drum kit: TR-808, CR-78 or Mini Pops 7. Keys follow the General MIDI drum map. | TR-808, CR-78, Mini Pops 7 / TR-808 |
+| Kit menu (header) | Drum kit, by year: Mini Pops 7 (1966), CR-78 (1978) or TR-808 (1980). Keys follow the General MIDI drum map. | Mini Pops 7, CR-78, TR-808 / TR-808 |
 | Velocity (switch) | Off: a MIDI note plays at the normal level, or accented from velocity 100. On: velocity sets the level continuously. | Off / On / **Off** |
 | Tune | Tunes all drums together. | -12 to +12 st / 0 st |
 | Decay | Scales all decay times; x1 is the factory decay of each voice. | x0.25 to x4 / x1.00 |
