@@ -18,7 +18,13 @@ public:
         juce::File file;
         juce::String category = "Init";
         int engine = 0; // índice del parámetro "engine" que deja el preset (navegador: filtro por motor)
+        juce::String playHint; // cómo tocarlo (FactoryPreset::playHint; en los de usuario, el que se guardó con él)
+        int playLow = -1, playHigh = -1; // rango recomendado (notas MIDI; -1 = sin rango)
     };
+
+    // Cómo tocar el preset actual: propiedades del estado (no son parámetros). Las fija la carga de un preset, se pueden
+    // editar desde el teclado en pantalla (cuentan como cambio sin guardar, "*") y las escribe Save / Save As
+    static inline const juce::Identifier playHintProp { "playHint" }, playLowProp { "playLow" }, playHighProp { "playHigh" };
 
     // 1: hasta la 0.6 (sin atributo). 2: formatVersion y pluginVersion; thereminOn ya migrado a engine. 3: Osc 2 en modo Sample, con su
     // fichero (atributo osc2SamplePath)
@@ -46,7 +52,7 @@ public:
             int engine = 0;
             for (const auto& v : f.values)
                 if (v.id == "engine") engine = juce::roundToInt (v.value);
-            presets.push_back ({ f.name, true, {}, f.category, engine });
+            presets.push_back ({ f.name, true, {}, f.category, engine, f.playHint, f.playLow, f.playHigh });
         }
 
         auto files = userDirectory().findChildFiles (juce::File::findFiles, false, "*.xml");
@@ -54,17 +60,20 @@ public:
         for (const auto& f : files)
         {
             // Categoría del preset de usuario: atributo presetCategory (sin él, presets anteriores -> "Init")
-            juce::String category ("Init");
-            int engine = 0;
+            juce::String category ("Init"), hint;
+            int engine = 0, low = -1, high = -1;
             if (const auto xml = juce::XmlDocument::parse (f); xml != nullptr && xml->hasTagName (xmlTag))
             {
                 category = xml->getStringAttribute (categoryAttribute, "Init");
+                hint = xml->getStringAttribute (playHintAttribute);
+                low = xml->getIntAttribute (playLowAttribute, -1);
+                high = xml->getIntAttribute (playHighAttribute, -1);
                 engine = juce::roundToInt (xml->hasAttribute ("engine") ? xml->getDoubleAttribute ("engine")
                                                                         : (xml->getDoubleAttribute ("thereminOn") > 0.5 ? 1.0 : 0.0));
             }
             if (! presetCategories().contains (category))
                 category = "Init";
-            presets.push_back ({ f.getFileNameWithoutExtension(), false, f, category, engine });
+            presets.push_back ({ f.getFileNameWithoutExtension(), false, f, category, engine, hint, low, high });
         }
     }
 
@@ -140,6 +149,9 @@ private:
         }
 
         setCurrent (preset);
+        apvts.state.setProperty (playHintProp, preset.playHint, nullptr);
+        apvts.state.setProperty (playLowProp, preset.playLow, nullptr);
+        apvts.state.setProperty (playHighProp, preset.playHigh, nullptr);
         // Propiedades de texto (macros por frame, Dsp/FrameMacro.h): las del preset; si no las trae, vacías
         for (const auto* prop : textProperties())
         {
@@ -215,6 +227,7 @@ public:
         if (auto r = validateName (name); r.failed())
             return r;
 
+        // La indicación y el rango del estado (los del preset actual, editados o no) pasan al nuevo
         const auto file = fileFor (name);
         if (auto r = write (file, category); r.failed())
             return r;
@@ -235,6 +248,7 @@ public:
         if (auto r = write (current.file, current.category); r.failed())
             return r;
 
+        refresh(); // la indicación y el rango guardados pasan a la lista (navegador, display)
         markClean();
         return juce::Result::ok();
     }
@@ -308,6 +322,8 @@ private:
     static inline const juce::Identifier nameProp { "presetName" }, factoryProp { "presetFactory" };
     static constexpr const char* xmlTag = "KoniSynthPreset";
     static constexpr const char* categoryAttribute = "presetCategory"; // no es un ID de parámetro: targetValues lo ignora
+    static constexpr const char* playHintAttribute = "playHint";       // texto: tampoco es un parámetro
+    static constexpr const char* playLowAttribute = "playLow", * playHighAttribute = "playHigh"; // notas MIDI del rango
     static constexpr const char* formatAttribute = "formatVersion", * versionAttribute = "pluginVersion";
 
     std::set<juce::String> favorites;
@@ -354,6 +370,8 @@ private:
         textSnapshot.clear();
         for (const auto* prop : textProperties())
             textSnapshot[prop] = apvts.state.getProperty (prop).toString();
+        for (const auto& prop : { playHintProp, playLowProp, playHighProp }) // editar cómo tocarlo también marca el "*"
+            textSnapshot[prop.toString()] = apvts.state.getProperty (prop).toString();
         snapshotValid = true;
     }
 
@@ -396,8 +414,8 @@ private:
             if (note != nullptr)
             {
                 // Atributos que no son parámetros ni propiedades conocidas: de una versión posterior o renombrados
-                juce::StringArray known { formatAttribute, versionAttribute, categoryAttribute, sampleAttribute, osc2SampleAttribute, wavetableAttribute,
-                                          cabIrAttribute, "ansUser", "thereminOn" };
+                juce::StringArray known { formatAttribute, versionAttribute, categoryAttribute, playHintAttribute, playLowAttribute, playHighAttribute,
+                                          sampleAttribute, osc2SampleAttribute, wavetableAttribute, cabIrAttribute, "ansUser", "thereminOn" };
                 for (const auto* prop : textProperties()) known.add (prop);
                 for (auto* p : rangedParameters()) known.add (p->getParameterID());
                 juce::StringArray unknown;
@@ -432,6 +450,15 @@ private:
         xml.setAttribute (formatAttribute, formatVersion);
         xml.setAttribute (versionAttribute, JucePlugin_VersionString);
         xml.setAttribute (categoryAttribute, category);
+        // Cómo tocarlo: del estado (lo que trajo el preset o lo editado en el teclado); sin indicación ni rango, no se escribe
+        if (const auto hint = apvts.state.getProperty (playHintProp).toString(); hint.isNotEmpty())
+            xml.setAttribute (playHintAttribute, hint);
+        const int low = apvts.state.getProperty (playLowProp, -1), high = apvts.state.getProperty (playHighProp, -1);
+        if (low >= 0 && high >= low)
+        {
+            xml.setAttribute (playLowAttribute, low);
+            xml.setAttribute (playHighAttribute, high);
+        }
         // Rutas de los ficheros (no son parámetros: van en el estado). Vacías = sin fichero
         xml.setAttribute (sampleAttribute, apvts.state.getProperty (sampleAttribute).toString());
         xml.setAttribute (osc2SampleAttribute, apvts.state.getProperty (osc2SampleAttribute).toString());

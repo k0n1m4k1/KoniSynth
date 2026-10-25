@@ -49,9 +49,14 @@ public:
                                                                  &prevButton, &nextButton, &browseButton })
             addAndMakeVisible (*c);
 
+        lastAnnounced = presets.currentIndex(); // el preset que ya estaba al abrir el editor no se anuncia
         rebuild();
         startTimerHz (5); // detecta cambios de potenciómetros para el "*"
     }
+
+    // Lo instala el editor: el preset actual ha cambiado (desde la barra, el navegador, MIDI, el agente o el host); se
+    // detecta en el temporizador, como mucho 200 ms después
+    std::function<void (int index)> onPresetChanged;
 
     void resized() override
     {
@@ -114,6 +119,12 @@ private:
     void refreshDisplay()
     {
         const auto index = presets.currentIndex();
+        if (index != lastAnnounced)
+        {
+            lastAnnounced = index;
+            if (index >= 0 && onPresetChanged)
+                onPresetChanged (index);
+        }
         const auto dirty = presets.isDirty();
         if (index == lastIndex && dirty == lastDirty)
             return;
@@ -363,6 +374,6 @@ private:
                prevButton { IconButton::Icon::prev, "Previous preset" }, nextButton { IconButton::Icon::next, "Next preset" },
                browseButton { IconButton::Icon::browse, "Browse presets" };
     std::unique_ptr<Overlay> overlay;
-    int lastIndex = -2;
+    int lastIndex = -2, lastAnnounced = -1;
     bool lastDirty = false;
 };

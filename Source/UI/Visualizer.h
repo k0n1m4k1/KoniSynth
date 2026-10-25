@@ -28,6 +28,16 @@ public:
     int getBezel() const { return bezel; }
     std::function<void (int)> onBezelChange;
 
+    // Rótulo temporal sobre cualquier vista (p. ej. cómo tocar el preset recién cargado): título y línea, visible
+    // captionSeconds y desvanecido en el último segundo. Texto vacío = quitarlo
+    void showCaption (const juce::String& title, const juce::String& line)
+    {
+        captionTitle = title;
+        captionLine = line;
+        captionUntil = line.isEmpty() ? 0.0 : juce::Time::getMillisecondCounterHiRes() + captionSeconds * 1000.0;
+        repaint();
+    }
+
     void mouseUp (const juce::MouseEvent& e) override
     {
         if (e.mods.isPopupMenu())
@@ -89,6 +99,7 @@ public:
         g.setColour (juce::Colours::white.withAlpha (0.35f));
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText (labels[mode], r.removeFromTop (14.0f).removeFromLeft (120.0f), juce::Justification::topLeft);
+        paintCaption (g, full.reduced (10.0f));
         if (style != 0)
             paintCrt (g, full);
         else
@@ -104,6 +115,33 @@ private:
         return style == 1 ? juce::Colour (0xff41ff6a) : style == 2 ? juce::Colour (0xffffb000) : juce::Colour (0xff42a2c8);
     }
     juce::Colour inkHot() const { return style == 0 ? juce::Colour (0xffff3030) : ink().brighter (0.6f); }
+
+    static constexpr double captionSeconds = 8.0;
+    juce::String captionTitle, captionLine;
+    double captionUntil = 0.0;
+
+    // Rótulo abajo a la derecha, en el color del estilo, sobre una banda oscura para leerse encima de la traza
+    void paintCaption (juce::Graphics& g, juce::Rectangle<float> r) const
+    {
+        const auto remaining = (captionUntil - juce::Time::getMillisecondCounterHiRes()) / 1000.0;
+        if (remaining <= 0.0 || captionLine.isEmpty())
+            return;
+        const auto alpha = (float) juce::jmin (1.0, remaining); // desvanecido en el último segundo
+        const juce::Font titleFont (juce::FontOptions (13.0f, juce::Font::bold)), lineFont (juce::FontOptions (15.0f, juce::Font::bold));
+        const auto line = juce::String::fromUTF8 ("\xe2\x96\xb6 ") + captionLine; // ▶
+        const auto w = juce::jmin (r.getWidth(), 24.0f + juce::jmax (juce::GlyphArrangement::getStringWidth (titleFont, captionTitle),
+                                                                     juce::GlyphArrangement::getStringWidth (lineFont, line)));
+        auto box = r.removeFromBottom (44.0f).removeFromRight (w);
+        g.setColour (juce::Colours::black.withAlpha (0.6f * alpha));
+        g.fillRoundedRectangle (box, 5.0f);
+        box = box.reduced (12.0f, 4.0f);
+        g.setColour (ink().withAlpha (0.75f * alpha));
+        g.setFont (titleFont);
+        g.drawText (captionTitle, box.removeFromTop (16.0f), juce::Justification::centredLeft, true);
+        g.setColour (ink().brighter (0.3f).withAlpha (alpha));
+        g.setFont (lineFont);
+        g.drawText (line, box, juce::Justification::centredLeft, true);
+    }
 
     // Trazo con halo (fósforo): pasada ancha y tenue, después la fina
     void glowStroke (juce::Graphics& g, const juce::Path& path, float width) const

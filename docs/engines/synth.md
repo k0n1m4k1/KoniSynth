@@ -364,12 +364,28 @@ These are the Synth's own design choices, not an emulation of a particular unit.
 
 ## Factory presets
 
-161 factory presets have no "engine" value and therefore use the Synth. By category:
+163 factory presets have no "engine" value and therefore use the Synth. Presets whose sound depends on the note or on how
+they are played (nature sounds, one-voice drums, sequences, chip effects) say so: the display shows the hint for a few
+seconds when the preset loads (for example "Hold E6 (or C6 for the 'meow')" for Gull Long Call), and the preset browser
+shows it on hover and when the preset is selected. Most presets also carry a recommended range: the on-screen keyboard
+greys out the keys outside it (a single key when the sound needs one note, such as the 808-style kick on G1). To find a
+note, hover over the on-screen keyboard: it names the key under the mouse (C4 = MIDI 60, the convention of all the
+manuals). Right-click a key to set the range (Range starts at / Range ends at / Only this key / Clear range) or to edit
+the hint (Edit play hint...); like any other change, this marks the preset as modified, and Save or Save As stores it
+with the preset.
+
+The computer keyboard plays the on-screen keyboard (it never changes MIDI): the A row plays white keys (A to L and the
+two keys after L, by position: Ñ and ´ on a Spanish keyboard, ; and ' on an English one), the Q row the black keys
+between them, Z / X shift an octave down / up, C / V lower / raise the velocity by 10, and 1-9 load your favorite
+presets 1-9 (alphabetical order; mark them with the star in the browser). No click is needed: pressing one of these keys
+gives the on-screen keyboard the focus, unless you are typing in a text field. Loading a preset puts the A key on the
+first key of its recommended range (C4 without a range); right-click a key, then "PC keyboard starts at" to choose
+another white key. By category:
 
 | Category | Presets |
 |---|---|
 | Init | Init |
-| Bass | Saw Bass, Wobble, Acid Squelch, Studio Reel, Phasing Saw Bass, Picked Electric Bass, Analog Thump Bass, Model D Bass, Taurus Pedal Bass, Mono Bass 101, Detuned Reese Bass, 808 Sub Bass, House Organ Bass, Hardbass Donk, Blue Monday 88 Bass, Everything Counts Bass, The Model Bass, Europe Endless Bass, Around The World Bass, Acid 303 Bass |
+| Bass | Saw Bass, Wobble, Acid Squelch, Studio Reel, Phasing Saw Bass, Picked Electric Bass, Analog Thump Bass, Model D Bass, Taurus Pedal Bass, Mono Bass 101, Detuned Reese Bass, 808 Sub Bass, House Organ Bass, Juno Saw+Pulse Bass, Hardbass Donk, Electric Donk Bass, Blue Monday 88 Bass, Everything Counts Bass, The Model Bass, Europe Endless Bass, Around The World Bass, Acid 303 Bass |
 | Lead | Retro Lead, Supersaw Lab, Ladder Whistle, MS-20 Acid Scream, Wavefold Lead, Valve Clavioline, Modular Lead 1968, Model D Lead, Odyssey Sync Lead, Eight-Voice Sync Lead, Phase Distortion Reso Lead, Fat Mono Lead, Hoover 90s, Numbers Lead, Just Cant Get Enough Lead, New Life Lead, Never Let Me Down Lead, Oxygene IV Lead, Da Funk Lead, Shine On Lead, Digital Sync Lead |
 | Pad | Soft Pad, Space Tape, Cassette Memories, Worn Reel 9.5, PWM Analog Pad, Endless Plate Pad, Barber Pole Drone, PWM Sweep Pad, Notch Sweep Pad, Wavetable Pad PPG, Digital Bell Pad, Gated Supersaw Pad, Vector Wave Pad, Mistress Pad, Voyager Chords, Short Circuit Swell, In The Air Tonight Pad, Fade To Grey Pad, Stranger Things Pad, Harmonic Sweep Pad |
 | Keys | Glass Bell, French Chords, Dusty Vinyl, Funky Clav, Continental Combo Organ, Compact Combo Organ, Tape Flute, Pianet Reed Keys, Reed EP 200A, Suitcase Tine EP, Clavinet D6 Strings, Dub Techno Chord, Spring Dub Stab, Baroque Harpsichord, Neon Lights Keys, Formant Sweep Keys |

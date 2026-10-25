@@ -315,6 +315,14 @@ private:
         }
     }
 
+    // Cómo tocar el preset (si lo indica), al pasar sobre su fila
+    juce::String getCellTooltip (int row, int) override
+    {
+        if (row < 0 || row >= (int) visible.size()) return {};
+        const auto& play = presets.getPresets()[visible[(size_t) row]].playHint;
+        return play.isNotEmpty() ? "Play: " + play : juce::String();
+    }
+
     void cellClicked (int row, int col, const juce::MouseEvent&) override
     {
         if (col != colFav || row < 0 || row >= (int) visible.size()) return;
@@ -330,10 +338,12 @@ private:
         if (quiet || row < 0 || row >= (int) visible.size()) return;
         if (auto r = presets.load ((int) visible[(size_t) row]); r.failed())
             hint.setText (r.getErrorMessage(), juce::dontSendNotification);
+        else if (presets.lastLoadNote.isNotEmpty())
+            hint.setText (presets.lastLoadNote, juce::dontSendNotification);
+        else if (const auto& play = presets.getPresets()[visible[(size_t) row]].playHint; play.isNotEmpty())
+            hint.setText (juce::String::fromUTF8 ("\xe2\x96\xb6 Play: ") + play, juce::dontSendNotification); // ▶
         else
-            hint.setText (presets.lastLoadNote.isNotEmpty() ? presets.lastLoadNote
-                                                            : juce::String ("Click or arrow keys: listen. Double-click or Enter: load and close. Star: favorite."),
-                          juce::dontSendNotification);
+            hint.setText ("Click or arrow keys: listen. Double-click or Enter: load and close. Star: favorite.", juce::dontSendNotification);
     }
 
     void sortOrderChanged (int, bool) override { refilter(); }

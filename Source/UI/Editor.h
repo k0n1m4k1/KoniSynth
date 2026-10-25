@@ -8,6 +8,12 @@
 // Orden de las filas = orden de la señal: generación -> forma (filtro y envolventes) -> entrada/vocoder y modulación ->
 // efectos en el orden en que se aplican -> master. Flechas entre las secciones que forman cadena.
 // Tooltips a los 2 s (regla del proyecto: todo control lleva ayuda y menú con "Reset to default").
+#if JUCE_WINDOWS
+// user32 (ya enlazada por JUCE), declarada aquí para no incluir <windows.h> en la unidad de compilación: traduce un código de
+// escaneo (posición física de la tecla) a la tecla virtual de la distribución activa (NoteKeyboard::physicalKey)
+extern "C" __declspec (dllimport) unsigned int __stdcall MapVirtualKeyW (unsigned int code, unsigned int mapType);
+#endif
+
 class KoniSynthEditor : public juce::AudioProcessorEditor, private juce::Timer, private juce::ComponentListener
 {
 public:
@@ -145,6 +151,19 @@ public:
             auto browser = std::make_unique<PresetBrowser> (koni);
             browser->onClose = [safe = SafePointer<KoniSynthEditor> (this)] { if (safe != nullptr) safe->panel.reset(); };
             openPanel ("Presets", std::move (browser), 1100, 600);
+        };
+        keyboard.attachPlayRange (koni.apvts.state, [this] { editPlayHint(); });
+        keyboard.onFavorite = [this] (int n) { loadFavorite (n); };
+        keyboard.onPcKeysChanged = [this] (const juce::String& line) { scope.showCaption ("PC keyboard", line); };
+        // Al cambiar de preset, el display muestra cómo tocarlo si el preset lo indica (y quita el rótulo anterior si no)
+        presetBar.onPresetChanged = [this] (int index)
+        {
+            const auto& p = koni.presetManager.getPresets()[(size_t) index];
+            // La A del teclado del PC va al comienzo del rango recomendado (a la blanca si es negra); sin rango, a C4
+            koni.apvts.state.setProperty (NoteKeyboard::pcBaseProp, p.playLow >= 0 ? p.playLow : 60, nullptr);
+            scope.showCaption (p.name, p.playHint);
+            if (displayWindow != nullptr)
+                displayWindow->view.showCaption (p.name, p.playHint);
         };
 
         // 1. Generación
@@ -1001,6 +1020,38 @@ private:
         const auto w = juce::jlimit (420, kWidth - 40, juce::roundToInt (body->weight() * 78.0f) + 52);
         openPanel (panelTitle, std::move (body), w, 230);
     }
+    // Teclas 1-9 del PC: el favorito n (0-8) en orden alfabético de nombre (natural: "Pad 2" antes que "Pad 10")
+    void loadFavorite (int n)
+    {
+        auto& pm = koni.presetManager;
+        const auto& list = pm.getPresets();
+        std::vector<size_t> favs;
+        for (size_t i = 0; i < list.size(); ++i)
+            if (pm.isFavorite (i)) favs.push_back (i);
+        std::stable_sort (favs.begin(), favs.end(), [&list] (size_t a, size_t b) { return list[a].name.compareNatural (list[b].name) < 0; });
+        if (n >= (int) favs.size())
+        {
+            scope.showCaption ("Favorites", "No favorite " + juce::String (n + 1) + ": mark presets with the star in the browser");
+            return;
+        }
+        pm.load ((int) favs[(size_t) n]); // el display la anuncia (PresetBar::onPresetChanged)
+    }
+
+    // Indicación de cómo tocar el preset actual (clic derecho en el teclado): se guarda con el preset (Save / Save As)
+    void editPlayHint()
+    {
+        overlay = Overlay::create (*this, "Play hint", "How to play this preset. The display shows it when the preset loads, and the "
+                                   "preset browser on hover. Save the preset to keep it.",
+                                   koni.apvts.state.getProperty (PresetManager::playHintProp).toString(), "OK", "Cancel",
+                                   [this] (bool accepted, const juce::String& text, int)
+                                   {
+                                       if (accepted)
+                                           koni.apvts.state.setProperty (PresetManager::playHintProp, text.trim(), nullptr);
+                                       juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<KoniSynthEditor> (this)]
+                                                                        { if (safe != nullptr) safe->overlay.reset(); });
+                                   });
+    }
+
     // Modo del teclado en pantalla (propiedad del estado del plugin): 0 Docked, 1 Hidden, 2 Floating
     int keyboardMode() const { return juce::jlimit (0, 2, (int) koni.apvts.state.getProperty ("keyboardMode", 0)); }
 
@@ -1008,10 +1059,15 @@ private:
     {
         koni.apvts.state.setProperty ("keyboardMode", mode, nullptr);
         if (mode == 2 && floatingKeyboard == nullptr)
+        {
             floatingKeyboard = std::make_unique<KeyboardWindow> (koni.keyboardState, [safe = juce::Component::SafePointer<KoniSynthEditor> (this)]
             {
                 if (safe != nullptr) juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->setKeyboardMode (0); }); // al cerrar: vuelve abajo
             });
+            floatingKeyboard->keys.attachPlayRange (koni.apvts.state, [this] { editPlayHint(); });
+            floatingKeyboard->keys.onFavorite = [this] (int n) { loadFavorite (n); };
+            floatingKeyboard->keys.onPcKeysChanged = [this] (const juce::String& line) { scope.showCaption ("PC keyboard", line); };
+        }
         else if (mode != 2)
             floatingKeyboard.reset();
         updateMode();
@@ -2284,6 +2340,29 @@ private:
             koni.undoHistory.redo();
             return true;
         }
+        // 1-9 sin modificadores: favoritos, también sin el foco en el teclado en pantalla (los campos de texto se las quedan)
+        if (! k.getModifiers().isAnyModifierKeyDown() && k.getTextCharacter() >= '1' && k.getTextCharacter() <= '9')
+        {
+            loadFavorite ((int) (k.getTextCharacter() - '1'));
+            return true;
+        }
+        // Z / X / C / V sin el foco en el teclado: se lo da y las aplica
+        if (auto* kb = pcKeyboardTarget(); kb != nullptr && NoteKeyboard::isControlKey (k))
+        {
+            kb->grabKeyboardFocus();
+            return kb->keyPressed (k);
+        }
+        return false;
+    }
+
+    // Una tecla de nota del teclado del PC sin el foco en el teclado en pantalla: se lo da y la toca, sin tener que hacer clic
+    bool keyStateChanged (bool isKeyDown) override
+    {
+        if (auto* kb = pcKeyboardTarget(); kb != nullptr && isKeyDown && kb->anyPcNoteKeyDown())
+        {
+            kb->grabKeyboardFocus();
+            return kb->keyStateChanged (isKeyDown);
+        }
         return false;
     }
     juce::ToggleButton avxButton { "AVX2" };
@@ -2359,7 +2438,232 @@ private:
         if (displayWindow != nullptr) { displayWindow->toFront (true); return; }
         setDockMode (displayFoldId, 2); // mismo estado que "Floating window" en la pestaña DISPLAY
     }
-    // Teclado en ventana propia (modo Floating): otro MidiKeyboardComponent sobre el mismo MidiKeyboardState del procesador
+    // Teclado en pantalla que nombra la tecla bajo el ratón ("E6 - MIDI 88"), para encontrar la nota que pide un preset.
+    // C4 = MIDI 60, como en los manuales y en las indicaciones de los presets (JUCE rotula por defecto C3 = 60)
+    struct NoteKeyboard : juce::MidiKeyboardComponent, juce::TooltipClient, private juce::ValueTree::Listener
+    {
+        NoteKeyboard (juce::MidiKeyboardState& state, Orientation o) : juce::MidiKeyboardComponent (state, o) { setOctaveForMiddleC (4); }
+        juce::String getTooltip() override
+        {
+            const auto n = getNoteAndVelocityAtPosition (getMouseXYRelative().toFloat()).note;
+            return n < 0 ? juce::String() : juce::MidiMessage::getMidiNoteName (n, true, true, 4) + " - MIDI " + juce::String (n);
+        }
+        // Rango recomendado del preset (propiedades playLow / playHigh del estado): fuera de él, blancas en gris claro y negras
+        // aclaradas. Clic derecho: fijar el rango o editar la indicación (onEditHint lo abre el editor)
+        void attachPlayRange (juce::ValueTree s, std::function<void()> editHint)
+        {
+            state = std::move (s);
+            onEditHint = std::move (editHint);
+            state.addListener (this);
+            remapPcKeys();
+            repaint();
+        }
+
+        // Teclado del PC (solo el de escribir; el MIDI no cambia). Fila A = blancas desde pcKeyBase (propiedad del estado;
+        // C4 por defecto), fila Q = las negras que hay entre ellas, como en un piano. Z / X: octava abajo / arriba; C / V:
+        // velocidad -/+ 10 (pcKeyVelocity, 1-127); 1-9: favoritos (onFavorite). Clic derecho: "PC keyboard starts at"
+        std::function<void (int index)> onFavorite;
+        std::function<void (const juce::String& line)> onPcKeysChanged; // rótulo en el display tras Z / X / C / V
+        static inline const juce::Identifier pcBaseProp { "pcKeyBase" }, pcVelocityProp { "pcKeyVelocity" };
+
+        int pcBase() const { return juce::jlimit (0, 120, (int) state.getProperty (pcBaseProp, 60)); }
+        // Alguna tecla con nota está pulsada (el editor lo usa para dar el foco al teclado sin hacer clic en él)
+        bool anyPcNoteKeyDown() const
+        {
+            return std::any_of (pcKeys.begin(), pcKeys.end(), [] (const juce::KeyPress& k) { return k.isCurrentlyDown(); });
+        }
+        static bool isControlKey (const juce::KeyPress& k)
+        {
+            const auto c = juce::CharacterFunctions::toLowerCase (k.getTextCharacter());
+            return ! k.getModifiers().isAnyModifierKeyDown() && (c == 'z' || c == 'x' || c == 'c' || c == 'v');
+        }
+        // 127 por defecto: JUCE usa la misma velocidad como tope de la del ratón, que así queda como antes
+        int pcVelocity() const { return juce::jlimit (1, 127, (int) state.getProperty (pcVelocityProp, 127)); }
+        juce::String pcSummary() const
+        {
+            return "A = " + juce::MidiMessage::getMidiNoteName (firstWhite (pcBase()), true, true, 4) + ", velocity " + juce::String (pcVelocity());
+        }
+
+        bool keyPressed (const juce::KeyPress& k) override
+        {
+            if (state.isValid() && ! k.getModifiers().isAnyModifierKeyDown())
+            {
+                const auto c = juce::CharacterFunctions::toLowerCase (k.getTextCharacter());
+                if (c == 'z' || c == 'x')
+                {
+                    state.setProperty (pcBaseProp, juce::jlimit (0, 108, firstWhite (pcBase()) + (c == 'z' ? -12 : 12)), nullptr);
+                    if (onPcKeysChanged) onPcKeysChanged (pcSummary());
+                    return true;
+                }
+                if (c == 'c' || c == 'v')
+                {
+                    state.setProperty (pcVelocityProp, juce::jlimit (1, 127, pcVelocity() + (c == 'c' ? -10 : 10)), nullptr);
+                    if (onPcKeysChanged) onPcKeysChanged (pcSummary());
+                    return true;
+                }
+                if (c >= '1' && c <= '9' && onFavorite)
+                {
+                    onFavorite ((int) (c - '1'));
+                    return true;
+                }
+            }
+            return juce::MidiKeyboardComponent::keyPressed (k);
+        }
+        ~NoteKeyboard() override { state.removeListener (this); }
+
+        bool outsideRange (int note) const
+        {
+            const int low = state.getProperty (PresetManager::playLowProp, -1), high = state.getProperty (PresetManager::playHighProp, -1);
+            return low >= 0 && high >= low && (note < low || note > high);
+        }
+
+        bool mouseDownOnKey (int note, const juce::MouseEvent& e) override
+        {
+            if (! e.mods.isPopupMenu() || ! state.isValid())
+                return juce::MidiKeyboardComponent::mouseDownOnKey (note, e);
+            const auto name = juce::MidiMessage::getMidiNoteName (note, true, true, 4);
+            const int low = state.getProperty (PresetManager::playLowProp, -1), high = state.getProperty (PresetManager::playHighProp, -1);
+            juce::PopupMenu m;
+            m.addSectionHeader ("Recommended range" + (low >= 0 && high >= low ? ": " + juce::MidiMessage::getMidiNoteName (low, true, true, 4) + " - "
+                                                                              + juce::MidiMessage::getMidiNoteName (high, true, true, 4) : juce::String()));
+            m.addItem (1, "Range starts at " + name);
+            m.addItem (2, "Range ends at " + name);
+            m.addItem (3, "Only " + name);
+            m.addItem (4, "Clear range", low >= 0);
+            m.addSeparator();
+            m.addItem (5, "Edit play hint...", (bool) onEditHint);
+            m.addSeparator();
+            m.addSectionHeader ("PC keyboard: " + pcSummary());
+            m.addItem (6, "PC keyboard starts at " + juce::MidiMessage::getMidiNoteName (firstWhite (note), true, true, 4) + " (key A)");
+            m.addItem (7, "Keys: A row = white, Q row = black, Z/X octave, C/V velocity, 1-9 favorites", false, false);
+            m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withMousePosition(),
+                             [safe = juce::Component::SafePointer<NoteKeyboard> (this), note, low, high] (int id)
+                             {
+                                 if (safe == nullptr || id == 0) return;
+                                 auto set = [&] (int lo, int hi)
+                                 {
+                                     safe->state.setProperty (PresetManager::playLowProp, lo, nullptr);
+                                     safe->state.setProperty (PresetManager::playHighProp, hi, nullptr);
+                                 };
+                                 // Un extremo nuevo conserva el otro; si queda al revés, el rango se reduce a esa tecla
+                                 if (id == 1) set (note, high >= note ? high : note);
+                                 else if (id == 2) set (low >= 0 && low <= note ? low : note, note);
+                                 else if (id == 3) set (note, note);
+                                 else if (id == 4) set (-1, -1);
+                                 else if (id == 5 && safe->onEditHint) safe->onEditHint();
+                                 else if (id == 6)
+                                 {
+                                     safe->state.setProperty (pcBaseProp, firstWhite (note), nullptr);
+                                     if (safe->onPcKeysChanged) safe->onPcKeysChanged (safe->pcSummary());
+                                 }
+                             });
+            return false; // el clic derecho no toca la nota
+        }
+
+        // Además, la tecla bajo el ratón muestra su nombre al momento, como los Do (que JUCE rotula siempre)
+        void drawWhiteNote (int note, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver,
+                            juce::Colour lineColour, juce::Colour textColour) override
+        {
+            if (outsideRange (note))
+            {
+                g.setColour (juce::Colour (0xffd8d8d8)); // gris claro sobre el blanco de la tecla
+                g.fillRect (area);
+            }
+            juce::MidiKeyboardComponent::drawWhiteNote (note, g, area, isDown, isOver, lineColour, textColour);
+            if (isOver && getWhiteNoteText (note).isEmpty())
+            {
+                g.setColour (textColour);
+                g.setFont (labelFont());
+                g.drawText (juce::MidiMessage::getMidiNoteName (note, true, true, 4), area.withTrimmedLeft (1.0f).withTrimmedBottom (2.0f),
+                            juce::Justification::centredBottom, false);
+            }
+        }
+        // Negras: en blanco dentro de la propia tecla (fuera de ella quedaría sobre las blancas vecinas, que no se repintan al
+        // salir el ratón), ajustado a su ancho y en dos líneas si no cabe ("C#" / "4")
+        void drawBlackNote (int note, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver, juce::Colour fill) override
+        {
+            juce::MidiKeyboardComponent::drawBlackNote (note, g, area, isDown, isOver, outsideRange (note) ? fill.brighter (0.5f) : fill);
+            if (isOver)
+            {
+                g.setColour (juce::Colours::white);
+                g.setFont (labelFont());
+                const auto name = juce::MidiMessage::getMidiNoteName (note, true, false, 4) + "\n"
+                                + juce::String (note / 12 - 1); // octava con C4 = 60
+                g.drawFittedText (name, area.reduced (1.0f, 3.0f).toNearestInt(), juce::Justification::centredBottom, 2, 0.6f);
+            }
+        }
+        juce::Font labelFont() const
+        {
+            return juce::Font (juce::FontOptions (juce::jmin (12.0f, getKeyWidth() * 0.9f))).withHorizontalScale (0.8f);
+        }
+
+    private:
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier& id) override
+        {
+            if (id == PresetManager::playLowProp || id == PresetManager::playHighProp)
+                repaint();
+            else if (id == pcBaseProp || id == pcVelocityProp)
+                remapPcKeys();
+        }
+
+        // Tecla blanca de la nota, o la blanca anterior si es negra
+        static int firstWhite (int note)
+        {
+            while (note > 0 && juce::MidiMessage::isMidiNoteBlack (note)) --note;
+            return note;
+        }
+
+        // Tecla por su posición física (código de escaneo de un teclado PC: 0x27 y 0x28 tras la L, 0x1A tras la P). En Windows,
+        // JUCE traduce un carácter con VkKeyScan según la distribución activa (juce_Windowing_windows.cpp, isKeyCurrentlyDown):
+        // ';' en un teclado español es Mayús + coma y sonaría con la tecla de la coma. Con la tecla virtual de esa posición
+        // (marca extendedKeyModifier = 0x10000, juce_Windowing_windows.cpp:681) suena la tecla que hay ahí: Ñ y ´ en español,
+        // ; y ' en inglés. Fuera de Windows, el carácter de la distribución inglesa
+        static juce::KeyPress physicalKey (int scanCode, char fallback)
+        {
+           #if JUCE_WINDOWS
+            if (const auto vk = MapVirtualKeyW ((unsigned int) scanCode, 1 /* MAPVK_VSC_TO_VK */); vk != 0)
+                return juce::KeyPress ((int) vk | 0x10000, 0, 0);
+           #else
+            juce::ignoreUnused (scanCode);
+           #endif
+            return juce::KeyPress (fallback, 0, 0);
+        }
+
+        void remapPcKeys()
+        {
+            // Suelta las notas del teclado del PC antes de cambiar el mapa (JUCE buscaría la nota en el mapa nuevo y la antigua
+            // se quedaría sonando); focusLost es la vía pública a resetAnyKeysInUse
+            juce::MidiKeyboardComponent::focusLost (juce::Component::focusChangedDirectly);
+            clearKeyMappings();
+            pcKeys.clear();
+            setKeyPressBaseOctave (0); // la "posición" de cada tecla es directamente su nota MIDI
+            // Blancas: A S D F G H J K L y las dos siguientes (Ñ y ´ en español); negras: la tecla de arriba entre cada par
+            const std::array<juce::KeyPress, 11> whites { juce::KeyPress ('a', 0, 0), { 's', 0, 0 }, { 'd', 0, 0 }, { 'f', 0, 0 }, { 'g', 0, 0 },
+                                                          { 'h', 0, 0 }, { 'j', 0, 0 }, { 'k', 0, 0 }, { 'l', 0, 0 }, physicalKey (0x27, ';'),
+                                                          physicalKey (0x28, '\'') };
+            const std::array<juce::KeyPress, 10> gaps { juce::KeyPress ('w', 0, 0), { 'e', 0, 0 }, { 'r', 0, 0 }, { 't', 0, 0 }, { 'y', 0, 0 },
+                                                        { 'u', 0, 0 }, { 'i', 0, 0 }, { 'o', 0, 0 }, { 'p', 0, 0 }, physicalKey (0x1A, '[') };
+            auto note = firstWhite (pcBase());
+            int prev = -1;
+            for (size_t i = 0; i < whites.size() && note < 128; ++i)
+            {
+                setKeyPressForNote (whites[i], note);
+                pcKeys.push_back (whites[i]);
+                if (prev >= 0 && note - prev == 2)
+                {
+                    setKeyPressForNote (gaps[i - 1], prev + 1);
+                    pcKeys.push_back (gaps[i - 1]);
+                }
+                prev = note;
+                note += juce::MidiMessage::isMidiNoteBlack (note + 1) ? 2 : 1;
+            }
+            setVelocity ((float) pcVelocity() / 127.0f, true); // el ratón sigue dando velocidad por la altura del clic
+        }
+        std::vector<juce::KeyPress> pcKeys; // teclas con nota en el mapa actual
+        juce::ValueTree state;
+        std::function<void()> onEditHint;
+    };
+    // Teclado en ventana propia (modo Floating): otro teclado sobre el mismo MidiKeyboardState del procesador
     struct KeyboardWindow : juce::DocumentWindow
     {
         KeyboardWindow (juce::MidiKeyboardState& state, std::function<void()> onClose)
@@ -2381,10 +2685,20 @@ private:
             juce::DocumentWindow::resized();
             keys.setKeyWidth ((float) keys.getWidth() / 52.0f); // ~4 octavas y media visibles
         }
-        juce::MidiKeyboardComponent keys;
+        NoteKeyboard keys;
         std::function<void()> closed;
     };
     std::unique_ptr<KeyboardWindow> floatingKeyboard;
+
+    // Teclado que recibe el teclado del PC (el flotante si está abierto) cuando no tiene el foco; nadie si se está escribiendo
+    // en un campo de texto o si ya lo tiene
+    NoteKeyboard* pcKeyboardTarget()
+    {
+        if (dynamic_cast<juce::TextEditor*> (juce::Component::getCurrentlyFocusedComponent()) != nullptr)
+            return nullptr;
+        auto* kb = floatingKeyboard != nullptr ? &floatingKeyboard->keys : (keyboard.isShowing() ? &keyboard : nullptr);
+        return kb != nullptr && ! kb->hasKeyboardFocus (false) ? kb : nullptr;
+    }
 
     // Superficie del motor en ventana propia (modo Floating de PAD): redimensionable, siempre encima; al cerrar vuelve abajo
     struct SurfaceWindow : juce::DocumentWindow
@@ -2445,7 +2759,7 @@ private:
     std::unique_ptr<PanelDialog> panel;
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::unique_ptr<Overlay> overlay;
-    juce::MidiKeyboardComponent keyboard;
+    NoteKeyboard keyboard;
     ThereminPad pad;
     StylophonePad styloPad;
     int shownStyloModel = -1, shownOplModel = -1;
