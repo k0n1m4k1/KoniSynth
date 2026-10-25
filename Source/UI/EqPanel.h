@@ -132,9 +132,9 @@ private:
         s.mid1Freq = raw ("eqMid1Freq"); s.mid1Gain = raw ("eqMid1Gain"); s.mid1Q = raw ("eqMid1Q");
         s.mid2Freq = raw ("eqMid2Freq"); s.mid2Gain = raw ("eqMid2Gain"); s.mid2Q = raw ("eqMid2Q");
         s.highFreq = raw ("eqHighFreq"); s.highGain = raw ("eqHighGain"); s.outputDb = raw ("eqOutput");
-        static constexpr int orders[] = { 1, 2, 4 };
-        s.lowCutOrder = orders[juce::jlimit (0, 2, (int) raw ("eqLowCutSlope"))];
-        s.highCutOrder = orders[juce::jlimit (0, 2, (int) raw ("eqHighCutSlope"))];
+        static constexpr int orders[] = { 1, 2, 4, 0 }; // 0 = un polo (6 dB/oct)
+        s.lowCutOrder = orders[juce::jlimit (0, 3, (int) raw ("eqLowCutSlope"))];
+        s.highCutOrder = orders[juce::jlimit (0, 3, (int) raw ("eqHighCutSlope"))];
         return s;
     }
 

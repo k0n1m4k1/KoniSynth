@@ -5,8 +5,11 @@
 //==============================================================================
 // Ecualizador paramétrico de 6 etapas (tras la válvula, antes de la modulación: el sitio del EQ de un ampli; la reverb y el
 // eco reciben el tono ya ecualizado). Etapas, en este orden:
-//   Low Cut (paso alto Butterworth de 12/24/48 dB/oct) · Low (estante, pendiente S = 1) · Mid 1 y Mid 2 (picos con Q) ·
-//   High (estante, S = 1) · High Cut (paso bajo Butterworth 12/24/48 dB/oct) · Output (dB).
+//   Low Cut (paso alto Butterworth de 12/24/48 dB/oct o de un polo, 6 dB/oct) · Low (estante, pendiente S = 1) · Mid 1 y Mid 2
+//   (picos con Q) · High (estante, S = 1) · High Cut (paso bajo Butterworth 12/24/48 dB/oct o de un polo) · Output (dB).
+// 6 dB/oct es el HPF de un polo del Juno-60 (placa de chorus, IC5: C29/C28/C27 = 0,022/0,01/0,0047 µF contra R66 470 kΩ ∥
+// R69 33 kΩ, que entra en la entrada en corriente del VCA µPC1252H2; Service Notes, 1983, p. 11): posiciones 1-3 a 235, 516 y
+// 1098 Hz, calculado (la tolerancia de los condensadores no está medida). La 0 es plana.
 // Coeficientes del "Audio EQ Cookbook" de R. Bristow-Johnson (fórmulas estándar; transformada bilineal con frecuencia
 // prewarpeada en cada etapa, así la frecuencia central es exacta). Butterworth de orden 2N: N secciones con
 // Q_k = 1 / (2·cos((2k-1)·π / (4N))) (12 dB: 0,7071; 24 dB: 0,5412 y 1,3066).
@@ -58,6 +61,20 @@ inline Coeffs lowPass (double f, double q, double fs)
     return normalise ((1 - c) / 2, 1 - c, (1 - c) / 2, 1 + alpha, -2 * c, 1 - alpha);
 }
 
+// Primer orden (6 dB/oct, un polo, -3 dB exactos en f): bilineal con K = tan(w/2) prewarpeada. HP: (1 - z^-1)/(1+K + (K-1)z^-1);
+// LP: K·(1 + z^-1)/(1+K + (K-1)z^-1)
+inline Coeffs highPass1 (double f, double fs)
+{
+    const auto k = std::tan (0.5 * w0Of (f, fs));
+    return normalise (1.0, -1.0, 0.0, 1.0 + k, k - 1.0, 0.0);
+}
+
+inline Coeffs lowPass1 (double f, double fs)
+{
+    const auto k = std::tan (0.5 * w0Of (f, fs));
+    return normalise (k, k, 0.0, 1.0 + k, k - 1.0, 0.0);
+}
+
 // Q de la sección k (0..n-1) de un Butterworth de orden 2n
 inline double butterQ (int k, int n) { return 1.0 / (2.0 * std::cos ((2.0 * k + 1.0) * juce::MathConstants<double>::pi / (4.0 * n))); }
 
@@ -66,7 +83,7 @@ struct Settings
 {
     double lowCut = 20, highCut = 20000, lowFreq = 100, lowGain = 0, mid1Freq = 400, mid1Gain = 0, mid1Q = 1,
            mid2Freq = 2500, mid2Gain = 0, mid2Q = 1, highFreq = 8000, highGain = 0, outputDb = 0;
-    int lowCutOrder = 1, highCutOrder = 1; // secciones de 2.º orden: 1 = 12 dB/oct, 2 = 24, 4 = 48
+    int lowCutOrder = 1, highCutOrder = 1; // secciones de 2.º orden: 1 = 12 dB/oct, 2 = 24, 4 = 48; 0 = una de 1.er orden (6 dB/oct)
 };
 
 // Secciones en 12 posiciones fijas (0-3 Low Cut, 4 Low, 5 Mid 1, 6 Mid 2, 7 High, 8-11 High Cut). Las inactivas (ganancia
@@ -78,13 +95,19 @@ inline int sections (const Settings& s, double fs, std::array<Coeffs, 12>& out)
 {
     out.fill (Coeffs {});
     if (s.lowCut > 20.5)
+    {
+        if (s.lowCutOrder == 0) out[0] = highPass1 (s.lowCut, fs);
         for (int k = 0; k < s.lowCutOrder; ++k) out[(size_t) k] = highPass (s.lowCut, butterQ (k, s.lowCutOrder), fs);
+    }
     if (std::abs (s.lowGain) > 0.01)  out[4] = lowShelf (s.lowFreq, s.lowGain, fs);
     if (std::abs (s.mid1Gain) > 0.01) out[5] = peak (s.mid1Freq, s.mid1Gain, s.mid1Q, fs);
     if (std::abs (s.mid2Gain) > 0.01) out[6] = peak (s.mid2Freq, s.mid2Gain, s.mid2Q, fs);
     if (std::abs (s.highGain) > 0.01) out[7] = highShelf (s.highFreq, s.highGain, fs);
     if (s.highCut < 19900.0 && s.highCut < 0.49 * fs)
+    {
+        if (s.highCutOrder == 0) out[8] = lowPass1 (s.highCut, fs);
         for (int k = 0; k < s.highCutOrder; ++k) out[(size_t) (8 + k)] = lowPass (s.highCut, butterQ (k, s.highCutOrder), fs);
+    }
     return 12;
 }
 

@@ -699,15 +699,15 @@ public:
         if (eqOn)
         {
             if (! eqWasOn) equalizer.reset();
-            static constexpr int orders[] = { 1, 2, 4 };
+            static constexpr int orders[] = { 1, 2, 4, 0 }; // 0 = un polo (6 dB/oct), Effects/Equalizer.h
             Eq::Settings es;
             es.lowCut = params.eqLowCut->load(); es.highCut = params.eqHighCut->load();
             es.lowFreq = params.eqLowFreq->load(); es.lowGain = params.eqLowGain->load();
             es.mid1Freq = params.eqMid1Freq->load(); es.mid1Gain = params.eqMid1Gain->load(); es.mid1Q = params.eqMid1Q->load();
             es.mid2Freq = params.eqMid2Freq->load(); es.mid2Gain = params.eqMid2Gain->load(); es.mid2Q = params.eqMid2Q->load();
             es.highFreq = params.eqHighFreq->load(); es.highGain = params.eqHighGain->load(); es.outputDb = params.eqOutput->load();
-            es.lowCutOrder = orders[juce::jlimit (0, 2, (int) params.eqLowCutSlope->load())];
-            es.highCutOrder = orders[juce::jlimit (0, 2, (int) params.eqHighCutSlope->load())];
+            es.lowCutOrder = orders[juce::jlimit (0, 3, (int) params.eqLowCutSlope->load())];
+            es.highCutOrder = orders[juce::jlimit (0, 3, (int) params.eqHighCutSlope->load())];
             equalizer.process (buffer, es);
         }
         eqWasOn = eqOn;

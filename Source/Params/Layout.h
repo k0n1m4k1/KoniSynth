@@ -371,7 +371,7 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "tubeBias", 1 },  "Tube Bias",  NormalisableRange<float> (0.0f, 1.0f), 0.3f, percent));
     // Ecualizador paramétrico (Effects/Equalizer.h), tras la válvula: cortes Butterworth, estantes y dos picos
     {
-        const StringArray slopes { "12 dB/oct", "24 dB/oct", "48 dB/oct" };
+        const StringArray slopes { "12 dB/oct", "24 dB/oct", "48 dB/oct", "6 dB/oct" }; // 6 dB/oct al final (un polo; índices guardados)
         auto q = parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return "Q " + String (v, 2); }));
         auto gainRange = NormalisableRange<float> (-18.0f, 18.0f);
         l.add (std::make_unique<AudioParameterBool>   (ParameterID { "eqOn", 1 },           "EQ On", false));
