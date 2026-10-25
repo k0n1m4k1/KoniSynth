@@ -16,6 +16,8 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "../Source/Dsp/Tuning.h" // tuningtest: Scala y MTS-ESP (sin el plugin)
 #include <complex>
 #include "../Source/Dsp/VoiceSaturator.h" // sattest: media banda 2x de la saturación por voz
+#include "../Source/Engines/RhythmPatterns.h" // rhythmtest: ritmos de usuario en MIDI (sin el plugin)
+#include "../Source/Engines/UserRhythms.h"
 
 namespace
 {
@@ -527,6 +529,117 @@ int transportTest()
     return fails;
 }
 
+// rhythmtest: ritmos de usuario en MIDI (Engines/UserRhythms.h). Ida y vuelta de los patrones de fábrica, compases de vals,
+// tresillo y 32 pasos, e importación de un MIDI como lo exporta un DAW (tempo en otra pista, notas desplazadas, alias GM)
+int rhythmTest()
+{
+    int fails = 0;
+    const auto check = [&fails] (bool ok, const juce::String& what)
+    {
+        std::printf ("%s %s\n", ok ? "OK   " : "FALLO", what.toRawUTF8());
+        if (! ok) ++fails;
+    };
+    const auto fromPattern = [] (const RhythmPattern& p)
+    {
+        UserRhythms::Rhythm r;
+        r.name = p.name;
+        r.clear (p.numSteps, p.stepsPerBeat);
+        for (const auto& [slot, lane] : p.lanes)
+            r.lanes[(size_t) slot] = lane;
+        return r;
+    };
+    const auto roundTrip = [] (const UserRhythms::Rhythm& r, UserRhythms::Rhythm& back, juce::String& error)
+    {
+        juce::MemoryOutputStream out;
+        if (! UserRhythms::write (r, out)) { error = "write"; return false; }
+        juce::MemoryInputStream in (out.getData(), out.getDataSize(), false);
+        return UserRhythms::read (in, "x", back, error);
+    };
+    const auto same = [] (const UserRhythms::Rhythm& a, const UserRhythms::Rhythm& b)
+    {
+        if (a.numSteps != b.numSteps || a.stepsPerBeat != b.stepsPerBeat || a.name != b.name) return false;
+        for (size_t s = 0; s < a.lanes.size(); ++s)
+        {
+            // Un carril sin golpes equivale a ninguno
+            const auto empty = [] (const std::string& l) { return l.find_first_not_of ('.') == std::string::npos; };
+            if (empty (a.lanes[s]) != empty (b.lanes[s])) return false;
+            if (! empty (a.lanes[s]) && a.lanes[s] != b.lanes[s]) return false;
+        }
+        return true;
+    };
+
+    // 1) Los 29 patrones de fábrica: escribir y leer da el mismo patrón (longitud, rejilla, niveles y carriles)
+    int ok = 0;
+    juce::String bad;
+    for (const auto& p : drumPatterns())
+    {
+        const auto r = fromPattern (p);
+        UserRhythms::Rhythm back;
+        juce::String error;
+        if (roundTrip (r, back, error) && same (r, back)) ++ok; else bad << p.name << " (" << error << ") ";
+    }
+    check (ok == (int) drumPatterns().size(), "ida y vuelta de los patrones de fábrica: " + juce::String (ok) + " de "
+           + juce::String ((int) drumPatterns().size()) + (bad.isNotEmpty() ? " | " + bad : juce::String()));
+
+    // 2) Vals (12 pasos a 4 por tiempo, 3/4), tresillo (12 a 3, en 4/4) y dos compases (32)
+    {
+        UserRhythms::Rhythm r, back; juce::String e;
+        r.name = "Waltz test"; r.clear (12, 4); r.lanes[(size_t) DrumSlot::BD] = "x..........."; r.lanes[(size_t) DrumSlot::CH] = "....x...x...";
+        check (roundTrip (r, back, e) && back.numSteps == 12 && back.stepsPerBeat == 4 && same (r, back), "vals 12/4 (compás 3/4) " + e);
+        r.name = "Shuffle test"; r.clear (12, 3); r.lanes[(size_t) DrumSlot::BD] = "x.....x....."; r.lanes[(size_t) DrumSlot::SD] = "...X.....X.."; r.lanes[(size_t) DrumSlot::CH] = "x.xx.xx.xx.x";
+        check (roundTrip (r, back, e) && back.numSteps == 12 && back.stepsPerBeat == 3 && same (r, back), "tresillo 12/3 (corcheas de tresillo en 4/4) " + e);
+        r.name = "Two bars"; r.clear (32, 4); r.lanes[(size_t) DrumSlot::BD] = "x...x...x...x...x...x...x...x.x."; r.lanes[(size_t) DrumSlot::OH] = std::string (31, '.') + "X";
+        check (roundTrip (r, back, e) && back.numSteps == 32 && same (r, back), "dos compases (32 pasos, último paso con acento) " + e);
+        // Casos que solo resuelve la marca de rejilla: tresillo con golpes solo en los tiempos y segundo compás vacío
+        r.name = "Beats only"; r.clear (12, 3); r.lanes[(size_t) DrumSlot::BD] = "x..x..x..x..";
+        check (roundTrip (r, back, e) && back.numSteps == 12 && back.stepsPerBeat == 3 && same (r, back), "tresillo solo en los tiempos (marca de rejilla) " + e);
+        r.name = "Bar one only"; r.clear (32, 4); r.lanes[(size_t) DrumSlot::BD] = "x...x...x...x..." + std::string (16, '.');
+        check (roundTrip (r, back, e) && back.numSteps == 32 && same (r, back), "32 pasos con el segundo compás vacío (marca de rejilla) " + e);
+    }
+
+    // 3) Importación como de un DAW: tipo 1, tempo en la pista 0, batería en la 1 con 480 ticks por negra, notas adelantadas
+    //    o retrasadas 20 ticks, alias GM (35 = bombo, 44 = charles pedal), una nota fuera del mapa (60) y velocities intermedias
+    {
+        juce::MidiMessageSequence tempo, drums;
+        tempo.addEvent (juce::MidiMessage::tempoMetaEvent (468750), 0.0); // 128 BPM
+        tempo.addEvent (juce::MidiMessage::timeSignatureMetaEvent (4, 4), 0.0);
+        drums.addEvent (juce::MidiMessage::textMetaEvent (3, "DAW Beat"), 0.0);
+        const auto at = [&drums] (int note, double tick, int vel) { drums.addEvent (juce::MidiMessage::noteOn (10, note, (juce::uint8) vel), tick); drums.addEvent (juce::MidiMessage::noteOff (10, note), tick + 60.0); };
+        at (35, 0.0, 120);     // bombo acento, paso 0
+        at (38, 960.0 + 20.0, 100); // caja normal, paso 8 (retrasada 20 ticks)
+        at (44, 480.0 - 20.0, 60);  // charles suave, paso 4 (adelantado)
+        at (60, 240.0, 100);   // bongo: fuera del mapa -> ignorada
+        drums.updateMatchedPairs();
+        juce::MidiFile mf; mf.setTicksPerQuarterNote (480); mf.addTrack (tempo); mf.addTrack (drums);
+        juce::MemoryOutputStream out; mf.writeTo (out, 1);
+        juce::MemoryInputStream in (out.getData(), out.getDataSize(), false);
+        UserRhythms::Rhythm r; juce::String e;
+        const auto read = UserRhythms::read (in, "fallback", r, e);
+        check (read && r.name == "DAW Beat" && r.numSteps == 16 && r.stepsPerBeat == 4, "MIDI de DAW: nombre, 16 pasos, semicorcheas " + e);
+        check (read && r.lanes[(size_t) DrumSlot::BD].substr (0, 1) == "X" && r.lanes[(size_t) DrumSlot::SD][8] == 'x'
+               && r.lanes[(size_t) DrumSlot::CH][4] == 'o' && r.ignored == 1,
+               "cuantización ±20 ticks, alias GM 35/44, niveles por velocity (120 X, 100 x, 60 o), 1 nota ignorada (60)");
+    }
+
+    // 4) Ficheros que no son ritmos
+    {
+        juce::MemoryInputStream junk ("not midi", 8, false);
+        UserRhythms::Rhythm r; juce::String e;
+        // read antes que el mensaje: el orden de evaluación de los argumentos no está definido (MSVC, de derecha a izquierda)
+        auto junkOk = UserRhythms::read (junk, "j", r, e);
+        check (! junkOk && e.isNotEmpty(), "fichero que no es MIDI: rechazado (" + e + ")");
+        juce::MidiMessageSequence melody; melody.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0.0);
+        juce::MidiFile mf; mf.setTicksPerQuarterNote (96); mf.addTrack (melody);
+        juce::MemoryOutputStream out; mf.writeTo (out, 0);
+        juce::MemoryInputStream in (out.getData(), out.getDataSize(), false);
+        e.clear();
+        junkOk = UserRhythms::read (in, "m", r, e);
+        check (! junkOk && e.contains ("channel 10"), "MIDI sin canal 10: rechazado (" + e + ")");
+    }
+    std::printf ("%d fallos\n", fails);
+    return fails;
+}
+
 // tuningtest: lector Scala (.scl/.kbm) con valores derivados a mano
 int tuningTest()
 {
@@ -686,6 +799,11 @@ int main (int argc, char** argv)
     {
         juce::ScopedJuceInitialiser_GUI init;
         return transportTest();
+    }
+    if (argc >= 2 && juce::String (argv[1]) == "rhythmtest")
+    {
+        juce::ScopedJuceInitialiser_GUI init;
+        return rhythmTest();
     }
     if (argc >= 2 && juce::String (argv[1]) == "undotest")
     {

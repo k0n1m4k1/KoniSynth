@@ -285,6 +285,8 @@ static APVTS::ParameterLayout createLayout()
     {
         StringArray patterns { "Off" };
         for (const auto& r : drumPatterns()) patterns.add (r.name);
+        // Ranuras del banco de usuario (ficheros MIDI, Engines/UserRhythms.h), al final: los índices de fábrica no cambian
+        for (int i = 1; i <= UserRhythms::numSlots; ++i) patterns.add ("User " + String (i));
         l.add (std::make_unique<AudioParameterChoice> (ParameterID { "drumPattern", 1 }, "Drum Pattern", patterns, 0));
         l.add (std::make_unique<AudioParameterChoice> (ParameterID { "drumPattern2", 1 }, "Drum Pattern 2", patterns, 0));
     }

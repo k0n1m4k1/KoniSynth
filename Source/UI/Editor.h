@@ -276,7 +276,10 @@ public:
         drumSection.withCombo (s, "drumKit").withExtraToggle (s, "drumVelocity", "Velocity")
                    .withKnob (s, "drumTune", "Tune").withKnob (s, "drumDecay", "Decay").withKnob (s, "drumTone", "Tone")
                    .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent");
-        drumPatternSection.withSortedCombo (s, "drumPattern").withKnob (s, "drumPattern2", "+ Pattern")
+        drumPatternSection.withHeaderButton ("Edit...", "Open the rhythm editor: draw your own rhythms (User 1-8) on a grid of "
+                                             "instrument lanes and steps. Each one is a MIDI file you can also edit elsewhere.",
+                                             [this] { openPanel ("Rhythm Editor", std::make_unique<RhythmEditor> (koni), 1300, 560); })
+                          .withSortedCombo (s, "drumPattern").withKnob (s, "drumPattern2", "+ Pattern")
                           .withKnob (s, "drumTempo", "Tempo").withKnob (s, "drumSwing", "Swing")
                           .withBody (drumLeds, 12, 0); // fila de LED de los pasos sobre las perillas
         fmSection.withHeaderButton ("Edit...", "Open the FM editor: ratio, level, envelope and keyboard scaling of the 6 operators.",

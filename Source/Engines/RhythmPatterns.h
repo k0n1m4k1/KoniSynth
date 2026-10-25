@@ -69,7 +69,7 @@ static const std::vector<RhythmPattern>& drumPatterns()
 }
 
 // Ritmos del Omnichord (nombres del OM-84 según Acadia Recording y Wikipedia) con su bajo automático
-static const std::vector<RhythmPattern>& omnichordPatterns()
+[[maybe_unused]] static const std::vector<RhythmPattern>& omnichordPatterns()
 {
     using S = DrumSlot;
     static const std::vector<RhythmPattern> list {
@@ -98,7 +98,7 @@ static const std::vector<RhythmPattern>& omnichordPatterns()
     return list;
 }
 
-static float stepVelocity (char c)
+[[maybe_unused]] static float stepVelocity (char c)
 {
     switch (c)
     {

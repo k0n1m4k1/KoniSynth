@@ -622,9 +622,14 @@ struct SortableComboBox : juce::ComboBox
         for (int i = 0; i < getNumItems(); ++i)
             order.push_back (i);
         const auto first = getNumItems() > 0 && getItemText (0) == "Off" ? 1 : 0;
+        // Las ranuras de usuario ("User N") van al final, en su orden, detrás de las de fábrica ya ordenadas
+        const auto isUser = [this] (int i) { return getItemText (i).startsWith ("User "); };
         if (alphabetical)
-            std::stable_sort (order.begin() + first, order.end(), [this] (int a, int b)
-                              { return getItemText (a).compareNatural (getItemText (b)) < 0; });
+            std::stable_sort (order.begin() + first, order.end(), [this, &isUser] (int a, int b)
+                              {
+                                  if (isUser (a) != isUser (b)) return isUser (b);
+                                  return ! isUser (a) && getItemText (a).compareNatural (getItemText (b)) < 0;
+                              });
         juce::PopupMenu m;
         for (const auto i : order)
         {

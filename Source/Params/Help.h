@@ -137,7 +137,10 @@ static juce::String paramHelp (const juce::String& id)
         { "omniRhythmLevel", "Volume of the Omnichord drums." },
         { "drumPattern2", "Second pattern played at the same time, like holding two rhythm buttons on the Mini Pops 7: hits add up, and waltz or triplet rhythms make the counter skip steps (the trick behind the Oxygene rhythms)." },
         { "drumKit", "Drum kit: TR-808 (1980), CR-78 (1978) or Korg Mini Pops 7 (1966), synthesized from their circuit tunings. Keys follow the General MIDI drum map (C2 kick, D2 snare, F#2 closed hat, A#2 open hat...)." },
-        { "drumPattern", "Pattern played by the drum machine. Off: play the kit from the keys only. Patterns are KoniSynth's own, in each style." },
+        { "drumPattern", "Pattern played by the drum machine. Off: play the kit from the keys only. Patterns are KoniSynth's own, in each style. "
+                         "User 1-8: your own rhythms, one MIDI file each (drums on channel 10, General MIDI notes) in the KoniSynth "
+                         "settings folder, rhythms/Drum Machine/User 1.mid ... User 8.mid; edit them in any sequencer and they reload by "
+                         "themselves. An empty slot plays nothing." },
         { "drumTempo", "Pattern tempo (follows the host tempo and position when the host is playing)." },
         { "drumSwing", "Delays every second 16th note. 0 = straight; 33 % = triplet feel." },
         { "drumTune", "Tunes all drums together, in semitones." },

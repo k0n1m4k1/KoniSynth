@@ -11,6 +11,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Params/Attributes.h"
 
 #include "Engines/RhythmPatterns.h"
+#include "Engines/UserRhythms.h"
 
 #include "Dsp/ModMatrix.h"
 #include "Params/Layout.h"
@@ -235,6 +236,7 @@ public:
     juce::uint32 getVl1Notes() const { return vl1.displayNotes(); }
     int getVl1Pulse() const { return vl1.rhythmPulse(); }
     int getDrumLed() const { return drumMachine.currentLed(); }
+    long long getDrumStep() const { return drumMachine.currentStep(); }
     bool hasMt32Machine() const { bool has = false; mt32Engine.slot.withCurrent ([&has] (const Mt32Machine* m) { has = m != nullptr; }); return has; }
 
     juce::String getSampleInfo (int which = sourceSample) const
@@ -259,6 +261,7 @@ public:
         stylophone.prepare (sampleRate);
         omnichord.prepare (sampleRate);
         drumMachine.prepare (sampleRate);
+        updateUserRhythms(); // un render sin bucle de mensajes (bounce, KoniBench) también tiene el banco desde el primer bloque
         fmEngine.prepare (sampleRate);
         chipEngine.prepare (sampleRate, samplesPerBlock);
         polivoks.prepare (sampleRate);
@@ -521,7 +524,7 @@ public:
                 allVoicesOff();
                 drumMachine.reset();
             }
-            drumMachine.render (buffer, midi, params, transport);
+            drumMachine.render (buffer, midi, params, transport, drumRhythmSlot.current.load (std::memory_order_acquire));
         }
         else if (fmOn)
         {
@@ -962,6 +965,7 @@ public:
         if (auto* tap = agentTapActive.load (std::memory_order_acquire)) // control por agente (F3); desactivado: nulo
             tap->push (buffer);
         sampleSlot.blocksDone.fetch_add (1, std::memory_order_release); // ver DataSlot
+        drumRhythmSlot.blocksDone.fetch_add (1, std::memory_order_release);
         osc2SampleSlot.blocksDone.fetch_add (1, std::memory_order_release);
         ansSlot.blocksDone.fetch_add (1, std::memory_order_release);
         chipMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
@@ -1670,12 +1674,37 @@ private:
         mdMacroSlot.collect();
         snesMacroSlot.collect();
         mt32Engine.slot.collect();
+        drumRhythmSlot.collect();
+        if (++rhythmPollTicks >= 10) // ficheros de ritmos de usuario: una vez por segundo
+        {
+            rhythmPollTicks = 0;
+            updateUserRhythms();
+        }
         if ((int) params.engine->load() == 14 && ((int) params.mt32Model->load() != mt32BuiltModel || getSampleRate() != mt32Rate))
             rebuildMt32(); // solo con el motor elegido: desactivado no carga ROM ni ocupa memoria
         updateMacros();
         perfMacros.update();
         updateBuiltInWavetable();
     }
+
+    // Ritmos de usuario de la caja de ritmos (Engines/UserRhythms.h): se releen si cambia la firma de los ficheros (tamaño y
+    // fecha) y se publican con DataSlot. Hilo de mensajes o prepare. El editor de ritmos llama aquí tras guardar
+public:
+    void updateUserRhythms (bool force = false)
+    {
+        const auto sig = UserRhythms::signature (drumRhythmEngine);
+        if (! force && sig == drumRhythmSignature && drumRhythmSlot.current.load() != nullptr)
+            return;
+        drumRhythmSignature = sig;
+        drumRhythmSlot.replace (UserRhythms::loadBank (drumRhythmEngine));
+    }
+    // Lectura para la UI (nombres y errores de las ranuras) bajo el cerrojo del DataSlot
+    template <typename Fn> void withUserRhythms (Fn&& fn) const { drumRhythmSlot.withCurrent (std::forward<Fn> (fn)); }
+    static inline const juce::String drumRhythmEngine { "Drum Machine" };
+private:
+    DataSlot<UserRhythms::Bank> drumRhythmSlot;
+    juce::String drumRhythmSignature;
+    int rhythmPollTicks = 0;
 
     // Wavetable incluida elegida y aún no generada: se genera (FFT, fuera del hilo de audio). Temporizador y prepareToPlay:
     // un render offline sin bucle de mensajes (bounce, KoniBench) también la tiene desde el primer bloque
@@ -1919,6 +1948,8 @@ private:
 #include "UI/WavetablePanel.h"
 
 #include "UI/SequencerPanel.h"
+
+#include "UI/RhythmEditor.h"
 
 #include "UI/FmPanel.h"
 

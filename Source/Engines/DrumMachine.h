@@ -486,8 +486,21 @@ struct DrumMachine
 
     // LED encendido de la fila de pasos (se lee desde la UI): posición en el compás del último paso, 0..15; -1 parado
     int currentLed() const noexcept { return ledStep.load (std::memory_order_relaxed); }
+    // Pasos disparados desde el inicio del patrón (-1 parado): el editor de ritmos marca el paso step % numSteps
+    long long currentStep() const noexcept { return stepCount.load (std::memory_order_relaxed); }
 
-    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const StepClock::Transport& transport)
+    // Patrón por índice del parámetro (0 = Off ya restado): de fábrica y, a continuación, las ranuras User 1-8 del banco de
+    // usuario (Engines/UserRhythms.h). Ranura vacía o sin banco: nullptr (no suena)
+    static const RhythmPattern* patternAt (int index, const UserRhythms::Bank* userBank)
+    {
+        const auto factory = (int) drumPatterns().size();
+        if (index < 0) return nullptr;
+        if (index < factory) return &drumPatterns()[(size_t) index];
+        return userBank != nullptr ? userBank->pattern (index - factory) : nullptr;
+    }
+
+    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const StepClock::Transport& transport,
+                 const UserRhythms::Bank* userBank)
     {
         const auto kitIndex = juce::jlimit (0, 2, (int) p.drumKit->load());
         DrumKit::Settings s;
@@ -515,16 +528,16 @@ struct DrumMachine
         // p. 5): los ritmos de vals saltan las posiciones 4-5 y 8-9; los de tresillo, una de cada 4 y van a 3 pasos por
         // tiempo. Con dos patrones se suman los golpes (matriz de diodos = OR) y los saltos (supuesto: OR, no publicado).
         // Así, Slow Rock + Rock suena con el Rock recorrido a saltos, que es el efecto de los ritmos de Oxygène.
-        const std::array<int, 2> active { pattern, pattern2 };
+        const std::array<const RhythmPattern*, 2> active { patternAt (pattern, userBank), patternAt (pattern2, userBank) };
         std::array<unsigned, 2> ownSkips {};
         unsigned skips = 0;
         auto stepsPerBeat = 4;
         for (size_t k = 0; k < 2; ++k)
-            if (active[k] >= 0)
+            if (active[k] != nullptr)
             {
-                ownSkips[k] = skipMask (drumPatterns()[(size_t) active[k]]);
+                ownSkips[k] = skipMask (*active[k]);
                 skips |= ownSkips[k];
-                if (drumPatterns()[(size_t) active[k]].stepsPerBeat == 3)
+                if (active[k]->stepsPerBeat == 3)
                     stepsPerBeat = 3;
             }
         std::array<int, 16> playable {};
@@ -532,7 +545,8 @@ struct DrumMachine
         for (int c = 0; c < 16; ++c)
             if ((skips >> c & 1u) == 0)
                 playable[(size_t) numPlayable++] = c;
-        if ((pattern >= 0 || pattern2 >= 0) && numPlayable > 0)
+        const auto anyPattern = active[0] != nullptr || active[1] != nullptr;
+        if (anyPattern && numPlayable > 0)
         {
             clock.process (out.getNumSamples(), sampleRate, (double) p.drumTempo->load(), stepsPerBeat,
                            stepsPerBeat == 4 ? (double) p.drumSwing->load() : 0.0, transport,
@@ -542,9 +556,9 @@ struct DrumMachine
                     const auto c = playable[(size_t) (step % numPlayable)];
                     for (size_t k = 0; k < 2; ++k)
                     {
-                        if (active[k] < 0)
+                        if (active[k] == nullptr)
                             continue;
-                        const auto& pat = drumPatterns()[(size_t) active[k]];
+                        const auto& pat = *active[k];
                         // Índice propio: posición entre las que el patrón no salta por sí mismo
                         int rank = 0;
                         for (int q = 0; q < c; ++q)
@@ -588,8 +602,9 @@ struct DrumMachine
         }
         // Luz que recorre los pasos: posición entre las que suenan (un compás de 12 pasos usa los LED 1-12, como la TR-808
         // con PRE-SCALE de tresillo). Parado sin patrón o con el transporte del host detenido
-        const auto running = (pattern >= 0 || pattern2 >= 0) && numPlayable > 0 && clock.lastFired >= 0;
+        const auto running = anyPattern && numPlayable > 0 && clock.lastFired >= 0;
         ledStep.store (running ? (int) (clock.lastFired % numPlayable) : -1, std::memory_order_relaxed);
+        stepCount.store (running ? clock.lastFired : -1, std::memory_order_relaxed);
     }
 
     // Posiciones (de 16) que salta cada tipo de patrón: 12 pasos a 3 por tiempo = tresillo; 12 a 4 por tiempo = vals
@@ -605,4 +620,5 @@ struct DrumMachine
     StepClock clock;
     int pattern = -2, pattern2 = -2;
     std::atomic<int> ledStep { -1 };
+    std::atomic<long long> stepCount { -1 };
 };
