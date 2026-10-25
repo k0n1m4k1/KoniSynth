@@ -593,7 +593,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
         // OPLL / VRC7: instrumentos de la ROM de cada chip (volcados del silicio; Nuked-OPLL)
         { "OPLL Piano", "Keys", { { "engine", 13 }, { "oplModel", 2 }, { "opllInstrument", 3 } }, {}, "Chords and melody, C3-C5", 48, 72 },
         { "OPLL Synth Bass + Drums", "Bass", { { "engine", 13 }, { "oplModel", 2 }, { "opllInstrument", 13 }, { "opllRhythm", 1 } }, {}, "Bass on the keys; drums on MIDI channel 10 (GM map)" },
-        { "VRC7 Patch 1", "8-Bit", { { "engine", 13 }, { "oplModel", 3 }, { "opllInstrument", 1 } }, {}, "Melody, C4-C6", 60, 84 },
+        { "VRC7 Patch 1", "8-Bit", { { "engine", 13 }, { "oplModel", 3 }, { "opllInstrument", 1 }, { "gain", 0.18f } }, {}, "Melody, C4-C6", 60, 84 },
         // N64: samples propios de KoniSynth a 22 kHz en VADPCM; efectos de libultra con sus ajustes de fábrica. Big Room es el
         // efecto por defecto del reproductor de música de libultra (manual de N64, "Audio Effects")
         { "N64 Big Room Choir", "Pad", { { "engine", 12 }, { "n64Source", 4 }, { "n64Attack", 40.0f }, { "n64Release", 700.0f },
@@ -850,7 +850,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
             // cualquier nota. sfxr explosion: ruido, base 32,1 Hz × 32 valores por periodo = 1027 Hz de retención; NES: 2349 Hz (periodo $C)
         { "8-Bit Power-Up", "8-Bit", { { "wave", 3 }, { "pulseWidth", 0.35f }, { "attack", 0.001f }, { "decay", 0.2f }, { "sustain", 0.5f }, { "release", 0.1f },
                           { "pitchEnvAmount", -15.0f }, { "pitchEnvDecay", 37.0f }, { "arpOn", 1 }, { "arpMode", 0 }, { "arpRate", 3 }, { "arpBpm", 205.0f },
-                          { "arpOctaves", 2 }, { "arpGate", 1.0f } }, {}, "Press a triad around A4 for ~300 ms", 69, 76 },
+                          { "arpOctaves", 2 }, { "arpGate", 1.0f }, { "gain", 0.26f } }, {}, "Press a triad around A4 for ~300 ms", 69, 76 },
             // pulsar una tríada en A4 ~300 ms. sfxr powerup: base 436 Hz, +206 st/s, repetición 73 ms = +15 st por repetición; la tríada
             // arpegiada sustituye a la repetición (cada paso redispara la envolvente de tono)
             // pulsar una tríada mayor ~1 s. Sin generador de sfxr para "1-up": receta estimada (solo los 4 bits son verificados)
