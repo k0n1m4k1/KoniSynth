@@ -397,15 +397,15 @@ another white key. By category:
 | Category | Presets |
 |---|---|
 | Init | Init |
-| Bass | Saw Bass, Wobble, Acid Squelch, Studio Reel, Phasing Saw Bass, Picked Electric Bass, Analog Thump Bass, Model D Bass, Taurus Pedal Bass, Mono Bass 101, Detuned Reese Bass, 808 Sub Bass, House Organ Bass, Juno Saw+Pulse Bass, Hardbass Donk, Electric Donk Bass, Blue Monday 88 Bass, Everything Counts Bass, The Model Bass, Europe Endless Bass, Around The World Bass, Acid 303 Bass |
+| Bass | Saw Bass, Wobble, Acid Squelch, Studio Reel, Phasing Saw Bass, Picked Electric Bass, Analog Thump Bass, Model D Bass, Taurus Pedal Bass, Mono Bass 101, Detuned Reese Bass, 808 Sub Bass, House Organ Bass, Juno Saw+Pulse Bass, Hardbass Donk, Electric Donk Bass, Blue Monday 88 Bass, Everything Counts Bass, The Model Bass, Europe Endless Bass, Around The World Bass, Acid 303 Bass, Children Sub Bass, Children Offbeat Bass |
 | Lead | Retro Lead, Supersaw Lab, Ladder Whistle, MS-20 Acid Scream, Wavefold Lead, Valve Clavioline, Modular Lead 1968, Model D Lead, Odyssey Sync Lead, Eight-Voice Sync Lead, Phase Distortion Reso Lead, Fat Mono Lead, Hoover 90s, Numbers Lead, Just Cant Get Enough Lead, New Life Lead, Never Let Me Down Lead, Oxygene IV Lead, Da Funk Lead, Shine On Lead, Digital Sync Lead |
 | Pad | Soft Pad, Space Tape, Cassette Memories, Worn Reel 9.5, PWM Analog Pad, Endless Plate Pad, Barber Pole Drone, PWM Sweep Pad, Notch Sweep Pad, Wavetable Pad PPG, Digital Bell Pad, Gated Supersaw Pad, Vector Wave Pad, Mistress Pad, Voyager Chords, Short Circuit Swell, In The Air Tonight Pad, Fade To Grey Pad, Stranger Things Pad, Harmonic Sweep Pad |
 | Keys | Glass Bell, French Chords, Dusty Vinyl, Funky Clav, Continental Combo Organ, Compact Combo Organ, Tape Flute, Pianet Reed Keys, Reed EP 200A, Suitcase Tine EP, Clavinet D6 Strings, Dub Techno Chord, Spring Dub Stab, Baroque Harpsichord, Neon Lights Keys, Formant Sweep Keys |
 | Brass | Neon Brass, Five-Voice Poly Brass, Poly Brass Stab, Blade Runner Brass, Replicant Brass Swell, Africa Brass, Jump Brass |
-| Strings | String Machine, Synth Pizzicato, Comb Bowed Metal, Shine On Intro Strings, Tears in Rain Strings, Oxygene Phased Strings, Incantations Ensemble, Space Oddity Tape Strings, Warszawa Tape Cello |
-| Pluck | Echo Pluck, Nylon Guitar, Concert Harp, Trance Supersaw Pluck |
+| Strings | String Machine, Synth Pizzicato, Comb Bowed Metal, Shine On Intro Strings, Tears in Rain Strings, Oxygene Phased Strings, Incantations Ensemble, Space Oddity Tape Strings, Warszawa Tape Cello, Children Strings |
+| Pluck | Echo Pluck, Nylon Guitar, Concert Harp, Trance Supersaw Pluck, Children Pluck, Children Acoustic Guitar |
 | Sequence | Berlin Sequence, Hardbass Donk Bounce, Robot Arp, On the Run Sequence, Acid Step Line, Irregular 7-Step |
-| Drums | Gabber Kick, Hex Pad Tom, 808-Style Kick, 808-Style Long Boom, 909-Style Kick, 808-Style Snare, 808-Style Tom, 808-Style Conga, 808-Style Rimshot, 808-Style Claves, 808-Style Cowbell, 808-Style Closed Hat, 808-Style Open Hat, FM Ride Cymbal, Analog Hand Clap |
+| Drums | Gabber Kick, Hex Pad Tom, 808-Style Kick, 808-Style Long Boom, 909-Style Kick, 808-Style Snare, 808-Style Tom, 808-Style Conga, 808-Style Rimshot, 808-Style Claves, 808-Style Cowbell, 808-Style Closed Hat, 808-Style Open Hat, FM Ride Cymbal, Analog Hand Clap, Children Boom Kick |
 | FX | Orchestra Hit 8-Bit, Noise Riser, Sub Drop, Underwater Pad, Bode Bells, Sci-Fi Laser Zap |
 | 8-Bit | 8-Bit Power-Up, 8-Bit Hit, 8-Bit Menu Blip, Chip Square Bass, SID-Style Sync Lead, SID-Style PWM Bass, SID-Style Ring Bell |
 | Nature | Field Cricket, Dolbear Cricket 25C, Cicada Buzz, Spring Peeper, Bullfrog Croak, Chickadee Fee-Bee, Syrinx Tweet, Tawny Owl Hoot, Wolf Howl, Cat Meow, Cat Purr, Humpback Moan, Gull Long Call, Rain Drops, Campfire Crackle, Wind Whistle, Thunder Strike, Ocean Surf, Gusting Wind, Distant Thunder |

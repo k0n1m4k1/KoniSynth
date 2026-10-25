@@ -146,6 +146,8 @@ Optional setting that goes beyond the original: **Velocity** (continuous velocit
 | CR-78 Cha-Cha + Rumba | Drums |
 | Oxygene IV Rhythm | Drums |
 | Oxygene VI Rhythm | Drums |
+| Children 808 Kick | Drums |
+| Children 808 Open Hat | Drums |
 
 ## Limitations
 

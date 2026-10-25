@@ -53,7 +53,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   buttons, MPE and polyphonic aftertouch (Synth), undo/redo.
 - **Microtuning:** Scala `.scl`/`.kbm` files and MTS-ESP (all engines).
 - **Transport:** record the session to WAV, play audio files, import and export MIDI.
-- **Presets:** 279 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
+- **Presets:** 288 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
   favorites and a searchable browser with filters by category and engine. Presets that use your own files tell you when one
   is missing.
 - **Your own content:** samples (WAV, AIFF, FLAC), SoundFont zones, SNES BRR/SPC, DX7 SysEx banks, impulse responses, Roland
