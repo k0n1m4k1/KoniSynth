@@ -149,6 +149,7 @@ inline float naive (int wave, double t, double pw)
     {
         case triangle: return (float) (1.0 - 4.0 * std::abs (t - 0.5));
         case saw:      return (float) (2.0 * t - 1.0);
+        case triSaw:   return (float) (triSawSaw * (2.0 * t - 1.0) + triSawTri * (1.0 - 4.0 * std::abs (t - 0.5)));
         case square:   return 0.7f * ((t < pw ? 1.0f : -1.0f) - (float) (2.0 * pw - 1.0));
         default:       return (float) std::sin (juce::MathConstants<double>::twoPi * t);
     }
@@ -157,10 +158,11 @@ inline float naive (int wave, double t, double pw)
 // Saltos de valor de la forma ingenua mientras la fase recorre linealmente de t0 (instante f0) a t0 + inc·(f1 - f0)
 // (instante f1); instantes en fracciones de muestra tras la última muestra entregada. inc puede ser negativo (FM que
 // atraviesa cero). Sierra: salto -2 al cruzar un entero subiendo. Pulso: +1,4 en el entero y -1,4 en el ancho d.
+// Triángulo/sierra: el salto de su parte de sierra, -2·10/57; sus esquinas, como las del triángulo, sin corregir.
 // Seno y triángulo no tienen saltos de valor (el triángulo tiene saltos de pendiente: su aliasing cae 12 dB/oct, sin corregir)
 inline void segment (Ring& ring, int wave, double t0, double inc, double f0, double f1, double pw, float gL, float gR)
 {
-    if ((wave != saw && wave != square) || inc == 0.0) return;
+    if ((wave != saw && wave != square && wave != triSaw) || inc == 0.0) return;
     const auto t1 = t0 + inc * (f1 - f0);
     auto edge = [&] (double c, float deltaUp)
     {
@@ -173,6 +175,8 @@ inline void segment (Ring& ring, int wave, double t0, double inc, double f0, dou
     };
     if (wave == saw)
         edge (0.0, -2.0f);
+    else if (wave == triSaw)
+        edge (0.0, (float) (-2.0 * triSawSaw));
     else
     {
         edge (0.0, 1.4f);

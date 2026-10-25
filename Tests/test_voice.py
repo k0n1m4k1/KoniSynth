@@ -347,4 +347,25 @@ c.check(('osc2SamplePath="%s"' % FB).encode() in state, 'el estado guarda osc2Sa
 x, _ = render(SB + O2S, 1.0, NC, 'o2s.wav')
 y, _ = render(SB + O2S + ['--osc2-sample=' + os.path.join(RENDERS, 'no_such_file.wav')], 1.0, NC, 'o2s.wav')
 c.check(np.abs(x).max() == 0.0 and np.abs(y).max() == 0.0, 'Osc 2 Sample sin fichero y con un fichero que no existe: silencio, sin fallo')
+
+# --- Tri-Saw (triángulo/sierra del Minimoog): 10/57 de sierra + 47/57 de triángulo, en los cuatro osciladores ---
+TS = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%']
+NT = ['57:0.05:1.4:100']
+for name, pre, wid in (('Osc 1', [], 'Wave'), ('Osc 2', ['Osc1 Level=0%', 'Osc2 Level=100%'], 'Osc2 Wave'),
+                       ('Osc 3', ['Osc1 Level=0%', 'Sub Level=100%', 'Osc3 Semi=12'], 'Osc3 Wave'),
+                       ('modulador del Complex (ring: lineal en el modulador)', ['Complex On=On', 'AM Depth=100%', 'Wave=Sine'], 'Mod Wave')):
+    part = {w: render(TS + pre + ['%s=%s' % (wid, w)], 1.5, NT, 'trisaw.wav')[0] for w in ('Saw', 'Triangle', 'Tri-Saw')}
+    d = rel(part['Tri-Saw'], (10 * part['Saw'] + 47 * part['Triangle']) / 57)
+    c.check(d < -100, 'Tri-Saw en %s = 10/57 de sierra + 47/57 de triángulo: %.1f dB (< -100)' % (name, d))
+# Contra un Model D grabado ("The Moog Minimoog Sawtooth-Triangular Waveform", AutomaticGainsay, YouTube; h2..h10 medidos en
+# 26 ventanas estables): -21 -19 -27,3 -27,1 -31,4 -31,3 -34,3 -35,2 -36,6 dB. El minBLEP de fase mínima retrasa la parte de
+# sierra 2,76 muestras (57,5 µs) respecto al triángulo: los impares altos quedan hasta 4 dB bajo el modelo ideal (h9), con el
+# mismo error frente a la grabación (1,05 dB RMS frente a 1,04 del modelo sin retraso)
+x, fs = render(TS + ['Wave=Tri-Saw'], 1.5, NT, 'trisaw.wav')
+h = harmonics(x, fs, 220.0, 10); p = db(h[1:] / h[0])
+rms = np.sqrt(np.mean((p - np.array([-21, -19, -27.3, -27.1, -31.4, -31.3, -34.3, -35.2, -36.6])) ** 2))
+c.check(rms < 1.5, 'Tri-Saw frente al Model D grabado: h2..h10 %s dB, %.2f dB RMS (< 1,5)' % (' '.join('%.1f' % v for v in p), rms))
+al = {w: alias_ratio(render(TS + ['Wave=' + w], 1.5, ['84:0.05:1.4:100'], 'trisaw.wav')[0], fs, 440 * 2 ** (15 / 12)) for w in ('Triangle', 'Tri-Saw')}
+c.check(abs(al['Tri-Saw'] - al['Triangle']) < 1.0, 'Tri-Saw a C6: aliasing %.1f dB, como el triángulo %.1f dB (±1; el salto va con minBLEP, las esquinas no)'
+        % (al['Tri-Saw'], al['Triangle']))
 sys.exit(c.summary())

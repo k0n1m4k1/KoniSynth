@@ -29,7 +29,7 @@ silences the source without changing its level; mutes are off by default and pre
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 1 waveform: sine pure, triangle soft, saw bright, square hollow. | Sine, Triangle, Saw, Square / Sine |
+| Wave menu | Oscillator 1 waveform: sine pure, triangle soft, saw bright, square hollow, Tri-Saw (see below). | Sine, Triangle, Saw, Square, Tri-Saw / Sine |
 | Level | Oscillator 1 volume in the mixer. | 0-100 % / 100 % |
 | Voices | Oscillators per note (unison): wider and thicker, more CPU. | 1-7 / 1 |
 | Detune | Detune between the unison oscillators. | 0-50 ct / 12 ct |
@@ -73,6 +73,11 @@ Loop, Level, Root, Start, Length and a **Load** button. The file chooser accepts
 | Damping | Upper partials die out sooner than the fundamental; fundamental Decay and tuning are compensated. | 0-100 % / 0 % |
 | Pickup | Magnetic pickup position from the bridge; harmonic k is shaped by 2·abs(sin(π·k·position)). | Off-50 % / Off |
 
+**Tri-Saw** (all four waveform menus) is the triangle-sawtooth of the Minimoog oscillators 1 and 2: the saw and triangle
+mixed passively at the waveform switch, 10/57 saw and 47/57 triangle (47 kΩ and 10 kΩ resistors). Checked against a recorded
+Model D: harmonics 2 to 10 within 1.05 dB RMS. Softer than Saw, with a little more edge than Triangle; it aliases like the
+triangle (its saw jump is corrected, its corners are not).
+
 ### Complex Oscillator
 
 Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x oversampling.
@@ -81,7 +86,7 @@ Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x overs
 |---|---|---|
 | On (header) | Turns the complex oscillator on for oscillator 1. | Off / On / Off |
 | Mod Src | Which oscillator is the modulator: the internal one (Mod Wave and Ratio) or Osc 2 / Osc 3 exactly as tuned in their tabs (wave, Oct, Semi, Fine, drift, WT Pos, and the sync of Osc 2). With Osc 2 or Osc 3, Mod Wave and Ratio are dimmed. See the notes below. | Internal, Osc 2, Osc 3 / Internal |
-| Mod Wave menu | Modulator waveform. | Sine, Triangle, Saw, Square / Sine |
+| Mod Wave menu | Modulator waveform. | Sine, Triangle, Saw, Square, Tri-Saw / Sine |
 | Sync (switch) | Hard-syncs the main oscillator to the modulator. | Off / On / Off |
 | Ratio | Modulator/main frequency ratio: whole numbers harmonic, others bell-like. | 0.125x-16x / 1.000x |
 | FM | Linear through-zero FM amount. | I 0-10 / 0 |
@@ -120,7 +125,7 @@ another source's solo).
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Wavetable, Sample / Saw |
+| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Wavetable, Sample, Tri-Saw / Saw |
 | Edit... (header) | Opens the sample editor of Osc 2 (Sample waveform only; dimmed otherwise). | - |
 | Sync (switch) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. | Off / On / Off |
 | Level | Oscillator 2 level. | 0-100 % / 0 % |
@@ -164,7 +169,7 @@ editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loo
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Waveform; the square stays at 50 % (it does not follow PW). By default it is the classic sub (square one octave down); the Init preset sets Sine, and presets saved before Osc 3 keep the Square. | Sine, Triangle, Saw, Square / Square |
+| Wave menu | Waveform; the square stays at 50 % (it does not follow PW). By default it is the classic sub (square one octave down); the Init preset sets Sine, and presets saved before Osc 3 keep the Square. | Sine, Triangle, Saw, Square, Tri-Saw / Square |
 | Level | Oscillator 3 level. | 0-100 % / 0 % |
 | Oct | Base octave below Osc 1. | -1 oct, -2 oct / -1 oct |
 | Semi | Semitones on top of the base octave: from -1 oct, +12 = same octave as Osc 1 and +24 = one octave up. | -24 to +24 / 0 |

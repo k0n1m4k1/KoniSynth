@@ -45,7 +45,17 @@ static float polyBlep (double t, double dt)
     return 0.0f;
 }
 
-enum Wave { sine, triangle, saw, square };
+// triSaw = 6: el mismo código que su opción en osc2Wave (tras Wavetable 4 y Sample 5); en las listas de 4 formas (wave,
+// osc3Wave, modWave) es la opción 4 (waveFromChoice)
+enum Wave { sine, triangle, saw, square, triSaw = 6 };
+static int waveFromChoice (int choice) { return choice == 4 ? triSaw : choice; }
+
+// Triángulo/sierra del Minimoog (osciladores 1 y 2): mezcla pasiva de sierra y triángulo en el selector de forma, sierra
+// por 47 kΩ y triángulo por 10 kΩ -> pesos 10/57 y 47/57 (2AMLogic/gf180-monosynth, issue #48, que cita a Esqueda, Bilbao
+// y Välimäki 2016). Comprobado contra un Model D grabado ("The Moog Minimoog Sawtooth-Triangular Waveform", YouTube,
+// AutomaticGainsay): h2..h10 a 1,0 dB RMS del modelo. El triángulo es el plegado de la sierra (mínimo en su salto), como en
+// el VCO; la polaridad relativa no se distingue por los armónicos. Rango -1..+0,825, sin continua
+constexpr double triSawSaw = 10.0 / 57.0, triSawTri = 47.0 / 57.0;
 
 // pw: ancho de pulso de la cuadrada (0,5 = cuadrada simétrica). El pulso de ancho d tiene media 2d - 1:
 // se resta para que PWM no mueva el DC (que el filtro y la válvula verían como un desplazamiento lento).
@@ -56,6 +66,8 @@ static float oscillator (int wave, double t, double dt, float pw = 0.5f, bool bl
     {
         case triangle: return (float) (1.0 - 4.0 * std::abs (t - 0.5));
         case saw:      return (float) (2.0 * t - 1.0) - (blep ? polyBlep (t, dt) : 0.0f);
+        case triSaw:   return (float) (triSawSaw * (2.0 * t - 1.0) + triSawTri * (1.0 - 4.0 * std::abs (t - 0.5)))
+                            - (blep ? (float) triSawSaw * polyBlep (t, dt) : 0.0f);
         case square:
         {
             const auto d = (double) pw;
@@ -251,13 +263,15 @@ static void runSimdSelfTest()
     const auto pw = 0.3f;
     double maxErr = 0.0;
 
-    for (int wave = 0; wave < 4; ++wave)
+    constexpr int waves[] = { sine, triangle, saw, square, triSaw };
+    for (int w = 0; w < 5; ++w)
     {
+        const auto wave = waves[w];
         for (int mode = 0; mode < 5; ++mode) // 0 unísono, 1 complejo, 2 complejo + sync, 3 modulador externo, 4 externo + sync
         {
             auto a = randomLanes();
             auto b = a;
-            konisimd::ComplexArgs args { wave, (wave + 1) % 4, 1.37, 1.5, 0.3, (double) pw, mode == 2 || mode == 4 };
+            konisimd::ComplexArgs args { wave, waves[(w + 1) % 5], 1.37, 1.5, 0.3, (double) pw, mode == 2 || mode == 4 };
             double extPhase = 0.3; // modulador externo simulado: seno a 1,61 veces la portadora
 
             for (int i = 0; i < 2000; ++i)
@@ -347,7 +361,7 @@ static void runSimdSelfTest()
     report << "CPU AVX2: yes\nself-test max error: " << juce::String (maxErr, 9)
            << (status.selfTestPassed.load() ? " (passed)\n" : " (FAILED)\n");
 
-    for (int wave = 0; wave < 4; ++wave)
+    for (const auto wave : waves)
     {
         auto la = randomLanes(), lb = la;
         const auto tScalar = timeIt ([&] { float l, r; for (int i = 0; i < steps; ++i) { unisonStepScalar (la, wave, dt, pw, l, r); sink = sink + l; } });

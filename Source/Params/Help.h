@@ -172,7 +172,7 @@ static juce::String paramHelp (const juce::String& id)
         { "styloTuning", "Vintage: the original resistor chain, about 33 cents stretched over the 20 keys (low keys flat). Equal: in tune." },
         { "styloOutput", "Speaker: the small built-in speaker (bright, no bass). Line: the line output, darkened by its 154 Hz low-pass." },
         { "styloClick", "Stylus click when it touches a key." },
-        { "wave", "Oscillator 1 waveform. Sine: pure; triangle: soft; saw: bright; square: hollow." },
+        { "wave", "Oscillator 1 waveform. Sine: pure; triangle: soft; saw: bright; square: hollow; Tri-Saw: the Minimoog triangle-sawtooth (mostly triangle with a little saw): softer than saw, with a bit more edge than triangle. Default: Sine." },
         { "attack", "Time for the volume to rise when you press a key." },
         { "decay", "Time for the volume to fall from its peak to the Sustain level." },
         { "sustain", "Volume level while you hold the key." },
@@ -184,7 +184,7 @@ static juce::String paramHelp (const juce::String& id)
         { "osc2Wave", "Oscillator 2 waveform. Wavetable: plays the table of the Wavetable source (its own position: WT Pos), "
                       "with its own tuning and phase; Sync works too. Sample: plays its own audio file (Edit... in the header: Load, "
                       "Root, Start, Length, Loop), a different one from the Sample tab, with the tuning, drift, level and mute of "
-                      "Osc 2; Sync restarts it from Start every cycle of Osc 1. Default: Saw." },
+                      "Osc 2; Sync restarts it from Start every cycle of Osc 1. Tri-Saw: the Minimoog triangle-sawtooth. Default: Saw." },
         { "osc2WtPosition", "Position of oscillator 2 in the wavetable (Wavetable waveform only). The table is the one chosen "
                             "in the Wavetable tab (next to Osc 1), read here at its own position; muting the Wavetable tab "
                             "does not mute oscillator 2. Default 0 %." },
@@ -198,7 +198,7 @@ static juce::String paramHelp (const juce::String& id)
         { "subOctave", "Oscillator 3 base octave: -1 or -2 octaves below oscillator 1. Semi adds up to +/-24 semitones "
                        "(-1 oct + 12 st = same octave, + 24 st = one octave up)." },
         { "osc3Wave", "Oscillator 3 waveform. Square (default, 50 % pulse) is the classic sub-oscillator; Sine gives a clean "
-                      "fundamental (the Init preset uses it)." },
+                      "fundamental (the Init preset uses it); Tri-Saw is the Minimoog triangle-sawtooth." },
         { "osc3Semi", "Oscillator 3 offset in semitones from its base octave, -24 to +24. Default 0." },
         { "osc3Fine", "Oscillator 3 fine detune in cents, -50 to +50. Default 0." },
         { "noiseLevel", "Noise volume in the mixer (wind, percussion, breath)." },
@@ -472,7 +472,7 @@ static juce::String paramHelp (const juce::String& id)
         { "reverbWidth", "Stereo width of the reverb." },
         { "reverbFreeze", "Freezes the reverb tail indefinitely (infinite pad)." },
         { "complexOn", "Turns the complex oscillator (Buchla 259 style) on for oscillator 1." },
-        { "modWave", "Modulator oscillator waveform." },
+        { "modWave", "Modulator oscillator waveform (Tri-Saw: the Minimoog triangle-sawtooth). Default: Sine." },
         { "modRatio", "Modulator/main frequency ratio: whole numbers = harmonic; others = bell-like." },
         { "fmIndex", "FM amount: more = richer, more metallic timbre." },
         { "amDepth", "Amplitude modulation; at 100 % it is ring modulation (robot or bell sound)." },

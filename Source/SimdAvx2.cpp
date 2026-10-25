@@ -11,7 +11,7 @@ namespace konisimd
 {
 namespace
 {
-enum { kSine = 0, kTriangle = 1, kSaw = 2, kSquare = 3 };
+enum { kSine = 0, kTriangle = 1, kSaw = 2, kSquare = 3, kTriSaw = 6 }; // los mismos códigos que Wave (Dsp/OscillatorCore.h)
 
 inline __m256d set1 (double v) { return _mm256_set1_pd (v); }
 
@@ -64,6 +64,15 @@ inline __m256d oscillator (int wave, __m256d t, __m256d dt, double pw, bool blep
         {
             const auto naive = _mm256_sub_pd (_mm256_add_pd (t, t), set1 (1.0));
             return blep ? _mm256_sub_pd (naive, polyBlep (t, dt)) : naive;
+        }
+        case kTriSaw: // 10/57 de sierra + 47/57 de triángulo (Dsp/OscillatorCore.h)
+        {
+            const auto sawPart = _mm256_sub_pd (_mm256_add_pd (t, t), set1 (1.0));
+            const auto triPart = _mm256_sub_pd (set1 (1.0), _mm256_mul_pd (set1 (4.0), absd (_mm256_sub_pd (t, set1 (0.5)))));
+            auto v = _mm256_add_pd (_mm256_mul_pd (set1 (10.0 / 57.0), sawPart), _mm256_mul_pd (set1 (47.0 / 57.0), triPart));
+            if (blep)
+                v = _mm256_sub_pd (v, _mm256_mul_pd (set1 (10.0 / 57.0), polyBlep (t, dt)));
+            return v;
         }
         case kSquare:
         {

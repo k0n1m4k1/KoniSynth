@@ -251,7 +251,7 @@ struct SynthVoice : juce::SynthesiserVoice
         updateEnvelopes(); // los potenciómetros se leen una vez por bloque
 
         const auto sampleRate = getSampleRate();
-        const auto wave       = (int) params.wave->load();
+        const auto wave       = waveFromChoice ((int) params.wave->load()); // Tri-Saw: opción 4 -> código 6
         const auto drift      = params.drift->load();
         const auto lfoOn      = params.lfoOn->load() > 0.5f;
         const auto pitchEnvAmount = params.pitchEnvAmount->load();
@@ -344,7 +344,7 @@ struct SynthVoice : juce::SynthesiserVoice
         // de siempre (0,5 o 0,25) bit a bit
         mix.subRatio   = ((int) params.subOctave->load() == 0 ? 0.5 : 0.25)
                        * std::exp2 (((double) params.osc3Semi->load() + (double) params.osc3Fine->load() / 100.0) / 12.0);
-        mix.subWave    = (int) params.osc3Wave->load();
+        mix.subWave    = waveFromChoice ((int) params.osc3Wave->load());
         mix.noiseLevel = params.noiseLevel->load() * noiseGate;
         mix.noiseColor = (int) params.noiseColor->load();
         const auto sampleLevel = params.sampleLevel->load() * unmuted (Params::srcSample, params.sampleMute);
@@ -414,7 +414,7 @@ struct SynthVoice : juce::SynthesiserVoice
 
         complex.on        = params.complexOn->load() > 0.5f;
         complex.wave      = wave;
-        complex.modWave   = (int) params.modWave->load();
+        complex.modWave   = waveFromChoice ((int) params.modWave->load());
         complex.ratio     = params.modRatio->load();
         complex.fmIndex   = params.fmIndex->load();
         complex.am        = params.amDepth->load();
