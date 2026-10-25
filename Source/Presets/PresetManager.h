@@ -79,17 +79,41 @@ public:
 
     const std::vector<Preset>& getPresets() const { return presets; }
 
-    // Favoritos (navegador). Clave: "F:" fábrica / "U:" usuario + nombre
+    // Favoritos (navegador). Clave: "F:" fábrica / "U:" usuario + nombre. Tienen un orden propio, el del usuario (las teclas
+    // 1-9 cargan los nueve primeros); uno nuevo va al final. Las claves de presets que ya no existen se conservan en el
+    // fichero (un preset de usuario renombrado fuera vuelve a su sitio) pero no cuentan para la posición
     bool isFavorite (size_t index) const { return index < presets.size() && favorites.count (favoriteKey (presets[index])) > 0; }
     void toggleFavorite (size_t index)
     {
         if (index >= presets.size()) return;
         const auto key = favoriteKey (presets[index]);
-        if (! favorites.erase (key)) favorites.insert (key);
-        juce::StringArray lines;
-        for (const auto& k : favorites) lines.add (k);
-        favoritesFile().getParentDirectory().createDirectory();
-        favoritesFile().replaceWithText (lines.joinIntoString ("\n") + "\n");
+        if (favorites.erase (key)) favoriteOrder.removeString (key);
+        else favorites.insert (key), favoriteOrder.add (key);
+        saveFavorites();
+    }
+
+    // Índices de los presets favoritos que existen, en el orden del usuario
+    std::vector<size_t> favoriteIndices() const
+    {
+        std::map<juce::String, size_t> byKey;
+        for (size_t i = 0; i < presets.size(); ++i)
+            byKey.emplace (favoriteKey (presets[i]), i);
+        std::vector<size_t> out;
+        for (const auto& k : favoriteOrder)
+            if (const auto it = byKey.find (k); it != byKey.end())
+                out.push_back (it->second);
+        return out;
+    }
+
+    // Mueve el favorito del preset index delante del favorito del preset before (o al final si before no es favorito)
+    void moveFavorite (size_t index, size_t before)
+    {
+        if (! isFavorite (index) || index == before) return;
+        const auto key = favoriteKey (presets[index]);
+        favoriteOrder.removeString (key);
+        const auto at = isFavorite (before) ? favoriteOrder.indexOf (favoriteKey (presets[before])) : -1;
+        favoriteOrder.insert (at, key); // -1: al final
+        saveFavorites();
     }
 
     // Aviso de la última carga (preset de un formato posterior o con ajustes desconocidos); vacío si no hubo nada
@@ -326,15 +350,28 @@ private:
     static constexpr const char* playLowAttribute = "playLow", * playHighAttribute = "playHigh"; // notas MIDI del rango
     static constexpr const char* formatAttribute = "formatVersion", * versionAttribute = "pluginVersion";
 
-    std::set<juce::String> favorites;
+    std::set<juce::String> favorites; // búsqueda (isFavorite se llama por fila y por recuento de filtro)
+    juce::StringArray favoriteOrder;  // las mismas claves, en el orden del usuario
+    static inline const juce::String favoritesOrderedMark { "#ordered" };
     static juce::File favoritesFile() { return userDirectory().getParentDirectory().getChildFile ("favorites.txt"); }
     static juce::String favoriteKey (const Preset& p) { return (p.factory ? "F:" : "U:") + p.name; }
     void loadFavorites()
     {
         juce::StringArray lines;
         lines.addLines (favoritesFile().loadFileAsString());
+        const auto ordered = lines.size() > 0 && lines[0].trim() == favoritesOrderedMark;
         for (const auto& l : lines)
-            if (l.trim().isNotEmpty()) favorites.insert (l.trim());
+            if (const auto k = l.trim(); k.isNotEmpty() && ! k.startsWithChar ('#') && favorites.insert (k).second)
+                favoriteOrder.add (k);
+        // Fichero anterior al orden propio (sin la marca): el orden que tenían las teclas 1-9, por nombre (natural)
+        if (! ordered)
+            std::stable_sort (favoriteOrder.begin(), favoriteOrder.end(), [] (const juce::String& a, const juce::String& b)
+                              { return a.substring (2).compareNatural (b.substring (2)) < 0; });
+    }
+    void saveFavorites() const
+    {
+        favoritesFile().getParentDirectory().createDirectory();
+        favoritesFile().replaceWithText (favoritesOrderedMark + "\n" + favoriteOrder.joinIntoString ("\n") + "\n");
     }
     // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, wtPathProp)
     static constexpr const char* sampleAttribute = "samplePath";

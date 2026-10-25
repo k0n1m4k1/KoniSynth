@@ -1029,11 +1029,7 @@ private:
     void loadFavorite (int n)
     {
         auto& pm = koni.presetManager;
-        const auto& list = pm.getPresets();
-        std::vector<size_t> favs;
-        for (size_t i = 0; i < list.size(); ++i)
-            if (pm.isFavorite (i)) favs.push_back (i);
-        std::stable_sort (favs.begin(), favs.end(), [&list] (size_t a, size_t b) { return list[a].name.compareNatural (list[b].name) < 0; });
+        const auto favs = pm.favoriteIndices(); // en el orden del usuario (se reordena en el navegador)
         if (n >= (int) favs.size())
         {
             scope.showCaption ("Favorites", "No favorite " + juce::String (n + 1) + ": mark presets with the star in the browser");

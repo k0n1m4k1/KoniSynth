@@ -7,7 +7,10 @@
 // palabras deben aparecer en nombre, categoría o motor), filtros con recuento (origen / favoritos, categoría y motor:
 // cada recuento cuenta lo que quedaría al elegirlo con los demás filtros), tabla ordenable y favoritos con la estrella.
 // Elegir una fila (clic o flechas) carga el preset para escucharlo; doble clic o Intro lo carga y cierra.
-class PresetBrowser : public juce::Component, private juce::TableListBoxModel
+// Favoritos con orden propio (las teclas 1-9 cargan los nueve primeros, cuyo número se ve junto a la estrella): con la
+// tabla ordenada por la columna ★ se reordenan arrastrando; en cualquier orden, con el menú del clic derecho o Alt+flechas.
+class PresetBrowser : public juce::Component, public juce::DragAndDropContainer, private juce::DragAndDropTarget,
+                      private juce::TableListBoxModel
 {
 public:
     std::function<void()> onClose;
@@ -34,7 +37,7 @@ public:
         addAndMakeVisible (filterList);
 
         auto& h = table.getHeader();
-        h.addColumn (juce::String::fromUTF8 ("\xe2\x98\x85"), colFav, 30, 30, 30, juce::TableHeaderComponent::notResizableOrSortable);
+        h.addColumn (juce::String::fromUTF8 ("\xe2\x98\x85"), colFav, 46, 46, 46, juce::TableHeaderComponent::visible | juce::TableHeaderComponent::sortable);
         h.addColumn ("Name", colName, 300, 120, 600, juce::TableHeaderComponent::defaultFlags);
         h.addColumn ("Category", colCategory, 120);
         h.addColumn ("Engine", colEngine, 200);
@@ -50,7 +53,7 @@ public:
         count.setJustificationType (juce::Justification::centredRight);
         count.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         addAndMakeVisible (count);
-        hint.setText ("Click or arrow keys: listen. Double-click or Enter: load and close. Star: favorite.", juce::dontSendNotification);
+        hint.setText (defaultHint(), juce::dontSendNotification);
         hint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.5f));
         addAndMakeVisible (hint);
 
@@ -78,8 +81,22 @@ public:
 
     void paint (juce::Graphics& g) override { g.fillAll (Skin::c (0xff262c33)); }
 
+    // Línea de inserción mientras se arrastra un favorito
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        if (dropY < 0) return;
+        g.setColour (Skin::c (0xffffc040));
+        g.fillRect (table.getX(), table.getY() + dropY - 1, table.getWidth(), 3);
+    }
+
 private:
     enum { colFav = 1, colName, colCategory, colEngine, colSource };
+
+    static juce::String defaultHint()
+    {
+        return "Click or arrow keys: listen. Double-click or Enter: load and close. Star: favorite (keys 1-9 load the first nine; "
+               "drag them when sorted by the star column, or right-click / Alt+arrows to reorder).";
+    }
 
     //==========================================================================
     // Filtros: tres grupos de selección única. Fila = cabecera o elemento con su valor
@@ -119,6 +136,8 @@ private:
             if (row < 0 || row >= getNumRows() || owner->filterRows[(size_t) row].heading) return;
             const auto& f = owner->filterRows[(size_t) row];
             owner->selection[(size_t) f.group] = f.value;
+            if (f.value == "fav") // los favoritos se ven en su orden (el de las teclas 1-9)
+                owner->table.getHeader().setSortColumnId (colFav, true); // avisa a sortOrderChanged, que vuelve a filtrar
             owner->refilter();
         }
     };
@@ -132,6 +151,11 @@ private:
             const auto n = (int) owner->visible.size();
             if (n == 0) return false;
             const auto cur = owner->table.getSelectedRow();
+            if (k.getModifiers().isAltDown() && (k.getKeyCode() == juce::KeyPress::upKey || k.getKeyCode() == juce::KeyPress::downKey))
+            {
+                if (cur >= 0) owner->moveFavoriteBy (owner->visible[(size_t) cur], k.getKeyCode() == juce::KeyPress::upKey ? -1 : 1);
+                return true;
+            }
             int next = -1;
             if (k == juce::KeyPress::downKey) next = juce::jmin (n - 1, cur + 1);
             else if (k == juce::KeyPress::upKey) next = juce::jmax (0, cur - 1);
@@ -229,6 +253,10 @@ private:
         tokens.clear();
         tokens.addTokens (fold (search.getText()), " ", "");
         tokens.removeEmptyStrings();
+        favPos.assign (presets.getPresets().size(), -1);
+        const auto favs = presets.favoriteIndices();
+        for (size_t p = 0; p < favs.size(); ++p)
+            favPos[favs[p]] = (int) p;
         const auto keep = table.getSelectedRow() >= 0 && table.getSelectedRow() < (int) visible.size() ? visible[(size_t) table.getSelectedRow()] : (size_t) -1;
         visible.clear();
         for (size_t i = 0; i < presets.getPresets().size(); ++i)
@@ -261,6 +289,14 @@ private:
                 case colName:   c = pa.name.compareNatural (pb.name); break;
                 case colEngine: c = pa.engine - pb.engine; break;
                 case colSource: c = (int) pb.factory - (int) pa.factory; break;
+                case colFav: // por posición; los que no son favoritos, detrás (en ambos sentidos, por categoría)
+                {
+                    const auto fa = favPos[a], fb = favPos[b];
+                    if (fa < 0 && fb < 0) { c = catIndex (pa.category) - catIndex (pb.category); break; }
+                    if (fa < 0 || fb < 0) return fb < 0;
+                    c = fa - fb;
+                    break;
+                }
                 default:        c = catIndex (pa.category) - catIndex (pb.category); break;
             }
             if (c == 0) c = pa.name.compareNatural (pb.name);
@@ -301,10 +337,18 @@ private:
         switch (col)
         {
             case colFav:
-                g.setColour (presets.isFavorite (i) ? Skin::c (0xffffc040) : Skin::white().withAlpha (0.2f));
+            {
+                const auto pos = i < favPos.size() ? favPos[i] : -1;
+                g.setColour (pos >= 0 ? Skin::c (0xffffc040) : Skin::white().withAlpha (0.2f));
                 g.setFont (juce::FontOptions (16.0f));
-                g.drawText (juce::String::fromUTF8 (presets.isFavorite (i) ? "\xe2\x98\x85" : "\xe2\x98\x86"), 0, 0, w, h, juce::Justification::centred);
+                g.drawText (juce::String::fromUTF8 (pos >= 0 ? "\xe2\x98\x85" : "\xe2\x98\x86"), 0, 0, 26, h, juce::Justification::centred);
+                if (pos >= 0 && pos < 9) // número de la tecla 1-9 que lo carga
+                {
+                    g.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+                    g.drawText (juce::String (pos + 1), 24, 0, w - 26, h, juce::Justification::centredLeft);
+                }
                 break;
+            }
             case colName:     g.drawText (p.name, 4, 0, w - 8, h, juce::Justification::centredLeft, true); break;
             case colCategory: g.drawText (p.category, 4, 0, w - 8, h, juce::Justification::centredLeft, true); break;
             case colEngine:   g.drawText (engineName (p.engine), 4, 0, w - 8, h, juce::Justification::centredLeft, true); break;
@@ -323,11 +367,91 @@ private:
         return play.isNotEmpty() ? "Play: " + play : juce::String();
     }
 
-    void cellClicked (int row, int col, const juce::MouseEvent&) override
+    void cellClicked (int row, int col, const juce::MouseEvent& e) override
     {
-        if (col != colFav || row < 0 || row >= (int) visible.size()) return;
-        presets.toggleFavorite (visible[(size_t) row]);
-        if (selection[groupSource] == "fav") refilter(); else { table.repaintRow (row); filterList.repaint(); }
+        if (row < 0 || row >= (int) visible.size()) return;
+        const auto i = visible[(size_t) row];
+        if (e.mods.isPopupMenu())
+        {
+            if (favPos[i] < 0) return;
+            const auto last = (int) presets.favoriteIndices().size() - 1;
+            juce::PopupMenu m;
+            m.addItem (1, "Move to top", favPos[i] > 0);
+            m.addItem (2, "Move up", favPos[i] > 0);
+            m.addItem (3, "Move down", favPos[i] < last);
+            m.addItem (4, "Move to end", favPos[i] < last);
+            m.showMenuAsync ({}, [this, i] (int r)
+            {
+                if (r == 1) moveFavoriteBy (i, -1000000);
+                else if (r == 2) moveFavoriteBy (i, -1);
+                else if (r == 3) moveFavoriteBy (i, 1);
+                else if (r == 4) moveFavoriteBy (i, 1000000);
+            });
+            return;
+        }
+        if (col != colFav) return;
+        presets.toggleFavorite (i);
+        refilter(); // posiciones (números 1-9) y, con el filtro de favoritos, la lista
+    }
+
+    // Mueve el favorito del preset i delta posiciones en el orden global (acotado a los extremos)
+    void moveFavoriteBy (size_t i, int delta)
+    {
+        const auto favs = presets.favoriteIndices();
+        const auto from = favPos[i];
+        if (from < 0) return;
+        const auto to = juce::jlimit (0, (int) favs.size() - 1, from + delta);
+        if (to == from) return;
+        // Delante del que ocupa la posición destino al subir; al bajar, delante del siguiente a ella (o al final)
+        const auto before = to < from ? favs[(size_t) to] : to + 1 < (int) favs.size() ? favs[(size_t) to + 1] : std::numeric_limits<size_t>::max();
+        presets.moveFavorite (i, before);
+        refilter();
+        table.scrollToEnsureRowIsOnscreen (table.getSelectedRow());
+    }
+
+    //==========================================================================
+    // Arrastrar para reordenar: solo favoritos y con la tabla ordenada por ★ hacia delante (lo visto es el orden real)
+    bool favoriteOrderShown() { return table.getHeader().getSortColumnId() == colFav && table.getHeader().isSortedForwards(); }
+
+    juce::var getDragSourceDescription (const juce::SparseSet<int>& rows) override
+    {
+        if (rows.size() != 1 || ! favoriteOrderShown()) return {};
+        const auto row = rows[0];
+        if (row < 0 || row >= (int) visible.size() || favPos[visible[(size_t) row]] < 0) return {};
+        return "fav:" + juce::String ((juce::int64) visible[(size_t) row]);
+    }
+
+    bool isInterestedInDragSource (const SourceDetails& d) override { return d.description.toString().startsWith ("fav:"); }
+
+    // Fila delante de la que cae (visible.size () = al final de lo visible) según la mitad de la fila bajo el puntero
+    int dropRow (juce::Point<int> p) const
+    {
+        const auto local = table.getLocalPoint (this, p);
+        auto row = table.getRowContainingPosition (local.x, local.y);
+        if (row < 0) return local.y < table.getHeaderHeight() ? 0 : (int) visible.size();
+        const auto r = table.getRowPosition (row, true);
+        return local.y > r.getCentreY() ? row + 1 : row;
+    }
+
+    void itemDragMove (const SourceDetails& d) override
+    {
+        const auto row = dropRow (d.localPosition);
+        const auto y = row < (int) visible.size() ? table.getRowPosition (row, true).getY()
+                                                  : table.getRowPosition ((int) visible.size() - 1, true).getBottom();
+        dropY = juce::jlimit (table.getHeaderHeight(), table.getHeight(), y);
+        repaint();
+    }
+    void itemDragExit (const SourceDetails&) override { dropY = -1; repaint(); }
+
+    void itemDropped (const SourceDetails& d) override
+    {
+        dropY = -1;
+        const auto i = (size_t) d.description.toString().fromFirstOccurrenceOf ("fav:", false, false).getLargeIntValue();
+        const auto row = dropRow (d.localPosition);
+        // Delante del favorito de esa fila; si no lo es (o es el final de lo visible), al final
+        const auto before = row < (int) visible.size() ? visible[(size_t) row] : std::numeric_limits<size_t>::max();
+        presets.moveFavorite (i, before);
+        refilter();
     }
 
     void cellDoubleClicked (int, int col, const juce::MouseEvent&) override { if (col != colFav) close(); }
@@ -343,7 +467,7 @@ private:
         else if (const auto& play = presets.getPresets()[visible[(size_t) row]].playHint; play.isNotEmpty())
             hint.setText (juce::String::fromUTF8 ("\xe2\x96\xb6 Play: ") + play, juce::dontSendNotification); // ▶
         else
-            hint.setText ("Click or arrow keys: listen. Double-click or Enter: load and close. Star: favorite.", juce::dontSendNotification);
+            hint.setText (defaultHint(), juce::dontSendNotification);
     }
 
     void sortOrderChanged (int, bool) override { refilter(); }
@@ -360,5 +484,7 @@ private:
     std::vector<FilterRow> filterRows;
     std::array<juce::String, 3> selection {};
     std::vector<size_t> visible;
+    std::vector<int> favPos; // posición de favorito por índice de preset (-1 = no lo es); se rehace en refilter
+    int dropY = -1;          // línea de inserción (coordenadas de la tabla) mientras se arrastra
     bool quiet = false;
 };
