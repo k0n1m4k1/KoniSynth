@@ -368,7 +368,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
         { "PWM Sweep Pad", "Pad", { { "osc1Level", 0.0f }, { "wtLevel", 1.0f }, { "wtTable", 1 }, { "wtPosition", 0.3f },
                           { "lfo2On", 1 }, { "lfo2Target", 5 }, { "lfo2Shape", 1 }, { "lfo2Rate", 0.12f }, { "lfo2Depth", 0.6f },
                           { "attack", 1.0f }, { "sustain", 1.0f }, { "release", 2.5f }, { "voicePan", 0.5f },
-                          { "chorusOn", 1 }, { "chorusMode", 1 }, { "chorusMix", 0.4f }, { "ambientOn", 1 }, { "ambientMix", 0.35f }, { "reverbDecay", 5.0f } } },
+                          { "chorusOn", 1 }, { "chorusMode", 1 }, { "chorusMix", 0.4f }, { "ambientOn", 1 }, { "ambientMix", 0.35f }, { "reverbDecay", 5.0f }, { "gain", 0.12f } } },
         // FM 6-Op, algoritmo 5 (3 pares): portadoras 1:1 desafinadas ±4, moduladores 3/1/1 a nivel bajo, ataque lento (R1 40-45,
         // tiempo estimado ~1 s), vibrato retardado. Diseño propio
         { "FM Glass Pad", "Pad", { { "engine", 6 }, { "fmAlgorithm", 5 },
@@ -548,7 +548,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
         // Subida de ruido: BP de 300 Hz a 300·2^4,5 ≈ 6,8 kHz en 4 s (filterEnv 0,9 = +4,5 oct). Diseño propio
         { "Noise Riser", "FX", { { "osc1Level", 0.0f }, { "noiseLevel", 1.0f }, { "filterMode", 2 }, { "cutoff", 300.0f }, { "resonance", 0.5f },
                           { "filterEnv", 0.9f }, { "filterAttack", 4.0f }, { "filterDecay", 1.0f }, { "filterSustain", 1.0f }, { "filterRelease", 1.0f },
-                          { "attack", 3.0f }, { "sustain", 1.0f }, { "release", 1.5f }, { "ambientOn", 1 }, { "ambientMix", 0.4f }, { "reverbDecay", 4.0f } } },
+                          { "attack", 3.0f }, { "sustain", 1.0f }, { "release", 1.5f }, { "ambientOn", 1 }, { "ambientMix", 0.4f }, { "reverbDecay", 4.0f }, { "gain", 0.19f } } },
         // Caída de sub: seno de +24 st a la nota con τ 600 ms (tocar C1). Diseño propio
         { "Sub Drop", "FX", { { "wave", 0 }, { "attack", 0.001f }, { "decay", 2.0f }, { "sustain", 0.0f }, { "release", 1.0f }, { "pitchEnvAmount", 24.0f },
                           { "pitchEnvDecay", 600.0f }, { "filterOn", 0 }, { "tubeOn", 1 }, { "tubeDrive", 6.0f } } },
@@ -689,13 +689,13 @@ static const std::vector<FactoryPreset>& factoryPresets()
             // syntorial.com/preset-recipe/daft-punk-around-the-world-bass (mono, portamento 30 ms) ; reverbmachine.com (sinte sin identificar)
         { "Acid 303 Bass", "Bass", { { "voiceMode", 2 }, { "glide", 60.0f }, { "wave", 2 }, { "attack", 0.001f }, { "sustain", 1.0f }, { "release", 0.01f },
                           { "cutoff", 1000.0f }, { "resonance", 0.5f }, { "filterEnv", 0.4f }, { "filterAttack", 0.001f }, { "filterDecay", 0.3f }, { "filterSustain", 0.0f },
-                          { "tubeOn", 1 }, { "tubeDrive", 20.0f } } },
+                          { "tubeOn", 1 }, { "tubeDrive", 20.0f }, { "gain", 0.22f } } },
             // TB-303: LP 24 dB sin autooscilación (Wikipedia) -> resonancia < 0,91; valores por defecto de NT-303/Open303 (plugin, no
             // hardware), slide 60 ms ≈ Legato + Glide; distorsión casi al máximo como en "Da Funk" (reverbmachine.com). Falta accent.
         { "Numbers Lead", "Lead", { { "voiceMode", 1 }, { "wave", 2 }, { "osc1Level", 0.5f }, { "osc2Wave", 2 }, { "osc2Level", 0.5f }, { "osc2Fine", -4.0f },
                           { "attack", 0.01f }, { "decay", 0.13f }, { "sustain", 0.0f }, { "release", 0.12f }, { "cutoff", 481.0f }, { "filterKey", 0.5f }, { "filterEnv", 0.43f },
                           { "filterAttack", 0.03f }, { "filterSustain", 1.0f }, { "filterRelease", 10.0f }, { "lfoOn", 1 }, { "lfoTarget", 0 }, { "lfoRate", 0.5f },
-                          { "lfoDepth", 0.5f }, { "echoOn", 1 }, { "echoTime", 250.0f }, { "echoFeedback", 0.5f }, { "echoMix", 0.45f } } },
+                          { "lfoDepth", 0.5f }, { "echoOn", 1 }, { "echoTime", 250.0f }, { "echoFeedback", 0.5f }, { "echoMix", 0.45f }, { "gain", 1.00f } } },
             // syntorial.com/preset-recipe/kraftwerk-numbers-lead (2 sierras ±2 ct, LFO 1 st a 1 compás, delay 1/8 a 120 BPM supuesto)
         { "Just Cant Get Enough Lead", "Lead", { { "wave", 2 }, { "subLevel", 0.15f }, { "unisonVoices", 4 }, { "unisonDetune", 9.0f }, { "unisonSpread", 0.6f },
                           { "attack", 0.01f }, { "decay", 0.55f }, { "sustain", 0.0f }, { "release", 0.22f }, { "cutoff", 4537.0f },
@@ -703,7 +703,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
             // syntorial.com/preset-recipe/depeche-mode-just-cant-get-enough-lead ; original Roland Jupiter-4 (thomann.de/blog)
         { "New Life Lead", "Lead", { { "voiceMode", 2 }, { "wave", 2 }, { "osc1Level", 0.6f }, { "osc2Wave", 2 }, { "osc2Octave", 1 }, { "osc2Level", 0.4f },
                           { "unisonVoices", 4 }, { "unisonDetune", 8.0f }, { "attack", 0.12f }, { "sustain", 1.0f }, { "release", 1.7f }, { "filterMode", 2 },
-                          { "cutoff", 1478.0f }, { "resonance", 0.4f }, { "ambientOn", 1 }, { "ambientSize", 0.8f }, { "ambientMix", 0.3f } } },
+                          { "cutoff", 1478.0f }, { "resonance", 0.4f }, { "ambientOn", 1 }, { "ambientSize", 0.8f }, { "ambientMix", 0.3f }, { "gain", 0.25f } } },
             // syntorial.com/preset-recipe/depeche-mode-new-life-lead (mono legato, BP, res 40 %)
         { "Never Let Me Down Lead", "Lead", { { "wave", 2 }, { "osc1Level", 0.71f }, { "osc2Wave", 2 }, { "osc2Level", 0.69f }, { "unisonVoices", 5 }, { "unisonDetune", 10.0f },
                           { "unisonSpread", 1.0f }, { "attack", 0.001f }, { "decay", 0.346f }, { "sustain", 0.71f }, { "release", 0.203f }, { "cutoff", 447.0f },
@@ -713,7 +713,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
             // faltan el morph de sync y el LFO solo en osc2)
         { "Oxygene IV Lead", "Lead", { { "wave", 3 }, { "pulseWidth", 0.3f }, { "unisonVoices", 3 }, { "unisonDetune", 11.0f }, { "unisonSpread", 0.5f },
                           { "attack", 0.001f }, { "sustain", 1.0f }, { "release", 1.59f }, { "filterMode", 3 }, { "cutoff", 2493.0f }, { "resonance", 0.76f },
-                          { "filterEnv", 0.6f }, { "filterAttack", 0.001f }, { "filterDecay", 0.078f }, { "filterSustain", 0.0f }, { "filterRelease", 0.09f } } },
+                          { "filterEnv", 0.6f }, { "filterAttack", 0.001f }, { "filterDecay", 0.078f }, { "filterSustain", 0.0f }, { "filterRelease", 0.09f }, { "gain", 0.24f } } },
             // syntorial.com/preset-recipe/jean-michel-jarre-oxygene-4-lead (HP 12 dB 2493 Hz, res 76 %; falta flanger) ; equipo del álbum:
             // VCS3, Eminent 310, RMI, ARP 2600 (musicradar.com). PW 0,3 estimado ("medium pulse")
         { "Blade Runner Brass", "Brass", { { "voiceMode", 1 }, { "filterMode", 1 }, { "wave", 3 }, { "osc1Level", 0.6f }, { "osc2Wave", 3 }, { "osc2Octave", 1 }, { "osc2Fine", -6.0f },
@@ -724,7 +724,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
             // Filtro LP 12 dB/oct del CS-80 (hollowsun.com/nostalgia/contributors/cs80). Faltan aftertouch y ribbon
         { "Da Funk Lead", "Lead", { { "wave", 3 }, { "osc2Wave", 3 }, { "osc2Semi", 5 }, { "osc2Level", 0.8f }, { "attack", 0.001f }, { "sustain", 1.0f },
                           { "release", 0.05f }, { "filterMode", 2 }, { "cutoff", 228.0f }, { "resonance", 0.65f }, { "filterKey", 0.5f }, { "filterEnv", 0.64f },
-                          { "filterAttack", 0.09f }, { "filterDecay", 4.0f }, { "filterSustain", 0.0f }, { "filterRelease", 0.11f }, { "tubeOn", 1 }, { "tubeDrive", 16.8f } } },
+                          { "filterAttack", 0.09f }, { "filterDecay", 4.0f }, { "filterSustain", 0.0f }, { "filterRelease", 0.11f }, { "tubeOn", 1 }, { "tubeDrive", 16.8f }, { "gain", 0.21f } } },
             // syntorial.com/preset-recipe/daft-punk-da-funk-lead ; reverbmachine.com (cuartas paralelas -> osc2 +5 st, "likely")
         // ---- Pink Floyd (investigación 2026-10-20)
         { "Shine On Lead", "Lead", { { "voiceMode", 1 }, { "wave", 2 }, { "cutoff", 700.0f }, { "resonance", 0.5f }, { "attack", 1.05f }, { "decay", 10.0f },
@@ -882,7 +882,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
             // Regla: arpBpm = (7·T_C - 30)/2. Sílabas de ~30 Hz, 4 por chirp (resumen de Springer, G. campestris; no leído entero)
         { "Cicada Buzz", "Nature", { { "osc1Level", 0.0f }, { "noiseLevel", 1.0f }, { "filterMode", 2 }, { "cutoff", 6383.0f }, { "resonance", 0.69f },
                           { "attack", 0.05f }, { "decay", 0.1f }, { "sustain", 1.0f }, { "release", 0.3f }, { "lfoOn", 1 }, { "lfoTarget", 1 }, { "lfoRate", 8.0f },
-                          { "lfoDepth", 1.0f } } },
+                          { "lfoDepth", 1.0f }, { "gain", 0.21f } } },
             // mantener cualquier nota. Farnell cicada1 (BP 6000 Hz Q 7 -> res 0,69, pico a 0,94·cutoff) y cicada3 (llamada a 8 Hz).
             // Falta el ring mod a 500 Hz y la 2ª banda
         { "Spring Peeper", "Nature", { { "wave", 0 }, { "fineTune", 43.0f }, { "attack", 0.01f }, { "decay", 0.15f }, { "sustain", 0.0f }, { "release", 0.02f },
@@ -900,7 +900,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
         { "Syrinx Tweet", "Nature", { { "wave", 0 }, { "filterMode", 2 }, { "cutoff", 3534.0f }, { "resonance", 0.5f }, { "pitchEnvAmount", 12.0f },
                           { "pitchEnvDecay", 40.0f }, { "lfoOn", 1 }, { "lfoTarget", 0 }, { "lfoRate", 20.0f }, { "lfoDepth", 0.3f }, { "attack", 0.005f },
                           { "decay", 0.12f }, { "sustain", 0.0f }, { "release", 0.03f }, { "arpOn", 1 }, { "arpMode", 3 }, { "arpRate", 3 }, { "arpGate", 0.4f },
-                          { "arpBpm", 150.0f }, { "ambientOn", 1 }, { "ambientMix", 0.2f } } },
+                          { "arpBpm", 150.0f }, { "ambientOn", 1 }, { "ambientMix", 0.2f }, { "gain", 0.19f } } },
             // mantener 3–5 notas entre C7 y C8. Farnell bird2/trachea: formante traqueal ≈ 3138 Hz (Q 3 -> res 0,5). Chirp FM aproximado
         { "Tawny Owl Hoot", "Nature", { { "wave", 0 }, { "osc2Wave", 0 }, { "osc2Octave", 1 }, { "osc2Level", 0.3f }, { "attack", 0.05f }, { "decay", 0.5f },
                           { "sustain", 0.5f }, { "release", 0.3f }, { "pitchEnvAmount", -1.77f }, { "pitchEnvDecay", 150.0f }, { "ambientOn", 1 },
@@ -923,12 +923,12 @@ static const std::vector<FactoryPreset>& factoryPresets()
                           { "cutoff", 1500.0f }, { "filterKey", 0.5f }, { "pitchEnvAmount", -5.0f }, { "pitchEnvDecay", 800.0f }, { "attack", 0.5f },
                           { "decay", 1.5f }, { "sustain", 0.8f }, { "release", 2.5f }, { "lfoOn", 1 }, { "lfoTarget", 0 }, { "lfoRate", 0.3f }, { "lfoDepth", 0.15f },
                           { "echoOn", 1 }, { "echoTime", 700.0f }, { "echoFeedback", 0.35f }, { "echoMix", 0.25f }, { "ambientOn", 1 }, { "ambientMix", 0.5f },
-                          { "reverbDecay", 8.0f } } },
+                          { "reverbDecay", 8.0f }, { "gain", 0.17f } } },
             // unidades de 1–3 s en legato entre C3 y C5. Wikipedia "Whale vocalization": unidades de 20 Hz a > 24 kHz y de pocos segundos
         { "Gull Long Call", "Nature", { { "wave", 2 }, { "filterMode", 2 }, { "cutoff", 3000.0f }, { "resonance", 0.5f }, { "pitchEnvAmount", 2.0f },
                           { "pitchEnvDecay", 60.0f }, { "attack", 0.01f }, { "decay", 0.12f }, { "sustain", 0.0f }, { "release", 0.05f }, { "arpOn", 1 },
                           { "arpMode", 0 }, { "arpRate", 1 }, { "arpGate", 0.5f }, { "arpBpm", 126.0f }, { "tubeOn", 1 }, { "tubeDrive", 6.0f },
-                          { "ambientOn", 1 }, { "ambientMix", 0.2f }, { "reverbDecay", 1.5f } } },
+                          { "ambientOn", 1 }, { "ambientMix", 0.2f }, { "reverbDecay", 1.5f }, { "gain", 0.22f } } },
             // mantener E6 (nota alta) o C6 ("miau"). gull-research.org: 1,31–1,47 kHz; 8 elementos en 1,7–2,1 s (0,238 s/elemento)
         { "Rain Drops", "Nature", { { "osc1Level", 0.0f }, { "noiseLevel", 1.0f }, { "filterMode", 3 }, { "cutoff", 900.0f }, { "filterKey", 1.0f },
                           { "attack", 0.0002f }, { "decay", 0.0003f }, { "sustain", 0.0f }, { "release", 0.0002f }, { "arpOn", 1 }, { "arpMode", 3 },
@@ -1032,12 +1032,12 @@ static const std::vector<FactoryPreset>& factoryPresets()
             // tocar C#5. Verificado: cuadradas 540 + 800 Hz (6,80 st), pasa-banda; SOS: BP 12 dB/oct a 2,64 kHz con algo de resonancia
         { "808-Style Closed Hat", "Drums", { { "wave", 3 }, { "osc2Wave", 3 }, { "osc2Semi", 7 }, { "osc2Fine", -20.0f }, { "osc1Level", 0.7f }, { "osc2Level", 0.7f },
                           { "complexOn", 1 }, { "modRatio", 0.38f }, { "fmIndex", 4.0f }, { "amDepth", 1.0f }, { "noiseLevel", 0.3f }, { "filterMode", 3 },
-                          { "cutoff", 7100.0f }, { "resonance", 0.2f }, { "attack", 0.001f }, { "decay", 0.05f }, { "sustain", 0.0f }, { "release", 0.05f } } },
+                          { "cutoff", 7100.0f }, { "resonance", 0.2f }, { "attack", 0.001f }, { "decay", 0.05f }, { "sustain", 0.0f }, { "release", 0.05f }, { "gain", 1.00f } } },
             // tocar C#5. Verificado: 6 cuadradas (205,3/369,6/304,4/522,7/540/800 Hz), BPF 3440 y 7100 Hz + HPF. Aquí: aproximación
             // con 2 osciladores, ring/FM y ruido (el 808 no usa ruido). Falta el banco de 6 cuadradas
         { "808-Style Open Hat", "Drums", { { "wave", 3 }, { "osc2Wave", 3 }, { "osc2Semi", 7 }, { "osc2Fine", -20.0f }, { "osc1Level", 0.7f }, { "osc2Level", 0.7f },
                           { "complexOn", 1 }, { "modRatio", 0.38f }, { "fmIndex", 4.0f }, { "amDepth", 1.0f }, { "noiseLevel", 0.3f }, { "filterMode", 3 },
-                          { "cutoff", 7100.0f }, { "resonance", 0.2f }, { "attack", 0.001f }, { "decay", 0.45f }, { "sustain", 0.0f }, { "release", 0.45f } } },
+                          { "cutoff", 7100.0f }, { "resonance", 0.2f }, { "attack", 0.001f }, { "decay", 0.45f }, { "sustain", 0.0f }, { "release", 0.45f }, { "gain", 0.95f } } },
             // tocar C#5. Igual que el closed hat con decay largo (0,45 s estimado)
         { "FM Ride Cymbal", "Drums", { { "wave", 3 }, { "complexOn", 1 }, { "modRatio", 0.4f }, { "fmIndex", 10.0f }, { "filterMode", 3 }, { "cutoff", 2640.0f },
                           { "filterEnv", 0.58f }, { "filterAttack", 0.2f }, { "filterDecay", 3.7f }, { "filterSustain", 0.0f }, { "attack", 0.001f },
@@ -1052,12 +1052,12 @@ static const std::vector<FactoryPreset>& factoryPresets()
         { "Ocean Surf", "Nature", { { "osc1Level", 0.0f }, { "noiseLevel", 1.0f }, { "cutoff", 400.0f }, { "resonance", 0.2f }, { "filterEnv", 0.5f },
                           { "filterAttack", 2.0f }, { "filterDecay", 4.0f }, { "filterSustain", 0.2f }, { "attack", 2.0f }, { "decay", 2.0f }, { "sustain", 0.6f },
                           { "release", 4.0f }, { "echoOn", 1 }, { "echoTime", 350.0f }, { "echoFeedback", 0.3f }, { "echoMix", 0.3f }, { "ambientOn", 1 },
-                          { "ambientMix", 0.4f }, { "reverbDecay", 3.0f } } },
+                          { "ambientMix", 0.4f }, { "reverbDecay", 3.0f }, { "gain", 0.89f } } },
             // mantener una nota = una ola. Oxygène II: olas con EMS Synthi AKS y delay de cinta Revox (Wikipedia, newagemusic.guide). Cifras estimadas
         { "Gusting Wind", "Nature", { { "osc1Level", 0.0f }, { "noiseLevel", 1.0f }, { "noiseColor", 1 }, { "filterMode", 2 }, { "cutoff", 800.0f }, { "resonance", 0.7f },
                           { "filterKey", 1.0f }, { "filterEnv", 0.3f }, { "filterAttack", 1.5f }, { "filterDecay", 3.0f }, { "filterSustain", 0.5f }, { "attack", 1.5f },
                           { "decay", 1.0f }, { "sustain", 1.0f }, { "release", 3.0f }, { "lfoOn", 1 }, { "lfoTarget", 2 }, { "lfoRate", 0.2f }, { "lfoDepth", 0.4f },
-                          { "ambientOn", 1 }, { "ambientMix", 0.3f } } },
+                          { "ambientOn", 1 }, { "ambientMix", 0.3f }, { "gain", 0.16f } } },
             // C3–C6: la tecla mueve el filtro. Receta: ruido rosa por filtro resonante con ráfagas (LFO lento aquí; falta S&H). Cifras estimadas
         { "Sci-Fi Laser Zap", "FX", { { "wave", 0 }, { "attack", 0.001f }, { "decay", 0.25f }, { "sustain", 0.0f }, { "release", 0.1f }, { "pitchEnvAmount", 36.0f },
                           { "pitchEnvDecay", 40.0f }, { "echoOn", 1 }, { "echoTime", 120.0f }, { "echoFeedback", 0.4f }, { "echoMix", 0.3f } } },
