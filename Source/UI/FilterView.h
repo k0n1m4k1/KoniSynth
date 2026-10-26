@@ -181,6 +181,7 @@ private:
             setTooltip (paramTooltip (o.s, "cutoff") + "\nDrag: left/right = Cutoff, up/down = Resonance. Right-click: Cutoff menu.");
             setMouseCursor (juce::MouseCursor::DraggingHandCursor);
             menu = std::make_unique<ParamMenu> (o.s, "cutoff", *this);
+            setViewportIgnoreDragFlag (true); // arrastrar el asa no desplaza el panel
         }
         void paint (juce::Graphics& g) override
         {

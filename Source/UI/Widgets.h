@@ -244,7 +244,12 @@ struct Knob : juce::Component, private juce::Timer
           paramId (id)
     {
         auto* p = s.getParameter (id);
-        slider.setSliderStyle (style == Style::rotary ? juce::Slider::RotaryHorizontalVerticalDrag : juce::Slider::LinearVertical);
+        // Perilla: arrastre vertical (arriba = más) con el valor en una burbuja legible mientras se arrastra
+        slider.setSliderStyle (style == Style::rotary ? juce::Slider::RotaryVerticalDrag : juce::Slider::LinearVertical);
+        slider.setViewportIgnoreDragFlag (true); // arrastrar un mando no desplaza el panel
+        slider.onDragStart = [this] { showBubble (true); };
+        slider.onValueChange = [this] { if (bubble.isShowing()) showBubble (true); };
+        slider.onDragEnd = [this] { showBubble (false); };
         slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, style == Style::rotary ? 70 : 56, 18);
         slider.setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
         const auto tip = paramTooltip (s, id);
@@ -273,9 +278,47 @@ struct Knob : juce::Component, private juce::Timer
     void resized() override
     {
         auto r = getLocalBounds();
+        // Perilla de 64 px como mucho (más la etiqueta de 18 px y la caja de valor de ~22): en una ventana grande o una fila
+        // alta no crece sin límite (antes ~110 px en Complex frente a ~25 en Osc 1 con dos filas); el bloque va centrado
+        if (style == Style::rotary)
+            r = r.withSizeKeepingCentre (r.getWidth(), juce::jmin (r.getHeight(), 18 + maxDial + 22));
         label.setBounds (r.removeFromTop (18));
         slider.setBounds (r);
     }
+    static constexpr int maxDial = 64;
+
+    // Burbuja con "Nombre: valor" en 15 px sobre el mando mientras se arrastra (en la ventana de nivel superior, por encima de
+    // todo; sigue la escala del editor). Colores fijos de tooltip del skin
+    struct Bubble : juce::Component
+    {
+        juce::String text;
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat().reduced (1.0f);
+            g.setColour (Skin::c (0xff101316).withAlpha (0.95f));
+            g.fillRoundedRectangle (r, 6.0f);
+            g.setColour (Skin::accent());
+            g.drawRoundedRectangle (r, 6.0f, 1.2f);
+            g.setColour (Skin::white());
+            g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
+            g.drawText (text, r, juce::Justification::centred, false);
+        }
+    };
+    void showBubble (bool on)
+    {
+        auto* top = getTopLevelComponent();
+        if (! on || top == nullptr) { bubble.setVisible (false); if (auto* p = bubble.getParentComponent()) p->removeChildComponent (&bubble); return; }
+        if (bubble.getParentComponent() != top) top->addChildComponent (bubble);
+        bubble.setInterceptsMouseClicks (false, false);
+        bubble.text = name + ":  " + slider.getTextFromValue (slider.getValue());
+        const auto w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)), bubble.text)) + 24;
+        const auto area = top->getLocalArea (this, slider.getBounds());
+        bubble.setBounds (juce::Rectangle<int> (w, 28).withCentre ({ area.getCentreX(), area.getY() - 18 }).constrainedWithin (top->getLocalBounds()));
+        bubble.setVisible (true);
+        bubble.toFront (false);
+        bubble.repaint();
+    }
+    Bubble bubble;
 
     float layoutWeight() const { return style == Style::rotary ? 1.0f : 0.9f; } // slider: su caja de valor ("300 ms") necesita ~50 px
 

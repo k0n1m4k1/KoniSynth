@@ -608,7 +608,19 @@ public:
             content.addChildComponent (*c);
         rowsView.setViewedComponent (&rows, false);
         rowsView.setScrollBarsShown (true, false); // solo vertical
-        rowsView.setScrollBarThickness (12);
+        rowsView.setScrollBarThickness (32);       // 32 px (antes 12): más fácil de agarrar
+        // Arrastrar el fondo (marcos, títulos, huecos) desplaza el panel en vertical; los controles no: botones, selectores y
+        // listas se marcan aquí (perillas, sliders y asas de los displays ya lo hacen en su constructor)
+        rowsView.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::all);
+        std::function<void (juce::Component&)> blockDrag = [&blockDrag] (juce::Component& c)
+        {
+            if (dynamic_cast<juce::Button*> (&c) != nullptr || dynamic_cast<juce::ComboBox*> (&c) != nullptr
+                || dynamic_cast<juce::ListBox*> (&c) != nullptr || dynamic_cast<juce::TextEditor*> (&c) != nullptr)
+                c.setViewportIgnoreDragFlag (true);
+            for (auto* child : c.getChildren())
+                blockDrag (*child);
+        };
+        blockDrag (rows);
         content.addAndMakeVisible (rowsView);
         content.addAndMakeVisible (scope);
         // Modo y estilo del display: propiedades del estado del plugin
@@ -1806,7 +1818,8 @@ private:
     // acoplar, el editor los devuelve a 'content' antes de destruir la ventana
     struct FloatHolder : juce::Component
     {
-        std::vector<std::vector<std::pair<juce::Component*, float>>> rows; // filas del mismo alto; en cada una, ancho por peso
+        std::vector<std::vector<std::pair<juce::Component*, float>>> rows; // en cada fila, ancho por peso
+        std::vector<float> rowWeights; // alto de cada fila por peso (los de engineRows); vacío = filas del mismo alto
         juce::Component* overlay = nullptr; // diálogo abierto encima (ocupa todo)
         void paint (juce::Graphics& g) override { Skin::paintBackground (g, getLocalBounds(), juce::Colour (0xff22272e)); }
         void resized() override
@@ -1814,10 +1827,14 @@ private:
             if (overlay != nullptr)
                 overlay->setBounds (getLocalBounds());
             auto area = getLocalBounds().reduced (6);
-            const auto rowH = area.getHeight() / juce::jmax (1, (int) rows.size());
-            for (auto& items : rows)
+            const auto weighted = rowWeights.size() == rows.size();
+            float totalWeight = 0.0f;
+            for (size_t i = 0; i < rows.size(); ++i) totalWeight += weighted ? rowWeights[i] : 1.0f;
+            const auto unitH = (float) area.getHeight() / juce::jmax (0.001f, totalWeight);
+            for (size_t row = 0; row < rows.size(); ++row)
             {
-                auto r = area.removeFromTop (rowH);
+                auto& items = rows[row];
+                auto r = area.removeFromTop (juce::roundToInt (unitH * (weighted ? rowWeights[row] : 1.0f)));
                 float total = 0.0f;
                 for (auto& it : items) total += it.second;
                 const auto unit = (float) r.getWidth() / juce::jmax (0.001f, total);
@@ -1834,12 +1851,13 @@ private:
             : FloatWindow (name, std::vector<std::vector<std::pair<juce::Component*, float>>> { std::move (items) }, w, h, laf, std::move (onClose)) {}
 
         FloatWindow (const juce::String& name, std::vector<std::vector<std::pair<juce::Component*, float>>> rows, int w, int h,
-                     juce::LookAndFeel& laf, std::function<void()> onClose)
+                     juce::LookAndFeel& laf, std::function<void()> onClose, std::vector<float> rowWeights = {})
             : juce::DocumentWindow (name, Skin::c (0xff1b1f24), juce::DocumentWindow::closeButton), closed (std::move (onClose))
         {
             auto* holder = new FloatHolder();
             holder->setLookAndFeel (&laf); // fuera del editor no hereda su LookAndFeel
             holder->rows = std::move (rows);
+            holder->rowWeights = std::move (rowWeights);
             for (auto& row : holder->rows)
                 for (auto& it : row)
                     holder->addAndMakeVisible (it.first);
@@ -1946,17 +1964,21 @@ private:
         if (wantEngine && engineWindow == nullptr)
         {
             std::vector<std::vector<std::pair<juce::Component*, float>>> winRows;
-            float maxUnits = 0.0f;
+            std::vector<float> rowWeights; // el mismo reparto de alto que en el panel (tira de señal 0,24, display 1,85...)
+            float maxUnits = 0.0f, totalWeight = 0.0f;
             for (const auto& row : rowsNow)
             {
                 winRows.emplace_back();
+                rowWeights.push_back (row.weight);
+                totalWeight += row.weight;
                 float units = 0.0f;
                 for (auto* sec : row.sections)
                     if (sec != nullptr) { winRows.back().push_back ({ sec, sec->layoutWeight() }); units += sec->layoutWeight(); sec->setVisible (true); }
                 maxUnits = juce::jmax (maxUnits, units);
             }
             engineWindow = std::make_unique<FloatWindow> ("KoniSynth ENGINE", std::move (winRows), juce::jmin (1600, juce::roundToInt (maxUnits * 60.0f) + 12), // tope: nace como mucho del ancho del editor
-                                                          150 * (int) rowsNow.size(), lookAndFeel, [this] { closeFloat (engineFoldId); });
+                                                          juce::roundToInt (165.0f * totalWeight), lookAndFeel, [this] { closeFloat (engineFoldId); },
+                                                          std::move (rowWeights)); // 165 px por unidad de peso: minLineHeight del panel
             if (engineWindowPos.x != 0 || engineWindowPos.y != 0)
                 engineWindow->setTopLeftPosition (engineWindowPos);
             engineWindowSecs = engineSecs;

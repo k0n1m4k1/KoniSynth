@@ -125,6 +125,7 @@ private:
             setMouseCursor (sh == bar ? juce::MouseCursor::LeftRightResizeCursor : sh == level ? juce::MouseCursor::UpDownResizeCursor
                           : sh == button ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::DraggingHandCursor);
             menu = std::make_unique<ParamMenu> (o.s, id, *this);
+            setViewportIgnoreDragFlag (true); // arrastrar el asa no desplaza el panel
         }
 
         void paint (juce::Graphics& g) override

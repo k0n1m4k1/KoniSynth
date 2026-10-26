@@ -15,6 +15,7 @@ struct ParamDot : juce::Component, juce::SettableTooltipClient
         setMouseCursor (px != nullptr && py != nullptr ? juce::MouseCursor::DraggingHandCursor
                         : px != nullptr ? juce::MouseCursor::LeftRightResizeCursor : juce::MouseCursor::UpDownResizeCursor);
         menu = std::make_unique<ParamMenu> (s, main, *this);
+        setViewportIgnoreDragFlag (true); // arrastrar el asa no desplaza el panel
     }
 
     std::function<void (juce::Point<float> inParent)> onDrag;
