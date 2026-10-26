@@ -22,14 +22,14 @@ Sections: **OPL** and **OPL LFO / Output**; with Model = OPLL or VRC7, an **OPLL
 |---|---|---|
 | Model (header menu) | OPL2 (YM3812), OPL3 (YMF262), OPLL (YM2413) or VRC7 (Konami), as described above. | default OPL2 (YM3812) |
 | 4-Op | OPL3 only: pairs of channels become 4-operator voices (6 voices) with 4 algorithms. | off |
-| Edit... (header button) | Opens the OPL editor (see below). | |
+| Operators... (header button) | Opens the OPL editor (see below). | |
 | Algorithm | 2 operators: 0 = FM (1 modulates 2), 1 = AM (1 + 2 added). 4 operators (OPL3): 0 = 1->2->3->4, 1 = (1->2)+(3->4), 2 = 1+(2->3->4), 3 = 1+(2->3)+4. | 0-3; 0 |
 | Feedback | Self-modulation of OP1 (register C0h): 0 = off, 7 = most (noisy). | 0-7; 0 |
 | OP1 TL ... OP4 TL | Total level, 0.75 dB steps (63 = -47 dB). On a modulator it sets the brightness. | 0-63; OP1/OP3 63, OP2/OP4 0 |
 
 Default patch: 2 operators in FM, the modulator silent (TL 63) and the carrier a sine with AR 15, RR 7, EGT on.
 
-**OPL editor (Edit...).** Columns OP1-OP4 with the chip's own registers, carriers highlighted, algorithm written out;
+**OPL editor (Operators...).** Columns OP1-OP4 with the chip's own registers, carriers highlighted, algorithm written out;
 OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 
 | Control | What it does | Range / default |
@@ -70,7 +70,7 @@ OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 
 - **Voices:** OPL2 9; OPL3 18, or 6 with 4-Op; OPLL 9, or 6 with Rhythm on; VRC7 6. A repeated note reuses its voice;
   otherwise the oldest free voice, else the oldest one.
-- **OPLL user instrument:** set Instrument = 0 User and shape it in Edit... with OP1 (modulator) and OP2 (carrier): AM,
+- **OPLL user instrument:** set Instrument = 0 User and shape it in Operators... with OP1 (modulator) and OP2 (carrier): AM,
   VIB, EGT, KSR, MULT, AR, DR, SL, RR of both; KSL of both; TL of OP1; WAVE 0 or 1 of both; Feedback.
 - **OPLL drums (channel 10):** set Model = OPLL (YM2413), turn Rhythm on, and send notes on MIDI channel 10 (General MIDI
   drum notes). Other channels keep playing the 6 melodic voices. Note map in the code:

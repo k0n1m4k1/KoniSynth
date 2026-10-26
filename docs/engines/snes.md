@@ -61,7 +61,7 @@ Default envelope: A15 D7 SL7 SR0 (organ-like).
 
 - 8 voices. Key-on resets the envelope and starts the sample from the beginning, after 5 empty samples, as on the chip.
 - **Your own sample:**
-  1. Switch to the Synth engine, open the Sample tab, press Edit... and Load a file. For .sf2 and .spc files a menu
+  1. Switch to the Synth engine, open the Sample tab, press Edit Sample... and Load a file. For .sf2 and .spc files a menu
      lets you pick the preset/zone or the sample inside.
   2. Set Start, Length, Loop and Root in the Sample panel.
   3. Switch back to SNES and set Source = User Sample. Choose User Rate (32, 16 or 8 kHz).

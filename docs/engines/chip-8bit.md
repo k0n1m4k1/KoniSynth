@@ -10,7 +10,7 @@ As with every emulated engine in KoniSynth, the defaults reproduce the original 
 
 ## What you need
 
-Nothing extra. Optional: for **DPCM = User Sample**, a sound file loaded in the Sample panel (the **Edit...** button of
+Nothing extra. Optional: for **DPCM = User Sample**, a sound file loaded in the Sample panel (the **Edit Sample...** button of
 the Sample tab, in the Synth engine's sources). It is converted to 1-bit DPCM.
 
 ## Controls

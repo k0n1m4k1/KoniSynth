@@ -62,7 +62,7 @@ static juce::String paramHelp (const juce::String& id)
         { "pvLfoRate", "Polivoks LFO rate." },
         { "pvLfoVco1", "LFO to VCO1 pitch." }, { "pvLfoVco2", "LFO to VCO2 pitch." },
         { "pvLfoVcf", "LFO to filter cutoff." }, { "pvLfoVca", "LFO to volume (tremolo)." },
-        { "ansScore", "ANS score (the glass plate): factory scores or User (draw your own with Edit...)." },
+        { "ansScore", "ANS score (the glass plate): factory scores or User (draw your own with Plate...)." },
         { "ansSpeed", "Plate speed in mm per second (up to 24, as on the ANS). 1 mm is one column of the score." },
         { "ansHold", "Hold: the plate keeps playing without a key. Off: it plays while a key is held. In both modes the last key "
                     "pressed transposes the score." },
@@ -133,7 +133,7 @@ static juce::String paramHelp (const juce::String& id)
         { "omniHarpOctave", "Octave of the strum plate: its 13 zones span 4 octaves from the chord." },
         { "omniSplit", "Keys below this note are chord buttons (one key = major; add the minor third for minor, the minor seventh for 7th, both for m7, the major seventh for maj7). From this note up: the 13 strum zones. The mod wheel also strums." },
         { "omniRhythm", "Omnichord rhythm with auto bass. The bass plays only while a chord key is held. Patterns are KoniSynth's own, in each style. "
-                        "User 1-8: your own rhythms (Edit...), one MIDI file each in the KoniSynth settings folder, rhythms/Omnichord/"
+                        "User 1-8: your own rhythms (Edit Rhythms...), one MIDI file each in the KoniSynth settings folder, rhythms/Omnichord/"
                         "User 1.mid ... User 8.mid: drums on channel 10 (General MIDI notes), bass on channel 2 written in C (C3 root, "
                         "C2 low root, G3 fifth, E3 third). Default: Off." },
         { "omniTempo", "Omnichord rhythm tempo (follows the host tempo when the host is playing)." },
@@ -191,7 +191,7 @@ static juce::String paramHelp (const juce::String& id)
                         "and the modulator): 50 % sounds hollow; extreme values sound thin and nasal." },
         { "pwmDepth", "How much the LFO moves the pulse width (PWM): adds motion and body to the square wave and the pulse mixes." },
         { "osc2Wave", "Oscillator 2 waveform. Wavetable: plays the table of the Wavetable source (its own position: WT Pos), "
-                      "with its own tuning and phase; Sync works too. Sample: plays its own audio file (Edit... in the header: Load, "
+                      "with its own tuning and phase; Sync works too. Sample: plays its own audio file (Osc 2 Sample... in the header: Load, "
                       "Root, Start, Length, Loop), a different one from the Sample tab, with the tuning, drift, level and mute of "
                       "Osc 2; Sync restarts it from Start every cycle of Osc 1. Tri-Saw: the Minimoog triangle-sawtooth. Saw+Pulse, Saw+Tri, "
                       "Tri+Pulse, Saw+Tri+Pulse: Prophet-5 waveform mixes; Saw+Pulse (Juno): the Juno-106 mix (see Wave). Default: Saw." },
@@ -314,7 +314,7 @@ static juce::String paramHelp (const juce::String& id)
         { "vl1Release", "R: release after you let go (0-9)." },
         { "vl1Vibrato", "V: vibrato (0 = off; 1 fast and subtle ... 9 slow and deep)." },
         { "vl1Tremolo", "T: tremolo (0 = off; 1 fast ... 9 slow)." },
-        { "vl1Rhythm", "VL-1 rhythm box (Rock 1 is the one from \"Da Da Da\"). Off stops it. User 1-8: your own rhythms (Edit...), one MIDI "
+        { "vl1Rhythm", "VL-1 rhythm box (Rock 1 is the one from \"Da Da Da\"). Off stops it. User 1-8: your own rhythms (Edit Rhythms...), one MIDI "
                        "file each in the KoniSynth settings folder, rhythms/Casio VL-1/User 1.mid ... User 8.mid: channel 10, notes 36 "
                        "(Pock), 37 (Peek) and 42 (Noise), one sound per sixteenth. Default: Off." },
         { "vl1Tempo", "VL-1 tempo, from -9 to +9 (0 = about 131 BPM)." },
@@ -477,14 +477,14 @@ static juce::String paramHelp (const juce::String& id)
         { "formantDepth", "How many vowels the automatic morph sweeps (0 = off)." },
         { "formantMix", "Balance between the original and the vowel-filtered sound." },
         { "bendRange", "Pitch bend wheel range of your controller, in semitones." },
-        { "macro1", "Performance macro 1: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Edit..." },
-        { "macro2", "Performance macro 2: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Edit..." },
-        { "macro3", "Performance macro 3: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Edit..." },
-        { "macro4", "Performance macro 4: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Edit..." },
-        { "macro5", "Performance macro 5: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Edit..." },
-        { "macro6", "Performance macro 6: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Edit..." },
-        { "macro7", "Performance macro 7: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Edit..." },
-        { "macro8", "Performance macro 8: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Edit..." },
+        { "macro1", "Performance macro 1: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Assign..." },
+        { "macro2", "Performance macro 2: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Assign..." },
+        { "macro3", "Performance macro 3: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Assign..." },
+        { "macro4", "Performance macro 4: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Assign..." },
+        { "macro5", "Performance macro 5: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Assign..." },
+        { "macro6", "Performance macro 6: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Assign..." },
+        { "macro7", "Performance macro 7: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Assign..." },
+        { "macro8", "Performance macro 8: moves all the parameters assigned to it at once, each between its From and To values. Assign a parameter: right-click it > Assign to macro. Edit ranges and names: Macros > Assign..." },
         { "modWheelDepth", "Mod wheel depth (CC 1): vibrato up to +/-1 semitone." },
         { "echoOn", "Turns the tape echo on." },
         { "echoTime", "Time between repeats." },
@@ -642,7 +642,7 @@ static juce::String paramHelp (const juce::String& id)
         { "chipPan3", "Game Boy NR51: where the Wave channel goes. No effect on the NES (mono)." },
         { "chipPan4", "Game Boy NR51: where the Noise channel goes. No effect on the NES (mono)." },
         { "mdModel", "Mega Drive model. Model 1: discrete YM2612 with its 'ladder effect' (crossover distortion in the 9-bit DAC) and the 3.4 kHz output low-pass. Model 2: YM3438 in the ASIC, no ladder, same low-pass. Clean: YM3438 without the analog filter." },
-        { "mdAlgorithm", "How the 4 operators connect (0-7), as on the YM2612. 0: 1->2->3->4 (one carrier) ... 7: all four heard. Carriers are highlighted in Edit..." },
+        { "mdAlgorithm", "How the 4 operators connect (0-7), as on the YM2612. 0: 1->2->3->4 (one carrier) ... 7: all four heard. Carriers are highlighted in Operators..." },
         { "mdFeedback", "OP1 feedback (0-7): from pure sine to buzzy and, at 7, noisy." },
         { "mdLfo", "Chip LFO speed (the 8 YM2612 rates) or Off." },
         { "mdPms", "Vibrato depth from the LFO (0-7: 0 to 80 cents)." },

@@ -29,7 +29,7 @@ sections side by side: **FM 6-Op**, **FM LFO** and **Display**.
 
 Header buttons:
 
-- **Edit...** opens the FM editor (see below).
+- **Operators...** opens the FM editor (see below).
 - **Load .syx...** loads a DX7 voice or a 32-voice bank into the 6 operators.
 
 ### FM LFO
@@ -60,7 +60,7 @@ The labels come from the manual's figures; those it does not show (feedback, det
 transpose, pitch envelope and most LFO waveform names) are estimated. The voice loaded from a .syx is saved with the
 project and with user presets. The display only shows; its colours do not follow the skin.
 
-### FM editor (Edit...)
+### FM editor (Operators...)
 
 The header repeats **Algorithm** and **Feedback** and shows the algorithm as text, next to two blocks for the whole
 voice:
@@ -120,7 +120,7 @@ syncs on.
 
 ### Building a sound from INIT
 
-1. Choose an **Algorithm**; open **Edit...** to see which operators are carriers (highlighted).
+1. Choose an **Algorithm**; open **Operators...** to see which operators are carriers (highlighted).
 2. Raise the **Level** of a modulator to add brightness; set its **Coarse** ratio for the harmonic colour.
 3. Shape each operator with **R1-R4 / L1-L4**; a modulator with a fast decay gives a percussive attack.
 4. Add **Vel** on modulators so harder playing is brighter.

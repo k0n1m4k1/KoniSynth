@@ -42,7 +42,7 @@ silences the source without changing its level; mutes are off by default and pre
 | Tri Sym | Triangle waveform only: makes the triangle slightly lopsided like an analog one (even harmonics; see Analog triangle below). | 0-100 % / 0 % |
 | Tri Rnd | Triangle waveform only: rounds its tips (weaker odd harmonics); 100 % is a sine. | 0-100 % / 0 % |
 
-**Wavetable** (Edit... opens the wavetable editor: the frames in perspective, the table menu, Level, Position and a
+**Wavetable** (Edit Table... opens the wavetable editor: the frames in perspective, the table menu, Level, Position and a
 **Load** button for a WAV with 2048 samples per frame, the Serum format, or a single cycle)
 
 | Control | What it does | Range / default |
@@ -51,7 +51,7 @@ silences the source without changing its level; mutes are off by default and pre
 | Level | Wavetable volume in the mixer. | 0-100 % / 0 % |
 | Position | Sweeps from the first to the last waveform; LFO 2 can move it. | 0-100 % / 0 % |
 
-**Sample** (Edit... opens the sample editor: waveform with a draggable Start, the end of Length and the loop zone;
+**Sample** (Edit Sample... opens the sample editor: waveform with a draggable Start, the end of Length and the loop zone;
 Loop, Level, Root, Start, Length and a **Load** button. The file chooser accepts WAV, AIFF, FLAC, OGG, SoundFont 2
 (.sf2), SNES BRR (.brr) and SNES APU snapshots (.spc); for .sf2 and .spc you choose one item inside the bank)
 
@@ -155,7 +155,7 @@ another source's solo).
 | Control | What it does | Range / default |
 |---|---|---|
 | Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Wavetable, Sample, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Saw |
-| Edit... (header) | Opens the sample editor of Osc 2 (Sample waveform only; dimmed otherwise). | - |
+| Osc 2 Sample... (header) | Opens the sample editor of Osc 2 (Sample waveform only; dimmed otherwise). | - |
 | Sync (switch) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. | Off / On / Off |
 | Level | Oscillator 2 level. | 0-100 % / 0 % |
 | Oct | Octave relative to oscillator 1. | -2 to +2 / 0 |
@@ -165,7 +165,7 @@ another source's solo).
 | Tri Sym / Tri Rnd | Analog triangle of Osc 2 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
 
 **Osc 2 Sample** (Wave = Sample). A second sample player with its own file, independent of the Sample tab: two different
-files can sound at once. It uses the Level, Oct, Semi, Fine, drift and Mute of Osc 2; Edit... opens the same sample
+files can sound at once. It uses the Level, Oct, Semi, Fine, drift and Mute of Osc 2; Osc 2 Sample... opens the same sample
 editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loop), working on the Osc 2 file.
 
 | Control | What it does | Range / default |
@@ -265,7 +265,7 @@ Saturation* (curve menu and Drive). The **Ladder quality** selector next to it c
 | Glide | Portamento from the last note played (any voice); 0 = off. | 0-2000 ms / 0 ms |
 | Mod Wheel | Mod wheel (CC 1) depth: vibrato up to +/-1 semitone at the LFO 1 rate; works even with LFO 1 off. | 0-100 % / 50 % |
 
-**Edit...** opens the **Synth Voice** dialog:
+**Voice...** opens the **Synth Voice** dialog:
 
 | Group | Control | What it does | Range / default |
 |---|---|---|---|

@@ -2,7 +2,7 @@
 
 Three engines have a bank of **8 user rhythms** next to their factory patterns: **Drum Machine**, **Omnichord** and
 **Casio VL-1**. The slots appear as **User 1** to **User 8** at the end of the engine's rhythm menu. Each slot is a
-standard MIDI file: you draw it in the rhythm editor (**Edit...** in the header of the rhythm section) or write it in any
+standard MIDI file: you draw it in the rhythm editor (**Edit Rhythms...** in the header of the rhythm section) or write it in any
 sequencer, and KoniSynth plays it with the engine's own sounds and tempo.
 
 A preset or a project stores only which slot is selected (for example *User 3*), not the rhythm itself: the slot plays
@@ -25,7 +25,7 @@ KoniSynth checks the files once per second (size and modification time) and relo
 changes, so a rhythm saved from another program is picked up while it plays. The rhythm editor also rereads a file
 changed by another program, as long as it has no unsaved edits of its own.
 
-## Rhythm editor (Edit...)
+## Rhythm editor (Edit Rhythms...)
 
 The editor shows one row (lane) per sound and one column per step; the step numbers mark the beats, and a 32-step rhythm
 shows a line between its two bars.

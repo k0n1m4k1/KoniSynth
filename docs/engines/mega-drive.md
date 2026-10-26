@@ -22,7 +22,7 @@ the second.
 | Control | What it does | Range / default |
 |---|---|---|
 | Model (header menu) | Model 1: discrete YM2612 with the "ladder effect" and the ~3.4 kHz output low-pass. Model 2: YM3438, no ladder, same low-pass. Clean: YM3438 without the analog filter, brighter than any real console. | Model 1 (YM2612) / Model 2 (YM3438) / Clean (YM3438); default Model 1 |
-| Edit... (header button) | Opens the Mega Drive editor (see below). | |
+| Operators... (header button) | Opens the Mega Drive editor (see below). | |
 | Algorithm | How the 4 operators connect, as on the YM2612. 0: 1->2->3->4 (one carrier) ... 7: all four heard. | 0-7; 0 |
 | Feedback | OP1 feedback: from pure sine to buzzy and, at 7, noisy. | 0-7; 0 |
 | OP1 TL ... OP4 TL | Total level of each operator, 0.75 dB steps (0 = loudest, 127 = -95 dB). On a carrier it is volume; on a modulator, brightness. | 0-127; OP1-OP3 127, OP4 0 |
@@ -30,7 +30,7 @@ the second.
 The default patch is the equivalent of an INIT VOICE: algorithm 0 with OP1-OP3 silent (TL 127) and OP4 a sine with AR 31,
 RR 15.
 
-**Mega Drive editor (Edit...).** One column per operator (OP1-OP4), carriers highlighted, and the current algorithm
+**Mega Drive editor (Operators...).** One column per operator (OP1-OP4), carriers highlighted, and the current algorithm
 written out (for example `(1 -> 2) + (3 -> 4)`). Per operator:
 
 | Control | What it does | Range / default |
@@ -88,7 +88,7 @@ The PSG has no envelope of its own; A/D/S/R are a sound-driver envelope.
 - **PSG Noise, DAC Sample, FM Ch3 Special:** monophonic, last-note priority with a stack of held notes.
 - **DAC Sample:** plays the sample loaded in the Sample panel through channel 6, quantized to 8 bits. With Loop off the
   sample plays to the end, like drum samples in games.
-  1. Switch to the Synth engine, open the Sample tab, press Edit... and Load a file (Start, Length, Loop, Root apply).
+  1. Switch to the Synth engine, open the Sample tab, press Edit Sample... and Load a file (Start, Length, Loop, Root apply).
   2. Switch back to Mega Drive and set Voice = DAC Sample (ch 6).
   3. Set DAC Rate; the Root note plays at that rate.
 - **Frame Macros...:** one line of text per macro, Furnace syntax: values separated by spaces, one per frame; `|` = loop

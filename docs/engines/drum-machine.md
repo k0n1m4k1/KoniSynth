@@ -34,7 +34,7 @@ two sections side by side.
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Edit... (header) | Opens the rhythm editor for your own rhythms, User 1-8 (see [User rhythms](../user-rhythms.md)). | - |
+| Edit Rhythms... (header) | Opens the rhythm editor for your own rhythms, User 1-8 (see [User rhythms](../user-rhythms.md)). | - |
 | Pattern menu (header) | Pattern played by the machine. Off: play the kit from the keys only. Factory patterns listed alphabetically, then User 1-8 (an empty user slot plays nothing). | Off + 29 patterns + User 1-8 / Off |
 | + Pattern | A second pattern played at the same time, like holding two rhythm buttons on the Mini Pops 7. | Off + 29 patterns + User 1-8 / Off |
 | Tempo | Pattern tempo. Follows the host tempo and position when the host is playing. | 60-240 BPM / 120 BPM |
@@ -49,7 +49,7 @@ p. 11): while a pattern runs, the light moves across the steps of the measure fr
 uses lights 1-12; with no pattern running, all are off. The lights do not change colour with the skin.
 
 **User rhythms.** User 1-8 are MIDI files (channel 10, General MIDI drum notes, three levels: soft, normal, accent) in
-the KoniSynth settings folder, `rhythms/Drum Machine/User 1.mid` to `User 8.mid`. Draw them with **Edit...** (15
+the KoniSynth settings folder, `rhythms/Drum Machine/User 1.mid` to `User 8.mid`. Draw them with **Edit Rhythms...** (15
 instrument lanes, 12, 16 or 32 steps; lanes the selected kit does not have are dimmed) or in any sequencer: KoniSynth
 reloads a changed file by itself. Presets store only the slot number. Folder locations, the editor and the file format:
 [User rhythms](../user-rhythms.md).

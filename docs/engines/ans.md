@@ -22,14 +22,14 @@ Select **ANS** in the Engine menu. Choosing it from that menu loads the preset *
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Score menu (header) | The glass plate: a factory score, or User (draw your own with Edit...). | Cluster, Glissandi, Drone, Bells, Noise Bands, 72-Step Scale, User / Cluster |
+| Score menu (header) | The glass plate: a factory score, or User (draw your own with Plate...). | Cluster, Glissandi, Drone, Bells, Noise Bands, 72-Step Scale, User / Cluster |
 | Hold (switch) | On: the plate keeps playing without a key. Off: it starts when you press a key. | Off / On / Off |
 | Speed | Plate speed in mm per second (up to 24, as on the ANS). 1 mm is one column of the score. | 0-24 mm/s / 12 mm/s |
 | Emulsion | Slow irregularity of each optical track, which made the ANS sound alive (amount not documented: estimate). | 0-100 % / 20 % |
 
-Header button **Edit...** opens the ANS plate editor.
+Header button **Plate...** opens the ANS plate editor.
 
-### ANS plate editor (Edit...)
+### ANS plate editor (Plate...)
 
 - The header repeats Score, Hold, Speed and Emulsion.
 - The plate: 720 tones (vertical) x 512 mm (horizontal). Horizontal lines mark each octave (every 72 tones). A red
@@ -54,7 +54,7 @@ Header button **Edit...** opens the ANS plate editor.
 
 ### Drawing your own score
 
-1. Click **Edit...**.
+1. Click **Plate...**.
 2. Left-drag on the plate to scratch tones. A horizontal stroke is a sustained tone; a slanted stroke is a glissando; a
    wide vertical band of tones sounds like noise.
 3. Right-drag to erase.

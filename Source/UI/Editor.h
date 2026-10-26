@@ -184,7 +184,7 @@ public:
                       .withKnob (s, "symmetry", "Symmetry").withKnob (s, "timbreMod", "T.Mod");
         // Segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), con Mute/Solo como las fuentes de Osc 1
         osc2Section.withCombo (s, "osc2Wave").withExtraToggle (s, "osc2Sync", "Sync")
-                   .withHeaderButton ("Edit...", "Open the sample editor of Osc 2 (Sample waveform): load its own file, see its waveform, "
+                   .withHeaderButton ("Osc 2 Sample...", "Open the sample editor of Osc 2 (Sample waveform): load its own file, see its waveform, "
                                       "set Root, Start, Length and Loop.", [this] { openSamplePanel (KoniSynthProcessor::osc2Sample); })
                    .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Semi", "Semi")
                    .withKnob (s, "osc2Fine", "Fine").withKnob (s, "osc2WtPosition", "WT Pos")
@@ -196,15 +196,15 @@ public:
         mixerTabs = std::make_unique<SourceTabs> (s, std::vector<SourceTabs::Source> {
             { "Osc 2", &osc2Section, "osc2Level", "osc2Mute" }, { "Osc 3", &osc3Section, "subLevel", "osc3Mute" },
             { "Noise", &noiseSection, "noiseLevel", "noiseMute" } }, Params::srcOsc2, koni.getParams().soloSource);
-        // Sample, Wavetable y Sequencer: sección compacta + panel de edición propio (Edit...)
-        sampleSection.withHeaderButton ("Edit...", "Open the sample editor: load a file, see its waveform, set Start, Length and Loop.",
+        // Sample, Wavetable y Sequencer: sección compacta + panel de edición propio (Edit Sample..., Edit Table..., Edit Steps...)
+        sampleSection.withHeaderButton ("Edit Sample...", "Open the sample editor: load a file, see its waveform, set Start, Length and Loop.",
                                         [this] { openSamplePanel (KoniSynthProcessor::sourceSample); })
                      .withKnob (s, "sampleLevel", "Level");
         wavetableSection.withCombo (s, "wtTable")
-                        .withHeaderButton ("Edit...", "Open the wavetable editor: see the frames, load your own table.", [this] { openWavetablePanel(); })
+                        .withHeaderButton ("Edit Table...", "Open the wavetable editor: see the frames, load your own table.", [this] { openWavetablePanel(); })
                         .withKnob (s, "wtLevel", "Level").withKnob (s, "wtPosition", "Position");
         seqSection.withToggle (s, "seqOn")
-                  .withHeaderButton ("Edit...", "Open the step sequencer: pitch, on/off and tie for each of the 16 steps.", [this] { openSequencerPanel(); })
+                  .withHeaderButton ("Edit Steps...", "Open the step sequencer: pitch, on/off and tie for each of the 16 steps.", [this] { openSequencerPanel(); })
                   .withKnob (s, "seqRate", "Rate"); // Steps, Gate y BPM: en el diálogo
         stringSection.withCombo (s, "stringExcite").withKnob (s, "stringLevel", "Level").withKnob (s, "stringDecay", "Decay")
                      .withKnob (s, "stringBright", "Bright").withKnob (s, "stringPick", "Pick")
@@ -266,13 +266,13 @@ public:
                                    "Two band-pass filters in parallel, Spread apart: vowel-like formants.",
                                    "Two low-pass filters in series, Spread apart." });
         // Las dos envolventes con la misma caja: Env Curve en la cabecera (es una sola curva para las dos: Synth.h,
-        // updateEnvelopes), display de 160 px y 4 faders; el paneo por voz del VCA va al diálogo Edit... de Amp Envelope
+        // updateEnvelopes), display de 160 px y 4 faders; el paneo por voz del VCA va al diálogo Voice Pan... de Amp Envelope
         filterEnvSection.withCombo (s, "envCurve")
                         .withSlider (s, "filterAttack", "A").withSlider (s, "filterDecay", "D")
                         .withSlider (s, "filterSustain", "S").withSlider (s, "filterRelease", "R")
                         .withSideBody (filterEnvView, 160, true); // curva con asas A, D/S, R (UI/ModViews.h)
         ampEnvSection.withCombo (s, "envCurve")
-                     .withHeaderButton ("Edit...", "Per-voice panning after the VCA: V.Pan (how far the voices spread) and Pan Mode.", [this]
+                     .withHeaderButton ("Voice Pan...", "Per-voice panning after the VCA: V.Pan (how far the voices spread) and Pan Mode.", [this]
                      {
                          openParamPanel ("Amp Envelope", [] (ParamPanel& p, APVTS& st)
                          {
@@ -308,7 +308,7 @@ public:
                      .withKnob (s, "genxTime", "Time").withKnob (s, "genxRepeats", "Repeats").withKnob (s, "genxLevel", "Level");
         omniSection.withKnob (s, "omniSplit", "Split").withKnob (s, "omniSustain", "Sustain").withKnob (s, "omniHarpOctave", "Oct")
                    .withKnob (s, "omniHarpLevel", "Harp").withKnob (s, "omniChordLevel", "Chord").withKnob (s, "omniBassLevel", "Bass");
-        omniRhythmSection.withHeaderButton ("Edit...", "Open the rhythm editor: draw your own rhythms (User 1-8) with drum lanes and the "
+        omniRhythmSection.withHeaderButton ("Edit Rhythms...", "Open the rhythm editor: draw your own rhythms (User 1-8) with drum lanes and the "
                                             "automatic bass (root, low root, 5th, 3rd of the chord you hold). Each one is a MIDI file "
                                             "you can also edit elsewhere (drums on channel 10, bass on channel 2).",
                                             [this] { openPanel ("Omnichord Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::omnichord), 1300, 560); })
@@ -316,13 +316,13 @@ public:
         drumSection.withCombo (s, "drumKit").withExtraToggle (s, "drumVelocity", "Velocity")
                    .withKnob (s, "drumTune", "Tune").withKnob (s, "drumDecay", "Decay").withKnob (s, "drumTone", "Tone")
                    .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent");
-        drumPatternSection.withHeaderButton ("Edit...", "Open the rhythm editor: draw your own rhythms (User 1-8) on a grid of "
+        drumPatternSection.withHeaderButton ("Edit Rhythms...", "Open the rhythm editor: draw your own rhythms (User 1-8) on a grid of "
                                              "instrument lanes and steps. Each one is a MIDI file you can also edit elsewhere.",
                                              [this] { openPanel ("Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::drums), 1300, 560); })
                           .withSortedCombo (s, "drumPattern").withKnob (s, "drumPattern2", "+ Pattern")
                           .withKnob (s, "drumTempo", "Tempo").withKnob (s, "drumSwing", "Swing")
                           .withBody (drumLeds, 12, 0); // fila de LED de los pasos sobre las perillas
-        fmSection.withHeaderButton ("Edit...", "Open the FM editor: ratio, level, envelope and keyboard scaling of the 6 operators.",
+        fmSection.withHeaderButton ("Operators...", "Open the FM editor: ratio, level, envelope and keyboard scaling of the 6 operators.",
                                     [this] { openFmPanel(); })
                  .withHeaderButton ("Load .syx...", "Load a Yamaha DX7 voice or 32-voice bank (SysEx .syx file): operators, "
                                     "algorithm, LFO, pitch envelope, transpose and key sync, as stored in the voice.",
@@ -371,7 +371,7 @@ public:
                      "Yamaha YM3438 (OPN2C) core inside the later ASIC: no ladder effect and a cleaner low end; some early games "
                      "that relied on the ladder sound quieter. Same ~3.4 kHz FM low-pass as the emulators' Model 2 setting.",
                      "YM3438 core without the analog low-pass filter: the raw digital output, brighter than any real console." })
-                 .withHeaderButton ("Edit...", "Open the Mega Drive editor: the 4 operators with the YM2612's own registers.", [this] { openMdPanel(); })
+                 .withHeaderButton ("Operators...", "Open the Mega Drive editor: the 4 operators with the YM2612's own registers.", [this] { openMdPanel(); })
                  .withKnob (s, "mdAlgorithm", "Algorithm").withKnob (s, "mdFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             mdSection.withKnob (s, "md" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");
@@ -395,7 +395,7 @@ public:
                      .withKnob (s, "n64AttackVolume", "A Vol").withKnob (s, "n64DecayVolume", "D Vol");
         n64FxSection.withCombo (s, "n64Fx").withKnob (s, "n64FxMix", "Mix").withKnob (s, "n64Dac", "DAC");
         oplSection.withCombo (s, "oplModel").withExtraToggle (s, "oplFourOp", "4-Op")
-                  .withHeaderButton ("Edit...", "Open the OPL editor: the operators with the chip's own registers.", [this] { openOplPanel(); })
+                  .withHeaderButton ("Operators...", "Open the OPL editor: the operators with the chip's own registers.", [this] { openOplPanel(); })
                   .withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             oplSection.withKnob (s, "opl" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");
@@ -453,7 +453,7 @@ public:
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
         fmDisplaySection.withBody (dx7Display, 0, 560); // 16 × 2 caracteres y el LED de 2 dígitos a ~4,6 px por punto
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")
-                  .withHeaderButton ("Edit...", "Open the ANS plate: draw the score (pitch vertically, time horizontally) and set the 20 registers.",
+                  .withHeaderButton ("Plate...", "Open the ANS plate: draw the score (pitch vertically, time horizontally) and set the 20 registers.",
                                      [this] { openAnsPanel(); })
                   .withKnob (s, "ansSpeed", "Speed").withKnob (s, "ansEmulsion", "Emulsion");
         flangerSection.withToggle (s, "flangerOn").withExtraToggle (s, "flangerMatrix", "Matrix")
@@ -464,7 +464,7 @@ public:
         leslieSection.withToggle (s, "leslieOn").withCombo (s, "leslieSpeed")
                      .withKnob (s, "leslieDrive", "Drive").withKnob (s, "leslieMix", "Mix");
         springSection.withToggle (s, "springOn").withKnob (s, "springDecay", "Decay").withKnob (s, "springMix", "Mix");
-        vl1RhythmSection.withHeaderButton ("Edit...", "Open the rhythm editor: draw your own rhythms (User 1-8) with the three VL-1 "
+        vl1RhythmSection.withHeaderButton ("Edit Rhythms...", "Open the rhythm editor: draw your own rhythms (User 1-8) with the three VL-1 "
                                            "sounds (Pock, Peek, Noise; one per step). Each one is a MIDI file you can also edit elsewhere "
                                            "(channel 10: notes 36, 37, 42).",
                                            [this] { openPanel ("VL-1 Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::vl1), 1300, 400); })
@@ -475,7 +475,7 @@ public:
         // 3. Entrada, vocoder y modulación
         inputSection.withKnob (s, "inputGain", "Gain").withKnob (s, "inputMonitor", "Monitor");
         vocoderSection.withToggle (s, "vocoderOn")
-                      .withHeaderButton ("Edit...", "Vocoder settings: filter bank, band envelopes (attack, release) and sibilance.", [this]
+                      .withHeaderButton ("Bands...", "Vocoder settings: filter bank, band envelopes (attack, release) and sibilance.", [this]
                       {
                           openParamPanel ("Vocoder", [] (ParamPanel& p, APVTS& st)
                           {
@@ -499,7 +499,7 @@ public:
                       .withKnob (s, "formantVowel", "Vowel").withKnob (s, "formantShift", "Shift").withKnob (s, "formantRate", "Morph")
                       .withKnob (s, "formantDepth", "Depth").withKnob (s, "formantMix", "Mix");
         controllerSection.withCombo (s, "voiceMode")
-                         .withHeaderButton ("Edit...", "Voice settings of the Synth engine: aftertouch, MPE, voice assignment, oscillator "
+                         .withHeaderButton ("Voice...", "Voice settings of the Synth engine: aftertouch, MPE, voice assignment, oscillator "
                                             "phase, tolerances and analog VCA. MIDI channel, fine tune, bend range and controller "
                                             "profiles are global: the MIDI button left of the engine selector.", [this]
                          {
@@ -515,7 +515,7 @@ public:
                          })
                          .withKnob (s, "glide", "Glide").withKnob (s, "modWheelDepth", "Mod Wheel");
         arpSection.withToggle (s, "arpOn").withCombo (s, "arpMode")
-                  .withHeaderButton ("Edit...", "Arpeggiator settings: latch, octaves, gate, one-shot and the internal tempo.", [this]
+                  .withHeaderButton ("Gate/Tempo...", "Arpeggiator settings: latch, octaves, gate, one-shot and the internal tempo.", [this]
                   {
                       openParamPanel ("Arpeggiator", [] (ParamPanel& p, APVTS& st)
                       {
@@ -527,7 +527,7 @@ public:
                   .withKnob (s, "arpRate", "Rate");
 
         // Macros de interpretación (Params/PerfMacros.h): 8 perillas con el nombre de cada macro
-        macroSection.withHeaderButton ("Edit...", "Performance macros: names, assigned parameters and their From / To ranges. "
+        macroSection.withHeaderButton ("Assign...", "Performance macros: names, assigned parameters and their From / To ranges. "
                                        "Assign a parameter with right-click on its control > Assign to macro.", [this] { openPerfMacroPanel(); });
         for (int m = 0; m < PerfMacros::numMacros; ++m)
             macroSection.withKnob (s, PerfMacros::paramId (m), koni.perfMacros.name (m));
@@ -541,16 +541,16 @@ public:
                      .withKnob (s, "phaserFeedback", "Color").withKnob (s, "phaserMix", "Mix");
         tube.withToggle (s, "tubeOn")
             .withKnob (s, "tubeDrive", "Drive").withKnob (s, "tubeBias", "Bias");
-        // EQ: en el panel, como el de un ampli (Bass / Mid / Treble); todo lo demás, curva y nodos en Edit...
+        // EQ: en el panel, como el de un ampli (Bass / Mid / Treble); todo lo demás, curva y nodos en EQ Bands...
         eqSection.withToggle (s, "eqOn")
-                 .withHeaderButton ("Edit...", "Parametric EQ: low/high cuts, shelves, two mid bands with Q, and the response curve "
+                 .withHeaderButton ("EQ Bands...", "Parametric EQ: low/high cuts, shelves, two mid bands with Q, and the response curve "
                                     "over the live spectrum (drag the nodes).", [this] { openPanel ("Equalizer", std::make_unique<EqPanel> (koni), 1180, 640); })
                  .withKnob (s, "eqLowGain", "Bass").withKnob (s, "eqMid1Gain", "Mid").withKnob (s, "eqHighGain", "Treble");
-        // Ampli: modelo y mandos de un ampli en el panel; Presence, Sag y Output en Edit...
+        // Ampli: modelo y mandos de un ampli en el panel; Presence, Sag y Output en Cabinet...
         // Amp con su pantalla (la pantalla solo actúa con el ampli encendido): en el panel lo que se toca tocando, incluida la
-        // mezcla de la pantalla (Cab); tipo de pantalla e IR del usuario en Edit...
+        // mezcla de la pantalla (Cab); tipo de pantalla e IR del usuario en Cabinet...
         ampSection.withToggle (s, "ampOn").withCombo (s, "ampModel")
-                  .withHeaderButton ("Edit...", "Amp: presence, power supply sag and output level; speaker cabinet type and your own "
+                  .withHeaderButton ("Cabinet...", "Amp: presence, power supply sag and output level; speaker cabinet type and your own "
                                      "impulse response.", [this]
                   {
                       openParamPanel ("Amp and Cabinet", [this] (ParamPanel& p, APVTS& st)
@@ -566,17 +566,17 @@ public:
                   })
                   .withKnob (s, "ampGain", "Gain").withKnob (s, "ampBass", "Bass").withKnob (s, "ampMid", "Mid")
                   .withKnob (s, "ampTreble", "Treble").withKnob (s, "ampMaster", "Master").withKnob (s, "cabMix", "Cab");
-        // Dinámica: en el panel lo que se toca tocando; tiempos, rodilla, llave y curva de transferencia en Edit...
+        // Dinámica: en el panel lo que se toca tocando; tiempos, rodilla, llave y curva de transferencia en Sidechain...
         transSection.withToggle (s, "transOn").withKnob (s, "transAttack", "Attack").withKnob (s, "transSustain", "Sustain");
         compSection.withToggle (s, "compOn").withCombo (s, "compMode")
-                   .withHeaderButton ("Edit...", "Compressor: attack, release, knee, makeup, sidechain filter and key (ducking from "
+                   .withHeaderButton ("Sidechain...", "Compressor: attack, release, knee, makeup, sidechain filter and key (ducking from "
                                       "the audio input), with the transfer curve and the gain reduction meter.",
                                       [this] { openPanel ("Dynamics", std::make_unique<DynamicsPanel> (koni), 980, 560); })
                    .withKnob (s, "compThreshold", "Thresh").withKnob (s, "compRatio", "Ratio").withKnob (s, "compMix", "Mix");
         chorusSection.withToggle (s, "chorusOn").withCombo (s, "chorusMode")
                      .withKnob (s, "chorusMix", "Mix").withKnob (s, "chorusDepth", "Depth");
         echo.withToggle (s, "echoOn")
-            .withHeaderButton ("Edit...", "Tape echo settings: ping-pong, tone, wow and tempo sync.", [this]
+            .withHeaderButton ("Tone/Wow...", "Tape echo settings: ping-pong, tone, wow and tempo sync.", [this]
             {
                 openParamPanel ("Tape Echo", [] (ParamPanel& p, APVTS& st)
                 {
@@ -586,7 +586,7 @@ public:
             })
             .withKnob (s, "echoTime", "Time").withKnob (s, "echoFeedback", "Feedback").withKnob (s, "echoMix", "Mix");
         ambient.withToggle (s, "ambientOn").withExtraToggle (s, "reverbFreeze", "Freeze")
-               .withHeaderButton ("Edit...", "Plate reverb settings: predelay, diffusion, damping, tone, modulation and width.", [this]
+               .withHeaderButton ("Diffusion...", "Plate reverb settings: predelay, diffusion, damping, tone, modulation and width.", [this]
                {
                    openParamPanel ("Plate Reverb", [] (ParamPanel& p, APVTS& st)
                    {
@@ -1472,7 +1472,7 @@ private:
         dim (osc.knobFor ("osc1TriSym"), ! tri1);         dim (osc.knobFor ("osc1TriRound"), ! tri1);
         dim (osc2Section.knobFor ("osc2TriSym"), ! tri2); dim (osc2Section.knobFor ("osc2TriRound"), ! tri2);
         dim (osc3Section.knobFor ("osc3TriSym"), ! tri3); dim (osc3Section.knobFor ("osc3TriRound"), ! tri3);
-        dim (osc2Section.headerButton (0), (int) v ("osc2Wave") != 5); // Edit... (fichero de Osc 2): solo con la forma Sample
+        dim (osc2Section.headerButton (0), (int) v ("osc2Wave") != 5); // Osc 2 Sample... (fichero de Osc 2): solo con la forma Sample
         const auto theremin = engine == 1; // el Theremin usa LFO 1 con seno fijo y su propia velocidad (sin Shape ni Sync)
         dim (lfo.knobFor ("lfoRate"), ! theremin && v ("lfoSync") > 0.5f);
         dim (lfo.knobFor ("lfoShape"), theremin);
@@ -1751,7 +1751,7 @@ private:
                                  "into the effects chain.", { &inputSection, &vocoderSection }, true, "mod" },
             { "MACROS", "foldMacros", "Performance macros: 8 knobs, each moving several parameters at once.", { &macroSection } },
             { "COLOR", "foldColor", "Effects 1/7 - color: crush, formant filter, tube and parametric EQ.", { &crushSection, &formantSection, &tube, &eqSection }, true, nullptr, true },
-            { "AMP", "foldAmp", "Effects 2/7 - tube amp and speaker cabinet (built-in or your impulse response, in Edit...).", { &ampSection }, true, nullptr, true },
+            { "AMP", "foldAmp", "Effects 2/7 - tube amp and speaker cabinet (built-in or your impulse response, in Cabinet...).", { &ampSection }, true, nullptr, true },
             { "DYNAMICS", "foldDynamics", "Effects 3/7 - dynamics: transient shaper and compressor.", { &transSection, &compSection }, true, nullptr, true },
             { "MOD FX", "foldModFx", "Effects 4/7 - modulation: phaser, flanger and frequency shifter.", { &phaserSection, &flangerSection, &fshiftSection }, true, nullptr, true },
             { "ENSEMBLE", "foldEnsemble", "Effects 5/7 - ensemble: chorus and Leslie.", { &chorusSection, &leslieSection }, true, nullptr, true },

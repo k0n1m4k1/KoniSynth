@@ -436,7 +436,7 @@ private:
         {
             g.setColour (Skin::trace().withAlpha (0.6f));
             g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 12.0f, juce::Font::plain));
-            g.drawText ("NO SAMPLE LOADED: Edit... > Load", r, juce::Justification::centred);
+            g.drawText ("NO SAMPLE LOADED: Edit Sample... > Load", r, juce::Justification::centred);
             return;
         }
         // Fichero entero en el tiempo (mín/máx por columna), no un ciclo: un sample no es periódico

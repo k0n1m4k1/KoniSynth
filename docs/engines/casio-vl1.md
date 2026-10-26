@@ -38,7 +38,7 @@ The digits A to T follow the VL-1 sound code (sound, A, D, SL, ST, R, V, T). The
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Edit... (header) | Opens the rhythm editor for your own rhythms, User 1-8, with the three VL-1 sounds (see [User rhythms](../user-rhythms.md)). | - |
+| Edit Rhythms... (header) | Opens the rhythm editor for your own rhythms, User 1-8, with the three VL-1 sounds (see [User rhythms](../user-rhythms.md)). | - |
 | Rhythm menu (header) | VL-1 rhythm box (Rock 1 is the one from "Da Da Da"). Off stops it. User 1-8 are your own rhythms (an empty slot plays nothing). | Off, March, Waltz, 4 Beat, Swing, Rock 1, Rock 2, Bossanova, Samba, Rhumba, Beguine, User 1-8 / Off |
 | Tempo | VL-1 tempo; 0 = about 131 BPM. | -9 to +9 / 0 |
 | Balance | Balance between melody and rhythm. | 0-100 % / 50 % |
@@ -61,7 +61,7 @@ manual: a positive tempo is drawn without a sign (`[ 2]`).
 User 1-8 are MIDI files in the KoniSynth settings folder, `rhythms/Casio VL-1/User 1.mid` to `User 8.mid`: channel
 10, notes 36 (Pock), 37 (Peek) and 42 (Noise), one sound per sixteenth (no triplet grid, no accent levels). On an empty
 step the previous sound keeps ringing, as in the factory rhythms. They run on the VL-1's own clock, so Tempo applies.
-Draw them with **Edit...** or in any sequencer; KoniSynth reloads a changed file by itself. Details:
+Draw them with **Edit Rhythms...** or in any sequencer; KoniSynth reloads a changed file by itself. Details:
 [User rhythms](../user-rhythms.md).
 
 ## Playing it
