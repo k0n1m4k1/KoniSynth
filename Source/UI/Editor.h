@@ -171,7 +171,8 @@ public:
            .withKnob (s, "osc1Level", "Level").withKnob (s, "unisonVoices", "Voices").withKnob (s, "unisonDetune", "Detune").withKnob (s, "unisonSpread", "Spread")
            .withKnob (s, "pulseWidth", "PW").withKnob (s, "pwmDepth", "PWM").withKnob (s, "drift", "Drift")
            .withKnob (s, "pitchEnvAmount", "P.Env").withKnob (s, "pitchEnvDecay", "P.Decay")
-           .withKnob (s, "osc1TriSym", "Tri Sym").withKnob (s, "osc1TriRound", "Tri Rnd");
+           .withKnob (s, "osc1TriSym", "Tri Sym").withKnob (s, "osc1TriRound", "Tri Rnd")
+           .withControlRows (2); // 6 + 5 perillas: la fila del display es alta y así el display gana ancho
         complexSection.withToggle (s, "complexOn").withCombo (s, "modWave").withExtraToggle (s, "modSync", "Sync")
                       .withKnob (s, "complexModSource", "Mod Src").withKnob (s, "modRatio", "Ratio").withKnob (s, "fmIndex", "FM")
                       .withKnob (s, "amDepth", "AM/Ring").withKnob (s, "timbre", "Timbre")
@@ -208,6 +209,22 @@ public:
             { "Osc 1", &osc, "osc1Level", "osc1Mute" }, { "Wavetable", &wavetableSection, "wtLevel", "wtMute" },
             { "Sample", &sampleSection, "sampleLevel", "sampleMute" }, { "String", &stringSection, "stringLevel", "stringMute" } },
             Params::srcOsc1, koni.getParams().soloSource);
+        // Display de onda: muestra la fuente de la pestaña elegida (vistas en el orden de Params::SourceIndex) y sus etiquetas
+        // eligen la pestaña. 420 px de ancho mínimo: dos ciclos legibles y la lectura de una línea
+        waveSection.withBody (waveView, 0, 420);
+        waveSection.stretchToFill = true; // el resto del ancho de la fila, para el display
+        // Pestañas, vistas del display y fichas de la tira de señal van juntas: elegir en uno elige en los otros
+        const auto pickSource = [this] (int v)
+        {
+            waveView.setView (v);
+            if (v < Params::srcOsc2) sourceTabs->show (v);
+            else if (v < WaveView::mix) mixerTabs->show (v - Params::srcOsc2);
+            signalStrip.setSelectedSource (v < WaveView::mix ? v : -1);
+        };
+        sourceTabs->onSelect = [pickSource] (int k) { pickSource (Params::srcOsc1 + k); };
+        mixerTabs->onSelect = [pickSource] (int k) { pickSource (Params::srcOsc2 + k); };
+        waveView.onViewPicked = pickSource;
+        signalStrip.onSourcePicked = pickSource;
 
         // 2. Forma: filtro + envolventes (sliders verticales, como en un panel de hardware)
         qualitySelector.addItemList ({ "Classic", "Balanced", "High Quality" }, 1);
@@ -233,6 +250,7 @@ public:
               .withKnob (s, "cutoff", "Cutoff").withKnob (s, "resonance", "Reso").withKnob (s, "filterDrive", "Drive")
               .withKnob (s, "filterEnv", "Env").withKnob (s, "filterKey", "Key").withKnob (s, "velToFilter", "Vel")
               .withKnob (s, "filterSpread", "Spread").withKnob (s, "voiceSatDrive", "Sat")
+              .withSideBody (filterView, 240).withControlRows (2) // respuesta del filtro a la izquierda; 4 + 4 perillas
               .withItemTooltips ({ "Ladder, 4 poles (24 dB/oct): the classic Moog low-pass.", "Ladder, 2 poles (12 dB/oct).",
                                    "Ladder band-pass.", "Ladder high-pass.", "State-variable low-pass (12 dB/oct), smooth like the Oberheim SEM.",
                                    "State-variable band-pass.", "State-variable high-pass.", "State-variable notch: removes a band.",
@@ -242,10 +260,12 @@ public:
                                    "Two band-pass filters in parallel, Spread apart: vowel-like formants.",
                                    "Two low-pass filters in series, Spread apart." });
         filterEnvSection.withSlider (s, "filterAttack", "A").withSlider (s, "filterDecay", "D")
-                        .withSlider (s, "filterSustain", "S").withSlider (s, "filterRelease", "R");
+                        .withSlider (s, "filterSustain", "S").withSlider (s, "filterRelease", "R")
+                        .withSideBody (filterEnvView, 160); // curva con asas A, D/S, R (UI/ModViews.h)
         ampEnvSection.withCombo (s, "envCurve").withSlider (s, "attack", "A").withSlider (s, "decay", "D")
                      .withSlider (s, "sustain", "S").withSlider (s, "release", "R")
-                     .withKnob (s, "voicePan", "V.Pan").withKnob (s, "voicePanMode", "Pan Mode"); // paneo por voz, tras el VCA
+                     .withKnob (s, "voicePan", "V.Pan").withKnob (s, "voicePanMode", "Pan Mode") // paneo por voz, tras el VCA
+                     .withSideBody (ampEnvView, 160);
 
         // Motores alternativos
         thereminSection.withCombo (s, "thereminModel")
@@ -450,13 +470,15 @@ public:
                       })
                       .withKnob (s, "vocoderMix", "Mix").withKnob (s, "vocoderFormant", "Formant");
         lfo.withToggle (s, "lfoOn").withCombo (s, "lfoTarget")
-           .withKnob (s, "lfoRate", "Rate").withKnob (s, "lfoDepth", "Depth").withKnob (s, "lfoShape", "Shape").withKnob (s, "lfoSync", "Sync");
+           .withKnob (s, "lfoRate", "Rate").withKnob (s, "lfoDepth", "Depth").withKnob (s, "lfoShape", "Shape").withKnob (s, "lfoSync", "Sync")
+           .withSideBody (lfoView, 170); // forma, alcance en el destino, Depth y Rate arrastrables (UI/ModViews.h)
         lfo2Section.withToggle (s, "lfo2On").withCombo (s, "lfo2Target")
                    .withHeaderButton ("Matrix...", "Modulation matrix of the Synth engine: 8 slots, each a source (LFOs, envelopes, velocity, "
                                       "key, wheel, aftertouch, MPE timbre, random, bend) moving a destination per voice. The number in "
                                       "brackets is the count of active routes; amber rings on the knobs show their range.",
                                       [this] { openPanel ("Modulation Matrix", std::make_unique<MatrixPanel> (koni), 1100, 520); })
-                   .withKnob (s, "lfo2Rate", "Rate").withKnob (s, "lfo2Depth", "Depth").withKnob (s, "lfo2Shape", "Shape").withKnob (s, "lfo2Sync", "Sync");
+                   .withKnob (s, "lfo2Rate", "Rate").withKnob (s, "lfo2Depth", "Depth").withKnob (s, "lfo2Shape", "Shape").withKnob (s, "lfo2Sync", "Sync")
+                   .withSideBody (lfo2View, 170);
         formantSection.withToggle (s, "formantOn").withCombo (s, "formantVoice")
                       .withKnob (s, "formantVowel", "Vowel").withKnob (s, "formantShift", "Shift").withKnob (s, "formantRate", "Morph")
                       .withKnob (s, "formantDepth", "Depth").withKnob (s, "formantMix", "Mix");
@@ -576,7 +598,7 @@ public:
             rows.addAndMakeVisible (*c);
         rows.addChildComponent (*sourceTabs);
         rows.addChildComponent (*mixerTabs);
-        for (auto* c : std::initializer_list<juce::Component*> { &filter, &complexSection, &thereminSection,
+        for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, &filter, &complexSection, &thereminSection,
                                                                  &vl1Section, &vl1RhythmSection, &vl1DisplaySection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
                                                                  &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
@@ -994,7 +1016,7 @@ private:
         styloPad.setVisible (engine == 3 && padMode() == 0);
         padTab->setVisible (engine == 1 || engine == 3);
         syncFloatingPad();
-        for (auto* c : std::initializer_list<juce::Component*> { sourceTabs.get(), &filter, &complexSection, mixerTabs.get(), &filterEnvSection, &ampEnvSection,
+        for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, sourceTabs.get(), &filter, &complexSection, mixerTabs.get(), &filterEnvSection, &ampEnvSection,
                                                                  &lfo2Section, &controllerSection })
             c->setVisible (synthMode); // layoutContent las vuelve a ocultar si su grupo está plegado
         lfo.setVisible (synthMode || thereminMode); // LFO 1 solo actúa en el Synth y el Theremin (filas de ENGINE)
@@ -1472,6 +1494,7 @@ private:
             if (MatrixUi::bipolar (src)) { lo[(size_t) dst] -= std::abs (a); hi[(size_t) dst] += std::abs (a); }
             else { lo[(size_t) dst] += juce::jmin (0.0f, a); hi[(size_t) dst] += juce::jmax (0.0f, a); }
         }
+        signalStrip.setRoutes (routes); // la tira de señal las lista entre las modulaciones
         if (routes != shownRoutes) // botón Matrix de LFO 2 con el número de rutas activas (su ancho cambia: se rehace la fila)
         {
             shownRoutes = routes;
@@ -1638,8 +1661,13 @@ private:
     {
         switch (engine)
         {
-            case 0:  return { { 1.35f, { sourceTabs.get(), &complexSection, mixerTabs.get() }, 3 },  // fuentes -> complejo -> Osc 2 / Osc 3 / Noise
-                              { 1.0f, { &filter, &filterEnvSection, &ampEnvSection }, 0 },
+            // Fuentes en dos filas: display de onda + pestañas A (Osc 1 / Wavetable / Sample / String) y, debajo, complejo -> Osc 2 /
+            // Osc 3 / Noise. Encima, la tira del recorrido de la señal (0,24: ~40 px). La fila del display, la más alta (1,85):
+            // con las perillas de Osc 1 en dos filas, el display queda en ~2,5:1 en vez de ~3,5:1 con 1,5
+            case 0:  return { { 0.24f, { &signalStrip }, 0 },
+                              { 1.85f, { &waveSection, sourceTabs.get() }, 0 },
+                              { 1.35f, { &complexSection, mixerTabs.get() }, 2 },
+                              { 1.3f, { &filter, &filterEnvSection, &ampEnvSection }, 0 }, // 1,3: el filtro, con display y 2 filas
                               { 1.0f, { &controllerSection, &lfo, &lfo2Section }, 0 } };      // voz y modulación: solo actúan en el Synth
             case 1:  return { { 1.0f, { &thereminSection, &lfo }, 1 } };                        // el Theremin usa LFO 1 (vibrato / trémolo)
             case 2:  return { { 1.0f, { &vl1Section, &vl1RhythmSection, &vl1DisplaySection }, 1 } };
@@ -2283,6 +2311,11 @@ private:
             if (s != nullptr) { total += s->layoutWeight(); natural += s->naturalWidth(); }
             else row.removeFromRight (gap); // el ancho de los separadores sale del total antes de repartir
         const auto fitsNatural = natural <= (float) row.getWidth();
+        // Si caben a su ancho natural, el sobrante va a las secciones elásticas (display de onda); sin ellas, al final
+        int stretchers = 0;
+        for (auto* s : spec.sections)
+            if (s != nullptr && s->stretchToFill) ++stretchers;
+        const auto extra = fitsNatural && stretchers > 0 ? ((float) row.getWidth() - natural) / (float) stretchers : 0.0f;
 
         const auto unit = (float) row.getWidth() / total;
         for (int index = 0; index < (int) spec.sections.size(); ++index)
@@ -2295,7 +2328,8 @@ private:
                                                                     1.0f, (float) g.getHeight() - 12.0f));
                 continue;
             }
-            const auto cell = row.removeFromLeft (juce::roundToInt (fitsNatural ? s->naturalWidth() : unit * s->layoutWeight()));
+            const auto cell = row.removeFromLeft (juce::roundToInt (fitsNatural ? s->naturalWidth() + (s->stretchToFill ? extra : 0.0f)
+                                                                                : unit * s->layoutWeight()));
             s->setBounds (cell.reduced (7, 0));            if (index >= spec.chainStart && index < spec.chainStart + spec.chain - 1)
             {
                 const juce::Point<float> at ((float) cell.getRight(), (float) cell.getY() + 24.0f);
@@ -2745,6 +2779,12 @@ private:
     Visualizer scope;
     std::unique_ptr<VisualizerWindow> displayWindow;
     BpmDisplay bpmDisplay { koni };
+    WaveView waveView { koni }; // antes que waveSection (cuerpo de la sección): se destruye después
+    SignalStrip signalStrip { koni }; // tira del recorrido de la señal (fila superior del Synth)
+    FilterView filterView { koni };   // antes que filter (cuerpo lateral de la sección): se destruye después
+    EnvView filterEnvView { koni.apvts, "filterAttack", "filterDecay", "filterSustain", "filterRelease" }; // ídem, envolventes
+    EnvView ampEnvView { koni.apvts, "attack", "decay", "sustain", "release" };
+    LfoView lfoView { koni.apvts, false }, lfo2View { koni.apvts, true }; // ídem, LFO 1 y LFO 2
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
     Vl1Display vl1Display { koni }; // ídem con vl1DisplaySection
@@ -2771,7 +2811,7 @@ private:
             snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, fmDisplaySection { "Display" }, vl1DisplaySection { "Display" },
             flangerSection { "Flanger" }, fshiftSection { "Freq Shifter" }, leslieSection { "Leslie" }, springSection { "Spring Reverb" }, eqSection { "EQ" },
             transSection { "Transient" }, compSection { "Compressor" }, limiterSection { "Limiter" },
-            ampSection { "Amp" };
+            ampSection { "Amp" }, waveSection { "Wave" };
     std::unique_ptr<PanelDialog> panel;
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::unique_ptr<Overlay> overlay;

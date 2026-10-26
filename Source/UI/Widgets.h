@@ -772,6 +772,16 @@ struct Section : juce::Component
         return *this;
     }
 
+    // Componente a la izquierda de los controles, con su ancho en px y todo el alto bajo la cabecera (mini-display del
+    // filtro); no es propiedad de la sección
+    Section& withSideBody (juce::Component& c, int width)
+    {
+        sideBody = &c;
+        sideBodyWidth = width;
+        addAndMakeVisible (c);
+        return *this;
+    }
+
     // Segundo interruptor en la cabecera (Sync, Freeze...)
     Section& withExtraToggle (APVTS& s, const juce::String& id, const juce::String& text)
     {
@@ -853,24 +863,55 @@ struct Section : juce::Component
             body->setBounds (bodyHeight > 0 ? r.removeFromTop (bodyHeight) : r);
             r.removeFromTop (4);
         }
+        if (sideBody != nullptr) // a la izquierda de los controles, todo su alto
+        {
+            sideBody->setBounds (r.removeFromLeft (sideBodyWidth));
+            r.removeFromLeft (8);
+        }
 
         if (row.empty())
             return;
 
         // Como mucho maxControlUnit px por unidad: con pocos controles en una sección ancha no se estiran hasta el borde; el
-        // hueco queda al final (en las filas llenas la unidad real es ~55-70 px y no cambia nada)
-        const auto unit = juce::jmin (maxControlUnit, (float) r.getWidth() / controlsWeight());
-        for (auto& item : row)
-            item.component->setBounds (r.removeFromLeft (juce::roundToInt (unit * item.weight())));
+        // hueco queda al final (en las filas llenas la unidad real es ~55-70 px y no cambia nada). Con varias filas
+        // (withControlRows), la misma unidad en todas: la de la fila más ancha
+        const auto unit = juce::jmin (maxControlUnit, (float) r.getWidth() / juce::jmax (0.01f, controlsWeight()));
+        const auto perRow = controlsPerRow();
+        const auto rowH = r.getHeight() / juce::jmax (1, controlRows);
+        for (size_t i = 0; i < row.size(); i += perRow)
+        {
+            auto line = controlRows > 1 ? r.removeFromTop (rowH) : r;
+            for (size_t k = i; k < juce::jmin (row.size(), i + perRow); ++k)
+                row[k].component->setBounds (line.removeFromLeft (juce::roundToInt (unit * row[k].weight())));
+        }
     }
 
+    // Controles en n filas (en el orden en que se añadieron, ⌈N/n⌉ por fila): la sección pide el ancho de la fila más
+    // ancha. Para secciones con muchas perillas en una fila alta (Osc 1 junto al display de onda)
+    Section& withControlRows (int n)
+    {
+        controlRows = juce::jlimit (1, 4, n);
+        return *this;
+    }
+
+    // Peso de los controles: el de su fila (o el de la fila más ancha si hay varias)
     float controlsWeight() const
     {
-        float w = 0.0f;
-        for (auto& item : row)
-            if (item.component->isVisible()) w += item.weight();
-        return w;
+        const auto perRow = controlsPerRow();
+        float widest = 0.0f;
+        for (size_t i = 0; i < row.size(); i += perRow)
+        {
+            float w = 0.0f;
+            for (size_t k = i; k < juce::jmin (row.size(), i + perRow); ++k)
+                if (row[k].component->isVisible()) w += row[k].weight();
+            widest = juce::jmax (widest, w);
+        }
+        return widest;
     }
+    size_t controlsPerRow() const { return juce::jmax ((size_t) 1, (row.size() + (size_t) controlRows - 1) / (size_t) controlRows); }
+    int controlRows = 1;
+    // Elástica: si su fila cabe a ancho natural, se queda con el sobrante (Editor::layoutRow)
+    bool stretchToFill = false;
 
     // Muestra u oculta los controles (interruptor, selector, segundo interruptor y mandos) dejando los botones de cabecera
     // y el texto: la sección conserva su marco y su ancho (layoutWeight) pasa a ser el de lo visible
@@ -910,7 +951,7 @@ struct Section : juce::Component
     // Mínimo 1,3: con 1 potenciómetro el título ("Master") salía cortado
     virtual float layoutWeight() const
     {
-        return juce::jmax (controlsWeight(), headerPixels() / 60.0f, ((float) bodyMinWidth + 34.0f) / 60.0f, 1.3f);
+        return juce::jmax (controlsWeight() + sidePixels() / 60.0f, headerPixels() / 60.0f, ((float) bodyMinWidth + 34.0f) / 60.0f, 1.3f);
     }
 
     // Lo que pide la cabecera en píxeles, márgenes incluidos: 20 del marco + 14 de la celda en layoutRow (con 20 se cortaba
@@ -941,8 +982,10 @@ struct Section : juce::Component
     // lo usa cuando todas las secciones de la fila caben así; si no, reparte por layoutWeight
     virtual float naturalWidth() const
     {
-        return juce::jmax (headerPixels(), (float) bodyMinWidth + 34.0f, controlsWeight() * maxControlUnit + 34.0f, 1.3f * 60.0f);
+        return juce::jmax (headerPixels(), (float) bodyMinWidth + 34.0f, controlsWeight() * maxControlUnit + sidePixels() + 34.0f, 1.3f * 60.0f);
     }
+    // Ancho del componente lateral (withSideBody) con su separación
+    float sidePixels() const { return sideBody != nullptr ? (float) sideBodyWidth + 8.0f : 0.0f; }
 
     // Ancho de un botón de cabecera: 64 px o lo que pida su texto ("Frame Macros...") más el margen izquierdo de 6
     static int buttonWidth (juce::TextButton& b) { return juce::jmax (64, b.getBestWidthForHeight (24) + 6); }
@@ -986,6 +1029,8 @@ private:
     std::vector<RowItem> row; // perillas, sliders y listas en el orden en que se añadieron
     juce::Component* body = nullptr;
     int bodyHeight = 0, bodyMinWidth = 0;
+    juce::Component* sideBody = nullptr;
+    int sideBodyWidth = 0;
     std::vector<std::unique_ptr<ParamMenu>> menus;
 };
 

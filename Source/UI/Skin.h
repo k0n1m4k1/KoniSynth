@@ -100,6 +100,56 @@ inline juce::Colour accent()
     }
 }
 
+// Traza de las pantallas (display de onda): azul claro en Default, acero claro en Brushed Metal y el fósforo en los monocromos
+inline juce::Colour trace()
+{
+    switch (current())
+    {
+        case green: return juce::Colour (0xff7dffab);
+        case amber: return juce::Colour (0xffffc040);
+        case metal: return juce::Colour (0xffbfe0ff);
+        default:    return juce::Colour (0xff7fd4ff);
+    }
+}
+
+// Pantalla con bisel: marco de 4 px con luz arriba y sombra abajo, cristal hundido (degradado radial casi negro, tintado en
+// los monocromos) y líneas de barrido en los monocromos. El contenido se dibuja encima y glass() va al final
+inline void screen (juce::Graphics& g, juce::Rectangle<float> r, float radius = 8.0f)
+{
+    g.setGradientFill (juce::ColourGradient (map (juce::Colour (0xff4a525c)), 0.0f, r.getY(), map (juce::Colour (0xff15181c)), 0.0f, r.getBottom(), false));
+    g.fillRoundedRectangle (r, radius);
+    const auto glassArea = r.reduced (4.0f);
+    const auto tint = trace();
+    g.setGradientFill (juce::ColourGradient (tint.interpolatedWith (juce::Colours::black, 0.9f), glassArea.getCentreX(), glassArea.getCentreY(),
+                                             juce::Colour (0xff020304), glassArea.getX(), glassArea.getY(), true));
+    g.fillRoundedRectangle (glassArea, juce::jmax (2.0f, radius - 3.0f));
+    g.setColour (juce::Colours::black);
+    g.drawRoundedRectangle (glassArea, juce::jmax (2.0f, radius - 3.0f), 1.5f);
+    scanlines (g, glassArea.toNearestInt());
+}
+
+// Cristal sobre una pantalla: viñeta (tubo curvo), reflejo diagonal del 13 % al 0 % en el primer tercio y un brillo de borde.
+// Coste: dos degradados y un trazo por repintado
+inline void glass (juce::Graphics& g, juce::Rectangle<float> r, float radius = 8.0f)
+{
+    const auto a = r.reduced (4.0f);
+    const auto rr = juce::jmax (2.0f, radius - 3.0f);
+    const auto c = a.getCentre();
+    juce::ColourGradient vignette (juce::Colours::transparentBlack, c.x, c.y, juce::Colours::black.withAlpha (0.55f), a.getX(), a.getY(), true);
+    vignette.addColour (0.55, juce::Colours::transparentBlack);
+    g.setGradientFill (vignette);
+    g.fillRoundedRectangle (a, rr);
+    juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.13f), a.getX(), a.getY(), juce::Colours::transparentWhite,
+                                a.getX() + a.getWidth() * 0.35f, a.getY() + a.getHeight() * 0.65f, false);
+    g.setGradientFill (sheen);
+    g.fillRoundedRectangle (a, rr);
+    juce::Path edge;
+    edge.startNewSubPath (a.getX() + 6.0f, a.getCentreY());
+    edge.quadraticTo (a.getX() + a.getWidth() * 0.22f, a.getY() + 4.0f, a.getX() + a.getWidth() * 0.65f, a.getY() + 4.0f);
+    g.setColour (juce::Colours::white.withAlpha (0.10f));
+    g.strokePath (edge, juce::PathStrokeType (1.5f));
+}
+
 // Placa de circuito (solo Phosphor Green): pistas a 0°/45°/90° sobre una rejilla de 8 px que acaban en pads o vías, y huellas
 // de chips con sus patillas, en el color del fósforo al 7-13 %. Mosaico de 512 × 512 con semilla fija, dibujado una vez; cada
 // elemento se dibuja también desplazado ±512 px para que no haya cortes en los bordes del mosaico

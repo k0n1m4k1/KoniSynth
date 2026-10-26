@@ -1960,6 +1960,10 @@ private:
 
 #include "UI/WavetablePanel.h"
 
+#include "UI/FilterView.h"
+#include "UI/ModViews.h"
+#include "UI/WaveView.h"
+
 #include "UI/SequencerPanel.h"
 
 #include "UI/RhythmEditor.h"

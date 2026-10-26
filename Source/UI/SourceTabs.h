@@ -33,6 +33,11 @@ public:
         startTimerHz (10);
     }
 
+    // Pestaña elegida con el ratón (índice dentro del grupo): el display de onda cambia de vista. show() la elige desde fuera
+    // sin llamar a onSelect
+    std::function<void (int index)> onSelect;
+    void show (int k) { if (k >= 0 && k < (int) sources.size() && k != current) select (k); }
+
     // Ancho en la fila: el de la pestaña más ancha (todas comparten el sitio)
     float layoutWeight() const override
     {
@@ -108,7 +113,11 @@ private:
             g.drawFittedText (getButtonText(), label.toNearestInt(), juce::Justification::centredLeft, 1);
         }
 
-        void clicked() override { owner.select (index); }
+        void clicked() override
+        {
+            owner.select (index);
+            if (owner.onSelect) owner.onSelect (index);
+        }
 
         void mouseDown (const juce::MouseEvent& e) override
         {
