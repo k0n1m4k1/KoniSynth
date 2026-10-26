@@ -162,7 +162,8 @@ public:
 
 private:
     float v (int i) const { return s.getRawParameterValue (ids[(size_t) i])->load(); }
-    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (10.0f, 18.0f); }
+    // Arriba, banda de 36 px para la lectura de dos líneas (6 + 2 × 12 + 6): el pico del ataque no queda debajo del texto
+    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (10.0f, 0.0f).withTrimmedTop (36.0f).withTrimmedBottom (18.0f); }
     static constexpr float wA = 0.24f, wD = 0.28f, wHold = 0.16f, wR = 0.32f;
     // Ancho de un tramo para un tiempo t (0,2 ms .. tmax): logarítmico con referencia 1 ms
     float widthOf (float t, float frac, float tmax) const
