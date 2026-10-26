@@ -3,7 +3,7 @@
 The Synth is KoniSynth's own polyphonic synthesizer. It does not emulate a specific instrument: it is a subtractive
 design with its own personality, combining four summed sources (a minBLEP oscillator with unison, a wavetable, a
 sample player and a Karplus-Strong plucked string), a Buchla 259-style complex oscillator, a second oscillator
-(classic waves or wavetable), a third oscillator that grows from the classic sub, noise, 14 filter modes, per-voice saturation, two LFOs, an 8-slot modulation matrix and an analog-style drift
+(classic and mixed waves, the wavetable or its own sample file), a third oscillator that grows from the classic sub, noise, 14 filter modes, per-voice saturation, two LFOs, an 8-slot modulation matrix and an analog-style drift
 model. Use it for basses, leads, pads, keys, plucks, sound effects and anything the emulated engines do not cover.
 
 Unlike the emulated engines, the Synth is not bound to an original. Its analog behaviours (drift, filter input
@@ -313,6 +313,10 @@ their modulation range.
 
 - **Poly** plays up to 8 voices; **Mono** and **Legato** use a single voice. Unison (Voices) multiplies oscillators
   inside each voice.
+- In **Mono** and **Legato**, a note that arrives while the previous one is still in its release (notes that do not
+  overlap, such as a glissando dragged across the keys) retriggers the envelopes from their current level, with filter
+  and oscillators still running, as on an analog monosynth; the velocity level moves to the new note in 5 ms. There is
+  no click.
 - **Glide** starts from the last note played, in any voice, and slides exponentially in semitones.
 - **Pitch bend** follows the global Bend Range; in MPE mode each note uses MPE Bend.
 
@@ -376,7 +380,7 @@ These are the Synth's own design choices, not an emulation of a particular unit.
 
 ## Factory presets
 
-163 factory presets have no "engine" value and therefore use the Synth. Presets whose sound depends on the note or on how
+217 factory presets have no "engine" value and therefore use the Synth. Presets whose sound depends on the note or on how
 they are played (nature sounds, one-voice drums, sequences, chip effects) say so: the display shows the hint for a few
 seconds when the preset loads (for example "Hold E6 (or C6 for the 'meow')" for Gull Long Call), and the preset browser
 shows it on hover and when the preset is selected. Most presets also carry a recommended range: the on-screen keyboard
@@ -389,23 +393,24 @@ with the preset.
 The computer keyboard plays the on-screen keyboard (it never changes MIDI): the A row plays white keys (A to L and the
 two keys after L, by position: Ñ and ´ on a Spanish keyboard, ; and ' on an English one), the Q row the black keys
 between them, Z / X shift an octave down / up, C / V lower / raise the velocity by 10, and 1-9 load your favorite
-presets 1-9 (alphabetical order; mark them with the star in the browser). No click is needed: pressing one of these keys
-gives the on-screen keyboard the focus, unless you are typing in a text field. Loading a preset puts the A key on the
+presets 1-9 (mark them with the star in the browser and put them in your own order: see
+[Getting started](../../README.md#getting-started)). No click is needed: pressing one of these keys gives the on-screen
+keyboard the focus, unless you are typing in a text field. Loading a preset puts the A key on the
 first key of its recommended range (C4 without a range); right-click a key, then "PC keyboard starts at" to choose
 another white key. By category:
 
 | Category | Presets |
 |---|---|
 | Init | Init |
-| Bass | Saw Bass, Wobble, Acid Squelch, Studio Reel, Phasing Saw Bass, Picked Electric Bass, Analog Thump Bass, Model D Bass, Taurus Pedal Bass, Mono Bass 101, Detuned Reese Bass, 808 Sub Bass, House Organ Bass, Juno Saw+Pulse Bass, Hardbass Donk, Electric Donk Bass, Blue Monday 88 Bass, Everything Counts Bass, The Model Bass, Europe Endless Bass, Around The World Bass, Acid 303 Bass, Children Sub Bass, Children Offbeat Bass, Model D Air Bass, Model D Saw Stack Bass, Model D Robot Bass, Model D Bubble Bass, Model D Bounce Bass, Model D Sub Bass, Model D Soft Rez Bass, Model D Twin Square Bass, Model D The Jump |
-| Lead | Retro Lead, Supersaw Lab, Ladder Whistle, MS-20 Acid Scream, Wavefold Lead, Valve Clavioline, Modular Lead 1968, Model D Lead, Odyssey Sync Lead, Eight-Voice Sync Lead, Phase Distortion Reso Lead, Fat Mono Lead, Hoover 90s, Numbers Lead, Just Cant Get Enough Lead, New Life Lead, Never Let Me Down Lead, Oxygene IV Lead, Da Funk Lead, Shine On Lead, Digital Sync Lead, Model D Midnight Funk, Model D 70s Violin Lead, Model D Bright & Rude, Model D Fuzz Lead, Model D 3-Square Lead, Model D Octave Ouroboros, Model D Fusion Lead, Model D Sync Strike, Model D Nothin' Lead, Model D Looking Glass Lead, Model D Level 3, Model D Ghost Lead, Model D Outlaw |
+| Bass | Saw Bass, Bleep & Bass Sub, Wobble, Acid Squelch, Studio Reel, Phasing Saw Bass, Picked Electric Bass, Analog Thump Bass, Model D Bass, Taurus Pedal Bass, Mono Bass 101, Detuned Reese Bass, 808 Sub Bass, House Organ Bass, Juno Saw+Pulse Bass, Hardbass Donk, Electric Donk Bass, Blue Monday 88 Bass, Everything Counts Bass, The Model Bass, Europe Endless Bass, Around The World Bass, Acid 303 Bass, Children Sub Bass, Children Offbeat Bass, Model D Air Bass, Model D Saw Stack Bass, Model D Robot Bass, Model D Bubble Bass, Model D Bounce Bass, Model D Sub Bass, Model D Soft Rez Bass, Model D Twin Square Bass, Model D The Jump |
+| Lead | Retro Lead, Gabber Screech, Supersaw Lab, Ladder Whistle, MS-20 Acid Scream, Wavefold Lead, Valve Clavioline, Modular Lead 1968, Model D Lead, Odyssey Sync Lead, Eight-Voice Sync Lead, Phase Distortion Reso Lead, Fat Mono Lead, Hoover 90s, Numbers Lead, Just Cant Get Enough Lead, New Life Lead, Never Let Me Down Lead, Oxygene IV Lead, Da Funk Lead, Shine On Lead, Digital Sync Lead, Model D Midnight Funk, Model D 70s Violin Lead, Model D Bright & Rude, Model D Fuzz Lead, Model D 3-Square Lead, Model D Octave Ouroboros, Model D Fusion Lead, Model D Sync Strike, Model D Nothin' Lead, Model D Looking Glass Lead, Model D Level 3, Model D Ghost Lead, Model D Outlaw |
 | Pad | Soft Pad, Space Tape, Cassette Memories, Worn Reel 9.5, PWM Analog Pad, Endless Plate Pad, Barber Pole Drone, PWM Sweep Pad, Notch Sweep Pad, Wavetable Pad PPG, Digital Bell Pad, Gated Supersaw Pad, Vector Wave Pad, Mistress Pad, Voyager Chords, Short Circuit Swell, In The Air Tonight Pad, Fade To Grey Pad, Stranger Things Pad, Harmonic Sweep Pad, Model D Destitution, Model D Haunting |
-| Keys | Glass Bell, French Chords, Dusty Vinyl, Funky Clav, Continental Combo Organ, Compact Combo Organ, Tape Flute, Pianet Reed Keys, Reed EP 200A, Suitcase Tine EP, Clavinet D6 Strings, Dub Techno Chord, Spring Dub Stab, Baroque Harpsichord, Neon Lights Keys, Formant Sweep Keys, Model D Smooth EP |
+| Keys | Glass Bell, Detroit Chord Stab, French Chords, Dusty Vinyl, Funky Clav, Continental Combo Organ, Compact Combo Organ, Tape Flute, Pianet Reed Keys, Reed EP 200A, Suitcase Tine EP, Clavinet D6 Strings, Dub Techno Chord, Spring Dub Stab, Baroque Harpsichord, Neon Lights Keys, Formant Sweep Keys, Model D Smooth EP |
 | Brass | Neon Brass, Five-Voice Poly Brass, Poly Brass Stab, Blade Runner Brass, Replicant Brass Swell, Africa Brass, Jump Brass, Model D Brass Drone |
 | Strings | String Machine, Synth Pizzicato, Comb Bowed Metal, Shine On Intro Strings, Tears in Rain Strings, Oxygene Phased Strings, Incantations Ensemble, Space Oddity Tape Strings, Warszawa Tape Cello, Children Strings |
 | Pluck | Echo Pluck, Nylon Guitar, Concert Harp, Trance Supersaw Pluck, Children Pluck, Children Acoustic Guitar, Model D Steel Wound Pluck |
 | Sequence | Berlin Sequence, Hardbass Donk Bounce, Robot Arp, On the Run Sequence, Acid Step Line, Irregular 7-Step |
-| Drums | Gabber Kick, Hex Pad Tom, 808-Style Kick, 808-Style Long Boom, 909-Style Kick, 808-Style Snare, 808-Style Tom, 808-Style Conga, 808-Style Rimshot, 808-Style Claves, 808-Style Cowbell, 808-Style Closed Hat, 808-Style Open Hat, FM Ride Cymbal, Analog Hand Clap, Children Boom Kick, Model D Dark Toms, Model D Room Snare, Model D Hi-Hat, Model D Tri Kick, Model D Rez Hit |
+| Drums | Gabber Kick, Minimal Techno Click Perc, Hex Pad Tom, 808-Style Kick, 808-Style Long Boom, 909-Style Kick, 808-Style Snare, 808-Style Tom, 808-Style Conga, 808-Style Rimshot, 808-Style Claves, 808-Style Cowbell, 808-Style Closed Hat, 808-Style Open Hat, FM Ride Cymbal, Analog Hand Clap, Children Boom Kick, Model D Dark Toms, Model D Room Snare, Model D Hi-Hat, Model D Tri Kick, Model D Rez Hit |
 | FX | Orchestra Hit 8-Bit, Noise Riser, Sub Drop, Underwater Pad, Bode Bells, Sci-Fi Laser Zap, Model D Vocal Bot, Model D Very Bad Place, Model D Abandoned Planet, Model D Freqy, Model D Jurassic Love, Model D Whirlwind, Model D Light Cycle, Model D 70s Sci-Fi Wobble, Model D 60s Space, Model D Singing Wind, Model D Square Meow, Model D Broken Radio |
 | 8-Bit | 8-Bit Power-Up, 8-Bit Hit, 8-Bit Menu Blip, Chip Square Bass, SID-Style Sync Lead, SID-Style PWM Bass, SID-Style Ring Bell |
 | Nature | Field Cricket, Dolbear Cricket 25C, Cicada Buzz, Spring Peeper, Bullfrog Croak, Chickadee Fee-Bee, Syrinx Tweet, Tawny Owl Hoot, Wolf Howl, Cat Meow, Cat Purr, Humpback Moan, Gull Long Call, Rain Drops, Campfire Crackle, Wind Whistle, Thunder Strike, Ocean Surf, Gusting Wind, Distant Thunder |

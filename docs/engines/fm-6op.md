@@ -15,8 +15,8 @@ Nothing extra. Optional: Yamaha DX7 SysEx files (`.syx`) if you want to load ori
 
 ## Controls
 
-Select **FM 6-Op** in the Engine menu. Choosing it from that menu loads the preset **FM E.Piano**. The engine shows two
-sections side by side.
+Select **FM 6-Op** in the Engine menu. Choosing it from that menu loads the preset **FM E.Piano**. The engine shows three
+sections side by side: **FM 6-Op**, **FM LFO** and **Display**.
 
 ### FM 6-Op
 
@@ -37,16 +37,45 @@ Header buttons:
 | Control | What it does | Range / default |
 |---|---|---|
 | Wave menu (header) | LFO waveform. | Triangle, Saw Down, Saw Up, Square, Sine, S&H / Triangle |
+| Sync (switch) | LFO key sync: restarts the LFO cycle when you play a note after all keys were released. | Off / On / **On** (DX7 INIT VOICE) |
 | Speed | LFO speed, about 0.06 to 49 Hz (from the DX7 table). | 0-99 / 35 |
 | Delay | Time before the LFO fades in after you play (0 = at once). | 0-99 / 0 |
 | PMD | Pitch modulation depth (vibrato), scaled by PMS. | 0-99 / 0 |
 | AMD | Amplitude modulation depth (tremolo / wah), for operators with AMS above 0. | 0-99 / 0 |
 | PMS | Pitch modulation sensitivity; with depth 99, 7 is about one octave. | 0-7 / 3 |
 
+### Display
+
+The DX7's front panel display, after the figures of its operating manual: a 16-character x 2-line LCD without
+backlight and, to its left, the red 2-digit LED with the voice number.
+
+| What you do | What it shows |
+|---|---|
+| Load a voice from a .syx bank | `CARTRIDGE VOICE` / `CRT 5 BRASSHORNS`; the LED shows the voice's position in the bank (none for a single voice) |
+| Load a KoniSynth preset | `INTERNAL VOICE` / `INT` and the preset name; the LED is off |
+| Change any voice parameter | A dot after the LED number: the voice has been edited |
+| Move an FM control | For 2 s, the DX7 EDIT mode: line 1 `ALG1 111111 OP2` (algorithm, operators, the operator edited), line 2 the parameter and its value (`OUTPUT LEVEL =69`) |
+
+The labels come from the manual's figures; those it does not show (feedback, detune, fixed mode, oscillator key sync,
+transpose, pitch envelope and most LFO waveform names) are estimated. The voice loaded from a .syx is saved with the
+project and with user presets. The display only shows; its colours do not follow the skin.
+
 ### FM editor (Edit...)
 
-The header repeats **Algorithm** and **Feedback** and shows the algorithm as text. Below are six columns, OP1 to OP6;
-the columns of the carriers (the operators you hear with the current algorithm) are highlighted.
+The header repeats **Algorithm** and **Feedback** and shows the algorithm as text, next to two blocks for the whole
+voice:
+
+| Block | Control | What it does | Range / default |
+|---|---|---|---|
+| Voice | Osc Sync | Oscillator key sync. On: every note starts the operators from the same point of the wave. Off: they keep running freely, so each attack sounds slightly different (many DX7 pianos and guitars). | Off / On / **On** |
+| | Transpose | Transposes the whole voice; the transposed note also drives keyboard level and rate scaling. | -24 to +24 st / 0 |
+| Pitch EG | R1 ... R4 | Pitch envelope rates: 1 when you play, 2 and 3 towards the sustain (L3), 4 after you release the key. | 0-99 / 99 |
+| | L1 ... L4 | Pitch envelope levels; 50 = no change, 0 / 99 = about -4 / +4 octaves. A note starts at L4 and returns to it after release. | 0-99 / 50 |
+
+The pitch envelope affects only operators in ratio mode (Fixed operators keep their frequency), as on the DX7.
+
+Below are six columns, OP1 to OP6; the columns of the carriers (the operators you hear with the current algorithm) are
+highlighted.
 
 | Control | What it does | Range / default |
 |---|---|---|
@@ -65,15 +94,18 @@ the columns of the carriers (the operators you hear with the current algorithm) 
 | Fixed | Fixed frequency: the operator ignores the key (drum and noise effects). | Off / On / Off |
 
 The defaults form the DX7 **INIT VOICE**: algorithm 1, OP1 at level 99 and the rest at 0, envelope 99/99/99/99 -
-99/99/99/0, ratio 1, break point C3 (Yamaha) = MIDI 60.
+99/99/99/0, ratio 1, break point C3 (Yamaha) = MIDI 60, a flat pitch envelope (levels 50), transpose 0 and both key
+syncs on.
 
 ## Playing it
 
 - **Polyphony:** 16 voices, as on the DX7. Playing a note that is already sounding reuses its voice; with all 16 busy,
   the oldest note is replaced.
 - **Sustain pedal** (CC 64) holds released notes until the pedal is lifted.
-- **Oscillator key sync:** every operator's phase is reset to 0 on each note.
-- **LFO delay** restarts only when you press a key with no other key held.
+- **Oscillator key sync** (Osc Sync, on by default): every operator's phase is reset to 0 on each note; off, the
+  operators run freely.
+- **LFO delay** restarts only when you press a key with no other key held; with LFO **Sync** on, the LFO cycle
+  restarts too.
 - **Switching Mode** (DX7 / Clean) cuts the sounding notes.
 
 ### Loading a DX7 voice or bank
@@ -82,9 +114,9 @@ The defaults form the DX7 **INIT VOICE**: algorithm 1, OP1 at level 99 and the r
 2. Accepted formats: a 32-voice bank (4104 bytes with SysEx header, or the bare 4096-byte block) or a single voice
    (163 bytes).
 3. A single voice is applied at once. For a bank, a menu lists the 32 voices by number and name; pick one.
-4. The voice writes all operator parameters, Algorithm, Feedback and the LFO settings.
-5. If the voice uses something the engine does not model (pitch envelope, transpose, oscillator key sync off, LFO key
-   sync), a message names it: the voice then sounds without it.
+4. The voice writes all operator parameters, Algorithm, Feedback, the LFO settings (with LFO key sync), the pitch
+   envelope, Transpose and oscillator key sync.
+5. The display shows it as a cartridge voice, with its number in the bank.
 
 ### Building a sound from INIT
 
@@ -125,10 +157,12 @@ off by default.
 | FM Glass Pad | Pad |
 | FM Ensemble Strings | Strings |
 | FM Marimba | Pluck |
+| FM Bleep | Lead |
+| Industrial Metal Hit | Drums |
 
-The FM E.Piano preset is KoniSynth's own conversion to the DX7 scale, not the ROM patch.
+The FM E.Piano preset is KoniSynth's own conversion to the DX7 scale, not the ROM patch. FM Bleep is an original design
+after a 1990 bleep sound, not a copy of it.
 
 ## Limitations
 
-- Not modelled: pitch envelope, transpose, LFO key sync, and oscillator key sync off (phase always resets).
 - The amplitude modulation scale is estimated (0 to 24 dB with AMD 99 and AMS 3).

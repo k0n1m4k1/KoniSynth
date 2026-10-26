@@ -69,6 +69,9 @@ Default envelope: A15 D7 SL7 SR0 (organ-like).
   - Original BRR data (.brr, or a sample taken from an .spc) is played as it is, at 32 kHz, with its own End/Loop flags;
     Start, Length and Loop do not apply. A .brr file of size 9·n + 2 starts with a 2-byte loop offset; size 9·n loops
     (if at all) to the start.
+  - In an .spc, several directory entries can point to the same sample (same start and loop) and a game may use any
+    of them: the menu lists that sample once, and every one of its directory numbers loads it. Entries with the same
+    start but a different loop point sound different on the chip, so they are listed as separate samples.
 - **Frame Macros... (experimental):** Furnace syntax (`|` loop, `/` release, `@n` absolute note in the arpeggio, max 256
   steps). Volume 0-15 scales the voice volume; Arpeggio in semitones; Pitch moves the pitch register 8 units per step
   (+ = lower); Noise (NON) 1 = that voice plays the noise generator. Nintendo's N-SPC driver stepped by tempo ticks, not

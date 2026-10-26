@@ -33,7 +33,8 @@ shows two sections: **Omnichord** and **Omnichord Rhythm**.
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Rhythm menu (header) | Rhythm with auto bass. The bass plays only while a chord key is held. Patterns are KoniSynth's own, in each style. | Off, Rock 1, Rock 2, Slow Rock, Swing, Waltz, Latin, Foxtrot, Country, Disco, March, Blues, Tango / Off |
+| Edit... (header) | Opens the rhythm editor for your own rhythms, User 1-8: drum lanes and the auto bass (see [User rhythms](../user-rhythms.md)). | - |
+| Rhythm menu (header) | Rhythm with auto bass. The bass plays only while a chord key is held. Patterns are KoniSynth's own, in each style; User 1-8 are your own (an empty slot plays nothing). | Off, Rock 1, Rock 2, Slow Rock, Swing, Waltz, Latin, Foxtrot, Country, Disco, March, Blues, Tango, User 1-8 / Off |
 | Tempo | Rhythm tempo; follows the host tempo when the host is playing. | 60-240 BPM / 100 BPM |
 | Level | Volume of the drums. | 0-100 % / 70 % |
 
@@ -62,6 +63,12 @@ Split wrap around to zone 0 again. The **mod wheel** also strums: each zone it c
 **Bass and rhythm.** With a rhythm running, the bass follows the pattern (root, root an octave down, fifth or third)
 only while a chord key is held. With Rhythm = Off, the bass sounds once when you press a chord. The drums use the CR-78
 voices of KoniSynth's drum machine. **Pitch bend** bends harp, chord and bass.
+
+**User rhythms.** User 1-8 are MIDI files in the KoniSynth settings folder, `rhythms/Omnichord/User 1.mid` to
+`User 8.mid`: drums on channel 10 (General MIDI notes, soft / normal / accent) and the auto bass on channel 2, written
+in C and transposed to the chord you hold: C3 = root, C2 = root one octave down, G3 = fifth, E3 = third. Draw them with
+**Edit...** (a Bass lane cycles Root, Low, 5th, 3rd) or in any sequencer; KoniSynth reloads a changed file by itself.
+A user rhythm without bass notes leaves the bass silent while it runs. Details: [User rhythms](../user-rhythms.md).
 
 Recipe, strum over chords:
 1. Load **Omnichord Strum** (long Sustain 90 %, quiet chord voice, plate reverb).

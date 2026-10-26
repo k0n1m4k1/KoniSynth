@@ -25,9 +25,27 @@ cmake --build build --config Release --target KoniSynth_VST3 KoniSynth_CLAP Koni
 
 The C++ runtime is linked statically (`/MT`): the binaries need no Visual C++ Redistributable.
 
-## Linux (x86-64), compiles (not tested by hand yet)
+**Faster rebuilds while developing (optional).** In Release, JUCE links with full link-time code generation, which redoes
+the whole code generation for each format after any change. `-DKONISYNTH_FAST_LINK=ON` (off by default; MSVC only)
+switches to incremental LTCG (`/LTCG:INCREMENTAL`), which regenerates only the functions that changed:
 
-Built on Ubuntu 24.04 with GCC 13.3 (also inside WSL 2). Packages:
+```
+cmake -S . -B build -DKONISYNTH_FAST_LINK=ON
+```
+
+| Link mode | Rebuild after a one-file change (VST3 + Standalone, measured) | CPU in the heaviest KoniBench scenarios |
+|---|---|---|
+| Full LTCG (default) | 130 s | reference |
+| Incremental (`KONISYNTH_FAST_LINK=ON`) | 34 s | +18 to +23 % |
+
+The sound is the same (identical regression renders), but the binaries are slower: use it only between development
+tests. Release builds and CPU measurements use the default full LTCG; after switching back to `OFF`, the first link
+takes about 57 s per format.
+
+## Linux (x86-64), tested
+
+Built on Ubuntu 24.04 with GCC 13.3 (also inside WSL 2). The standalone application and the VST3 have been tested by
+hand on Ubuntu. Packages:
 
 ```
 sudo apt install build-essential cmake ninja-build pkg-config git \
@@ -70,7 +88,7 @@ signature and notarization, macOS Gatekeeper blocks the plugin until its quarant
 ## Tests
 
 ```
-python Tests/run_all.py                 # 8 suites (see README); needs KoniSynth_VST3 + KoniBench in Release and numpy
+python Tests/run_all.py                 # 9 suites (see README); needs KoniSynth_VST3 + KoniBench in Release and numpy
 CLAP_VALIDATOR=<path> python Tests/run_all.py   # also runs clap-validator
 ```
 

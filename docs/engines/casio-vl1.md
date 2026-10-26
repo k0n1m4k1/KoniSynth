@@ -15,7 +15,7 @@ Nothing extra.
 ## Controls
 
 Select **Casio VL-1** in the Engine menu. Choosing it from that menu loads the preset **VL-1 Piano**. The engine shows
-two sections: **Casio VL-1** and **VL-1 Rhythm**.
+three sections: **Casio VL-1**, **VL-1 Rhythm** and **Display**.
 
 ### Casio VL-1
 
@@ -38,9 +38,31 @@ The digits A to T follow the VL-1 sound code (sound, A, D, SL, ST, R, V, T). The
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Rhythm menu (header) | VL-1 rhythm box (Rock 1 is the one from "Da Da Da"). Off stops it. | Off, March, Waltz, 4 Beat, Swing, Rock 1, Rock 2, Bossanova, Samba, Rhumba, Beguine / Off |
+| Edit... (header) | Opens the rhythm editor for your own rhythms, User 1-8, with the three VL-1 sounds (see [User rhythms](../user-rhythms.md)). | - |
+| Rhythm menu (header) | VL-1 rhythm box (Rock 1 is the one from "Da Da Da"). Off stops it. User 1-8 are your own rhythms (an empty slot plays nothing). | Off, March, Waltz, 4 Beat, Swing, Rock 1, Rock 2, Bossanova, Samba, Rhumba, Beguine, User 1-8 / Off |
 | Tempo | VL-1 tempo; 0 = about 131 BPM. | -9 to +9 / 0 |
 | Balance | Balance between melody and rhythm. | 0-100 % / 50 % |
+
+### Display
+
+The VL-1's 7-segment LCD, drawn after the figures of its manual (8 digits plus one position on the left):
+
+- The **last three notes** you played, the last one on the right (manual p. 18). Each note is a number 1-7 (C to B),
+  with a small sharp sign above it for a black key and an octave bar: below the number for the low octave (MIDI notes
+  below 60), above it for the high octave (from MIDI 72), none for the middle octave (60-71).
+- The **tempo**, as `[-2]`, for 2 s whenever you change it (manual p. 14).
+- The mark on the far left is lit, and **blinks with the rhythm** while one is running.
+
+The display only shows; it does not change the sound. Its colours do not follow the skin. Estimated, not shown in the
+manual: a positive tempo is drawn without a sign (`[ 2]`).
+
+### User rhythms
+
+User 1-8 are MIDI files in the KoniSynth settings folder, `rhythms/Casio VL-1/User 1.mid` to `User 8.mid`: channel
+10, notes 36 (Pock), 37 (Peek) and 42 (Noise), one sound per sixteenth (no triplet grid, no accent levels). On an empty
+step the previous sound keeps ringing, as in the factory rhythms. They run on the VL-1's own clock, so Tempo applies.
+Draw them with **Edit...** or in any sequencer; KoniSynth reloads a changed file by itself. Details:
+[User rhythms](../user-rhythms.md).
 
 ## Playing it
 

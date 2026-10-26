@@ -3,8 +3,8 @@
 The Drum Machine engine synthesizes three analog rhythm machines from their circuit tunings: the Roland TR-808 (1980),
 the Roland CR-78 (1978) and the Korg Mini Pops 7 (1966). Nothing is sampled: frequencies and decay times come from the
 tuning tables of the TR-808 and CR-78 service notes, and the noise filters and envelopes were calculated from the
-schematics. You can play the kit from the keyboard (General MIDI drum map), run one of 29 built-in patterns, or both at
-once. Use it for classic analog drum parts, or for the combined-rhythm trick of the Mini Pops 7.
+schematics. You can play the kit from the keyboard (General MIDI drum map), run one of 29 built-in patterns or one of
+your own 8 user rhythms, or both at once. Use it for classic analog drum parts, or for the combined-rhythm trick of the Mini Pops 7.
 
 As with every emulated engine in KoniSynth, the defaults reproduce the original behaviour, quirks included. Anything that
 makes it "nicer" than the hardware is an option and is off by default.
@@ -34,8 +34,9 @@ two sections side by side.
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Pattern menu (header) | Pattern played by the machine. Off: play the kit from the keys only. Listed alphabetically. | Off + 29 patterns / Off |
-| + Pattern | A second pattern played at the same time, like holding two rhythm buttons on the Mini Pops 7. | Off + 29 patterns / Off |
+| Edit... (header) | Opens the rhythm editor for your own rhythms, User 1-8 (see [User rhythms](../user-rhythms.md)). | - |
+| Pattern menu (header) | Pattern played by the machine. Off: play the kit from the keys only. Factory patterns listed alphabetically, then User 1-8 (an empty user slot plays nothing). | Off + 29 patterns + User 1-8 / Off |
+| + Pattern | A second pattern played at the same time, like holding two rhythm buttons on the Mini Pops 7. | Off + 29 patterns + User 1-8 / Off |
 | Tempo | Pattern tempo. Follows the host tempo and position when the host is playing. | 60-240 BPM / 120 BPM |
 | Swing | Delays every second 16th note. 0 = straight; 33 % = triplet feel. | 0-50 % / 0 % |
 
@@ -43,7 +44,15 @@ Patterns: Rock 1, Rock 2, Rock 4, Disco, Funk, Electro, Hip Hop, Synth Pop, Boss
 Tango, Reggae, March, March 6/8, Foxtrot, Waltz, Jazz Waltz, Shuffle, Slow Rock, Swing, Boogie, Rumba, Merengue,
 Habanera, Latin Swing, Hardbass.
 
-There are no header buttons or extra dialogs in this engine.
+Above the knobs, a row of 16 red step lights works like the LEDs of the TR-808 STEP buttons (TR-808 Owner's Manual,
+p. 11): while a pattern runs, the light moves across the steps of the measure from left to right. A 12-step measure
+uses lights 1-12; with no pattern running, all are off. The lights do not change colour with the skin.
+
+**User rhythms.** User 1-8 are MIDI files (channel 10, General MIDI drum notes, three levels: soft, normal, accent) in
+the KoniSynth settings folder, `rhythms/Drum Machine/User 1.mid` to `User 8.mid`. Draw them with **Edit...** (15
+instrument lanes, 12, 16 or 32 steps; lanes the selected kit does not have are dimmed) or in any sequencer: KoniSynth
+reloads a changed file by itself. Presets store only the slot number. Folder locations, the editor and the file format:
+[User rhythms](../user-rhythms.md).
 
 ## Playing it
 
