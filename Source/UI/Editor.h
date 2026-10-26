@@ -264,12 +264,22 @@ public:
                                    "Comb with negative feedback: odd harmonics only (hollow, like a closed pipe).",
                                    "Two band-pass filters in parallel, Spread apart: vowel-like formants.",
                                    "Two low-pass filters in series, Spread apart." });
-        filterEnvSection.withSlider (s, "filterAttack", "A").withSlider (s, "filterDecay", "D")
+        // Las dos envolventes con la misma caja: Env Curve en la cabecera (es una sola curva para las dos: Synth.h,
+        // updateEnvelopes), display de 160 px y 4 faders; el paneo por voz del VCA va al diálogo Edit... de Amp Envelope
+        filterEnvSection.withCombo (s, "envCurve")
+                        .withSlider (s, "filterAttack", "A").withSlider (s, "filterDecay", "D")
                         .withSlider (s, "filterSustain", "S").withSlider (s, "filterRelease", "R")
                         .withSideBody (filterEnvView, 160); // curva con asas A, D/S, R (UI/ModViews.h)
-        ampEnvSection.withCombo (s, "envCurve").withSlider (s, "attack", "A").withSlider (s, "decay", "D")
+        ampEnvSection.withCombo (s, "envCurve")
+                     .withHeaderButton ("Edit...", "Per-voice panning after the VCA: V.Pan (how far the voices spread) and Pan Mode.", [this]
+                     {
+                         openParamPanel ("Amp Envelope", [] (ParamPanel& p, APVTS& st)
+                         {
+                             p.add ("Voice Pan").withKnob (st, "voicePan", "V.Pan").withKnob (st, "voicePanMode", "Pan Mode");
+                         });
+                     })
+                     .withSlider (s, "attack", "A").withSlider (s, "decay", "D")
                      .withSlider (s, "sustain", "S").withSlider (s, "release", "R")
-                     .withKnob (s, "voicePan", "V.Pan").withKnob (s, "voicePanMode", "Pan Mode") // paneo por voz, tras el VCA
                      .withSideBody (ampEnvView, 160);
 
         // Motores alternativos
