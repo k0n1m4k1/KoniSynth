@@ -190,14 +190,17 @@ static juce::String paramHelp (const juce::String& id)
         { "pulseWidth", "Square wave pulse width (also the pulse in the Saw+Pulse, Tri+Pulse and Saw+Tri+Pulse waveforms of Osc 1, Osc 2 "
                         "and the modulator): 50 % sounds hollow; extreme values sound thin and nasal." },
         { "pwmDepth", "How much the LFO moves the pulse width (PWM): adds motion and body to the square wave and the pulse mixes." },
-        { "osc2Wave", "Oscillator 2 waveform. Wavetable: plays the table of the Wavetable source (its own position: WT Pos), "
-                      "with its own tuning and phase; Sync works too. Sample: plays its own audio file (Osc 2 Sample... in the header: Load, "
-                      "Root, Start, Length, Loop), a different one from the Sample tab, with the tuning, drift, level and mute of "
-                      "Osc 2; Sync restarts it from Start every cycle of Osc 1. Tri-Saw: the Minimoog triangle-sawtooth. Saw+Pulse, Saw+Tri, "
-                      "Tri+Pulse, Saw+Tri+Pulse: Prophet-5 waveform mixes; Saw+Pulse (Juno): the Juno-106 mix (see Wave). Default: Saw." },
-        { "osc2WtPosition", "Position of oscillator 2 in the wavetable (Wavetable waveform only). The table is the one chosen "
-                            "in the Wavetable tab (next to Osc 1), read here at its own position; muting the Wavetable tab "
-                            "does not mute oscillator 2. Default 0 %." },
+        { "osc2Wave", "Oscillator 2 waveform. Tri-Saw: the Minimoog triangle-sawtooth. Saw+Pulse, Saw+Tri, Tri+Pulse, "
+                      "Saw+Tri+Pulse: Prophet-5 waveform mixes; Saw+Pulse (Juno): the Juno-106 mix (see Wave). Wavetable: plays its "
+                      "own table (Osc 2 Table... in the header), independent of the Wavetable tab, at its own position (WT Pos), "
+                      "with its own tuning and phase; Sync works too. Sample: plays its own audio file (Osc 2 Sample... in the header: "
+                      "Load, Root, Start, Length, Loop), a different one from the Sample tab, with the tuning, drift, level and mute "
+                      "of Osc 2; Sync restarts it from Start every cycle of Osc 1. Default: Saw." },
+        { "osc2WtPosition", "Position of oscillator 2 in its own wavetable (Wavetable waveform only; the table is chosen in "
+                            "Osc 2 Table...). Default 0 %." },
+        { "osc2WtTable", "Wavetable of oscillator 2 (Wavetable waveform only), independent of the Wavetable tab: built-in "
+                         "tables or your own file (Osc 2 Table... > Load: WAV with 2048 samples per frame, the Serum format, "
+                         "or a single cycle). Default: Basic Shapes." },
         { "osc2Octave", "Oscillator 2 octave relative to oscillator 1." },
         { "osc2Semi", "Oscillator 2 offset in semitones (7 = fifth, 12 = octave)." },
         { "osc2Fine", "Oscillator 2 fine detune in cents: a few cents give a thick beating sound." },

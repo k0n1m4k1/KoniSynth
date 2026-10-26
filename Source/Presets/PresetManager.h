@@ -27,8 +27,9 @@ public:
     static inline const juce::Identifier playHintProp { "playHint" }, playLowProp { "playLow" }, playHighProp { "playHigh" };
 
     // 1: hasta la 0.6 (sin atributo). 2: formatVersion y pluginVersion; thereminOn ya migrado a engine. 3: Osc 2 en modo Sample, con su
-    // fichero (atributo osc2SamplePath)
-    static constexpr int formatVersion = 3;
+    // fichero (atributo osc2SamplePath). 4: tabla propia de Osc 2 en modo Wavetable (osc2WtTable, fichero en osc2WtPath) y
+    // osc2Wave con Wavetable y Sample al final de la lista
+    static constexpr int formatVersion = 4;
 
     explicit PresetManager (APVTS& s) : apvts (s)
     {
@@ -205,12 +206,18 @@ private:
         if (onPresetFiles)
         {
             if (preset.factory)
-                onPresetFiles (std::nullopt, std::nullopt, std::nullopt, juce::String());
+                onPresetFiles (std::nullopt, std::nullopt, std::nullopt, juce::String(), std::nullopt);
             else if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr)
+            {
+                // Tabla de Osc 2: su atributo; en un formato < 4 Osc 2 leía la de la fuente Wavetable (mismo fichero)
+                const char* osc2Table = xml->hasAttribute (osc2WavetableAttribute) ? osc2WavetableAttribute
+                                      : xml->getIntAttribute (formatAttribute, 1) < 4 && xml->hasAttribute (wavetableAttribute) ? wavetableAttribute : nullptr;
                 onPresetFiles (xml->hasAttribute (sampleAttribute) ? std::optional<juce::String> (xml->getStringAttribute (sampleAttribute)) : std::nullopt,
                                xml->hasAttribute (wavetableAttribute) ? std::optional<juce::String> (xml->getStringAttribute (wavetableAttribute)) : std::nullopt,
                                xml->hasAttribute (cabIrAttribute) ? std::optional<juce::String> (xml->getStringAttribute (cabIrAttribute)) : std::nullopt,
-                               xml->getStringAttribute (osc2SampleAttribute));
+                               xml->getStringAttribute (osc2SampleAttribute),
+                               osc2Table != nullptr ? std::optional<juce::String> (xml->getStringAttribute (osc2Table)) : std::nullopt);
+            }
         }
         return juce::Result::ok();
     }
@@ -229,7 +236,8 @@ public:
     // Lo instala el procesador: aplica las rutas de fichero de un preset (hilo de mensajes). nullopt = no tocar ese fichero;
     // osc2SamplePath siempre llega (vacía = sin fichero)
     std::function<void (std::optional<juce::String> samplePath, std::optional<juce::String> wavetablePath,
-                        std::optional<juce::String> cabIrPath, juce::String osc2SamplePath)> onPresetFiles;
+                        std::optional<juce::String> cabIrPath, juce::String osc2SamplePath,
+                        std::optional<juce::String> osc2WavetablePath)> onPresetFiles;
 
     juce::Result validateName (const juce::String& name) const
     {
@@ -373,10 +381,10 @@ private:
         favoritesFile().getParentDirectory().createDirectory();
         favoritesFile().replaceWithText (favoritesOrderedMark + "\n" + favoriteOrder.joinIntoString ("\n") + "\n");
     }
-    // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, wtPathProp)
+    // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, wtPathProp, osc2WtPathProp)
     static constexpr const char* sampleAttribute = "samplePath";
     static constexpr const char* osc2SampleAttribute = "osc2SamplePath";
-    static constexpr const char* wavetableAttribute = "wtPath";
+    static constexpr const char* wavetableAttribute = "wtPath", * osc2WavetableAttribute = "osc2WtPath";
     static constexpr const char* cabIrAttribute = "cabIrPath";
 
     // Parámetros que forman parte de un preset. Quedan fuera los de interpretación (el pad del theremin):
@@ -421,7 +429,23 @@ private:
                 real["engine"] = real["thereminOn"] > 0.5f ? 1.0f : 0.0f;
         // 2 -> 3: ningún valor cambia. osc2Wave no podía valer Sample (5) y los parámetros osc2Sample* ausentes toman su valor
         // por defecto; el fichero de Osc 2 (osc2SamplePath) ausente se quita al cargar (loadInternal)
+        if (from < 4) // 3 -> 4: Osc 2 leía la tabla de la fuente Wavetable; su tabla propia empieza siendo la misma.
+        {             // osc2Wave: Wavetable (4) y Sample (5) pasan al final (10, 11) y las mezclas 6..11 a 4..9
+            if (real.count ("osc2WtTable") == 0)
+                real["osc2WtTable"] = real.count ("wtTable") != 0 ? real["wtTable"] : 0.0f;
+            if (const auto it = real.find ("osc2Wave"); it != real.end())
+                it->second = (float) osc2WaveFromFormat3 (juce::roundToInt (it->second));
+        }
     }
+
+public:
+    // osc2Wave del formato 3 (Sine, Triangle, Saw, Square, Wavetable, Sample, mezclas) al actual (mezclas, Wavetable, Sample).
+    // También lo usa KoniSynthProcessor::setStateInformation con los proyectos anteriores
+    static int osc2WaveFromFormat3 (int v)
+    {
+        return v == 4 ? 10 : v == 5 ? 11 : v >= 6 ? v - 2 : v;
+    }
+private:
 
     // Valores normalizados que deja el preset; los ausentes vuelven al valor por defecto. note: aviso para la UI (formato
     // posterior o atributos que no son parámetros conocidos)
@@ -452,7 +476,7 @@ private:
             {
                 // Atributos que no son parámetros ni propiedades conocidas: de una versión posterior o renombrados
                 juce::StringArray known { formatAttribute, versionAttribute, categoryAttribute, playHintAttribute, playLowAttribute, playHighAttribute,
-                                          sampleAttribute, osc2SampleAttribute, wavetableAttribute, cabIrAttribute, "ansUser", "thereminOn" };
+                                          sampleAttribute, osc2SampleAttribute, wavetableAttribute, osc2WavetableAttribute, cabIrAttribute, "ansUser", "thereminOn" };
                 for (const auto* prop : textProperties()) known.add (prop);
                 for (auto* p : rangedParameters()) known.add (p->getParameterID());
                 juce::StringArray unknown;
@@ -500,6 +524,7 @@ private:
         xml.setAttribute (sampleAttribute, apvts.state.getProperty (sampleAttribute).toString());
         xml.setAttribute (osc2SampleAttribute, apvts.state.getProperty (osc2SampleAttribute).toString());
         xml.setAttribute (wavetableAttribute, apvts.state.getProperty (wavetableAttribute).toString());
+        xml.setAttribute (osc2WavetableAttribute, apvts.state.getProperty (osc2WavetableAttribute).toString());
         xml.setAttribute (cabIrAttribute, apvts.state.getProperty (cabIrAttribute).toString());
         if (const auto ans = apvts.state.getProperty ("ansUser").toString(); ans.isNotEmpty())
             xml.setAttribute ("ansUser", ans); // partitura del ANS dibujada por el usuario

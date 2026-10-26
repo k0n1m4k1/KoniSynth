@@ -96,8 +96,10 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc1Level", 1 },   "Osc1 Level",  NormalisableRange<float> (0.0f, 1.0f), 1.0f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "pulseWidth", 1 },  "Pulse Width", NormalisableRange<float> (0.05f, 0.95f), 0.5f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "pwmDepth", 1 },    "PWM Depth",   NormalisableRange<float> (0.0f, 0.45f), 0.0f, percent));
-    // Wavetable: la tabla de la fuente Wavetable. Sample: un fichero propio (osc2SamplePath en el estado), distinto del de la fuente Sample
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2Wave", 1 },    "Osc2 Wave",   StringArray { "Sine", "Triangle", "Saw", "Square", "Wavetable", "Sample", "Tri-Saw", "Saw+Pulse", "Saw+Tri", "Tri+Pulse", "Saw+Tri+Pulse", "Saw+Pulse (Juno)" }, 2));
+    // Las formas en el orden de wave y, al final, Wavetable (tabla propia, osc2WtTable) y Sample (fichero propio, osc2SamplePath).
+    // Hasta el formato de preset 3, Wavetable y Sample iban 4.º y 5.º: PresetManager::migrateValues y setStateInformation
+    // remapean. El motor usa sus códigos (osc2WaveFromChoice, Dsp/OscillatorCore.h)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2Wave", 1 },    "Osc2 Wave",   StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw", "Saw+Pulse", "Saw+Tri", "Tri+Pulse", "Saw+Tri+Pulse", "Saw+Pulse (Juno)", "Wavetable", "Sample" }, 2));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2Octave", 1 },  "Osc2 Octave", -2, 2, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc2Semi", 1 },    "Osc2 Semi",   -12, 12, 0));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2Fine", 1 },    "Osc2 Fine",   NormalisableRange<float> (-50.0f, 50.0f), 0.0f,
@@ -862,8 +864,11 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "timbreMod", 1 },  "Timbre Mod", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "modSync", 1 },    "Mod Sync", false));
 
-    // Osc 2 en modo Wavetable (osc2Wave = Wavetable): posición propia en la misma tabla que la fuente Wavetable
+    // Osc 2 en modo Wavetable (osc2Wave = Wavetable): su propia tabla (las incluidas o un fichero, ruta osc2WtPath en el
+    // estado), independiente de la de la fuente Wavetable, como su sample, y su posición en ella
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2WtPosition", 1 }, "Osc2 WT Position", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2WtTable", 1 },    "Osc2 Wavetable",
+        StringArray { "Basic Shapes", "PWM Sweep", "Harmonic Sweep", "Sync Sweep", "Formant Sweep", "User File" }, 0));
 
     // Osc 3: el Sub ampliado (subLevel y subOctave siguen siendo su nivel y su octava base). Por defecto, la cuadrada al 50 % de
     // siempre; f3 = f1 · 2^(octava + (semi + fine/100)/12): con -1 oct, Semi -24..+24 cubre de -3 a +1 octavas

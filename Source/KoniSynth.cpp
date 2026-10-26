@@ -136,13 +136,13 @@ public:
     {
         for (int i = 0; i < 8; ++i)
         {
-            auto* voice = new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot);
+            auto* voice = new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot);
             voice->cardIndex = i; // tarjeta de voz física (Tolerances: Per Voice Card)
             synth.addVoice (voice);
         }
         synth.addSound (new SynthSound());
         synth.assignMode = params.voiceAssign;
-        monoSynth.addVoice (new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
+        monoSynth.addVoice (new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
         monoSynth.addSound (new SynthSound());
         perfMacros.attach (apvts);
         undoHistory.attach (*this, apvts, { PerfMacros::mapProp, PerfMacros::namesProp, chipMacrosProp, mdMacrosProp, snesMacrosProp,
@@ -159,10 +159,12 @@ public:
         syncRandomState(); // semilla de la aleatoriedad reproducible (Dsp/RandomClock.h)
         startTimer (100); // libera datos retirados (DataSlot::collect) y genera la wavetable incluida elegida
         presetManager.onPresetFiles = [this] (std::optional<juce::String> sample, std::optional<juce::String> wavetable,
-                                              std::optional<juce::String> cabIr, juce::String osc2SamplePath)
+                                              std::optional<juce::String> cabIr, juce::String osc2SamplePath,
+                                              std::optional<juce::String> osc2Wavetable)
         {
             if (sample.has_value())    restoreSample (*sample);
             if (wavetable.has_value()) restoreWavetable (*wavetable);
+            if (osc2Wavetable.has_value()) restoreWavetable (*osc2Wavetable, wtOsc2);
             if (cabIr.has_value())     restoreCabIr (*cabIr);
             restoreSample (osc2SamplePath, osc2Sample);
         };
@@ -176,6 +178,10 @@ public:
     // Los dos samples del motor Synth (which): 0 = la fuente Sample (también la "User Sample" de los motores de consola y el
     // DPCM), 1 = Osc 2 en modo Sample. Mismo código para los dos; cada uno con su DataSlot, su ruta en el estado y su aviso
     static constexpr int sourceSample = 0, osc2Sample = 1;
+
+    // Las dos wavetables del motor Synth (which): 0 = la fuente Wavetable, 1 = Osc 2 en modo Wavetable. Mismo código para las
+    // dos; cada una con su DataSlot, su parámetro de tabla, su ruta en el estado y su aviso
+    static constexpr int wtMain = 0, wtOsc2 = 1;
 
     // Carga un sample (cualquier hilo salvo el de audio). item: elemento de un banco .sf2/.spc (Import/SampleImport.h).
     // Devuelve el error o una cadena vacía.
@@ -988,6 +994,7 @@ public:
         mdMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
         snesMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
         wavetableSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        osc2WavetableSlot.blocksDone.fetch_add (1, std::memory_order_release);
         mt32Engine.slot.blocksDone.fetch_add (1, std::memory_order_release);
     }
 
@@ -1098,6 +1105,21 @@ public:
                     e->setAttribute ("value", legacy->getDoubleAttribute ("value") > 0.5 ? 1.0 : 0.0);
                 }
 
+                // Estados anteriores a la tabla propia de Osc 2 (sin osc2WtTable): Osc 2 leía la de la fuente Wavetable;
+                // se le da la misma tabla y el mismo fichero para que suene igual. En ellos osc2Wave tenía Wavetable y Sample
+                // en 4.º y 5.º lugar: se remapea (PresetManager::osc2WaveFromFormat3)
+                if (xml->getChildByAttribute ("id", "osc2WtTable") == nullptr)
+                {
+                    if (auto* wave2 = xml->getChildByAttribute ("id", "osc2Wave"))
+                        wave2->setAttribute ("value", PresetManager::osc2WaveFromFormat3 (juce::roundToInt (wave2->getDoubleAttribute ("value"))));
+                    auto* e = xml->createNewChildElement ("PARAM");
+                    e->setAttribute ("id", "osc2WtTable");
+                    const auto* main = xml->getChildByAttribute ("id", "wtTable");
+                    e->setAttribute ("value", main != nullptr ? main->getDoubleAttribute ("value") : 0.0);
+                    if (! xml->hasAttribute (osc2WtPathProp.toString()))
+                        xml->setAttribute (osc2WtPathProp.toString(), xml->getStringAttribute (wtPathProp.toString()));
+                }
+
                 apvts.replaceState (juce::ValueTree::fromXml (*xml));
                 presetManager.invalidateSnapshot();
                 perfMacros.update();
@@ -1106,6 +1128,7 @@ public:
 
                 restoreFiles (apvts.state.getProperty (samplePathProp).toString(), apvts.state.getProperty (wtPathProp).toString());
                 restoreSample (apvts.state.getProperty (osc2SamplePathProp).toString(), osc2Sample); // sin la propiedad (proyectos anteriores): sin fichero
+                restoreWavetable (apvts.state.getProperty (osc2WtPathProp).toString(), wtOsc2);
                 restoreCabIr (apvts.state.getProperty (cabIrPathProp).toString());
                 restoreTuning();
                 // El host debe releer los valores: el wrapper CLAP lo traduce a params->rescan (clap-validator,
@@ -1180,16 +1203,16 @@ public:
         }
     }
 
-    void restoreWavetable (const juce::String& wavetablePath)
+    void restoreWavetable (const juce::String& wavetablePath, int which = wtMain)
     {
-        if ((int) params.wtTable->load() == 5 && wavetablePath.isNotEmpty())
+        if ((int) tableParam (which)->load() == 5 && wavetablePath.isNotEmpty())
         {
             const juce::File file (wavetablePath);
-            const auto error = file.existsAsFile() ? loadWavetable (file) : juce::String ("File not found");
+            const auto error = file.existsAsFile() ? loadWavetable (file, which) : juce::String ("File not found");
             if (error.isNotEmpty())
             {
-                apvts.state.setProperty (wtPathProp, wavetablePath, nullptr);
-                reportMissing (MissingFile::Kind::wavetable, file, file.existsAsFile());
+                apvts.state.setProperty (tablePathProp (which), wavetablePath, nullptr);
+                reportMissing (which == wtOsc2 ? MissingFile::Kind::osc2Wavetable : MissingFile::Kind::wavetable, file, file.existsAsFile());
             }
         }
     }
@@ -1252,7 +1275,7 @@ public:
     // y los consume el editor, uno a uno
     struct MissingFile
     {
-        enum class Kind { sample, wavetable, cabIr, osc2Sample };
+        enum class Kind { sample, wavetable, cabIr, osc2Sample, osc2Wavetable };
         Kind kind;
         juce::File file;
         bool unreadable = false;
@@ -1645,11 +1668,15 @@ private:
     std::vector<float> inputMono;
     float lastInputGain = 1.0f;
     SampleSlot sampleSlot, osc2SampleSlot;
-    WavetableSlot wavetableSlot;
+    WavetableSlot wavetableSlot, osc2WavetableSlot;
     juce::CriticalSection missingLock;
     std::vector<MissingFile> missing;
-    std::atomic<int> builtInLoaded { -1 };
-    static inline const juce::Identifier wtPathProp { "wtPath" };
+    std::array<std::atomic<int>, 2> builtInLoaded { -1, -1 }; // tabla incluida cargada en cada slot (wtMain, wtOsc2); -1 = fichero
+    static inline const juce::Identifier wtPathProp { "wtPath" }, osc2WtPathProp { "osc2WtPath" };
+    WavetableSlot& tableSlot (int which) { return which == wtOsc2 ? osc2WavetableSlot : wavetableSlot; }
+    const WavetableSlot& tableSlot (int which) const { return which == wtOsc2 ? osc2WavetableSlot : wavetableSlot; }
+    std::atomic<float>* tableParam (int which) const { return which == wtOsc2 ? params.osc2WtTable : params.wtTable; }
+    static const juce::Identifier& tablePathProp (int which) { return which == wtOsc2 ? osc2WtPathProp : wtPathProp; }
     juce::CriticalSection sampleInfoLock;
     // Por sample (sourceSample, osc2Sample): texto para la UI, nota raíz del formato (-1 = desconocida) y bucle propio
     struct SampleInfo { juce::String text; int rootKey = -1; bool hasLoop = false; };
@@ -1686,6 +1713,7 @@ private:
         sampleSlot.collect();
         osc2SampleSlot.collect();
         wavetableSlot.collect();
+        osc2WavetableSlot.collect();
         ansSlot.collect();
         updateAnsScore();
         chipMacroSlot.collect();
@@ -1736,15 +1764,19 @@ private:
     // un render offline sin bucle de mensajes (bounce, KoniBench) también la tiene desde el primer bloque
     void updateBuiltInWavetable()
     {
-        const auto table = (int) params.wtTable->load();
-        if (table < 5 && table != builtInLoaded)
+        for (const auto which : { wtMain, wtOsc2 })
         {
-            wavetableSlot.replace (WavetableData::builtIn (table));
-            builtInLoaded = table;
-        }
-        else if (table == 5)
-        {
-            builtInLoaded = -1;
+            const auto table = (int) tableParam (which)->load();
+            auto& loaded = builtInLoaded[(size_t) which];
+            if (table < 5 && table != loaded)
+            {
+                tableSlot (which).replace (WavetableData::builtIn (table));
+                loaded = table;
+            }
+            else if (table == 5)
+            {
+                loaded = -1;
+            }
         }
     }
 
@@ -1804,26 +1836,27 @@ private:
     }
 
 public:
-    // Carga una wavetable del usuario (cualquier hilo salvo el de audio) y selecciona "User File". Devuelve el error o "".
-    juce::String loadWavetable (const juce::File& file)
+    // Carga una wavetable del usuario (cualquier hilo salvo el de audio) y selecciona "User File" en la tabla de 'which'.
+    // Devuelve el error o "".
+    juce::String loadWavetable (const juce::File& file, int which = wtMain)
     {
         juce::String error;
         auto data = WavetableData::fromFile (file, error);
         if (data == nullptr)
             return error;
-        wavetableSlot.replace (std::move (data));
-        builtInLoaded = -1;
-        apvts.state.setProperty (wtPathProp, file.getFullPathName(), nullptr);
-        if (auto* p = apvts.getParameter ("wtTable"))
+        tableSlot (which).replace (std::move (data));
+        builtInLoaded[(size_t) which] = -1;
+        apvts.state.setProperty (tablePathProp (which), file.getFullPathName(), nullptr);
+        if (auto* p = apvts.getParameter (which == wtOsc2 ? "osc2WtTable" : "wtTable"))
             p->setValueNotifyingHost (p->convertTo0to1 (5.0f));
         return {};
     }
 
     // Copia de los fotogramas de nivel 0 para dibujarlos (hilo de mensajes): hasta maxFrames fotogramas, cada uno con 'points' puntos
-    std::vector<std::vector<float>> getWavetableOverview (int maxFramesToDraw, int points) const
+    std::vector<std::vector<float>> getWavetableOverview (int maxFramesToDraw, int points, int which = wtMain) const
     {
         std::vector<std::vector<float>> out;
-        wavetableSlot.withCurrent ([&] (const WavetableData* wt)
+        tableSlot (which).withCurrent ([&] (const WavetableData* wt)
         {
             if (wt == nullptr)
                 return;
@@ -1883,10 +1916,10 @@ public:
 
     static constexpr const char* ansUserProp = "ansUser";
 
-    juce::String getWavetableName() const
+    juce::String getWavetableName (int which = wtMain) const
     {
         juce::String name;
-        wavetableSlot.withCurrent ([&] (const WavetableData* wt) { if (wt != nullptr) name = wt->name; });
+        tableSlot (which).withCurrent ([&] (const WavetableData* wt) { if (wt != nullptr) name = wt->name; });
         return name;
     }
 

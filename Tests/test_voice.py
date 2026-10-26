@@ -99,8 +99,9 @@ for d in (0, 80):
 c.check(abs(dec[80] - dec[0]) < 0.5, 'cuerda, Damping 80 %%: caída de la fundamental en 1 s %.2f dB frente a %.2f sin Damping (< 0,5 dB)' % (dec[80], dec[0]))
 c.check(abs(1200 * np.log2(dec['80'] / dec['0'])) < 1.0, 'cuerda, Damping 80 %%: afinación %.3f Hz frente a %.3f Hz (< 1 cent)' % (dec['80'], dec['0']))
 
-# --- Osc 2 en modo Wavetable: misma tabla que la fuente Wavetable, fase y posición propias ---
-WT = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%', 'Wavetable=Harmonic Sweep']
+# --- Osc 2 en modo Wavetable: tabla propia (aquí, la misma que la fuente Wavetable para compararlas), fase y posición propias ---
+WT = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%', 'Wavetable=Harmonic Sweep',
+      'Osc2 Wavetable=Harmonic Sweep']
 OSC2 = WT + ['Osc2 Wave=Wavetable', 'Osc2 Level=100%']
 fa = 440 * 2 ** ((57 - 69) / 12)
 
@@ -119,6 +120,12 @@ src, fs = render(WT + ['Wavetable Level=100%', 'Wavetable Position=50%'], 1.5, [
 o2, _ = render(OSC2 + ['Osc2 WT Position=50%'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')
 d = same_harmonics(harmonics(src, fs, fa), harmonics(o2, fs, fa))
 c.check(d < 0.01, 'Osc 2 Wavetable = fuente Wavetable a la misma posición (50 %%): armónicos a %.3f dB como máximo (< 0,01)' % d)
+# Tabla propia: cambiar la de la fuente Wavetable no toca Osc 2 (bit a bit) y cambiar la de Osc 2 sí
+ind, _ = render(OSC2 + ['Osc2 WT Position=50%', 'Wavetable=PWM Sweep'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')
+own, _ = render(OSC2 + ['Osc2 WT Position=50%', 'Osc2 Wavetable=PWM Sweep'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')
+d = same_harmonics(harmonics(o2, fs, fa), harmonics(own, fs, fa))
+c.check(np.array_equal(ind, o2) and d > 3,
+        'Osc 2 Wavetable con tabla propia: la de la fuente Wavetable no lo cambia (bit a bit) y la suya sí (%.1f dB de diferencia máxima)' % d)
 h0 = harmonics(render(OSC2 + ['Osc2 WT Position=0%'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fa)
 h1 = harmonics(render(OSC2 + ['Osc2 WT Position=100%'], 1.5, ['57:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fa)
 c.check(db(h0[1] / h0[0]) < -100 and db(h1[1] / h1[0]) > -10,

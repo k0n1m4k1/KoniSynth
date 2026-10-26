@@ -81,7 +81,7 @@ public:
         switch (view)
         {
             case osc1: case osc2: case osc3: paintOsc (g, screen); break;
-            case wavetable: paintTable (g, screen, "wtPosition", 0.0f); break;
+            case wavetable: paintTable (g, screen, "wtPosition", KoniSynthProcessor::wtMain); break;
             case sample: paintSample (g, screen); break;
             case string: paintString (g, screen); break;
             case noise: paintNoise (g, screen); break;
@@ -249,7 +249,7 @@ private:
         OscSpec o {};
         if (v == osc2)
         {
-            o.wave = choice ("osc2Wave"); // osc2Wave usa los códigos del motor tal cual (4 Wavetable, 5 Sample)
+            o.wave = osc2WaveFromChoice (choice ("osc2Wave")); // códigos del motor (4 Wavetable, 5 Sample, mezclas 6..11)
             o.pw = value ("pulseWidth");
             o.tri.set (value ("osc2TriSym"), value ("osc2TriRound"));
             o.level = value ("osc2Level");
@@ -316,7 +316,7 @@ private:
     {
         const auto o = spec (view);
         const auto r = inner();
-        if (view == osc2 && o.wave == 4) { paintTable (g, screen, "osc2WtPosition", 0.0f); return; }
+        if (view == osc2 && o.wave == 4) { paintTable (g, screen, "osc2WtPosition", KoniSynthProcessor::wtOsc2); return; }
         if (view == osc2 && o.wave == 5) { paintSampleOverview (g, KoniSynthProcessor::osc2Sample, false); return; }
         const auto alpha = o.level > 0.0f ? 1.0f : 0.45f;
 
@@ -372,22 +372,30 @@ private:
     // Flanco del pulso dentro del ciclo: la cuadrada sube a 0 y baja en t = d; las mezclas con pulso, alto desde t = 1 - d
     static float edgeOf (int wave, float d) { return wave == square ? d : 1.0f - d; }
 
-    void paintTable (juce::Graphics& g, juce::Rectangle<float>, const char* posId, float)
+    // Fotogramas de la tabla 'which' (KoniSynthProcessor::wtMain o wtOsc2), releídos si cambia la tabla
+    const std::vector<std::vector<float>>& tableFrames (int which)
     {
-        const auto name = koni.getWavetableName();
-        if (name != tableName || frames.empty())
+        auto& f = frames[(size_t) which];
+        const auto name = koni.getWavetableName (which);
+        if (name != tableName[(size_t) which] || f.empty())
         {
-            tableName = name;
-            frames = koni.getWavetableOverview (32, 256);
+            tableName[(size_t) which] = name;
+            f = koni.getWavetableOverview (32, 256, which);
         }
+        return f;
+    }
+
+    void paintTable (juce::Graphics& g, juce::Rectangle<float>, const char* posId, int which)
+    {
+        const auto& table = tableFrames (which);
         const auto r = inner().withTrimmedRight (40.0f);
-        if (frames.empty())
+        if (table.empty())
         {
             g.setColour (Skin::trace().withAlpha (0.6f));
             g.drawText ("Generating wavetable...", r, juce::Justification::centred);
             return;
         }
-        const auto n = (int) frames.size();
+        const auto n = (int) table.size();
         const auto depthX = r.getWidth() * 0.22f, depthY = r.getHeight() * 0.35f;
         const auto w = r.getWidth() - depthX, h = r.getHeight() - depthY;
         const auto position = value (posId);
@@ -397,7 +405,7 @@ private:
             const auto t = n > 1 ? (float) k / (float) (n - 1) : 0.0f;
             const auto x0 = r.getX() + t * depthX, y0 = r.getBottom() - h * 0.5f - t * depthY;
             juce::Path path;
-            const auto& f = frames[(size_t) k];
+            const auto& f = table[(size_t) k];
             for (size_t i = 0; i < f.size(); ++i)
             {
                 const auto x = x0 + w * (float) i / (float) (f.size() - 1);
@@ -576,10 +584,10 @@ private:
     // Mute / Solo) y la wavetable con su fotograma actual
     std::function<float (double)> sourceFn (int v)
     {
-        if (frames.empty()) frames = koni.getWavetableOverview (32, 256);
-        const auto frameAt = [this] (const char* posId)
+        const auto frameAt = [this] (const char* posId, int which)
         {
-            return frames.empty() ? std::vector<float>() : frames[(size_t) juce::roundToInt (value (posId) * (float) (frames.size() - 1))];
+            const auto& f = tableFrames (which);
+            return f.empty() ? std::vector<float>() : f[(size_t) juce::roundToInt (value (posId) * (float) (f.size() - 1))];
         };
         const auto table = [] (const std::vector<float>& f, double t)
         {
@@ -591,11 +599,11 @@ private:
             const auto o = spec (v);
             if (v == osc2 && o.wave == 5) return {};
             if (v == osc2 && o.wave == 4)
-                return [f = frameAt ("osc2WtPosition"), table, level = o.level, ratio = o.ratio] (double t) { return level * table (f, t * ratio); };
+                return [f = frameAt ("osc2WtPosition", KoniSynthProcessor::wtOsc2), table, level = o.level, ratio = o.ratio] (double t) { return level * table (f, t * ratio); };
             return [o] (double t) { const auto ph = t * o.ratio; return o.level * sampleOsc (o, ph - std::floor (ph)); };
         }
         if (v == wavetable)
-            return [f = frameAt ("wtPosition"), table, level = value ("wtLevel")] (double t) { return level * table (f, t); };
+            return [f = frameAt ("wtPosition", KoniSynthProcessor::wtMain), table, level = value ("wtLevel")] (double t) { return level * table (f, t); };
         if (v != mix) return {};
         const auto solo = koni.getParams().soloSource.load();
         const auto audible = [&] (int src, const char* muteId) { return solo >= 0 ? solo == src : value (muteId) < 0.5f; };
@@ -605,7 +613,7 @@ private:
                                        o[1].level > 0.0f && o[1].wave != 4 && o[1].wave != 5 && audible (Params::srcOsc2, "osc2Mute"),
                                        o[2].level > 0.0f && audible (Params::srcOsc3, "osc3Mute") };
         const auto wtLevel = value ("wtLevel") > 0.0f && audible (Params::srcWavetable, "wtMute") ? value ("wtLevel") : 0.0f;
-        return [o, on, wtLevel, f = frameAt ("wtPosition"), table] (double t)
+        return [o, on, wtLevel, f = frameAt ("wtPosition", KoniSynthProcessor::wtMain), table] (double t)
         {
             float y = 0.0f;
             for (size_t k = 0; k < 3; ++k)
@@ -740,7 +748,7 @@ private:
             case osc2:
                 lines.add ("OCT " + text ("osc2Octave") + " | SEMI " + text ("osc2Semi") + " | FINE " + text ("osc2Fine"));
                 lines.add ("RATIO x" + juce::String (spec (osc2).ratio, 3) + " | LEVEL " + pct ("osc2Level"));
-                if (spec (osc2).wave == 4) lines.add ("WT POS " + pct ("osc2WtPosition"));
+                if (spec (osc2).wave == 4) lines.add ("WT POS " + pct ("osc2WtPosition") + " | " + koni.getWavetableName (KoniSynthProcessor::wtOsc2));
                 info = text ("osc2Wave");
                 break;
             case osc3:
@@ -750,7 +758,7 @@ private:
                 break;
             case wavetable:
                 lines.add ("POSITION " + pct ("wtPosition") + " | LEVEL " + pct ("wtLevel"));
-                info = koni.getWavetableName();
+                info = koni.getWavetableName (KoniSynthProcessor::wtMain);
                 break;
             case sample:
                 lines.add ("START " + text ("sampleStart") + " | LENGTH " + text ("sampleLength") + " | LOOP " + juce::String (value ("sampleLoop") > 0.5f ? "ON" : "OFF"));
@@ -945,12 +953,11 @@ private:
         for (const auto* id : watched)
             if (auto* v = s.getRawParameterValue (id))
                 h = h * 1000003u ^ (std::uint64_t) (std::hash<float>{} (v->load()));
-        h ^= (std::uint64_t) std::hash<juce::String>{} (koni.getWavetableName()) ^ (std::uint64_t) std::hash<juce::String>{} (koni.getSampleInfo (KoniSynthProcessor::sourceSample)) * 31u;
+        h ^= (std::uint64_t) std::hash<juce::String>{} (koni.getWavetableName() + "|" + koni.getWavetableName (KoniSynthProcessor::wtOsc2)) ^ (std::uint64_t) std::hash<juce::String>{} (koni.getSampleInfo (KoniSynthProcessor::sourceSample)) * 31u;
         h ^= (std::uint64_t) (koni.getParams().soloSource.load() + 2) << 56;
         if (h != lastHash)
         {
             lastHash = h;
-            if (view == mix && frames.empty()) frames = koni.getWavetableOverview (32, 256);
             placeHandles();
             updatePost();
             repaint();
@@ -959,7 +966,7 @@ private:
 
     static constexpr const char* watched[] = {
         "wave", "osc1Level", "unisonVoices", "unisonDetune", "unisonSpread", "pulseWidth", "pwmDepth", "drift", "osc1TriSym", "osc1TriRound",
-        "osc2Wave", "osc2Level", "osc2Octave", "osc2Semi", "osc2Fine", "osc2WtPosition", "osc2TriSym", "osc2TriRound",
+        "osc2Wave", "osc2Level", "osc2Octave", "osc2Semi", "osc2Fine", "osc2WtPosition", "osc2WtTable", "osc2TriSym", "osc2TriRound",
         "osc3Wave", "subLevel", "subOctave", "osc3Semi", "osc3Fine", "osc3TriSym", "osc3TriRound", "noiseColor", "noiseLevel",
         "wtTable", "wtLevel", "wtPosition", "sampleLevel", "sampleStart", "sampleLength", "sampleLoop", "sampleRoot",
         "stringLevel", "stringDecay", "stringBright", "stringPick", "stringPickup", "stringExcite", "stringDamping",
@@ -971,8 +978,9 @@ private:
     APVTS& s;
     std::vector<std::unique_ptr<Handle>> handles;
     int view = osc1;
-    std::vector<std::vector<float>> frames;
-    juce::String tableName, sampleInfo;
+    std::array<std::vector<std::vector<float>>, 2> frames; // por tabla: wtMain, wtOsc2
+    std::array<juce::String, 2> tableName;
+    juce::String sampleInfo;
     std::vector<std::pair<float, float>> overview;
     int sampleWidth = -1, sampleWhich = -1, sampleLength = 0;
     double sampleRate = 44100.0;

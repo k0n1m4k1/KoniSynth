@@ -186,6 +186,9 @@ public:
         osc2Section.withCombo (s, "osc2Wave").withExtraToggle (s, "osc2Sync", "Sync")
                    .withHeaderButton ("Osc 2 Sample...", "Open the sample editor of Osc 2 (Sample waveform): load its own file, see its waveform, "
                                       "set Root, Start, Length and Loop.", [this] { openSamplePanel (KoniSynthProcessor::osc2Sample); })
+                   .withHeaderButton ("Osc 2 Table...", "Open the wavetable editor of Osc 2 (Wavetable waveform): its own table, "
+                                      "independent of the Wavetable tab; see the frames, load your own file.",
+                                      [this] { openWavetablePanel (KoniSynthProcessor::wtOsc2); })
                    .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Semi", "Semi")
                    .withKnob (s, "osc2Fine", "Fine").withKnob (s, "osc2WtPosition", "WT Pos")
                    .withKnob (s, "osc2TriSym", "Tri Sym").withKnob (s, "osc2TriRound", "Tri Rnd");
@@ -1081,7 +1084,11 @@ private:
         const auto ids = SampleIds::of (which);
         openPanel (ids.title, std::make_unique<SamplePanel> (koni, ids, [this, which] { chooseSample (which); }), 1100, 560);
     }
-    void openWavetablePanel()  { openPanel ("Wavetable", std::make_unique<WavetablePanel> (koni, [this] { chooseWavetable(); }), 1100, 620); }
+    void openWavetablePanel (int which = KoniSynthProcessor::wtMain)
+    {
+        openPanel (which == KoniSynthProcessor::wtOsc2 ? "Osc 2 Wavetable" : "Wavetable",
+                   std::make_unique<WavetablePanel> (koni, which, [this, which] { chooseWavetable (which); }), 1100, 620);
+    }
     void openSequencerPanel()  { openPanel ("Step Sequencer", std::make_unique<SequencerPanel> (koni), 1300, 560); }
     void openPerfMacroPanel()  { openPanel ("Macros", std::make_unique<PerfMacroPanel> (koni), 1100, 470); }
     // Diálogo "Edit..." de una sección: una fila de secciones; ~78 px por unidad de peso, alto de una fila del panel
@@ -1219,15 +1226,15 @@ private:
                    "60.10 Hz on NES NTSC and Famicom, 50.01 Hz on PAL, 59.73 Hz on Game Boy"), 1100, 640);
     }
 
-    void chooseWavetable()
+    void chooseWavetable (int which = KoniSynthProcessor::wtMain)
     {
         fileChooser = std::make_unique<juce::FileChooser> ("Load wavetable", juce::File(), "*.wav;*.aif;*.aiff;*.flac");
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-            [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
+            [safe = SafePointer<KoniSynthEditor> (this), which] (const juce::FileChooser& fc)
             {
                 if (safe == nullptr || fc.getResult() == juce::File())
                     return;
-                if (const auto error = safe->koni.loadWavetable (fc.getResult()); error.isNotEmpty())
+                if (const auto error = safe->koni.loadWavetable (fc.getResult(), which); error.isNotEmpty())
                     safe->overlay = Overlay::create (*safe, "Wavetable", error, std::nullopt, "OK", {},
                                                      [safe] (bool, const juce::String&, int) { if (safe != nullptr) safe->overlay.reset(); });
             });
@@ -1447,9 +1454,10 @@ private:
         const auto osc3Sounds = v ("subLevel") > 0.0f || (complexOn && (int) v ("complexModSource") == 2);
         dim (complexSection.knobFor ("modRatio"), externalMod);
         dim (&complexSection.comboComponent(), externalMod);
+        const auto osc2Wave = osc2WaveFromChoice ((int) v ("osc2Wave")); // código del motor: 4 Wavetable, 5 Sample
         const auto pwUsed = (waveUsesPw (waveFromChoice ((int) v ("wave"))) && osc1Sounds)
                          || (complexOn && ! externalMod && waveUsesPw (waveFromChoice ((int) v ("modWave"))))
-                         || (waveUsesPw ((int) v ("osc2Wave")) && osc2Sounds);
+                         || (waveUsesPw (osc2Wave) && osc2Sounds);
         dim (osc.knobFor ("pulseWidth"), ! pwUsed);
         dim (osc.knobFor ("pwmDepth"), ! pwUsed);
         const auto unison = v ("unisonVoices") > 1.5f;
@@ -1464,15 +1472,16 @@ private:
             dim (osc3Section.knobFor (id), ! osc3Sounds);
         dim (&osc3Section.comboComponent(), ! osc3Sounds);
         dim (&noiseSection.comboComponent(), v ("noiseLevel") <= 0.0f && ! targeted (ModMatrix::dstNoiseLevel));
-        dim (osc2Section.knobFor ("osc2WtPosition"), (int) v ("osc2Wave") != 4 || ! osc2Sounds); // solo con la forma Wavetable
+        dim (osc2Section.knobFor ("osc2WtPosition"), osc2Wave != 4 || ! osc2Sounds); // solo con la forma Wavetable
         // Forma del triángulo: solo con la forma Triangle (índice 1 en las tres listas); en Osc 1, no con el oscilador complejo
         const auto tri1 = (int) v ("wave") == 1 && osc1Sounds && ! complexOn;
-        const auto tri2 = (int) v ("osc2Wave") == 1 && osc2Sounds;
+        const auto tri2 = osc2Wave == triangle && osc2Sounds;
         const auto tri3 = (int) v ("osc3Wave") == 1 && osc3Sounds;
         dim (osc.knobFor ("osc1TriSym"), ! tri1);         dim (osc.knobFor ("osc1TriRound"), ! tri1);
         dim (osc2Section.knobFor ("osc2TriSym"), ! tri2); dim (osc2Section.knobFor ("osc2TriRound"), ! tri2);
         dim (osc3Section.knobFor ("osc3TriSym"), ! tri3); dim (osc3Section.knobFor ("osc3TriRound"), ! tri3);
-        dim (osc2Section.headerButton (0), (int) v ("osc2Wave") != 5); // Osc 2 Sample... (fichero de Osc 2): solo con la forma Sample
+        dim (osc2Section.headerButton (0), osc2Wave != 5); // Osc 2 Sample... (fichero de Osc 2): solo con la forma Sample
+        dim (osc2Section.headerButton (1), osc2Wave != 4); // Osc 2 Table... (tabla de Osc 2): solo con la forma Wavetable
         const auto theremin = engine == 1; // el Theremin usa LFO 1 con seno fijo y su propia velocidad (sin Shape ni Sync)
         dim (lfo.knobFor ("lfoRate"), ! theremin && v ("lfoSync") > 0.5f);
         dim (lfo.knobFor ("lfoShape"), theremin);
@@ -1608,7 +1617,7 @@ private:
     {
         using Kind = KoniSynthProcessor::MissingFile::Kind;
         const juce::String what = m.kind == Kind::sample ? "Sample" : m.kind == Kind::osc2Sample ? "Osc 2 sample"
-                                : m.kind == Kind::cabIr ? "Cabinet IR" : "Wavetable";
+                                : m.kind == Kind::cabIr ? "Cabinet IR" : m.kind == Kind::osc2Wavetable ? "Osc 2 wavetable" : "Wavetable";
         const auto heading = what + (m.unreadable ? " file can't be read" : " file not found");
         const auto message = "\"" + m.file.getFileName() + "\" was expected at:\n" + m.file.getParentDirectory().getFullPathName()
                              + "\nLocate it to load it again, or ignore to continue without it.";
@@ -1630,17 +1639,18 @@ private:
         }
         const auto isSample = m.kind == KoniSynthProcessor::MissingFile::Kind::sample || m.kind == KoniSynthProcessor::MissingFile::Kind::osc2Sample;
         const auto which = m.kind == KoniSynthProcessor::MissingFile::Kind::osc2Sample ? KoniSynthProcessor::osc2Sample : KoniSynthProcessor::sourceSample;
+        const auto table = m.kind == KoniSynthProcessor::MissingFile::Kind::osc2Wavetable ? KoniSynthProcessor::wtOsc2 : KoniSynthProcessor::wtMain;
         const auto start = m.file.getParentDirectory().isDirectory() ? m.file.getParentDirectory()
                                                                      : juce::File::getSpecialLocation (juce::File::userHomeDirectory);
         fileChooser = std::make_unique<juce::FileChooser> (isSample ? "Locate sample: " + m.file.getFileName()
                                                                     : "Locate wavetable: " + m.file.getFileName(),
                                                            start, isSample ? SampleImport::fileFilter : "*.wav;*.aif;*.aiff;*.flac");
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-            [safe = SafePointer<KoniSynthEditor> (this), isSample, which] (const juce::FileChooser& fc)
+            [safe = SafePointer<KoniSynthEditor> (this), isSample, which, table] (const juce::FileChooser& fc)
             {
                 if (safe == nullptr || fc.getResult() == juce::File())
                     return;
-                const auto error = isSample ? safe->koni.loadSample (fc.getResult(), {}, which) : safe->koni.loadWavetable (fc.getResult());
+                const auto error = isSample ? safe->koni.loadSample (fc.getResult(), {}, which) : safe->koni.loadWavetable (fc.getResult(), table);
                 if (error.isNotEmpty())
                     safe->overlay = Overlay::create (*safe, isSample ? SampleIds::of (which).title : "Wavetable", error, std::nullopt, "OK", {},
                                                      [safe] (bool, const juce::String&, int) { if (safe != nullptr) safe->overlay.reset(); });

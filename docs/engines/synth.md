@@ -154,14 +154,15 @@ another source's solo).
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 2 waveform. Wavetable plays the table chosen in the Wavetable tab (next to Osc 1), with the tuning, drift and phase of Osc 2 and its own position (WT Pos); muting the Wavetable tab does not mute Osc 2. Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Wavetable, Sample, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Saw |
+| Wave menu | Oscillator 2 waveform. Wavetable plays its own table (Osc 2 Table...), independent of the Wavetable tab, with the tuning, drift and phase of Osc 2 and its own position (WT Pos). Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno), Wavetable, Sample / Saw |
 | Osc 2 Sample... (header) | Opens the sample editor of Osc 2 (Sample waveform only; dimmed otherwise). | - |
+| Osc 2 Table... (header) | Opens the wavetable editor of Osc 2: its own table (built-in or your file, Load), Level and Position (Wavetable waveform only; dimmed otherwise). | - |
 | Sync (switch) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. | Off / On / Off |
 | Level | Oscillator 2 level. | 0-100 % / 0 % |
 | Oct | Octave relative to oscillator 1. | -2 to +2 / 0 |
 | Semi | Offset in semitones (7 = fifth, 12 = octave). | -12 to +12 / 0 |
 | Fine | Fine detune; a few cents give beating. | -50 to +50 ct / 0 ct |
-| WT Pos | Position of Osc 2 in the wavetable (Wavetable waveform only), so one table can sound at two positions. | 0-100 % / 0 % |
+| WT Pos | Position of Osc 2 in its own wavetable (Wavetable waveform only). | 0-100 % / 0 % |
 | Tri Sym / Tri Rnd | Analog triangle of Osc 2 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
 
 **Osc 2 Sample** (Wave = Sample). A second sample player with its own file, independent of the Sample tab: two different

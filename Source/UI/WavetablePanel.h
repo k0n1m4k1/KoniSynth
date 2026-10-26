@@ -2,11 +2,12 @@
 // compilación; usa las declaraciones previas de KoniSynth.cpp (JUCE, Params, utilidades). No es una cabecera independiente.
 #pragma once
 
-// UI: wavetable como pila de fotogramas en perspectiva (el actual, según Position, resaltado)
+// UI: wavetable como pila de fotogramas en perspectiva (el actual, según Position, resaltado). which: la de la fuente
+// Wavetable (KoniSynthProcessor::wtMain) o la de Osc 2 (wtOsc2)
 class WavetableView : public juce::Component, private juce::Timer
 {
 public:
-    explicit WavetableView (KoniSynthProcessor& p) : koni (p) { startTimerHz (15); }
+    WavetableView (KoniSynthProcessor& p, int w) : koni (p), which (w) { startTimerHz (15); }
 
     void paint (juce::Graphics& g) override
     {
@@ -23,7 +24,7 @@ public:
         const auto area = r.reduced (16.0f);
         const auto depthX = area.getWidth() * 0.25f, depthY = area.getHeight() * 0.35f;
         const auto w = area.getWidth() - depthX, h = area.getHeight() - depthY;
-        const auto position = koni.apvts.getRawParameterValue ("wtPosition")->load();
+        const auto position = koni.apvts.getRawParameterValue (which == KoniSynthProcessor::wtOsc2 ? "osc2WtPosition" : "wtPosition")->load();
         const auto current = juce::roundToInt (position * (float) (n - 1));
 
         auto drawFrame = [&] (int k, juce::Colour colour, float thickness)
@@ -46,23 +47,24 @@ public:
                 drawFrame (k, Skin::white().withAlpha (0.12f), 1.0f);
         drawFrame (current, Skin::c (0xff42a2c8), 2.2f);
         g.setColour (Skin::white().withAlpha (0.7f));
-        g.drawText (koni.getWavetableName() + "  |  Position " + juce::String (juce::roundToInt (position * 100.0f)) + " %  (up to 32 frames drawn)",
+        g.drawText (koni.getWavetableName (which) + "  |  Position " + juce::String (juce::roundToInt (position * 100.0f)) + " %  (up to 32 frames drawn)",
                     r.reduced (8.0f, 4.0f), juce::Justification::topLeft);
     }
 
 private:
     void timerCallback() override
     {
-        const auto name = koni.getWavetableName();
+        const auto name = koni.getWavetableName (which);
         if (name != lastName || frames.empty())
         {
             lastName = name;
-            frames = koni.getWavetableOverview (32, 256);
+            frames = koni.getWavetableOverview (32, 256, which);
         }
         repaint();
     }
 
     KoniSynthProcessor& koni;
+    int which;
     std::vector<std::vector<float>> frames;
     juce::String lastName;
 };
@@ -70,13 +72,17 @@ private:
 class WavetablePanel : public juce::Component
 {
 public:
-    WavetablePanel (KoniSynthProcessor& p, std::function<void()> chooseFile) : view (p)
+    // which: KoniSynthProcessor::wtMain (pestaña Wavetable) o wtOsc2 (Osc 2 en modo Wavetable, nivel en Osc 2)
+    WavetablePanel (KoniSynthProcessor& p, int which, std::function<void()> chooseFile)
+        : view (p, which), controls (which == KoniSynthProcessor::wtOsc2 ? "Osc 2 Wavetable" : "Wavetable")
     {
         auto& s = p.apvts;
-        controls.withCombo (s, "wtTable")
+        const auto osc2 = which == KoniSynthProcessor::wtOsc2;
+        controls.withCombo (s, osc2 ? "osc2WtTable" : "wtTable")
                 .withHeaderButton ("Load", "Load a wavetable file: WAV with 2048 samples per frame (Serum format) or a single cycle.", std::move (chooseFile))
-                .withKnob (s, "wtLevel", "Level").withKnob (s, "wtPosition", "Position");
-        lfoHint.setText ("Tip: set LFO 2 Target to 'WT Position' to sweep the table.", juce::dontSendNotification);
+                .withKnob (s, osc2 ? "osc2Level" : "wtLevel", "Level").withKnob (s, osc2 ? "osc2WtPosition" : "wtPosition", "Position");
+        lfoHint.setText (osc2 ? "Osc 2 plays this table with its Wave set to Wavetable. Tip: a matrix slot with destination 'Osc 2 WT Position' sweeps it."
+                              : "Tip: set LFO 2 Target to 'WT Position' to sweep the table.", juce::dontSendNotification);
         lfoHint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         addAndMakeVisible (view);
         addAndMakeVisible (controls);
@@ -94,6 +100,6 @@ public:
 
 private:
     WavetableView view;
-    Section controls { "Wavetable" };
+    Section controls;
     juce::Label lfoHint;
 };

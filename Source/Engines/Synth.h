@@ -43,8 +43,8 @@ struct VoiceLfo
 // Voz: VCO (con drift) -> VCF (ladder + envolvente AD) -> VCA (ADSR). LFO propio con key sync.
 struct SynthVoice : juce::SynthesiserVoice
 {
-    SynthVoice (const Params& p, const SampleSlot& s, const SampleSlot& s2, const WavetableSlot& w)
-        : params (p), sampleSlot (s), osc2SampleSlot (s2), wavetableSlot (w) { rng.setSeedRandomly(); }
+    SynthVoice (const Params& p, const SampleSlot& s, const SampleSlot& s2, const WavetableSlot& w, const WavetableSlot& w2)
+        : params (p), sampleSlot (s), osc2SampleSlot (s2), wavetableSlot (w), osc2WavetableSlot (w2) { rng.setSeedRandomly(); }
 
     bool canPlaySound (juce::SynthesiserSound* s) override { return dynamic_cast<SynthSound*> (s) != nullptr; }
 
@@ -364,7 +364,7 @@ struct SynthVoice : juce::SynthesiserVoice
         mix.osc3Tri.set (params.osc3TriSym->load(), params.osc3TriRound->load());
         const auto tri1 = mix.osc1Tri.active && wave == triangle; // el oscilador complejo no la usa
         mix.pwmDepth   = params.pwmDepth->load();
-        mix.osc2Wave   = (int) params.osc2Wave->load();
+        mix.osc2Wave   = osc2WaveFromChoice ((int) params.osc2Wave->load());
         mix.osc2Ratio  = std::exp2 ((double) params.osc2Octave->load()
                                     + ((double) params.osc2Semi->load() + (double) params.osc2Fine->load() / 100.0) / 12.0);
         mix.osc2Level  = params.osc2Level->load() * osc2Gate;
@@ -382,9 +382,9 @@ struct SynthVoice : juce::SynthesiserVoice
         const auto wtLevel = params.wtLevel->load() * unmuted (Params::srcWavetable, params.wtMute);
         const auto wtPositionBase = params.wtPosition->load();
         const auto* blockWavetable = wtLevel > 0.0f ? wavetableSlot.current.load (std::memory_order_acquire) : nullptr;
-        // Osc 2 en modo Wavetable: la misma tabla, con la fase de Osc 2 y su propia posición (sin tabla: Osc 2 calla)
+        // Osc 2 en modo Wavetable: su propia tabla, con la fase de Osc 2 y su posición (sin tabla: Osc 2 calla)
         const auto osc2WtPositionBase = params.osc2WtPosition->load();
-        mix.osc2Table = mix.osc2Wave == wavetableWave ? wavetableSlot.current.load (std::memory_order_acquire) : nullptr;
+        mix.osc2Table = mix.osc2Wave == wavetableWave ? osc2WavetableSlot.current.load (std::memory_order_acquire) : nullptr;
         // Osc 2 en modo Sample: su propio fichero (sin fichero: Osc 2 calla)
         mix.osc2Sample = mix.osc2Wave == sampleWave ? osc2SampleSlot.current.load (std::memory_order_acquire) : nullptr;
         {
@@ -1051,8 +1051,8 @@ private:
         const SampleData* osc2Sample = nullptr; // modo Sample: fichero del bloque
         TriShape osc1Tri, osc2Tri, osc3Tri;     // forma del triángulo (TriSym, TriRound); inactiva a 0 %
     };
-    static constexpr int wavetableWave = 4; // osc2Wave = Wavetable (Layout.h: tras Sine, Triangle, Saw y Square)
-    static constexpr int sampleWave = 5;    // osc2Wave = Sample
+    static constexpr int wavetableWave = 4; // osc2Wave = Wavetable (código del motor; opción 10, osc2WaveFromChoice)
+    static constexpr int sampleWave = 5;    // osc2Wave = Sample (opción 11)
 
     // Fuentes mono del mezclador. dt = incremento de fase de Osc 1 (con vibrato y drift), así Osc 2 y el sub los siguen.
     //  Osc 2: dt·2^(oct + (semi + fine/100)/12); sync duro a la fundamental de Osc 1 (fase de referencia sin unísono ni FM),
@@ -1477,6 +1477,7 @@ private:
     const SampleSlot& sampleSlot;
     const SampleSlot& osc2SampleSlot;
     const WavetableSlot& wavetableSlot;
+    const WavetableSlot& osc2WavetableSlot;
     double wtPhase = 0.0;
     float bendTarget = 0.0f, modTarget = 0.0f, bendSmoothed = 0.0f, modSmoothed = 0.0f, controlCoef = 1.0f;
     float glideSemis = 0.0f, pitchEnvValue = 0.0f;
