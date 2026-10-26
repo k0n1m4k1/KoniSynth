@@ -34,6 +34,7 @@ juce_add_plugin(KoniSynth
     FORMATS                  VST3 Standalone)
 
 target_sources(KoniSynth PRIVATE Source/KoniSynth.cpp Source/SimdAvx2.cpp
+    Source/WinMaximiseFix.cpp # Windows: ventana maximizada con la barra de tareas a la izquierda o arriba (en otros sistemas, vacío)
     Source/ThirdParty/NukedOPLL/opll.c # Nuked-OPLL, GPL-2.0+ (YM2413 / VRC7)
     Source/ThirdParty/MTS-ESP/libMTSClient.cpp) # cliente MTS-ESP (ODDSound), 0BSD: carga LIBMTS.dll solo si está instalada
 # Código de terceros sin modificar: sin avisos (los suyos no son de KoniSynth)

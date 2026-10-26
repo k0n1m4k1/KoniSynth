@@ -13,6 +13,9 @@
 // escaneo (posición física de la tecla) a la tecla virtual de la distribución activa (NoteKeyboard::physicalKey)
 extern "C" __declspec (dllimport) unsigned int __stdcall MapVirtualKeyW (unsigned int code, unsigned int mapType);
 #endif
+// Ventana del standalone maximizada con la barra de tareas a la izquierda o arriba (Source/WinMaximiseFix.cpp; vacías fuera de Windows)
+void koniHookMaximiseFix (void* nativeHandle);
+void koniUnhookMaximiseFix (void* nativeHandle);
 
 class KoniSynthEditor : public juce::AudioProcessorEditor, private juce::Timer, private juce::ComponentListener
 {
@@ -672,6 +675,8 @@ public:
         floatingPad.reset();
         if (auto* area = hookedNotification.getComponent())
             area->removeComponentListener (this);
+        if (auto* window = hookedWindow.getComponent(); window != nullptr && window->getPeer() != nullptr)
+            koniUnhookMaximiseFix (window->getPeer()->getNativeHandle());
         if (auto* original = hookedOptions.getComponent())
             original->setVisible (true); // el botón propio muere con el editor (p. ej. "Reset to default state")
         setLookAndFeel (nullptr);
@@ -690,6 +695,12 @@ public:
         if (window == nullptr || window == hookedWindow.getComponent())
             return;
         hookedWindow = window;
+        // Windows: ventana maximizada con la barra de tareas a la izquierda o arriba (Source/WinMaximiseFix.cpp); el HWND
+        // existe cuando la ventana está en el escritorio: tras este cambio de jerarquía
+        juce::MessageManager::callAsync ([w = juce::Component::SafePointer<juce::Component> (window)]
+        {
+            if (w != nullptr && w->getPeer() != nullptr) koniHookMaximiseFix (w->getPeer()->getNativeHandle());
+        });
         window->setName (juce::String ("KoniSynth ") + KONI_VERSION_LABEL);
         window->setTitleBarButtonsRequired (juce::DocumentWindow::allButtons, false); // + maximizar (y doble clic en el título)
 
