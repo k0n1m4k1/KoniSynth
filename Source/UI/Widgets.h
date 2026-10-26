@@ -228,6 +228,112 @@ struct ParamMenu : juce::MouseListener
     JUCE_DECLARE_WEAK_REFERENCEABLE (ParamMenu)
 };
 
+// Iconos de forma de onda para las elecciones de onda (desplegables, perillas por pasos y teclas): un ciclo dibujado por
+// nombre de opción. Las formas del Synth salen de oscillator() (Dsp/OscillatorCore.h, sin BLEP, PW 50 %) con sus mezclas
+// medidas; las de OPL siguen las 8 formas del YMF262; S&H, Random y Noise usan valores fijos (el icono no cambia).
+// Sin icono (texto como hasta ahora): opciones que no son una forma (Wavetable, Sample, Strings, Organ...) y las de ancho
+// no documentado (Pulse 1 / Pulse 2 del Polivoks)
+namespace WaveGlyph
+{
+    // Valor en t ∈ [0, 1) de la forma de 'name'; false si no tiene icono
+    static bool sample (juce::String name, double t, double& v)
+    {
+        constexpr double twoPi = juce::MathConstants<double>::twoPi;
+        static constexpr double steps[] = { 0.55, -0.35, 0.9, -0.8, 0.15, 0.7, -0.6, -0.1 }; // S&H y Random
+        static constexpr double noise[] = { 0.2, -0.7, 0.9, -0.1, 0.5, -0.9, 0.3, 0.8, -0.4, 0.1, -0.6, 0.7, -0.2, 0.95, -0.8, 0.4,
+                                            -0.3, 0.6, -0.95, 0.15, 0.85, -0.5, 0.05, -0.75 };
+        name = name.trim();
+        if (name.length() > 2 && juce::CharacterFunctions::isDigit (name[0]) && name[1] == ' ') // OPL: "3 Quarter sine"
+            name = name.substring (2);
+        name = name.upToFirstOccurrenceOf (" (OPL3)", false, false);
+        static const std::pair<const char*, int> synth[] = { { "Sine", sine }, { "Triangle", triangle }, { "Saw", saw }, { "Saw Up", saw },
+            { "Square", square }, { "Tri-Saw", triSaw }, { "Saw+Pulse", sawPulse }, { "Saw+Tri", sawTri }, { "Tri+Pulse", triPulse },
+            { "Saw+Tri+Pulse", sawTriPulse }, { "Saw+Pulse (Juno)", sawPulseJuno } };
+        for (const auto& [text, wave] : synth)
+            if (name == text) { v = oscillator (wave, t, 0.0, 0.5f, false); return true; }
+        const auto s = std::sin (twoPi * t);
+        if (name == "Saw Down")      v = 1.0 - 2.0 * t;
+        else if (name == "Pulse 25 %") v = t < 0.25 ? 1.0 : -1.0;
+        else if (name == "S&H")      v = steps[(int) (t * 8.0) % 8];
+        else if (name == "Random")
+        {
+            const auto x = t * 8.0, f = x - std::floor (x);
+            const auto a = steps[(int) x % 8], b = steps[((int) x + 1) % 8];
+            v = a + (b - a) * 0.5 * (1.0 - std::cos (juce::MathConstants<double>::pi * f));
+        }
+        else if (name == "Noise")    v = noise[(int) (t * 24.0) % 24];
+        else if (name == "Half sine") v = juce::jmax (0.0, s);
+        else if (name == "Abs sine")  v = std::abs (s);
+        else if (name == "Quarter sine") v = std::fmod (t, 0.5) < 0.25 ? std::abs (s) : 0.0;
+        else if (name == "Alternating")  v = t < 0.5 ? std::sin (2.0 * twoPi * t) : 0.0;
+        else if (name == "Camel")        v = t < 0.5 ? std::abs (std::sin (2.0 * twoPi * t)) : 0.0;
+        else if (name == "Log saw")      v = t < 0.5 ? std::exp (-10.0 * t) : -std::exp (-10.0 * (1.0 - t));
+        else return false;
+        return true;
+    }
+
+    static bool has (const juce::String& name) { double v; return sample (name, 0.0, v); }
+
+    // Trazo de un ciclo dentro de 'area' (amplitud normalizada al pico); vacío si no tiene icono
+    static juce::Path path (const juce::String& name, juce::Rectangle<float> area)
+    {
+        constexpr int n = 96; // saltos inclinados 1/96 del ancho: < 0,3 px en un icono de 26 px
+        double v[n + 1], peak = 1.0e-9;
+        for (int i = 0; i <= n; ++i)
+        {
+            if (! sample (name, juce::jmin ((double) i / n, 0.99999), v[i]))
+                return {};
+            peak = juce::jmax (peak, std::abs (v[i]));
+        }
+        juce::Path p;
+        for (int i = 0; i <= n; ++i)
+        {
+            const juce::Point<float> pt { area.getX() + area.getWidth() * (float) i / n, area.getCentreY() - area.getHeight() * 0.5f * (float) (v[i] / peak) };
+            if (i == 0) p.startNewSubPath (pt); else p.lineTo (pt);
+        }
+        return p;
+    }
+
+    static void draw (juce::Graphics& g, const juce::String& name, juce::Rectangle<float> area, juce::Colour colour, float thickness = 1.5f)
+    {
+        g.setColour (colour);
+        g.strokePath (path (name, area), juce::PathStrokeType (thickness, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
+
+    // Elección de forma de onda: nombre con Wave, Shape o Source y al menos 2 opciones con icono (las demás elecciones
+    // con "Noise" u otra opción suelta no cuentan)
+    static bool isWaveChoice (const juce::RangedAudioParameter* p)
+    {
+        const auto* choice = dynamic_cast<const juce::AudioParameterChoice*> (p);
+        if (choice == nullptr || ! (choice->name.contains ("Wave") || choice->name.contains ("Shape") || choice->name.contains ("Source")))
+            return false;
+        int withGlyph = 0;
+        for (const auto& c : choice->choices)
+            withGlyph += has (c) ? 1 : 0;
+        return withGlyph >= 2;
+    }
+
+    // Desplegable de forma: icono en cada opción de la lista (imagen del item) y, con la propiedad, en la caja cerrada
+    // (KoniLookAndFeel::drawComboBox)
+    static void decorate (juce::ComboBox& combo)
+    {
+        combo.getProperties().set ("waveGlyphs", true);
+        for (juce::PopupMenu::MenuItemIterator it (*combo.getRootMenu()); it.next();)
+        {
+            auto& item = it.getItem();
+            const auto shape = path (item.text, { 0.0f, 0.0f, 26.0f, 12.0f });
+            if (shape.isEmpty())
+                continue;
+            auto icon = std::make_unique<juce::DrawablePath>();
+            icon->setPath (shape);
+            icon->setFill (juce::FillType (juce::Colours::transparentBlack));
+            icon->setStrokeFill (Skin::accent());
+            icon->setStrokeType (juce::PathStrokeType (1.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            item.image = std::move (icon);
+        }
+    }
+}
+
 // UI: control de un parámetro continuo con etiqueta: perilla o slider vertical (envolventes). Doble clic = valor por
 // defecto. La etiqueta muestra el CC asignado ("Cutoff [74]") o "Learn..." mientras espera un CC.
 struct Knob : juce::Component, private juce::Timer
@@ -266,6 +372,11 @@ struct Knob : juce::Component, private juce::Timer
         // recorrido entero: con 3 opciones, 83 px por paso y sin sensación de posición). Más de 10, perilla continua
         const auto* choice = dynamic_cast<juce::AudioParameterChoice*> (p);
         options = choice != nullptr ? choice->choices.size() : dynamic_cast<juce::AudioParameterBool*> (p) != nullptr ? 2 : 0;
+        if (WaveGlyph::isWaveChoice (p)) // la caja de valor muestra el icono de la forma en vez del nombre
+        {
+            slider.getProperties().set ("waveGlyphs", true);
+            keyValue.getProperties().set ("waveGlyphs", true);
+        }
         if (style == Style::rotary && options == 2)
         {
             key.setClickingTogglesState (true);
@@ -551,9 +662,11 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
 
     // LookAndFeel_V4 reduce 10 px por lado el área de la perilla (juce_LookAndFeel_V4.cpp:1079): con ~40 px de alto solo quedaba
     // un punto. Aquí el margen es de 2 px (se amplía el rectángulo 8 px antes de llamar al original)
-    // Perilla con aspecto de pieza física, dibujada (escala con la ventana; tono original en todos los skins): arco de valor por fuera, con la
-    // geometría de LookAndFeel_V4 (el anillo ámbar de la matriz queda fuera de él), y dentro sombra, faldón moleteado de 32
-    // estrías, tapa con degradado, reflejo y línea indicadora
+    // Perilla dibujada (escala con la ventana; tono original en todos los skins). De fuera a dentro, sobre el radio r:
+    // - arco de valor fino (trazo 0,1·r, entre 2 y 3,5 px) en el borde; el anillo ámbar de la matriz queda fuera de él;
+    // - hueco libre hasta el cuerpo (0,62·r): el cuerpo no toca el arco;
+    // - faldón con estrías y tapa con indicador. Faldón, estrías e indicador giran con el valor; la luz es fija (arriba a la
+    //   izquierda): cada estría se ilumina según su ángulo absoluto, así que al girar pasan por la luz como en una pieza real
     void drawRotarySlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float startAngle,
                            float endAngle, juce::Slider& slider) override
     {
@@ -562,21 +675,26 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         if (radius < 4.0f)
             return;
         const auto c = bounds.getCentre();
-        const auto lineW = juce::jmin (8.0f, radius * 0.5f);
+        const auto lineW = juce::jlimit (2.0f, 3.5f, radius * 0.1f);
         const auto arcR = radius - lineW * 0.5f;
         const auto angle = startAngle + sliderPos * (endAngle - startAngle);
         const auto enabled = slider.isEnabled();
+        const auto bodyR = radius * 0.62f;
+        const auto pi = juce::MathConstants<float>::pi;
+        const auto halfPi = juce::MathConstants<float>::halfPi;
+        const auto lightA = -0.75f * pi; // dirección de la luz (pantalla, y hacia abajo): arriba a la izquierda
 
         const int detents = slider.getProperties().getWithDefault ("detents", 0);
         if (detents > 0)
         {
-            // Conmutador por pasos (Knob: elecciones de 3 a 10 opciones): una marca radial por posición en lugar del arco; la
-            // elegida, en el acento con halo
+            // Conmutador por pasos (Knob: elecciones de 3 a 10 opciones): una marca radial por posición en el hueco, en lugar
+            // del arco; la elegida, en el acento con halo
             const auto chosen = juce::roundToInt (sliderPos * (float) (detents - 1));
+            const auto r0 = bodyR + (radius - bodyR) * 0.4f;
             for (int k = 0; k < detents; ++k)
             {
-                const auto a = startAngle + (endAngle - startAngle) * (float) k / (float) (detents - 1) - juce::MathConstants<float>::halfPi;
-                const juce::Point<float> p0 { c.x + std::cos (a) * (radius - lineW * 0.9f), c.y + std::sin (a) * (radius - lineW * 0.9f) },
+                const auto a = startAngle + (endAngle - startAngle) * (float) k / (float) (detents - 1) - halfPi;
+                const juce::Point<float> p0 { c.x + std::cos (a) * r0, c.y + std::sin (a) * r0 },
                                          p1 { c.x + std::cos (a) * radius, c.y + std::sin (a) * radius };
                 if (k == chosen && enabled)
                 {
@@ -587,78 +705,92 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
                 g.drawLine ({ p0, p1 }, k == chosen ? 2.2f : 1.4f);
             }
         }
-        // Arco: pista hundida y valor
-        juce::Path track;
-        if (detents == 0)
-            track.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, endAngle, true);
-        g.setColour (juce::Colour (0xff101316));
-        g.strokePath (track, juce::PathStrokeType (lineW * 0.55f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        if (enabled && detents == 0)
+        else
         {
-            juce::Path value;
-            value.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, angle, true);
-            g.setColour (Skin::accent().withAlpha (0.28f)); // halo: pasada ancha y tenue, después la del valor
-            g.strokePath (value, juce::PathStrokeType (lineW * 1.1f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-            g.setColour (Skin::accent());
-            g.strokePath (value, juce::PathStrokeType (lineW * 0.55f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            // Arco: pista hundida y valor con halo
+            const juce::PathStrokeType stroke (lineW, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+            juce::Path track;
+            track.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, endAngle, true);
+            g.setColour (juce::Colour (0xff0d0f12));
+            g.strokePath (track, stroke);
+            if (enabled)
+            {
+                juce::Path value;
+                value.addCentredArc (c.x, c.y, arcR, arcR, 0.0f, startAngle, angle, true);
+                g.setColour (Skin::accent().withAlpha (0.22f));
+                g.strokePath (value, juce::PathStrokeType (lineW * 2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+                g.setColour (Skin::accent());
+                g.strokePath (value, stroke);
+            }
         }
 
-        // Cuerpo
-        const auto bodyR = radius - lineW - 1.0f;
         if (bodyR < 3.0f)
             return;
         const auto body = juce::Rectangle<float> (2.0f * bodyR, 2.0f * bodyR).withCentre (c);
-        // Sombra difusa: tres pasadas al 14 % cada vez más anchas y bajas (luz cenital), en vez de un disco duro
-        for (int k = 3; k >= 1; --k)
         {
-            g.setColour (juce::Colours::black.withAlpha (0.14f));
-            g.fillEllipse (body.translated (0.0f, bodyR * 0.07f * (float) k + 0.5f).expanded (1.1f * (float) k));
+            // Sombra proyectada hacia abajo (luz alta): desenfoque gaussiano de radio 0,45·r desplazado 0,22·r, y sombra de
+            // contacto pegada al borde
+            juce::Path disc;
+            disc.addEllipse (body);
+            juce::DropShadow (juce::Colours::black.withAlpha (0.75f), juce::jmax (2, juce::roundToInt (bodyR * 0.45f)),
+                              { 0, juce::jmax (1, juce::roundToInt (bodyR * 0.22f)) }).drawForPath (g, disc);
+            g.setColour (juce::Colours::black.withAlpha (0.5f));
+            g.fillEllipse (body.translated (0.0f, 1.0f).expanded (0.6f));
         }
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff3a3f46), c.x, body.getY(), juce::Colour (0xff111316), c.x, body.getBottom(), false));
+        // Faldón: metal oscuro con luz fija
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a5059), body.getX(), body.getY(), juce::Colour (0xff0e1013), body.getRight(), body.getBottom(), false));
         g.fillEllipse (body);
-        // Moleteado: 32 estrías alternas en el faldón
+        // Estrías: n surcos que giran con el valor; cada uno con un canto de luz cuyo brillo es el coseno entre su ángulo
+        // absoluto y la luz (0,03 de alfa a contraluz, 0,19 de frente)
         const auto capR = bodyR * 0.74f;
-        for (int k = 0; k < 32; ++k)
+        const int flutes = bodyR < 14.0f ? 20 : 28;
+        const auto step = juce::MathConstants<float>::twoPi / (float) flutes;
+        const auto fluteW = juce::jmax (0.7f, bodyR * 0.045f);
+        for (int k = 0; k < flutes; ++k)
         {
-            const auto a = juce::MathConstants<float>::twoPi * (float) k / 32.0f;
+            const auto a = angle + step * (float) k;
+            const auto lit = 0.5f + 0.5f * std::cos (a - lightA);
             const auto ca = std::cos (a), sa = std::sin (a);
-            g.setColour ((k & 1) != 0 ? juce::Colours::white.withAlpha (0.10f) : juce::Colours::black.withAlpha (0.35f));
-            g.drawLine (c.x + ca * capR, c.y + sa * capR, c.x + ca * (bodyR - 0.6f), c.y + sa * (bodyR - 0.6f), juce::jmax (0.8f, bodyR * 0.05f));
+            g.setColour (juce::Colours::black.withAlpha (0.32f));
+            g.drawLine (c.x + ca * (capR + 0.5f), c.y + sa * (capR + 0.5f), c.x + ca * (bodyR - 0.5f), c.y + sa * (bodyR - 0.5f), fluteW);
+            const auto b = a + step * 0.28f;
+            const auto cb = std::cos (b), sb = std::sin (b);
+            g.setColour (juce::Colours::white.withAlpha (0.03f + 0.16f * lit));
+            g.drawLine (c.x + cb * (capR + 0.5f), c.y + sb * (capR + 0.5f), c.x + cb * (bodyR - 0.5f), c.y + sb * (bodyR - 0.5f), fluteW * 0.7f);
         }
-        g.setColour (juce::Colours::black.withAlpha (0.7f));
+        g.setColour (juce::Colours::black.withAlpha (0.8f));
         g.drawEllipse (body, 1.0f);
         {
-            // Luz de canto: arco claro en la mitad superior del faldón (de -70° a +70° desde arriba)
+            // Luz de canto en el borde del faldón, del lado de la luz (±70° alrededor de ella)
             juce::Path rim;
-            rim.addCentredArc (c.x, c.y, bodyR - 0.8f, bodyR - 0.8f, 0.0f, -1.22f, 1.22f, true);
-            g.setColour (juce::Colours::white.withAlpha (0.16f));
+            rim.addCentredArc (c.x, c.y, bodyR - 0.7f, bodyR - 0.7f, 0.0f, lightA + halfPi - 1.22f, lightA + halfPi + 1.22f, true);
+            g.setColour (juce::Colours::white.withAlpha (0.2f));
             g.strokePath (rim, juce::PathStrokeType (1.0f));
         }
-        // Tapa
+        // Tapa: cóncava (más oscura del lado de la luz que el faldón), con bisel claro arriba a la izquierda y oscuro abajo
         const auto cap = juce::Rectangle<float> (2.0f * capR, 2.0f * capR).withCentre (c);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff6a717b), cap.getX(), cap.getY(), juce::Colour (0xff23272c), cap.getRight(), cap.getBottom(), false));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2e34), cap.getX(), cap.getY(), juce::Colour (0xff474d56), cap.getRight(), cap.getBottom(), false));
         g.fillEllipse (cap);
-        for (int k = 1; k <= 4; ++k) // pulido concéntrico
-        {
-            g.setColour (juce::Colours::white.withAlpha (0.035f));
-            g.drawEllipse (cap.reduced (capR * 0.18f * (float) k), 0.8f);
-        }
-        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.22f), cap.getX() + capR * 0.5f, cap.getY() + capR * 0.35f,
-                                                 juce::Colours::white.withAlpha (0.0f), c.x, c.y, true));
-        g.fillEllipse (cap.reduced (capR * 0.08f)); // reflejo
-        g.setColour (juce::Colours::black.withAlpha (0.5f));
-        g.drawEllipse (cap, 0.8f);
-        // Indicador
-        const auto ia = angle - juce::MathConstants<float>::halfPi;
-        const juce::Point<float> p0 { c.x + std::cos (ia) * capR * 0.25f, c.y + std::sin (ia) * capR * 0.25f },
-                                 p1 { c.x + std::cos (ia) * (bodyR - 1.0f), c.y + std::sin (ia) * (bodyR - 1.0f) };
-        g.setColour (juce::Colours::black.withAlpha (0.6f));
-        g.drawLine ({ p0, p1 }, juce::jmax (2.6f, bodyR * 0.16f));
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.3f), cap.getX(), cap.getY(),
+                                                 juce::Colours::black.withAlpha (0.6f), cap.getRight(), cap.getBottom(), false));
+        g.drawEllipse (cap.reduced (0.5f), 1.0f);
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.14f), c.x - capR * 0.35f, c.y - capR * 0.45f,
+                                                 juce::Colours::white.withAlpha (0.0f), c.x, c.y + capR * 0.2f, true));
+        g.fillEllipse (cap.reduced (capR * 0.12f)); // reflejo fijo: no gira
+        // Indicador: surco oscuro con línea clara, del centro de la tapa al borde del faldón; gira con el valor
+        const auto ia = angle - halfPi;
+        const juce::Point<float> p0 { c.x + std::cos (ia) * capR * 0.2f, c.y + std::sin (ia) * capR * 0.2f },
+                                 p1 { c.x + std::cos (ia) * (bodyR - 1.2f), c.y + std::sin (ia) * (bodyR - 1.2f) };
+        g.setColour (juce::Colours::black.withAlpha (0.65f));
+        g.drawLine ({ p0, p1 }, juce::jmax (2.6f, bodyR * 0.17f));
         g.setColour (enabled ? juce::Colours::white : juce::Colours::white.withAlpha (0.5f));
-        g.drawLine ({ p0, p1 }, juce::jmax (1.4f, bodyR * 0.08f));
+        g.drawLine ({ p0, p1 }, juce::jmax (1.3f, bodyR * 0.08f));
     }
 
-    // Fader: ranura hundida, relleno de valor fino y tapa con degradado y estrías (vertical u horizontal); otros estilos, V4
+    // Fader de consola (vertical u horizontal; otros estilos, V4): escala de 11 marcas a cada lado (cada 10 %, más largas en
+    // 0, 50 y 100 %), ranura hundida de 3 px con el relleno de valor, y tapa de 18 px con dos caras talladas hacia la línea
+    // central (la que mira a la luz, clara; la otra, oscura) y sombra proyectada hacia abajo. La tapa cabe en el recorrido:
+    // JUCE deja getSliderThumbRadius (12 px en V4) en cada extremo y media tapa son 9 px
     void drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float minSliderPos,
                            float maxSliderPos, juce::Slider::SliderStyle style, juce::Slider& slider) override
     {
@@ -668,47 +800,83 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
             return;
         }
         const auto vertical = style == juce::Slider::LinearVertical;
+        const auto enabled = slider.isEnabled();
         const auto area = juce::Rectangle<int> (x, y, width, height).toFloat();
-        const auto grooveW = 4.0f;
-        const auto groove = vertical ? juce::Rectangle<float> (area.getCentreX() - grooveW * 0.5f, area.getY(), grooveW, area.getHeight())
-                                     : juce::Rectangle<float> (area.getX(), area.getCentreY() - grooveW * 0.5f, area.getWidth(), grooveW);
-        // Ranura hundida: fondo casi negro, sombra interior en el canto superior y luz en el inferior
-        g.setColour (juce::Colour (0xff0b0d0f));
-        g.fillRoundedRectangle (groove.expanded (1.0f), 3.0f);
-        g.setColour (juce::Colours::black.withAlpha (0.6f));
-        g.drawRoundedRectangle (groove.expanded (1.0f).translated (0.0f, -0.5f), 3.0f, 1.0f);
-        g.setColour (juce::Colours::white.withAlpha (0.10f));
-        g.drawRoundedRectangle (groove.expanded (1.5f).translated (0.0f, 0.8f), 3.0f, 0.8f);
-        if (slider.isEnabled()) // relleno desde el mínimo
+        const auto p0 = (float) slider.getPositionOfValue (slider.getMinimum()), p1 = (float) slider.getPositionOfValue (slider.getMaximum());
+        // Escala: marcas a ambos lados de la ranura, a 5 px de su eje
+        const auto mid = vertical ? area.getCentreX() : area.getCentreY();
+        for (int k = 0; k <= 10; ++k)
         {
-            const auto fill = vertical ? groove.withTop (sliderPos).reduced (1.0f, 0.0f) : groove.withRight (sliderPos).reduced (0.0f, 1.0f);
-            g.setColour (Skin::accent().withAlpha (0.28f)); // halo
-            g.fillRoundedRectangle (fill.expanded (2.0f, 2.0f), 3.0f);
+            const auto pos = p0 + (p1 - p0) * (float) k / 10.0f;
+            const auto len = (k % 5 == 0) ? 5.0f : 3.0f;
+            g.setColour (juce::Colours::white.withAlpha (k % 5 == 0 ? 0.30f : 0.16f));
+            for (int side = -1; side <= 1; side += 2)
+            {
+                const auto a = mid + (float) side * 5.0f, b = a + (float) side * len;
+                if (vertical) g.drawLine (a, pos, b, pos, 1.0f);
+                else          g.drawLine (pos, a, pos, b, 1.0f);
+            }
+        }
+        // Ranura hundida: fondo casi negro, sombra interior arriba y luz abajo
+        const auto grooveW = 3.0f;
+        const auto groove = vertical ? juce::Rectangle<float> (mid - grooveW * 0.5f, area.getY(), grooveW, area.getHeight())
+                                     : juce::Rectangle<float> (area.getX(), mid - grooveW * 0.5f, area.getWidth(), grooveW);
+        g.setColour (juce::Colour (0xff07090b));
+        g.fillRoundedRectangle (groove.expanded (1.0f), 2.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.7f));
+        g.drawRoundedRectangle (groove.expanded (1.0f).translated (0.0f, -0.5f), 2.5f, 1.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.10f));
+        g.drawRoundedRectangle (groove.expanded (1.5f).translated (0.0f, 0.8f), 2.5f, 0.8f);
+        if (enabled) // relleno desde el mínimo, dentro de la ranura
+        {
+            const auto fill = vertical ? groove.withTop (sliderPos) : groove.withRight (sliderPos);
+            g.setColour (Skin::accent().withAlpha (0.25f)); // halo
+            g.fillRoundedRectangle (fill.expanded (2.0f), 2.5f);
             g.setColour (Skin::accent());
-            g.fillRoundedRectangle (fill, 1.5f);
+            g.fillRoundedRectangle (fill.reduced (vertical ? 0.5f : 0.0f, vertical ? 0.0f : 0.5f), 1.0f);
         }
         // Tapa
-        const auto capW = vertical ? juce::jmin (area.getWidth() * 0.8f, 24.0f) : 12.0f;
-        const auto capH = vertical ? 12.0f : juce::jmin (area.getHeight() * 0.8f, 24.0f);
-        const auto cap = juce::Rectangle<float> (capW, capH).withCentre (vertical ? juce::Point<float> { area.getCentreX(), sliderPos }
-                                                                                    : juce::Point<float> { sliderPos, area.getCentreY() });
-        g.setColour (juce::Colours::black.withAlpha (0.22f)); // sombra difusa y después la de contacto
-        g.fillRoundedRectangle (cap.translated (0.0f, 3.0f).expanded (2.0f), 4.0f);
-        g.setColour (juce::Colours::black.withAlpha (0.55f));
-        g.fillRoundedRectangle (cap.translated (0.0f, 1.2f).expanded (0.6f), 2.5f);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff70777f), cap.getX(), cap.getY(), juce::Colour (0xff23272c), cap.getX(), cap.getBottom(), false));
-        g.fillRoundedRectangle (cap, 2.0f);
-        for (int k = -1; k <= 1; k += 2) // estrías a ±3 px de la línea central
+        const auto across = juce::jmin ((vertical ? area.getWidth() : area.getHeight()) * 0.85f, 26.0f);
+        const auto along = 18.0f;
+        const auto cap = juce::Rectangle<float> (vertical ? across : along, vertical ? along : across)
+                             .withCentre (vertical ? juce::Point<float> { mid, sliderPos } : juce::Point<float> { sliderPos, mid });
         {
-            g.setColour (juce::Colours::black.withAlpha (0.45f));
-            if (vertical) g.drawHorizontalLine (juce::roundToInt (cap.getCentreY()) + 3 * k, cap.getX() + 3.0f, cap.getRight() - 3.0f);
-            else          g.drawVerticalLine (juce::roundToInt (cap.getCentreX()) + 3 * k, cap.getY() + 3.0f, cap.getBottom() - 3.0f);
+            juce::Path shape;
+            shape.addRoundedRectangle (cap, 2.5f);
+            juce::DropShadow (juce::Colours::black.withAlpha (0.7f), 6, { 0, 4 }).drawForPath (g, shape); // proyectada
+            g.setColour (juce::Colours::black.withAlpha (0.55f)); // de contacto
+            g.fillRoundedRectangle (cap.translated (0.0f, 1.2f).expanded (0.6f), 2.5f);
         }
-        g.setColour (juce::Colours::white.withAlpha (slider.isEnabled() ? 0.9f : 0.45f)); // línea central
-        if (vertical) g.drawHorizontalLine (juce::roundToInt (cap.getCentreY()), cap.getX() + 1.5f, cap.getRight() - 1.5f);
-        else          g.drawVerticalLine (juce::roundToInt (cap.getCentreX()), cap.getY() + 1.5f, cap.getBottom() - 1.5f);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4d535b), cap.getX(), cap.getY(), juce::Colour (0xff1a1d21), cap.getX(), cap.getBottom(), false));
+        g.fillRoundedRectangle (cap, 2.5f);
+        // Caras talladas: mitad hacia la luz (arriba, o izquierda en horizontal) clara y la otra oscura, cada una con
+        // degradado hacia la línea central (el fondo del tallado)
+        const auto inner = cap.reduced (1.5f);
+        auto firstHalf = inner, secondHalf = inner;
+        if (vertical) { firstHalf = inner.withBottom (inner.getCentreY()); secondHalf = inner.withTop (inner.getCentreY()); }
+        else          { firstHalf = inner.withRight (inner.getCentreX()); secondHalf = inner.withLeft (inner.getCentreX()); }
+        const auto grad = [vertical] (juce::Rectangle<float> r, juce::Colour from, juce::Colour to, bool towardsEnd)
+        {
+            const auto a = towardsEnd ? r.getTopLeft() : (vertical ? r.getBottomLeft() : r.getTopRight());
+            const auto b = towardsEnd ? (vertical ? r.getBottomLeft() : r.getTopRight()) : r.getTopLeft();
+            return juce::ColourGradient (from, a, to, b, false);
+        };
+        g.setGradientFill (grad (firstHalf, juce::Colour (0xff8a919a), juce::Colour (0xff50565e), true));
+        g.fillRoundedRectangle (firstHalf, 1.5f);
+        g.setGradientFill (grad (secondHalf, juce::Colour (0xff3a3f46), juce::Colour (0xff23272c), false));
+        g.fillRoundedRectangle (secondHalf, 1.5f);
+        // Luz en el canto superior y contorno
+        g.setColour (juce::Colours::white.withAlpha (0.35f));
+        g.drawHorizontalLine (juce::roundToInt (cap.getY() + 0.5f), cap.getX() + 2.5f, cap.getRight() - 2.5f);
+        g.setColour (juce::Colours::black.withAlpha (0.75f));
+        g.drawRoundedRectangle (cap, 2.5f, 0.9f);
+        // Línea central: surco oscuro con el trazo blanco
         g.setColour (juce::Colours::black.withAlpha (0.6f));
-        g.drawRoundedRectangle (cap, 2.0f, 0.8f);
+        if (vertical) g.fillRect (juce::Rectangle<float> (inner.getWidth(), 2.4f).withCentre (cap.getCentre()));
+        else          g.fillRect (juce::Rectangle<float> (2.4f, inner.getHeight()).withCentre (cap.getCentre()));
+        g.setColour (juce::Colours::white.withAlpha (enabled ? 0.92f : 0.45f));
+        if (vertical) g.fillRect (juce::Rectangle<float> (inner.getWidth() - 2.0f, 1.0f).withCentre (cap.getCentre()));
+        else          g.fillRect (juce::Rectangle<float> (1.0f, inner.getHeight() - 2.0f).withCentre (cap.getCentre()));
     }
 
     void drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool highlighted, bool down) override
@@ -737,21 +905,38 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         g.drawFittedText (b.getButtonText(), r.withTrimmedLeft (d + 10.0f).toNearestInt(), juce::Justification::centredLeft, 1);
     }
 
-    // Marco de sección como panel en relieve (antes, la línea de 1 px de V4 cortada por el título): sombra en dos pasadas bajo
-    // el panel, cara con degradado vertical, banda de título de 19 px algo más clara, luz en el canto superior y contorno
-    // oscuro; título dentro de la banda. Todo dentro de los límites del componente (1,5 px de margen y 2 de sombra abajo)
+    // Marco de sección como panel en relieve (antes, la línea de 1 px de V4 cortada por el título): sombra proyectada hacia
+    // abajo, cara con degradado vertical del skin (Skin::panelFace; en Brushed Metal, con vetas y un brillo diagonal de
+    // metal pulido), banda de título de 19 px algo más clara, chaflán claro 1 px por dentro del canto, luz en el canto
+    // superior y contorno oscuro; dos tornillos en las esquinas de la banda y el título tras el izquierdo. Todo dentro de los límites del componente: 1,5 px de margen y 5 px de sombra abajo
+    // (el borde inferior del panel coincide con el de los displays a ras, Section::resized). La sombra son 5 capas
+    // apiladas y no un desenfoque: el marco se repinta bajo cada perilla que cambia y DropShadow difuminaría el panel entero
     void drawGroupComponentOutline (juce::Graphics& g, int width, int height, const juce::String& text,
                                     const juce::Justification&, juce::GroupComponent& group) override
     {
-        const auto card = juce::Rectangle<float> ((float) width, (float) height).reduced (1.5f).withTrimmedBottom (2.0f);
+        const auto card = juce::Rectangle<float> ((float) width, (float) height).reduced (1.5f).withTrimmedBottom (3.5f);
         constexpr float radius = 7.0f;
-        g.setColour (juce::Colours::black.withAlpha (0.18f));
-        g.fillRoundedRectangle (card.translated (0.0f, 2.0f), radius);
-        g.setColour (juce::Colours::black.withAlpha (0.28f));
+        for (int k = 5; k >= 1; --k) // capa k: 0,9·k px más abajo, 0,3·k px más ancha, 9 % de negro (acumulado ≈ 38 %)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.09f));
+            g.fillRoundedRectangle (card.translated (0.0f, 0.9f * (float) k).expanded (0.3f * (float) k, 0.0f), radius + 0.5f * (float) k);
+        }
+        g.setColour (juce::Colours::black.withAlpha (0.3f)); // de contacto
         g.fillRoundedRectangle (card.translated (0.0f, 0.8f), radius);
-        g.setGradientFill (juce::ColourGradient (Skin::c (0xff353b43).withAlpha (0.94f), 0.0f, card.getY(),
-                                                 Skin::c (0xff282d34).withAlpha (0.94f), 0.0f, card.getBottom(), false));
+        const auto face = Skin::panelFace();
+        g.setGradientFill (juce::ColourGradient (face.top.withAlpha (0.94f), 0.0f, card.getY(), face.bottom.withAlpha (0.94f), 0.0f, card.getBottom(), false));
         g.fillRoundedRectangle (card, radius);
+        if (Skin::current() == Skin::metal)
+        {
+            // Vetas del cepillado (las del fondo de ventana) y brillo de metal pulido: banda diagonal blanca al 12 % en el
+            // 40 % del recorrido de la esquina superior izquierda a la inferior derecha
+            g.setTiledImageFill (Skin::brushedTile(), 0, 0, 1.0f);
+            g.fillRoundedRectangle (card, radius);
+            juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.0f), card.getTopLeft(), juce::Colours::white.withAlpha (0.0f), card.getBottomRight(), false);
+            sheen.addColour (0.4, juce::Colours::white.withAlpha (0.12f));
+            g.setGradientFill (sheen);
+            g.fillRoundedRectangle (card, radius);
+        }
         {
             juce::Graphics::ScopedSaveState state (g);
             g.reduceClipRegion (card.withHeight (19.0f).toNearestInt());
@@ -760,14 +945,77 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         }
         g.setColour (juce::Colours::white.withAlpha (0.10f));
         g.drawHorizontalLine (juce::roundToInt (card.getY() + 1.0f), card.getX() + radius, card.getRight() - radius);
+        // Chaflán: línea clara 1 px por dentro del canto, de 14 % arriba a nada abajo
+        g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.14f), 0.0f, card.getY(), juce::Colours::white.withAlpha (0.0f), 0.0f, card.getBottom(), false));
+        g.drawRoundedRectangle (card.reduced (1.5f), radius - 1.5f, 0.8f);
         g.setColour (juce::Colours::black.withAlpha (0.55f));
         g.drawRoundedRectangle (card, radius, 1.0f);
+        // Tornillos de cabeza ranurada (Ø 7 px) en las esquinas de la banda de título, con la ranura a 35° y -20°. Acero
+        // blanco azulado en todos los skins (sin Skin::c), como el cuerpo de las perillas
+        for (const auto [cx, slot] : { std::pair<float, float> { card.getX() + 9.5f, 0.61f }, { card.getRight() - 9.5f, -0.35f } })
+        {
+            const auto head = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ cx, card.getY() + 9.5f });
+            g.setColour (juce::Colours::black.withAlpha (0.45f)); // avellanado: sombra arriba, luz abajo
+            g.fillEllipse (head.expanded (1.0f).translated (0.0f, -0.4f));
+            g.setColour (juce::Colours::white.withAlpha (0.12f));
+            g.drawEllipse (head.expanded (0.8f).translated (0.0f, 0.5f), 0.6f);
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xffe8f0fa), head.getX() + 1.5f, head.getY() + 1.0f, juce::Colour (0xff66778c), head.getRight(), head.getBottom(), true));
+            g.fillEllipse (head);
+            const juce::Point<float> d { 2.6f * std::cos (slot), 2.6f * std::sin (slot) };
+            g.setColour (juce::Colours::black.withAlpha (0.7f));
+            g.drawLine ({ head.getCentre() - d, head.getCentre() + d }, 1.2f);
+            g.setColour (juce::Colours::white.withAlpha (0.25f));
+            g.drawLine ({ head.getCentre() - d + juce::Point<float> { 0.0f, 0.8f }, head.getCentre() + d + juce::Point<float> { 0.0f, 0.8f } }, 0.5f);
+        }
         if (text.isNotEmpty())
         {
             g.setColour (group.findColour (juce::GroupComponent::textColourId).withAlpha (group.isEnabled() ? 0.95f : 0.45f));
             g.setFont (juce::FontOptions (14.0f, juce::Font::bold));
-            g.drawText (text, card.withHeight (19.0f).withTrimmedLeft (10.0f).toNearestInt(), juce::Justification::centredLeft, true);
+            g.drawText (text, card.withHeight (19.0f).withTrimmedLeft (19.0f).toNearestInt(), juce::Justification::centredLeft, true);
         }
+    }
+
+    // Desplegable de forma de onda (propiedad waveGlyphs, WaveGlyph::decorate): icono de la opción elegida a la izquierda
+    // del texto, en una franja de 30 px
+    void drawComboBox (juce::Graphics& g, int width, int height, bool down, int buttonX, int buttonY, int buttonW, int buttonH,
+                       juce::ComboBox& box) override
+    {
+        LookAndFeel_V4::drawComboBox (g, width, height, down, buttonX, buttonY, buttonW, buttonH, box);
+        if (box.getProperties().contains ("waveGlyphs"))
+            WaveGlyph::draw (g, box.getText(), juce::Rectangle<float> (7.0f, 0.0f, 22.0f, (float) height).reduced (0.0f, (float) height * 0.3f),
+                             Skin::accent().withMultipliedAlpha (box.isEnabled() ? 1.0f : 0.4f));
+    }
+
+    void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
+    {
+        LookAndFeel_V4::positionComboBoxText (box, label);
+        if (box.getProperties().contains ("waveGlyphs"))
+            label.setBounds (label.getBounds().withTrimmedLeft (28));
+    }
+
+    // Opción de menú con icono (formas de onda): franja de 34 px para el icono en vez del cuadrado de una línea de V4, y la
+    // opción elegida con el texto en el acento (el icono ocupa el sitio de la marca). Sin icono, como V4
+    void drawPopupMenuItem (juce::Graphics& g, const juce::Rectangle<int>& area, bool isSeparator, bool isActive, bool isHighlighted,
+                            bool isTicked, bool hasSubMenu, const juce::String& text, const juce::String& shortcutKeyText,
+                            const juce::Drawable* icon, const juce::Colour* textColour) override
+    {
+        if (icon == nullptr || isSeparator)
+        {
+            LookAndFeel_V4::drawPopupMenuItem (g, area, isSeparator, isActive, isHighlighted, isTicked, hasSubMenu, text, shortcutKeyText, icon, textColour);
+            return;
+        }
+        auto r = area.reduced (1);
+        if (isHighlighted && isActive)
+        {
+            g.setColour (findColour (juce::PopupMenu::highlightedBackgroundColourId));
+            g.fillRect (r);
+        }
+        icon->drawWithin (g, r.removeFromLeft (34).reduced (5, 0).toFloat().reduced (0.0f, (float) r.getHeight() * 0.22f),
+                          juce::RectanglePlacement::stretchToFit, isActive ? 1.0f : 0.5f);
+        auto colour = isTicked ? Skin::accent() : findColour (isHighlighted ? juce::PopupMenu::highlightedTextColourId : juce::PopupMenu::textColourId);
+        g.setColour (colour.withMultipliedAlpha (isActive ? 1.0f : 0.5f));
+        g.setFont (getPopupMenuFont().withHeight (juce::jmin ((float) r.getHeight() / 1.3f, 17.0f)));
+        g.drawFittedText (text, r.withTrimmedRight (3), juce::Justification::centredLeft, 1);
     }
 
     // Caja de valor de perillas y faders: hundida (fondo oscuro, sombra interior arriba, luz abajo) en vez del contorno de V4.
@@ -787,7 +1035,16 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         g.drawHorizontalLine (juce::roundToInt (r.getY() + 0.5f), r.getX() + 3.0f, r.getRight() - 3.0f);
         g.setColour (juce::Colours::white.withAlpha (0.08f));
         g.drawHorizontalLine (juce::roundToInt (r.getBottom() - 1.0f), r.getX() + 3.0f, r.getRight() - 3.0f);
-        g.setColour (label.findColour (juce::Label::textColourId).withMultipliedAlpha (label.isEnabled() ? 1.0f : 0.5f));
+        const auto colour = label.findColour (juce::Label::textColourId).withMultipliedAlpha (label.isEnabled() ? 1.0f : 0.5f);
+        const auto* parent = label.getParentComponent();
+        if ((label.getProperties().contains ("waveGlyphs") || (parent != nullptr && parent->getProperties().contains ("waveGlyphs")))
+            && WaveGlyph::has (label.getText()))
+        {
+            // Elección de forma de onda: el trazo en lugar del nombre (el nombre sigue en el tooltip y en el menú Set value)
+            WaveGlyph::draw (g, label.getText(), r.withSizeKeepingCentre (juce::jmin (r.getWidth() - 8.0f, 30.0f), r.getHeight() * 0.56f), colour);
+            return;
+        }
+        g.setColour (colour);
         g.setFont (getLabelFont (label));
         g.drawFittedText (label.getText(), r.reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.8f);
     }
@@ -929,6 +1186,8 @@ struct Section : juce::Component
             combo.addItemList (choice->choices, 1); // los items deben existir antes del attachment
         addAndMakeVisible (combo);
         comboAttachment = std::make_unique<APVTS::ComboBoxAttachment> (s, id, combo);
+        if (WaveGlyph::isWaveChoice (s.getParameter (id)))
+            WaveGlyph::decorate (combo);
         decorate (s, id, combo);
         return *this;
     }
@@ -940,6 +1199,8 @@ struct Section : juce::Component
             combo.addItemList (choice->choices, 1);
         addAndMakeVisible (combo);
         pickAttachment = std::make_unique<PickComboAttachment> (*s.getParameter (id), combo, std::move (onPick));
+        if (WaveGlyph::isWaveChoice (s.getParameter (id)))
+            WaveGlyph::decorate (combo);
         decorate (s, id, combo);
         return *this;
     }
@@ -1071,7 +1332,7 @@ struct Section : juce::Component
         {
             auto header = r.removeFromTop (24);
             if (toggle.isVisible()) toggle.setBounds (header.removeFromLeft (60));
-            if (combo.isVisible())  combo.setBounds (header.removeFromLeft (110));
+            if (combo.isVisible())  combo.setBounds (header.removeFromLeft (combo.getProperties().contains ("waveGlyphs") ? 140 : 110)); // +30: icono
             if (extraToggle.isVisible()) extraToggle.setBounds (header.removeFromLeft (80).withTrimmedLeft (10));
             for (auto& b : headerButtons)
                 b->setBounds (header.removeFromLeft (buttonWidth (*b)).withTrimmedLeft (6));

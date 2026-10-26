@@ -221,6 +221,44 @@ inline const juce::Image& circuitTile()
     return img;
 }
 
+// Vetas de acero cepillado (Brushed Metal): cada fila con su brillo (±5 %) y grano fino a lo largo de ella; mosaico de
+// 512 × 64 con semilla fija, generado una vez
+inline const juce::Image& brushedTile()
+{
+    static juce::Image streaks;
+    if (streaks.isNull())
+    {
+        streaks = juce::Image (juce::Image::ARGB, 512, 64, true);
+        juce::Random rng (0xB0A5);
+        for (int y = 0; y < 64; ++y)
+        {
+            const auto row = rng.nextFloat() - 0.5f;
+            for (int x = 0; x < 512; ++x)
+            {
+                const auto v = 0.75f * row + 0.25f * (rng.nextFloat() - 0.5f);
+                streaks.setPixelAt (x, y, v > 0.0f ? juce::Colours::white.withAlpha (0.10f * v) : juce::Colours::black.withAlpha (-0.14f * v));
+            }
+        }
+    }
+    return streaks;
+}
+
+// Cara de los paneles de sección (KoniLookAndFeel::drawGroupComponentOutline), arriba y abajo del degradado vertical.
+// Default: el gris de siempre. Brushed Metal: acero claro (L ≈ 45 % arriba), con vetas y brillo aparte. Green: verde
+// grisáceo (S ≈ 0,33) y más claro que el mapeo de la rampa (#0c2a16, S ≈ 0,71). Amber: ámbar tostado más claro que el
+// mapeo (#312102)
+struct PanelFace { juce::Colour top, bottom; };
+inline PanelFace panelFace()
+{
+    switch (current())
+    {
+        case metal: return { juce::Colour (0xff6e7782), juce::Colour (0xff4b535d) };
+        case green: return { juce::Colour (0xff2a3f31), juce::Colour (0xff1f2f25) };
+        case amber: return { juce::Colour (0xff4d3816), juce::Colour (0xff36270e) };
+        default:    return { juce::Colour (0xff353b43), juce::Colour (0xff282d34) };
+    }
+}
+
 // Fondo de ventana. Default: el color plano de siempre. Fósforo: fondo tintado con textura de tubo: grano (ruido de ±4 % por
 // píxel, mosaico de 128 × 128 generado una vez por skin con semilla fija), una línea de barrido cada 3 px, brillo central
 // tenue y viñeta hacia los bordes; en Green, además, la placa de circuito (circuitTile). Coste: uno o dos rellenos en mosaico
@@ -229,26 +267,11 @@ inline void paintBackground (juce::Graphics& g, juce::Rectangle<int> area, juce:
 {
     if (current() == metal)
     {
-        // Acero cepillado: base algo más clara que Default, vetas horizontales (cada fila con su brillo, ±5 %, y grano fino
-        // a lo largo de ella; mosaico de 512 × 64 con semilla fija) y luz cenital (más claro arriba, más oscuro abajo)
+        // Acero cepillado: base algo más clara que Default, vetas horizontales (brushedTile) y luz cenital (más claro arriba,
+        // más oscuro abajo)
         g.setColour (plain.brighter (0.25f));
         g.fillRect (area);
-        static juce::Image streaks;
-        if (streaks.isNull())
-        {
-            streaks = juce::Image (juce::Image::ARGB, 512, 64, true);
-            juce::Random rng (0xB0A5);
-            for (int y = 0; y < 64; ++y)
-            {
-                const auto row = rng.nextFloat() - 0.5f;
-                for (int x = 0; x < 512; ++x)
-                {
-                    const auto v = 0.75f * row + 0.25f * (rng.nextFloat() - 0.5f);
-                    streaks.setPixelAt (x, y, v > 0.0f ? juce::Colours::white.withAlpha (0.10f * v) : juce::Colours::black.withAlpha (-0.14f * v));
-                }
-            }
-        }
-        g.setTiledImageFill (streaks, area.getX(), area.getY(), 1.0f);
+        g.setTiledImageFill (brushedTile(), area.getX(), area.getY(), 1.0f);
         g.fillRect (area);
         g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.07f), 0.0f, (float) area.getY(),
                                                  juce::Colours::black.withAlpha (0.18f), 0.0f, (float) area.getBottom(), false));
