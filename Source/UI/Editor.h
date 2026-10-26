@@ -1033,7 +1033,7 @@ private:
         const auto w = juce::jlimit (420, kWidth - 40, juce::roundToInt (body->weight() * 78.0f) + 52);
         openPanel (panelTitle, std::move (body), w, 230);
     }
-    // Teclas 1-9 del PC: el favorito n (0-8) en orden alfabético de nombre (natural: "Pad 2" antes que "Pad 10")
+    // Teclas 1-9 del PC: el favorito n (0-8) en el orden del usuario (se reordena en el navegador de presets)
     void loadFavorite (int n)
     {
         auto& pm = koni.presetManager;
