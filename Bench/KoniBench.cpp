@@ -325,7 +325,28 @@ int undoTest()
     h.undo();
     check (near (a->getValue(), 0.7f) && near (b->getValue(), 0.0f) && proc.apvts.state.getProperty ("perfMacros").toString().isEmpty(),
            "undo de la carga: A 0.7 (su valor previo, puesto sin gesto), B 0, propiedad vacía");
-    for (int i = 0; i < 250; ++i) gesture (a, { (float) (i % 100) / 100.0f + 0.001f });
+    // Gestos seguidos sobre el mismo parámetro (rueda: un gesto por clic) se funden en un paso hasta tocar otro
+    h.clear();
+    a->setValueNotifyingHost (0.0f); b->setValueNotifyingHost (0.0f);
+    gesture (a, { 0.1f }); gesture (a, { 0.2f }); gesture (a, { 0.3f });
+    gesture (b, { 0.4f });
+    gesture (a, { 0.5f }); gesture (a, { 0.6f });
+    h.undo();
+    check (near (a->getValue(), 0.3f) && near (b->getValue(), 0.4f), "rueda: dos gestos de A tras B = un paso (A vuelve a 0.3)");
+    h.undo();
+    check (near (b->getValue(), 0.0f), "B: su propio paso");
+    h.undo();
+    check (near (a->getValue(), 0.0f) && ! h.canUndo(), "tres gestos de A seguidos = un paso (A vuelve a 0)");
+    h.redo();
+    gesture (a, { 0.35f });
+    check (h.canUndo() && ! h.canRedo(), "tras rehacer, un gesto del mismo parámetro abre paso nuevo");
+    h.undo();
+    check (near (a->getValue(), 0.3f), "...y deshacerlo vuelve al valor rehecho (0.3), no a 0");
+    h.clear();
+    gesture (a, { 0.8f }); gesture (a, { 0.3f });
+    check (! h.canUndo(), "fundido que vuelve al valor de partida: sin paso");
+
+    for (int i = 0; i < 250; ++i) gesture (i % 2 == 0 ? a : b, { (float) (i % 100) / 100.0f + 0.001f }); // alternos: no se funden
     int steps = 0; while (h.canUndo()) { h.undo(); ++steps; }
     check (steps == (int) UndoHistory::maxSteps, "tope de 200 pasos");
     proc.apvts.replaceState (juce::ValueTree ("P"));

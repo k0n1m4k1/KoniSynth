@@ -3,7 +3,8 @@
 #pragma once
 
 // Deshacer / rehacer de lo que hace el usuario: cada gesto sobre un parámetro (arrastre de perilla, clic, selector,
-// Set value, Reset) es un paso; una carga de preset es un solo paso (parámetros + propiedades de texto + nombre).
+// Set value, Reset) es un paso, y los gestos seguidos sobre el mismo parámetro (rueda, varios arrastres) se funden en ese
+// paso hasta tocar otro; una carga de preset es un solo paso (parámetros + propiedades de texto + nombre).
 // También las propiedades de estado seguidas (macros, nombre del preset). No entran: automatización del host, MIDI
 // (CC, MIDI learn) ni los destinos movidos por las macros de interpretación (no abren gesto).
 // Todo en el hilo de mensajes salvo parameterValueChanged, que llega de cualquier hilo y no hace nada.
@@ -43,10 +44,28 @@ public:
     {
         if (depth > 0 && --depth == 0 && ! pending.empty())
         {
-            undoStack.push_back (std::move (pending));
+            // Mismo parámetro que el último paso (rueda del ratón: un gesto por clic; arrastres seguidos de la misma perilla):
+            // se funde en ese paso, con su "antes" y el "después" nuevo. Un paso nuevo solo al tocar otro parámetro (o tras
+            // deshacer, rehacer o una carga de preset). Si vuelve al valor de partida, el paso desaparece
+            if (mergeable && pending.size() == 1 && pending[0].param >= 0 && ! undoStack.empty()
+                && undoStack.back().size() == 1 && undoStack.back()[0].param == pending[0].param)
+            {
+                auto& last = undoStack.back()[0];
+                last.after = pending[0].after;
+                if (std::abs (last.after - last.before) <= 1.0e-7f)
+                {
+                    undoStack.pop_back();
+                    mergeable = false;
+                }
+            }
+            else
+            {
+                mergeable = pending.size() == 1 && pending[0].param >= 0; // un gesto sobre un parámetro: los siguientes se funden
+                undoStack.push_back (std::move (pending));
+                if (undoStack.size() > maxSteps)
+                    undoStack.erase (undoStack.begin());
+            }
             pending = {};
-            if (undoStack.size() > maxSteps)
-                undoStack.erase (undoStack.begin());
             redoStack.clear();
             changed();
         }
@@ -57,10 +76,10 @@ public:
     juce::String undoName() const { return canUndo() ? describe (undoStack.back()) : juce::String(); }
     juce::String redoName() const { return canRedo() ? describe (redoStack.back()) : juce::String(); }
 
-    void undo() { move (undoStack, redoStack, true); }
-    void redo() { move (redoStack, undoStack, false); }
+    void undo() { mergeable = false; move (undoStack, redoStack, true); }
+    void redo() { mergeable = false; move (redoStack, undoStack, false); }
 
-    void clear() { undoStack.clear(); redoStack.clear(); pending.clear(); gestureStart.clear(); changed(); }
+    void clear() { undoStack.clear(); redoStack.clear(); pending.clear(); gestureStart.clear(); mergeable = false; changed(); }
 
     std::function<void()> onChange; // la UI refresca los botones
 
@@ -188,4 +207,5 @@ private:
     Step pending;
     int depth = 0;
     bool applying = false;
+    bool mergeable = false; // el último paso es un gesto sobre un parámetro: otro gesto sobre el mismo se funde en él
 };
