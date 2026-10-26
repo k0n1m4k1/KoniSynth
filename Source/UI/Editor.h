@@ -272,13 +272,17 @@ public:
                      .withKnob (s, "genxTime", "Time").withKnob (s, "genxRepeats", "Repeats").withKnob (s, "genxLevel", "Level");
         omniSection.withKnob (s, "omniSplit", "Split").withKnob (s, "omniSustain", "Sustain").withKnob (s, "omniHarpOctave", "Oct")
                    .withKnob (s, "omniHarpLevel", "Harp").withKnob (s, "omniChordLevel", "Chord").withKnob (s, "omniBassLevel", "Bass");
-        omniRhythmSection.withSortedCombo (s, "omniRhythm").withKnob (s, "omniTempo", "Tempo").withKnob (s, "omniRhythmLevel", "Level");
+        omniRhythmSection.withHeaderButton ("Edit...", "Open the rhythm editor: draw your own rhythms (User 1-8) with drum lanes and the "
+                                            "automatic bass (root, low root, 5th, 3rd of the chord you hold). Each one is a MIDI file "
+                                            "you can also edit elsewhere (drums on channel 10, bass on channel 2).",
+                                            [this] { openPanel ("Omnichord Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::omnichord), 1300, 560); })
+                         .withSortedCombo (s, "omniRhythm").withKnob (s, "omniTempo", "Tempo").withKnob (s, "omniRhythmLevel", "Level");
         drumSection.withCombo (s, "drumKit").withExtraToggle (s, "drumVelocity", "Velocity")
                    .withKnob (s, "drumTune", "Tune").withKnob (s, "drumDecay", "Decay").withKnob (s, "drumTone", "Tone")
                    .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent");
         drumPatternSection.withHeaderButton ("Edit...", "Open the rhythm editor: draw your own rhythms (User 1-8) on a grid of "
                                              "instrument lanes and steps. Each one is a MIDI file you can also edit elsewhere.",
-                                             [this] { openPanel ("Rhythm Editor", std::make_unique<RhythmEditor> (koni), 1300, 560); })
+                                             [this] { openPanel ("Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::drums), 1300, 560); })
                           .withSortedCombo (s, "drumPattern").withKnob (s, "drumPattern2", "+ Pattern")
                           .withKnob (s, "drumTempo", "Tempo").withKnob (s, "drumSwing", "Swing")
                           .withBody (drumLeds, 12, 0); // fila de LED de los pasos sobre las perillas
@@ -424,7 +428,11 @@ public:
         leslieSection.withToggle (s, "leslieOn").withCombo (s, "leslieSpeed")
                      .withKnob (s, "leslieDrive", "Drive").withKnob (s, "leslieMix", "Mix");
         springSection.withToggle (s, "springOn").withKnob (s, "springDecay", "Decay").withKnob (s, "springMix", "Mix");
-        vl1RhythmSection.withCombo (s, "vl1Rhythm")
+        vl1RhythmSection.withHeaderButton ("Edit...", "Open the rhythm editor: draw your own rhythms (User 1-8) with the three VL-1 "
+                                           "sounds (Pock, Peek, Noise; one per step). Each one is a MIDI file you can also edit elsewhere "
+                                           "(channel 10: notes 36, 37, 42).",
+                                           [this] { openPanel ("VL-1 Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::vl1), 1300, 400); })
+                        .withCombo (s, "vl1Rhythm")
                         .withKnob (s, "vl1Tempo", "Tempo").withKnob (s, "vl1Balance", "Balance");
         vl1DisplaySection.withBody (vl1Display, 0, 420); // 9 posiciones de 7 segmentos a ~52 px de alto
 

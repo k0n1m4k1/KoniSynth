@@ -636,6 +636,66 @@ int rhythmTest()
         junkOk = UserRhythms::read (in, "m", r, e);
         check (! junkOk && e.contains ("channel 10"), "MIDI sin canal 10: rechazado (" + e + ")");
     }
+
+    // 5) Omnichord: los 12 ritmos de fábrica con su bajo (canal 2) van y vuelven iguales; restrict los acepta
+    {
+        ok = 0; bad.clear();
+        for (const auto& p : omnichordPatterns())
+        {
+            const auto r = fromPattern (p);
+            UserRhythms::Rhythm back; juce::String error;
+            const auto good = roundTrip (r, back, error) && same (r, back)
+                              && UserRhythms::restrict (back, UserRhythms::spec (UserRhythms::Target::omnichord), error) && back.ignored == 0;
+            if (good) ++ok; else bad << p.name << " (" << error << ") ";
+        }
+        check (ok == (int) omnichordPatterns().size(), "Omnichord: ida y vuelta con el bajo en el canal 2: " + juce::String (ok) + " de "
+               + juce::String ((int) omnichordPatterns().size()) + (bad.isNotEmpty() ? " | " + bad : juce::String()));
+    }
+
+    // 6) restrict por motor: la caja de ritmos quita el bajo; el VL-1 deja sus 3 carriles, aplana niveles, un sonido por paso
+    //    (gana BD, luego RS, luego CH) y rechaza el tresillo
+    {
+        UserRhythms::Rhythm r; juce::String e;
+        r.clear (16, 4);
+        r.lanes[(size_t) DrumSlot::BD] = "X...x...o...x...";
+        r.lanes[(size_t) DrumSlot::RS] = "x.x.............";
+        r.lanes[(size_t) DrumSlot::CH] = "x.x.x...........";
+        r.lanes[(size_t) DrumSlot::SD] = "....x...........";
+        r.lanes[(size_t) DrumSlot::Bass] = "r.......f.......";
+        auto d = r;
+        const auto drumsOk = UserRhythms::restrict (d, UserRhythms::spec (UserRhythms::Target::drums), e);
+        check (drumsOk && d.lanes[(size_t) DrumSlot::Bass].empty() && d.ignored == 2, "caja de ritmos: el bajo se ignora (2 notas) " + e);
+        auto v = r;
+        const auto vlOk = UserRhythms::restrict (v, UserRhythms::spec (UserRhythms::Target::vl1), e);
+        check (vlOk && v.lanes[(size_t) DrumSlot::BD] == "x...x...x...x..." && v.lanes[(size_t) DrumSlot::RS] == "..x............."
+               && v.lanes[(size_t) DrumSlot::CH] == "................" && v.lanes[(size_t) DrumSlot::SD].empty() && v.ignored == 7,
+               "VL-1: 3 carriles, sin niveles, un sonido por paso (BD > RS > CH), 7 notas ignoradas: " + juce::String (v.ignored) + " " + e);
+        UserRhythms::Rhythm t; t.clear (12, 3); t.lanes[(size_t) DrumSlot::BD] = "x.....x.....";
+        e.clear();
+        const auto tripletOk = UserRhythms::restrict (t, UserRhythms::spec (UserRhythms::Target::vl1), e);
+        check (! tripletOk && e.contains ("triplet"), "VL-1: tresillo rechazado (" + e + ")");
+    }
+
+    // 7) Patrones de duraciones (VL-1, H = 16 ticks = corchea, W = 32 = negra) a semicorcheas de 8 ticks: Rock 1 llena un
+    //    compás; March (2 negras) se repite hasta 16 pasos; Waltz (3 negras) da el vals de 12
+    {
+        using S = DrumSlot;
+        const int rockLane[] = { (int) S::BD, (int) S::RS, (int) S::CH, (int) S::CH, (int) S::BD, (int) S::RS, (int) S::CH, (int) S::RS };
+        const int rockTicks[] = { 16, 16, 16, 16, 16, 16, 16, 16 };
+        UserRhythms::Rhythm r;
+        const auto rock = UserRhythms::fromDurations (rockLane, rockTicks, 8, 8, 32, r);
+        check (rock && r.numSteps == 16 && r.lanes[(size_t) S::BD] == "x.......x......." && r.lanes[(size_t) S::RS] == "..x.......x...x."
+               && r.lanes[(size_t) S::CH] == "....x.x.....x...", "duraciones: Rock 1 del VL-1 en 16 semicorcheas");
+        const int marchLane[] = { (int) S::BD, (int) S::CH };
+        const int marchTicks[] = { 32, 32 };
+        const auto march = UserRhythms::fromDurations (marchLane, marchTicks, 2, 8, 32, r);
+        check (march && r.numSteps == 16 && r.lanes[(size_t) S::BD] == "x.......x......." && r.lanes[(size_t) S::CH] == "....x.......x...",
+               "duraciones: March (2 tiempos) repetida hasta 16 pasos");
+        const int waltzLane[] = { (int) S::BD, (int) S::CH, (int) S::CH };
+        const int waltzTicks[] = { 32, 32, 32 };
+        const auto waltz = UserRhythms::fromDurations (waltzLane, waltzTicks, 3, 8, 32, r);
+        check (waltz && r.isWaltz() && r.lanes[(size_t) S::CH] == "....x...x...", "duraciones: Waltz en el vals de 12 pasos");
+    }
     std::printf ("%d fallos\n", fails);
     return fails;
 }

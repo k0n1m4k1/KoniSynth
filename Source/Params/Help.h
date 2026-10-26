@@ -132,7 +132,10 @@ static juce::String paramHelp (const juce::String& id)
         { "omniBassLevel", "Volume of the auto bass (root, fifth and third follow the rhythm)." },
         { "omniHarpOctave", "Octave of the strum plate: its 13 zones span 4 octaves from the chord." },
         { "omniSplit", "Keys below this note are chord buttons (one key = major; add the minor third for minor, the minor seventh for 7th, both for m7, the major seventh for maj7). From this note up: the 13 strum zones. The mod wheel also strums." },
-        { "omniRhythm", "Omnichord rhythm with auto bass. The bass plays only while a chord key is held. Patterns are KoniSynth's own, in each style." },
+        { "omniRhythm", "Omnichord rhythm with auto bass. The bass plays only while a chord key is held. Patterns are KoniSynth's own, in each style. "
+                        "User 1-8: your own rhythms (Edit...), one MIDI file each in the KoniSynth settings folder, rhythms/Omnichord/"
+                        "User 1.mid ... User 8.mid: drums on channel 10 (General MIDI notes), bass on channel 2 written in C (C3 root, "
+                        "C2 low root, G3 fifth, E3 third). Default: Off." },
         { "omniTempo", "Omnichord rhythm tempo (follows the host tempo when the host is playing)." },
         { "omniRhythmLevel", "Volume of the Omnichord drums." },
         { "drumPattern2", "Second pattern played at the same time, like holding two rhythm buttons on the Mini Pops 7: hits add up, and waltz or triplet rhythms make the counter skip steps (the trick behind the Oxygene rhythms)." },
@@ -311,7 +314,9 @@ static juce::String paramHelp (const juce::String& id)
         { "vl1Release", "R: release after you let go (0-9)." },
         { "vl1Vibrato", "V: vibrato (0 = off; 1 fast and subtle ... 9 slow and deep)." },
         { "vl1Tremolo", "T: tremolo (0 = off; 1 fast ... 9 slow)." },
-        { "vl1Rhythm", "VL-1 rhythm box (Rock 1 is the one from \"Da Da Da\"). Off stops it." },
+        { "vl1Rhythm", "VL-1 rhythm box (Rock 1 is the one from \"Da Da Da\"). Off stops it. User 1-8: your own rhythms (Edit...), one MIDI "
+                       "file each in the KoniSynth settings folder, rhythms/Casio VL-1/User 1.mid ... User 8.mid: channel 10, notes 36 "
+                       "(Pock), 37 (Peek) and 42 (Noise), one sound per sixteenth. Default: Off." },
         { "vl1Tempo", "VL-1 tempo, from -9 to +9 (0 = about 131 BPM)." },
         { "vl1Balance", "Balance between melody and rhythm." },
         { "crushOn", "Turns the bit crusher on: lowers resolution and sample rate for 8-bit game, early sampler and lo-fi textures." },

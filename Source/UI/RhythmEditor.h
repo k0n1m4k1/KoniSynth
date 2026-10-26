@@ -3,19 +3,43 @@
 #pragma once
 
 //==============================================================================
-// Editor de ritmos de usuario de la caja de ritmos (banco de ficheros MIDI, Engines/UserRhythms.h): rejilla de carriles ×
-// pasos. Clic: recorre normal -> acento -> suave -> silencio; clic derecho: silencio; arrastrar pinta el nivel del primer
-// clic. Cada cambio se guarda solo en su fichero (300 ms después del último, como una caja de ritmos de hardware: lo que
-// suena es lo que hay en la rejilla) y el procesador relee el banco. Los carriles que el kit elegido no tiene, atenuados.
+// Editor de ritmos de usuario (banco de ficheros MIDI por motor, Engines/UserRhythms.h): rejilla de carriles × pasos para
+// la caja de ritmos, el Omnichord (con el carril del bajo automático) y el VL-1 (Pock, Peek, Noise: un sonido por paso).
+// Clic: recorre los valores de la celda (normal -> acento -> suave; bajo: raíz -> raíz grave -> quinta -> tercera; VL-1:
+// sí / no); clic derecho: silencio; arrastrar pinta el valor del primer clic. Cada cambio se guarda solo en su fichero
+// (300 ms después del último: lo que suena es lo que hay en la rejilla) y el procesador relee el banco. En la caja de
+// ritmos, los carriles que el kit elegido no tiene, atenuados.
 class RhythmEditor : public juce::Component, private juce::Timer
 {
 public:
-    explicit RhythmEditor (KoniSynthProcessor& p) : koni (p)
+    RhythmEditor (KoniSynthProcessor& p, UserRhythms::Target t) : koni (p), target (t), rules (UserRhythms::spec (t))
     {
+        using S = DrumSlot;
+        switch (target)
+        {
+            case UserRhythms::Target::drums:
+                paramId = "drumPattern";
+                factoryCount = (int) drumPatterns().size();
+                for (int s = 0; s < (int) S::Bass; ++s) lanes.push_back ({ (S) s, drumLaneName (s) });
+                break;
+            case UserRhythms::Target::omnichord:
+                paramId = "omniRhythm";
+                factoryCount = (int) omnichordPatterns().size();
+                for (int s = 0; s < (int) S::Bass; ++s) // solo los sonidos de su caja de ritmos (la del CR-78, Omnichord.h)
+                    if (slotVoice (1, (S) s) >= 0) lanes.push_back ({ (S) s, drumLaneName (s) });
+                lanes.push_back ({ S::Bass, "Bass" });
+                break;
+            default:
+                paramId = "vl1Rhythm";
+                factoryCount = VL1::numPatterns;
+                lanes = { { S::BD, "Pock" }, { S::RS, "Peek" }, { S::CH, "Noise" } };
+                break;
+        }
+
         for (int i = 0; i < UserRhythms::numSlots; ++i)
             slotBox.addItem ("User " + juce::String (i + 1), i + 1);
-        slotBox.setTooltip ("Which of the 8 user rhythms you edit. Each one is a MIDI file in the KoniSynth settings folder "
-                            "(rhythms/Drum Machine/User N.mid) that you can also edit in any sequencer.");
+        slotBox.setTooltip ("Which of the 8 user rhythms you edit. Each one is a MIDI file in the KoniSynth settings folder (rhythms/"
+                            + juce::String (rules.folder) + "/User N.mid) that you can also edit in any sequencer.");
         slotBox.onChange = [this] { loadSlot (slotBox.getSelectedId() - 1); };
 
         nameBox.setTooltip ("Name of the rhythm (stored in the MIDI file).");
@@ -24,20 +48,21 @@ public:
         lengthBox.addItem ("16 steps (4/4)", 1);
         lengthBox.addItem ("32 steps (2 bars)", 2);
         lengthBox.addItem ("12 steps (waltz 3/4)", 3);
-        lengthBox.addItem ("12 steps (shuffle)", 4);
-        lengthBox.setTooltip ("Length and grid: one bar of sixteenths, two bars, a waltz bar, or a bar of triplet eighths. "
-                              "Changing it keeps the hits that still fit.");
+        if (rules.triplets)
+            lengthBox.addItem ("12 steps (shuffle)", 4);
+        lengthBox.setTooltip ("Length and grid: one bar of sixteenths, two bars, a waltz bar"
+                              + juce::String (rules.triplets ? ", or a bar of triplet eighths" : "") + ". Changing it keeps the hits that still fit.");
         lengthBox.onChange = [this] { setLength (lengthBox.getSelectedId()); };
 
-        copyButton.setTooltip ("Start from one of the factory patterns (replaces the grid).");
+        copyButton.setTooltip ("Start from one of the factory rhythms (replaces the grid).");
         copyButton.onClick = [this] { showCopyMenu(); };
         clearButton.setTooltip ("Empty the grid.");
         clearButton.onClick = [this] { rhythm.clear (rhythm.numSteps, rhythm.stepsPerBeat); touch(); };
-        useButton.setTooltip ("Play this rhythm (selects it in the Pattern menu) or stop it (Pattern back to Off).");
+        useButton.setTooltip ("Play this rhythm (selects it in the rhythm menu) or stop it (rhythm back to Off).");
         useButton.onClick = [this] { togglePlay(); };
         folderButton.setTooltip ("Open the folder with the rhythm files.");
-        folderButton.onClick = [] {
-            const auto f = UserRhythms::folder (KoniSynthProcessor::drumRhythmEngine);
+        folderButton.onClick = [this] {
+            const auto f = UserRhythms::folder (target);
             f.createDirectory();
             f.startAsProcess();
         };
@@ -46,9 +71,8 @@ public:
             addAndMakeVisible (c);
         status.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.7f));
 
-        // Ranura inicial: la que suena en Pattern si es de usuario; si no, User 1
-        const auto factory = (int) drumPatterns().size();
-        const auto current = (int) koni.apvts.getRawParameterValue ("drumPattern")->load() - 1 - factory;
+        // Ranura inicial: la que suena si es de usuario; si no, User 1
+        const auto current = (int) koni.apvts.getRawParameterValue (paramId)->load() - 1 - factoryCount;
         slotBox.setSelectedId (juce::jlimit (0, UserRhythms::numSlots - 1, current) + 1, juce::dontSendNotification);
         loadSlot (slotBox.getSelectedId() - 1);
         updatePlayButton();
@@ -59,36 +83,45 @@ public:
 
     void paint (juce::Graphics& g) override
     {
-        const auto kit = kitFromParam (koni.apvts.getRawParameterValue ("drumKit")->load());
         const auto n = rhythm.numSteps;
-        const auto perBar = rhythm.isWaltz() ? 12 : rhythm.stepsPerBeat == 3 ? 12 : 16;
-        g.setFont (juce::FontOptions (13.0f));
-        for (int s = 0; s < lanesShown; ++s)
+        const auto perBar = barSteps();
+        for (int k = 0; k < (int) lanes.size(); ++k)
         {
-            const auto row = rowArea (s);
-            const auto inKit = slotVoice (kit, (DrumSlot) s) >= 0;
-            g.setColour (Skin::white().withAlpha (inKit ? 0.85f : 0.3f));
-            g.drawText (laneName (s), row.withWidth (labelWidth - 8), juce::Justification::centredRight);
-            const auto& lane = rhythm.lanes[(size_t) s];
+            const auto row = rowArea (k);
+            const auto laneSlot = lanes[(size_t) k].slot;
+            const auto playable = inKit (laneSlot);
+            g.setFont (juce::FontOptions (13.0f));
+            g.setColour (Skin::white().withAlpha (playable ? 0.85f : 0.3f));
+            g.drawText (lanes[(size_t) k].name, row.withWidth (labelWidth - 8), juce::Justification::centredRight);
+            const auto& lane = rhythm.lanes[(size_t) laneSlot];
             for (int i = 0; i < n; ++i)
             {
-                const auto cell = cellArea (s, i).toFloat().reduced (2.0f);
+                const auto cellBox = cellArea (k, i).toFloat().reduced (2.0f);
                 const auto c = lane.empty() ? '.' : lane[(size_t) i];
                 const auto beatStart = i % rhythm.stepsPerBeat == 0;
                 auto base = Skin::black().withAlpha (beatStart ? 0.55f : 0.35f);
                 if (i == playing) base = Skin::c (0xff42a2c8).withAlpha (0.45f);
                 g.setColour (base);
-                g.fillRoundedRectangle (cell, 3.0f);
-                if (c != '.')
+                g.fillRoundedRectangle (cellBox, 3.0f);
+                if (c == '.')
+                    continue;
+                if (laneSlot == DrumSlot::Bass)
                 {
-                    const auto a = c == 'X' ? 1.0f : c == 'x' ? 0.7f : 0.38f;
-                    g.setColour (Skin::accent().withAlpha (a * (inKit ? 1.0f : 0.35f)));
-                    g.fillRoundedRectangle (cell.reduced (c == 'o' ? 4.0f : 2.0f), 3.0f);
-                    if (c == 'X')
-                    {
-                        g.setColour (Skin::white().withAlpha (inKit ? 0.9f : 0.3f));
-                        g.drawRoundedRectangle (cell.reduced (1.0f), 3.0f, 1.5f);
-                    }
+                    // Bajo: nota relativa al acorde pulsado
+                    g.setColour (Skin::accent().withAlpha (0.75f));
+                    g.fillRoundedRectangle (cellBox.reduced (2.0f), 3.0f);
+                    g.setColour (Skin::black());
+                    g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
+                    g.drawText (c == 'r' ? "Root" : c == 'R' ? "Low" : c == 'f' ? "5th" : "3rd", cellBox, juce::Justification::centred, false);
+                    continue;
+                }
+                const auto a = c == 'X' ? 1.0f : c == 'x' ? 0.7f : 0.38f;
+                g.setColour (Skin::accent().withAlpha (a * (playable ? 1.0f : 0.35f)));
+                g.fillRoundedRectangle (cellBox.reduced (c == 'o' ? 4.0f : 2.0f), 3.0f);
+                if (c == 'X')
+                {
+                    g.setColour (Skin::white().withAlpha (playable ? 0.9f : 0.3f));
+                    g.drawRoundedRectangle (cellBox.reduced (1.0f), 3.0f, 1.5f);
                 }
             }
         }
@@ -102,7 +135,7 @@ public:
         {
             const auto x = (float) cellArea (0, perBar).getX() - 1.0f;
             g.setColour (Skin::white().withAlpha (0.4f));
-            g.drawLine (x, (float) grid.getY(), x, (float) grid.getBottom(), 1.5f);
+            g.drawLine (x, (float) grid.getY(), x, (float) rowArea ((int) lanes.size() - 1).getBottom(), 1.5f);
         }
     }
 
@@ -130,56 +163,79 @@ public:
     {
         const auto [lane, step] = hit (e.getPosition());
         if (lane < 0) return;
-        const auto current = cell (lane, step);
-        paint_ = e.mods.isPopupMenu() ? '.' : current == '.' ? 'x' : current == 'x' ? 'X' : current == 'X' ? 'o' : '.';
-        setCell (lane, step, paint_);
+        paintValue = e.mods.isPopupMenu() ? '.' : next (lanes[(size_t) lane].slot, cell (lane, step));
+        setCell (lane, step, paintValue);
     }
 
     void mouseDrag (const juce::MouseEvent& e) override
     {
         const auto [lane, step] = hit (e.getPosition());
-        if (lane >= 0 && cell (lane, step) != paint_)
-            setCell (lane, step, paint_);
+        if (lane >= 0 && cell (lane, step) != paintValue)
+            setCell (lane, step, paintValue);
     }
 
 private:
-    static juce::String laneName (int s)
+    struct Lane { DrumSlot slot; juce::String name; };
+
+    static juce::String drumLaneName (int s)
     {
         static const char* names[] = { "Bass Drum", "Snare", "Rim Shot", "Hand Clap", "Closed Hat", "Open Hat", "Cymbal", "Cowbell",
                                        "Low Tom", "High Tom", "Low Conga", "Maracas", "Claves", "Tambourine", "Guiro" };
         return names[s];
     }
 
-    juce::Rectangle<int> rowArea (int s) const
+    // Valor siguiente de una celda al hacer clic
+    char next (DrumSlot laneSlot, char c) const
     {
-        const auto h = grid.getHeight() / lanesShown;
-        return { grid.getX(), grid.getY() + s * h, grid.getWidth(), h };
+        if (laneSlot == DrumSlot::Bass) return c == '.' ? 'r' : c == 'r' ? 'R' : c == 'R' ? 'f' : c == 'f' ? 't' : '.';
+        if (! rules.levels)         return c == '.' ? 'x' : '.';
+        return c == '.' ? 'x' : c == 'x' ? 'X' : c == 'X' ? 'o' : '.';
     }
-    juce::Rectangle<int> cellArea (int s, int i) const
+
+    // ¿Suena el carril con el kit elegido? Solo la caja de ritmos cambia de kit
+    bool inKit (DrumSlot laneSlot) const
     {
-        const auto row = rowArea (s);
-        const auto perBar = rhythm.isWaltz() || rhythm.stepsPerBeat == 3 ? 12 : 16;
+        if (target != UserRhythms::Target::drums) return true;
+        return slotVoice (kitFromParam (koni.apvts.getRawParameterValue ("drumKit")->load()), laneSlot) >= 0;
+    }
+
+    int barSteps() const { return rhythm.isWaltz() || rhythm.stepsPerBeat == 3 ? 12 : 16; }
+
+    juce::Rectangle<int> rowArea (int k) const
+    {
+        const auto h = juce::jmin (44, grid.getHeight() / juce::jmax (1, (int) lanes.size())); // pocos carriles: filas de 44 px
+        return { grid.getX(), grid.getY() + k * h, grid.getWidth(), h };
+    }
+    juce::Rectangle<int> cellArea (int k, int i) const
+    {
+        const auto row = rowArea (k);
+        const auto perBar = barSteps();
         const auto gaps = rhythm.numSteps > perBar ? 1 : 0;
         const auto w = (row.getWidth() - labelWidth - gaps * 8) / juce::jmax (1, rhythm.numSteps);
         return { row.getX() + labelWidth + i * w + (i >= perBar ? 8 : 0), row.getY(), w, row.getHeight() };
     }
     std::pair<int, int> hit (juce::Point<int> p) const
     {
-        for (int s = 0; s < lanesShown; ++s)
+        for (int k = 0; k < (int) lanes.size(); ++k)
             for (int i = 0; i < rhythm.numSteps; ++i)
-                if (cellArea (s, i).contains (p))
-                    return { s, i };
+                if (cellArea (k, i).contains (p))
+                    return { k, i };
         return { -1, -1 };
     }
 
-    char cell (int lane, int step) const
+    char cell (int k, int step) const
     {
-        const auto& l = rhythm.lanes[(size_t) lane];
+        const auto& l = rhythm.lanes[(size_t) lanes[(size_t) k].slot];
         return l.empty() ? '.' : l[(size_t) step];
     }
-    void setCell (int lane, int step, char c)
+    void setCell (int k, int step, char c)
     {
-        auto& l = rhythm.lanes[(size_t) lane];
+        const auto laneSlot = lanes[(size_t) k].slot;
+        if (rules.onePerStep && c != '.') // VL-1: un sonido por paso, el nuevo sustituye al que hubiera
+            for (const auto& other : lanes)
+                if (other.slot != laneSlot && ! rhythm.lanes[(size_t) other.slot].empty())
+                    rhythm.lanes[(size_t) other.slot][(size_t) step] = '.';
+        auto& l = rhythm.lanes[(size_t) laneSlot];
         if (l.empty()) l.assign ((size_t) rhythm.numSteps, '.');
         l[(size_t) step] = c;
         touch();
@@ -198,37 +254,49 @@ private:
         touch();
     }
 
+    // Copia de un ritmo de fábrica (nombres del propio parámetro)
     void showCopyMenu()
     {
         juce::PopupMenu m;
-        const auto& list = drumPatterns();
-        for (int i = 0; i < (int) list.size(); ++i)
-            m.addItem (i + 1, list[(size_t) i].name);
+        if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (koni.apvts.getParameter (paramId)))
+            for (int i = 0; i < factoryCount; ++i)
+                m.addItem (i + 1, choice->choices[i + 1]);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&copyButton), [this] (int r)
         {
             if (r <= 0) return;
-            const auto& p = drumPatterns()[(size_t) r - 1];
-            rhythm.clear (p.numSteps, p.stepsPerBeat);
-            for (const auto& [slot, lane] : p.lanes)
-                rhythm.lanes[(size_t) slot] = lane;
+            const auto index = r - 1;
+            juce::String name;
+            if (target == UserRhythms::Target::vl1)
+            {
+                if (! VL1::factoryGrid (index, rhythm)) return;
+            }
+            else
+            {
+                const auto& p = (target == UserRhythms::Target::drums ? drumPatterns() : omnichordPatterns())[(size_t) index];
+                rhythm.clear (p.numSteps, p.stepsPerBeat);
+                for (const auto& [slot, lane] : p.lanes)
+                    rhythm.lanes[(size_t) slot] = lane;
+            }
+            if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (koni.apvts.getParameter (paramId)))
+                name = choice->choices[index + 1];
             if (nameBox.getText().startsWith ("User ") || nameBox.getText().isEmpty())
-                nameBox.setText (juce::String (p.name) + " (copy)", juce::sendNotification);
+                nameBox.setText (name + " (copy)", juce::sendNotification);
             syncLength();
             touch();
         });
     }
 
-    // Índice de Pattern de esta ranura (0 = Off, luego los de fábrica)
-    int patternIndex() const { return 1 + (int) drumPatterns().size() + slot; }
-    bool isPlayingThis() const { return (int) koni.apvts.getRawParameterValue ("drumPattern")->load() == patternIndex(); }
+    // Índice del parámetro de ritmo de esta ranura (0 = Off, luego los de fábrica)
+    int patternIndex() const { return 1 + factoryCount + slot; }
+    bool isPlayingThis() const { return (int) koni.apvts.getRawParameterValue (paramId)->load() == patternIndex(); }
 
-    // Play it / Stop: el estado sale del parámetro Pattern (sobrevive a cerrar y abrir el editor y a cambiarlo fuera).
-    // Stop deja Pattern en Off
+    // Play it / Stop: el estado sale del parámetro de ritmo (sobrevive a cerrar y abrir el editor y a cambiarlo fuera).
+    // Stop lo deja en Off
     void togglePlay()
     {
         if (dirty) save();
         const auto index = isPlayingThis() ? 0 : patternIndex();
-        if (auto* param = koni.apvts.getParameter ("drumPattern"))
+        if (auto* param = koni.apvts.getParameter (paramId))
         {
             param->beginChangeGesture();
             param->setValueNotifyingHost (param->convertTo0to1 ((float) index));
@@ -246,9 +314,9 @@ private:
     {
         if (dirty) save();
         slot = s;
-        const auto file = UserRhythms::slotFile (KoniSynthProcessor::drumRhythmEngine, slot);
+        const auto file = UserRhythms::slotFile (target, slot);
         juce::String error;
-        if (! file.existsAsFile() || ! UserRhythms::read (file, rhythm, error))
+        if (! file.existsAsFile() || ! UserRhythms::read (file, rules, rhythm, error))
         {
             rhythm = {};
             rhythm.name = "User " + juce::String (slot + 1);
@@ -259,7 +327,7 @@ private:
         }
         else
         {
-            status.setText (file.getFullPathName() + (rhythm.ignored > 0 ? "  (" + juce::String (rhythm.ignored) + " notes outside the drum map or the length were ignored)" : juce::String()),
+            status.setText (file.getFullPathName() + (rhythm.ignored > 0 ? "  (" + juce::String (rhythm.ignored) + " notes this engine cannot play were ignored)" : juce::String()),
                             juce::dontSendNotification);
         }
         fileTime = file.getLastModificationTime();
@@ -280,12 +348,12 @@ private:
     void save()
     {
         dirty = false;
-        const auto file = UserRhythms::slotFile (KoniSynthProcessor::drumRhythmEngine, slot);
+        const auto file = UserRhythms::slotFile (target, slot);
         if (UserRhythms::write (rhythm, file))
         {
             status.setText ("Saved " + file.getFullPathName(), juce::dontSendNotification);
             fileTime = file.getLastModificationTime();
-            koni.updateUserRhythms (true);
+            koni.updateUserRhythms (target, true);
         }
         else
         {
@@ -298,18 +366,24 @@ private:
         if (dirty && juce::Time::getMillisecondCounter() - lastEdit > 300)
             save();
         // Cambiado fuera (otro programa) y sin ediciones pendientes: se vuelve a leer
-        const auto file = UserRhythms::slotFile (KoniSynthProcessor::drumRhythmEngine, slot);
+        const auto file = UserRhythms::slotFile (target, slot);
         if (! dirty && file.existsAsFile() && file.getLastModificationTime() != fileTime && ++externalCheck % 15 == 0)
             loadSlot (slot);
-        // Paso que suena: solo si este ritmo es el de Pattern y no hay segundo patrón
+        // Paso que suena: solo si este ritmo es el elegido (en la caja de ritmos, además, sin segundo patrón)
         updatePlayButton();
-        const auto mine = isPlayingThis() && (int) koni.apvts.getRawParameterValue ("drumPattern2")->load() == 0;
-        const auto step = koni.getDrumStep();
+        const auto mine = isPlayingThis() && (target != UserRhythms::Target::drums
+                                              || (int) koni.apvts.getRawParameterValue ("drumPattern2")->load() == 0);
+        const auto step = koni.getRhythmStep (target);
         const auto now = mine && step >= 0 ? (int) (step % rhythm.numSteps) : -1;
         if (now != playing) { playing = now; repaint(); }
     }
 
     KoniSynthProcessor& koni;
+    const UserRhythms::Target target;
+    const UserRhythms::Spec& rules;
+    const char* paramId = "drumPattern";
+    int factoryCount = 0;
+    std::vector<Lane> lanes;
     juce::ComboBox slotBox, lengthBox;
     juce::TextEditor nameBox;
     juce::TextButton copyButton { "Copy from..." }, clearButton { "Clear" }, useButton { "Play it" }, folderButton { "Open folder" };
@@ -318,8 +392,8 @@ private:
     UserRhythms::Rhythm rhythm;
     int slot = 0, playing = -1, externalCheck = 0;
     bool dirty = false;
-    char paint_ = 'x';
+    char paintValue = 'x';
     juce::uint32 lastEdit = 0;
     juce::Time fileTime;
-    static constexpr int lanesShown = 15, labelWidth = 100;
+    static constexpr int labelWidth = 100;
 };

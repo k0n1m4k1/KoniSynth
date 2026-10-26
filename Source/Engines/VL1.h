@@ -53,6 +53,26 @@ struct VL1
         { 9,  { { Pock, H }, { Noise, Q }, { Noise, Q }, { Noise, H }, { Noise, H }, { Peek, H }, { Noise, H }, { Pock, H }, { Noise, H } } }, // Beguine
     };
 
+    static constexpr int numPatterns = (int) std::size (patterns);
+
+    // Patrón de fábrica -> rejilla de semicorcheas (Q ticks) del editor de ritmos ("Copy from"); Pock, Peek y Noise van en
+    // los carriles BD, RS y CH (UserRhythms::spec). Todos caben exactos: sus duraciones son múltiplos de Q
+    static bool factoryGrid (int index, UserRhythms::Rhythm& out)
+    {
+        if (index < 0 || index >= numPatterns) return false;
+        const auto& p = patterns[index];
+        std::array<int, 18> lane {}, ticks {};
+        for (int i = 0; i < p.numSteps; ++i)
+        {
+            lane[(size_t) i] = (int) (p.steps[i].drum == Pock ? DrumSlot::BD : p.steps[i].drum == Peek ? DrumSlot::RS : DrumSlot::CH);
+            ticks[(size_t) i] = p.steps[i].ticks;
+        }
+        return UserRhythms::fromDurations (lane.data(), ticks.data(), p.numSteps, Q, W, out);
+    }
+
+    // Pasos de usuario disparados desde el inicio (-1 parado o ritmo de fábrica): el editor marca el paso step % numSteps
+    long long currentStep() const noexcept { return stepCount.load (std::memory_order_relaxed); }
+
     void prepare (double sr)
     {
         sampleRate = sr;
@@ -89,7 +109,7 @@ struct VL1
     juce::uint32 displayNotes() const noexcept { return shownNotes.load (std::memory_order_relaxed); }
     int rhythmPulse() const noexcept { return pulse.load (std::memory_order_relaxed); }
 
-    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p)
+    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const UserRhythms::Bank* userBank)
     {
         const auto sound   = juce::jlimit (0, 9, (int) p.vl1Sound->load());
         const auto& wave   = waves[sound < 7 ? sound : sound - 7]; // Electro 1..3 = Piano, Fantasy, Violin modulados
@@ -120,7 +140,10 @@ struct VL1
             tickAcc = tickPeriod;      // primer tick en la primera muestra
             drumTime = -1;
             beatTicks = -1;            // el primer tick abre el primer pulso
+            userSteps = -1;
         }
+        // Ranuras User 1-8 tras los de fábrica (Engines/UserRhythms.h): un paso por semicorchea (Q ticks); vacía, sin ritmo
+        const RhythmPattern* user = rhythm >= numPatterns && userBank != nullptr ? userBank->pattern (rhythm - numPatterns) : nullptr;
 
         auto midiIt = midi.cbegin();
         const auto twoPi = juce::MathConstants<double>::twoPi;
@@ -141,13 +164,26 @@ struct VL1
                     electroHalf = electro && ! electroHalf;
                 }
                 beatTicks = (beatTicks + 1) % W; // pulso de la pantalla: una negra (W ticks)
-                if (rhythm >= 0 && --stepCounter == 0)
+                if (rhythm >= 0 && rhythm < numPatterns && --stepCounter == 0)
                 {
                     const auto& pat = patterns[rhythm];
                     drum = pat.steps[beat].drum;
                     stepCounter = pat.steps[beat].ticks;
                     beat = (beat + 1) % pat.numSteps;
                     drumTime = 0;
+                }
+                else if (user != nullptr && --stepCounter == 0)
+                {
+                    // Un solo sonido por paso (UserRhythms::restrict); paso vacío: el sonido anterior sigue sonando
+                    stepCounter = Q;
+                    const auto idx = (size_t) (++userSteps % user->numSteps);
+                    for (const auto& [slot, lane] : user->lanes)
+                        if (lane[idx] != '.')
+                        {
+                            drum = slot == DrumSlot::BD ? Pock : slot == DrumSlot::RS ? Peek : Noise;
+                            drumTime = 0;
+                            break;
+                        }
                 }
             }
 
@@ -195,6 +231,7 @@ struct VL1
         }
         // Indicador de tempo: encendido la primera mitad de cada pulso (estimado; el manual solo dice que parpadea)
         pulse.store (rhythm < 0 ? -1 : (beatTicks < H ? 1 : 0), std::memory_order_relaxed);
+        stepCount.store (user != nullptr ? userSteps : -1, std::memory_order_relaxed);
     }
 
 private:
@@ -394,6 +431,8 @@ private:
     int electroCounter = 8;
     bool electroHalf = false;
     int rhythm = -1, beat = 0, stepCounter = 1, drumTime = -1, beatTicks = -1;
+    long long userSteps = -1;
+    std::atomic<long long> stepCount { -1 };
     std::atomic<juce::uint32> shownNotes { 0 };
     std::atomic<int> pulse { -1 };
     Drum drum = Pock;

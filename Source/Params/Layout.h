@@ -226,8 +226,12 @@ static APVTS::ParameterLayout createLayout()
                            Digit { "vl1Release", "VL-1 Release", 2 }, Digit { "vl1Vibrato", "VL-1 Vibrato", 0 },
                            Digit { "vl1Tremolo", "VL-1 Tremolo", 0 } })
         l.add (std::make_unique<AudioParameterInt> (ParameterID { d.id, 1 }, d.name, 0, 9, d.def));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "vl1Rhythm", 1 }, "VL-1 Rhythm",
-        StringArray { "Off", "March", "Waltz", "4 Beat", "Swing", "Rock 1", "Rock 2", "Bossanova", "Samba", "Rhumba", "Beguine" }, 0));
+    {
+        // Ranuras del banco de usuario (Engines/UserRhythms.h) tras los 10 de fábrica (VL1::patterns, en este orden)
+        StringArray rhythms { "Off", "March", "Waltz", "4 Beat", "Swing", "Rock 1", "Rock 2", "Bossanova", "Samba", "Rhumba", "Beguine" };
+        for (int i = 1; i <= UserRhythms::numSlots; ++i) rhythms.add ("User " + String (i));
+        l.add (std::make_unique<AudioParameterChoice> (ParameterID { "vl1Rhythm", 1 }, "VL-1 Rhythm", rhythms, 0));
+    }
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "vl1Tempo", 1 },   "VL-1 Tempo", -9, 9, 0));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "vl1Balance", 1 }, "VL-1 Balance", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
 
@@ -274,6 +278,7 @@ static APVTS::ParameterLayout createLayout()
     {
         StringArray rhythms { "Off" };
         for (const auto& r : omnichordPatterns()) rhythms.add (r.name);
+        for (int i = 1; i <= UserRhythms::numSlots; ++i) rhythms.add ("User " + String (i)); // banco de usuario, al final
         l.add (std::make_unique<AudioParameterChoice> (ParameterID { "omniRhythm", 1 }, "Omnichord Rhythm", rhythms, 0));
     }
     auto bpm = parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " BPM"; }));

@@ -236,7 +236,12 @@ public:
     juce::uint32 getVl1Notes() const { return vl1.displayNotes(); }
     int getVl1Pulse() const { return vl1.rhythmPulse(); }
     int getDrumLed() const { return drumMachine.currentLed(); }
-    long long getDrumStep() const { return drumMachine.currentStep(); }
+    // Paso del ritmo que suena (-1 parado) para el editor de ritmos de cada motor
+    long long getRhythmStep (UserRhythms::Target t) const
+    {
+        return t == UserRhythms::Target::omnichord ? omnichord.currentStep() : t == UserRhythms::Target::vl1 ? vl1.currentStep()
+                                                                                                            : drumMachine.currentStep();
+    }
     bool hasMt32Machine() const { bool has = false; mt32Engine.slot.withCurrent ([&has] (const Mt32Machine* m) { has = m != nullptr; }); return has; }
 
     juce::String getSampleInfo (int which = sourceSample) const
@@ -497,7 +502,7 @@ public:
                 allVoicesOff();
                 vl1.reset();
             }
-            vl1.render (buffer, midi, params);
+            vl1.render (buffer, midi, params, rhythmBank (UserRhythms::Target::vl1));
         }
         else if (styloOn)
         {
@@ -515,7 +520,7 @@ public:
                 allVoicesOff();
                 omnichord.reset();
             }
-            omnichord.render (buffer, midi, params, transport);
+            omnichord.render (buffer, midi, params, transport, rhythmBank (UserRhythms::Target::omnichord));
         }
         else if (drumOn)
         {
@@ -524,7 +529,7 @@ public:
                 allVoicesOff();
                 drumMachine.reset();
             }
-            drumMachine.render (buffer, midi, params, transport, drumRhythmSlot.current.load (std::memory_order_acquire));
+            drumMachine.render (buffer, midi, params, transport, rhythmBank (UserRhythms::Target::drums));
         }
         else if (fmOn)
         {
@@ -965,7 +970,7 @@ public:
         if (auto* tap = agentTapActive.load (std::memory_order_acquire)) // control por agente (F3); desactivado: nulo
             tap->push (buffer);
         sampleSlot.blocksDone.fetch_add (1, std::memory_order_release); // ver DataSlot
-        drumRhythmSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        for (auto& b : rhythmBanks) b.slot.blocksDone.fetch_add (1, std::memory_order_release);
         osc2SampleSlot.blocksDone.fetch_add (1, std::memory_order_release);
         ansSlot.blocksDone.fetch_add (1, std::memory_order_release);
         chipMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
@@ -1674,7 +1679,7 @@ private:
         mdMacroSlot.collect();
         snesMacroSlot.collect();
         mt32Engine.slot.collect();
-        drumRhythmSlot.collect();
+        for (auto& b : rhythmBanks) b.slot.collect();
         if (++rhythmPollTicks >= 10) // ficheros de ritmos de usuario: una vez por segundo
         {
             rhythmPollTicks = 0;
@@ -1687,24 +1692,32 @@ private:
         updateBuiltInWavetable();
     }
 
-    // Ritmos de usuario de la caja de ritmos (Engines/UserRhythms.h): se releen si cambia la firma de los ficheros (tamaño y
-    // fecha) y se publican con DataSlot. Hilo de mensajes o prepare. El editor de ritmos llama aquí tras guardar
+    // Ritmos de usuario de la caja de ritmos, el Omnichord y el VL-1 (Engines/UserRhythms.h): un banco por motor, se relee
+    // si cambia la firma de sus ficheros (tamaño y fecha) y se publica con DataSlot. Hilo de mensajes o prepare. El editor
+    // de ritmos llama aquí tras guardar
 public:
     void updateUserRhythms (bool force = false)
     {
-        const auto sig = UserRhythms::signature (drumRhythmEngine);
-        if (! force && sig == drumRhythmSignature && drumRhythmSlot.current.load() != nullptr)
-            return;
-        drumRhythmSignature = sig;
-        drumRhythmSlot.replace (UserRhythms::loadBank (drumRhythmEngine));
+        for (int t = 0; t < (int) UserRhythms::Target::count; ++t)
+            updateUserRhythms ((UserRhythms::Target) t, force);
     }
-    // Lectura para la UI (nombres y errores de las ranuras) bajo el cerrojo del DataSlot
-    template <typename Fn> void withUserRhythms (Fn&& fn) const { drumRhythmSlot.withCurrent (std::forward<Fn> (fn)); }
-    static inline const juce::String drumRhythmEngine { "Drum Machine" };
+    void updateUserRhythms (UserRhythms::Target t, bool force)
+    {
+        auto& b = rhythmBanks[(size_t) t];
+        const auto sig = UserRhythms::signature (t);
+        if (! force && sig == b.signature && b.slot.current.load() != nullptr)
+            return;
+        b.signature = sig;
+        b.slot.replace (UserRhythms::loadBank (t));
+    }
 private:
-    DataSlot<UserRhythms::Bank> drumRhythmSlot;
-    juce::String drumRhythmSignature;
+    struct RhythmBank { DataSlot<UserRhythms::Bank> slot; juce::String signature; };
+    std::array<RhythmBank, (size_t) UserRhythms::Target::count> rhythmBanks;
     int rhythmPollTicks = 0;
+    const UserRhythms::Bank* rhythmBank (UserRhythms::Target t) const // hilo de audio
+    {
+        return rhythmBanks[(size_t) t].slot.current.load (std::memory_order_acquire);
+    }
 
     // Wavetable incluida elegida y aún no generada: se genera (FFT, fuera del hilo de audio). Temporizador y prepareToPlay:
     // un render offline sin bucle de mensajes (bounce, KoniBench) también la tiene desde el primer bloque

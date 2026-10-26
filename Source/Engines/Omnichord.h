@@ -46,7 +46,11 @@ struct Omnichord
         lastZone = -1;
     }
 
-    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const StepClock::Transport& transport)
+    // Pasos disparados desde el inicio del ritmo (-1 parado): el editor de ritmos marca el paso step % numSteps
+    long long currentStep() const noexcept { return stepCount.load (std::memory_order_relaxed); }
+
+    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const StepClock::Transport& transport,
+                 const UserRhythms::Bank* userBank)
     {
         split = (int) p.omniSplit->load();
         harpOctave = (int) p.omniHarpOctave->load();
@@ -63,12 +67,19 @@ struct Omnichord
             clock.restart();
         }
 
+        // Ritmos de fábrica y, a continuación, las ranuras User 1-8 (Engines/UserRhythms.h); ranura vacía: sin ritmo
+        const auto factory = (int) omnichordPatterns().size();
+        const RhythmPattern* active = rhythm < 0 ? nullptr
+                                    : rhythm < factory ? &omnichordPatterns()[(size_t) rhythm]
+                                    : userBank != nullptr ? userBank->pattern (rhythm - factory) : nullptr;
+        rhythmRunning = active != nullptr;
+
         struct Hit { int sample; DrumSlot slot; char c; };
         std::array<Hit, 64> hits;
         int numHits = 0;
-        if (rhythm >= 0)
+        if (active != nullptr)
         {
-            const auto& pat = omnichordPatterns()[(size_t) rhythm];
+            const auto& pat = *active;
             clock.process (out.getNumSamples(), sampleRate, (double) p.omniTempo->load(), pat.stepsPerBeat, 0.0, transport,
                 [&] (int sample, long long step)
                 {
@@ -78,6 +89,7 @@ struct Omnichord
                             hits[(size_t) numHits++] = { sample, slot, lane[idx] };
                 });
         }
+        stepCount.store (active != nullptr && clock.lastFired >= 0 ? clock.lastFired : -1, std::memory_order_relaxed);
 
         // Rasgueo con la rueda de modulación: cada zona que cruza suena una vez
         const auto zone = juce::jlimit (0, 12, (int) (p.modWheel.load() * 13.0f));
@@ -242,7 +254,7 @@ private:
         if (pressed && (changed || chordEnv < 0.01f))
         {
             chordTarget = 1.0f;
-            if (rhythm < 0)
+            if (! rhythmRunning)
                 startBass ('r'); // sin ritmo: el bajo suena al pulsar el acorde
         }
     }
@@ -272,6 +284,8 @@ private:
     DrumKit kit;
     StepClock clock;
     int rhythm = -2, split = 60, harpOctave = 0, lastZone = -1;
+    bool rhythmRunning = false;
+    std::atomic<long long> stepCount { -1 };
     std::array<int, 10> chordKeys {};
     int numChordKeys = 0, chordRoot = 0, bassNote = 48;
     std::array<int, 3> chordIntervals { 0, 4, 7 }, chordNotes { 60, 64, 67 };
