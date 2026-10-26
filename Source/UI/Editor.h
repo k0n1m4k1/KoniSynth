@@ -154,6 +154,8 @@ public:
         };
         keyboard.attachPlayRange (koni.apvts.state, [this] { editPlayHint(); });
         keyboard.onFavorite = [this] (int n) { loadFavorite (n); };
+        keyboard.scaleInfo = [this] { return ScaleBar::info (koni.apvts); };
+        scaleBar.onChanged = [this] { keyboard.repaint(); };
         keyboard.onPcKeysChanged = [this] (const juce::String& line) { scope.showCaption ("PC keyboard", line); };
         // Al cambiar de preset, el display muestra cómo tocarlo si el preset lo indica (y quita el rótulo anterior si no)
         presetBar.onPresetChanged = [this] (int index)
@@ -622,6 +624,7 @@ public:
         };
         blockDrag (rows);
         content.addAndMakeVisible (rowsView);
+        content.addAndMakeVisible (scaleBar);
         content.addAndMakeVisible (scope);
         // Modo y estilo del display: propiedades del estado del plugin
         scope.setMode ((int) koni.apvts.state.getProperty ("displayMode", 0));
@@ -2248,6 +2251,10 @@ private:
         else if (dockMode (bpmFoldId) == 1)
             bpmDisplay.setVisible (false);
 
+        // Pie del teclado (Transpose y escala, 30 px): siempre, también con el teclado plegado o flotante (sus parámetros no
+        // tienen otro control)
+        scaleBar.setBounds (r.removeFromBottom (30));
+        r.removeFromBottom (6);
         // Keys: teclado acoplado (100 px) encima de la barra; oculto o flotante, su pestaña está en la barra
         const auto mode = keyboardMode();
         groupTabs[3]->setVisible (true);
@@ -2642,6 +2649,7 @@ private:
                 g.fillRect (area);
             }
             juce::MidiKeyboardComponent::drawWhiteNote (note, g, area, isDown, isOver, lineColour, textColour);
+            scaleMark (note, g, area.withTrimmedBottom (16.0f));
             if (isOver && getWhiteNoteText (note).isEmpty())
             {
                 g.setColour (textColour);
@@ -2655,6 +2663,7 @@ private:
         void drawBlackNote (int note, juce::Graphics& g, juce::Rectangle<float> area, bool isDown, bool isOver, juce::Colour fill) override
         {
             juce::MidiKeyboardComponent::drawBlackNote (note, g, area, isDown, isOver, outsideRange (note) ? fill.brighter (0.5f) : fill);
+            scaleMark (note, g, area.withTrimmedBottom (4.0f));
             if (isOver)
             {
                 g.setColour (juce::Colours::white);
@@ -2667,6 +2676,21 @@ private:
         juce::Font labelFont() const
         {
             return juce::Font (juce::FontOptions (juce::jmin (12.0f, getKeyWidth() * 0.9f))).withHorizontalScale (0.8f);
+        }
+
+        // Teclas de la escala (pie del teclado, Mode Round o Filter): un punto al pie de cada tecla de la escala, mayor en la
+        // raíz. Colores fijos, como el teclado (no se tiñe con el skin). scaleInfo: máscara de 12 bits por clase de nota
+        // absoluta (bit 0 = C; 0 = sin escala) y clase de la raíz
+        std::function<std::pair<int, int>()> scaleInfo;
+        void scaleMark (int note, juce::Graphics& g, juce::Rectangle<float> area)
+        {
+            if (! scaleInfo) return;
+            const auto [mask, rootPc] = scaleInfo();
+            if (mask == 0 || ((mask >> (note % 12)) & 1) == 0) return;
+            const auto isRoot = note % 12 == rootPc;
+            const auto d = juce::jmin (area.getWidth() * (isRoot ? 0.55f : 0.4f), isRoot ? 8.0f : 6.0f);
+            g.setColour (isRoot ? juce::Colour (0xffe08a20) : juce::Colour (0xff42a2c8));
+            g.fillEllipse (juce::Rectangle<float> (d, d).withCentre ({ area.getCentreX(), area.getBottom() - d }));
         }
 
     private:
@@ -2838,6 +2862,7 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::unique_ptr<Overlay> overlay;
     NoteKeyboard keyboard;
+    ScaleBar scaleBar { koni.apvts }; // pie del teclado: Transpose y escala (UI/ScaleBar.h)
     ThereminPad pad;
     StylophonePad styloPad;
     int shownStyloModel = -1, shownOplModel = -1;

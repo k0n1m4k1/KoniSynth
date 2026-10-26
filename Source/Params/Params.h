@@ -39,6 +39,8 @@ struct Params
             stepOn[(size_t) i]   = get (("stepOn" + juce::String (i + 1)).toRawUTF8());
             stepTie[(size_t) i]  = get (("stepTie" + juce::String (i + 1)).toRawUTF8());
         }
+        keyTranspose = get ("keyTranspose"); scaleMode = get ("scaleMode"); scaleRoot = get ("scaleRoot"); scaleType = get ("scaleType");
+        scaleRound = get ("scaleRound");
         arpOn = get ("arpOn"); arpMode = get ("arpMode"); arpRate = get ("arpRate"); arpOctaves = get ("arpOctaves");
         arpGate = get ("arpGate"); arpLatch = get ("arpLatch"); arpBpm = get ("arpBpm"); arpOneShot = get ("arpOneShot");
         wave = get ("wave"); attack = get ("attack"); decay = get ("decay"); sustain = get ("sustain"); release = get ("release"); envCurve = get ("envCurve");
@@ -253,6 +255,7 @@ struct Params
                        *snesSustainRate {}, *snesGainRate {}, *snesDirectGain {}, *snesNoise {}, *snesNoiseRate {}, *snesVolume {},
                        *snesMainVolume {}, *snesVelocity {}, *snesEcho {}, *snesEdl {}, *snesEfb {}, *snesEvol {}, *snesFir {}, *snesFilter {}, *snesDac {};
     std::array<std::atomic<float>*, 20> ansReg {};
+    std::atomic<float> *keyTranspose {}, *scaleMode {}, *scaleRoot {}, *scaleType {}, *scaleRound {};
     std::atomic<float> *arpOn {}, *arpMode {}, *arpRate {}, *arpOctaves {}, *arpGate {}, *arpLatch {}, *arpBpm {}, *arpOneShot {};
     std::atomic<float> *monoOut {}, *mdOutput {}, *snesOutput {}, *chipOutput {};
     std::atomic<float> *osc1Mute {}, *wtMute {}, *sampleMute {}, *stringMute {}, *osc2Mute {}, *osc3Mute {}, *noiseMute {};

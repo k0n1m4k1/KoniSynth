@@ -396,6 +396,15 @@ static juce::String paramHelp (const juce::String& id)
         { "seqRate", "Step length, synced to the host tempo when it is playing (T = triplets); otherwise Arp BPM sets the tempo." },
         { "seqGate", "How long each step sounds, as a fraction of the step." },
         { "seqLatch", "Keeps the sequence running after you release the key; pressing a new key transposes it." },
+        { "keyTranspose", "Transposes every played note by this many semitones, before the scale, the sequencer and the arpeggiator "
+                          "(not the Drum Machine nor the MT-32 rhythm part)." },
+        { "scaleMode", "Keeps the notes in a scale. Round: a note outside the scale plays the nearest one in it (see Rounding). "
+                       "Filter: notes outside the scale do not sound. Off: every note as played." },
+        { "scaleRoot", "Root note of the scale (the keys of the scale are marked on the keyboard)." },
+        { "scaleType", "The scale: Major, Minor (natural), Harmonic and Melodic Minor, the church modes (Dorian, Phrygian, Lydian, "
+                       "Mixolydian, Locrian), the two pentatonics, Blues, Whole Tone and Phrygian Dominant." },
+        { "scaleRound", "Where a note outside the scale goes in Round mode: Nearest (the closer scale note; half way between two, "
+                        "the lower one), Down or Up." },
         { "arpOn", "Turns the arpeggiator on: held notes are played one after another in a pattern." },
         { "arpMode", "Arpeggio pattern: up, down, up and down, random or in the order you played the notes." },
         { "arpRate", "Arpeggio step length, synced to the host tempo when it is playing (T = triplets)." },

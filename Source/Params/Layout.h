@@ -462,6 +462,18 @@ static APVTS::ParameterLayout createLayout()
         parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " ct"; }))));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "lfoDepth", 1 },  "LFO Depth", NormalisableRange<float> (0.0f, 1.0f), 0.3f, percent));
 
+    // Escala de las notas de entrada (pie del teclado; Midi/ScaleQuantizer.h): transposición en semitonos y, con Mode Round,
+    // la nota fuera de la escala va a la más cercana de la escala (Rounding: Nearest con empate hacia abajo, Down o Up); con
+    // Filter, no suena. Escalas como grados en semitonos sobre Root (ScaleQuantizer::masks). Antes del secuenciador y el arpegiador
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "keyTranspose", 1 }, "Key Transpose", -24, 24, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "scaleMode", 1 },  "Scale Mode", StringArray { "Off", "Round", "Filter" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "scaleRoot", 1 },  "Scale Root",
+        StringArray { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "scaleType", 1 },  "Scale Type",
+        StringArray { "Major", "Minor", "Harmonic Minor", "Melodic Minor", "Dorian", "Phrygian", "Lydian", "Mixolydian", "Locrian",
+                      "Major Pentatonic", "Minor Pentatonic", "Blues", "Whole Tone", "Phrygian Dominant" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "scaleRound", 1 }, "Scale Rounding", StringArray { "Nearest", "Down", "Up" }, 0));
+
     // Arpegiador (antes del motor). Rate en fracciones de negra; Arp BPM solo sin tempo del host
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "arpOn", 1 },      "Arp On", false));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "arpMode", 1 },    "Arp Mode", StringArray { "Up", "Down", "Up/Down", "Random", "As Played" }, 0));

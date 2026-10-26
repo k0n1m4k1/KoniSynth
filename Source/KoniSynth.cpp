@@ -118,6 +118,8 @@ using APVTS = juce::AudioProcessorValueTreeState;
 
 #include "Midi/StepSequencer.h"
 
+#include "Midi/ScaleQuantizer.h"
+
 #include "Midi/MonoNoteFilter.h"
 
 //==============================================================================
@@ -295,6 +297,7 @@ public:
         setLatencySamples (currentLatency());
         arp.prepare (sampleRate);
         sequencer.prepare (sampleRate);
+        noteScale.prepare();
         vocoder.prepare (sampleRate);
         formant.prepare (sampleRate);
         inputMono.assign ((size_t) juce::jmax (samplesPerBlock, 1), 0.0f);
@@ -432,6 +435,14 @@ public:
 
         keyboardState.processNextMidiBuffer (midi, 0, numSamples, true); // mezcla las notas del teclado en pantalla
         sessionTransport.captureMidi (midi); // REC: lo que entra al motor (controlador, teclado y .mid), antes de secuenciador y arpegiador
+        {
+            // Transpose y escala (Midi/ScaleQuantizer.h). En la Drum Machine y la parte de ritmo del MT-32 la nota elige el
+            // sonido: ahí no se transpone ni se ajusta
+            const auto eng = (int) params.engine->load();
+            const auto noteIsSound = eng == 5 || (eng == 14 && params.mt32Mode->load() > 0.5f);
+            noteScale.process (midi, (int) params.keyTranspose->load(), (int) params.scaleMode->load(), (int) params.scaleRoot->load(),
+                           (int) params.scaleType->load(), (int) params.scaleRound->load(), noteIsSound);
+        }
         tuning.filterNotes (midi); // teclas sin mapear del .kbm ('x') o filtradas por el maestro MTS-ESP
 
         // Arpegiador: sustituye las notas por el patrón (tempo y posición del host si los hay)
@@ -1456,6 +1467,7 @@ private:
         vl1.reset();
         arp.reset();
         sequencer.reset();
+        noteScale.reset();
         equalizer.reset();
         ampSim.reset();
         transient.reset();
@@ -1620,6 +1632,7 @@ private:
     bool flangerWasOn = false, fshiftWasOn = false, leslieWasOn = false, springWasOn = false;
     Arpeggiator arp;
     StepSequencer sequencer;
+    ScaleQuantizer noteScale; // Transpose y escala de las notas de entrada (pie del teclado)
     Vocoder vocoder;
     bool vocoderWasOn = false;
     FormantFilter formant;
@@ -1982,6 +1995,7 @@ private:
 
 #include "UI/SettingsPanel.h"
 #include "UI/ControllerSetupPanel.h"
+#include "UI/ScaleBar.h"
 
 #include "UI/Editor.h"
 
