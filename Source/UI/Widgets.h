@@ -817,10 +817,12 @@ struct Section : juce::Component
 
     // Componente a la izquierda de los controles, con su ancho en px y todo el alto bajo la cabecera (mini-display del
     // filtro); no es propiedad de la sección
-    Section& withSideBody (juce::Component& c, int width)
+    // tall: el componente ocupa todo el alto de la caja y la cabecera pasa a su derecha (envolventes, LFO)
+    Section& withSideBody (juce::Component& c, int width, bool tall = false)
     {
         sideBody = &c;
         sideBodyWidth = width;
+        sideBodyTall = tall;
         addAndMakeVisible (c);
         return *this;
     }
@@ -884,6 +886,13 @@ struct Section : juce::Component
         group.setBounds (getLocalBounds());
 
         auto r = getLocalBounds().reduced (10).withTrimmedTop (8);
+        // Componente lateral alto (withSideBody, tall): todo el alto de la caja, a 5 px del marco a los lados y abajo y bajo
+        // la línea del título; la cabecera y los controles quedan a su derecha
+        if (sideBody != nullptr && sideBodyTall)
+        {
+            sideBody->setBounds (getLocalBounds().withTrimmedTop (18).withTrimmedBottom (5).withTrimmedLeft (5).withWidth (sideBodyWidth));
+            r.setLeft (sideBody->getRight() + 8);
+        }
         // Cabecera solo si tiene controles: sin ella, perillas y sliders ganan 28 px de alto
         if (toggle.isVisible() || combo.isVisible() || extraToggle.isVisible() || ! headerButtons.empty() || headerControl != nullptr)
         {
@@ -901,12 +910,14 @@ struct Section : juce::Component
             if (info.isVisible()) info.setBounds (header.withTrimmedLeft (6));
             r.removeFromTop (4);
         }
-        if (body != nullptr)
+        if (body != nullptr && bodyFlush) // a ras del marco: todo el alto y el ancho de la caja, a 5 px, bajo la línea del título
+            body->setBounds (getLocalBounds().withTrimmedTop (18).withTrimmedBottom (5).reduced (5, 0));
+        else if (body != nullptr)
         {
             body->setBounds (bodyHeight > 0 ? r.removeFromTop (bodyHeight) : r);
             r.removeFromTop (4);
         }
-        if (sideBody != nullptr) // a la izquierda de los controles, todo su alto
+        if (sideBody != nullptr && ! sideBodyTall) // a la izquierda de los controles, todo su alto (bajo la cabecera)
         {
             sideBody->setBounds (r.removeFromLeft (sideBodyWidth));
             r.removeFromLeft (8);
@@ -955,6 +966,8 @@ struct Section : juce::Component
     int controlRows = 1;
     // Elástica: si su fila cabe a ancho natural, se queda con el sobrante (Editor::layoutRow)
     bool stretchToFill = false;
+    // A ras del marco: el cuerpo ocupa la caja entera bajo la línea del título (display de onda; sin cabecera ni controles)
+    bool bodyFlush = false;
 
     // Muestra u oculta los controles (interruptor, selector, segundo interruptor y mandos) dejando los botones de cabecera
     // y el texto: la sección conserva su marco y su ancho (layoutWeight) pasa a ser el de lo visible
@@ -994,7 +1007,9 @@ struct Section : juce::Component
     // Mínimo 1,3: con 1 potenciómetro el título ("Master") salía cortado
     virtual float layoutWeight() const
     {
-        return juce::jmax (controlsWeight() + sidePixels() / 60.0f, headerPixels() / 60.0f, ((float) bodyMinWidth + 34.0f) / 60.0f, 1.3f);
+        // Con el componente lateral alto, la cabecera comparte fila con él: su ancho también se suma
+        return juce::jmax (controlsWeight() + sidePixels() / 60.0f, (headerPixels() + (sideBodyTall ? sidePixels() : 0.0f)) / 60.0f,
+                           ((float) bodyMinWidth + 34.0f) / 60.0f, 1.3f);
     }
 
     // Lo que pide la cabecera en píxeles, márgenes incluidos: 20 del marco + 14 de la celda en layoutRow (con 20 se cortaba
@@ -1025,7 +1040,8 @@ struct Section : juce::Component
     // lo usa cuando todas las secciones de la fila caben así; si no, reparte por layoutWeight
     virtual float naturalWidth() const
     {
-        return juce::jmax (headerPixels(), (float) bodyMinWidth + 34.0f, controlsWeight() * maxControlUnit + sidePixels() + 34.0f, 1.3f * 60.0f);
+        return juce::jmax (headerPixels() + (sideBodyTall ? sidePixels() : 0.0f), (float) bodyMinWidth + 34.0f,
+                           controlsWeight() * maxControlUnit + sidePixels() + 34.0f, 1.3f * 60.0f);
     }
     // Ancho del componente lateral (withSideBody) con su separación
     float sidePixels() const { return sideBody != nullptr ? (float) sideBodyWidth + 8.0f : 0.0f; }
@@ -1074,6 +1090,7 @@ private:
     int bodyHeight = 0, bodyMinWidth = 0;
     juce::Component* sideBody = nullptr;
     int sideBodyWidth = 0;
+    bool sideBodyTall = false;
     std::vector<std::unique_ptr<ParamMenu>> menus;
 };
 

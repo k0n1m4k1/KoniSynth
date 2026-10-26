@@ -218,6 +218,7 @@ public:
         // eligen la pestaña. 420 px de ancho mínimo: dos ciclos legibles y la lectura de una línea
         waveSection.withBody (waveView, 0, 420);
         waveSection.stretchToFill = true; // el resto del ancho de la fila, para el display
+        waveSection.bodyFlush = true;     // a ras del marco, como los displays de envolventes y LFO
         // Pestañas, vistas del display y fichas de la tira de señal van juntas: elegir en uno elige en los otros
         const auto pickSource = [this] (int v)
         {
@@ -269,7 +270,7 @@ public:
         filterEnvSection.withCombo (s, "envCurve")
                         .withSlider (s, "filterAttack", "A").withSlider (s, "filterDecay", "D")
                         .withSlider (s, "filterSustain", "S").withSlider (s, "filterRelease", "R")
-                        .withSideBody (filterEnvView, 160); // curva con asas A, D/S, R (UI/ModViews.h)
+                        .withSideBody (filterEnvView, 160, true); // curva con asas A, D/S, R (UI/ModViews.h)
         ampEnvSection.withCombo (s, "envCurve")
                      .withHeaderButton ("Edit...", "Per-voice panning after the VCA: V.Pan (how far the voices spread) and Pan Mode.", [this]
                      {
@@ -280,7 +281,7 @@ public:
                      })
                      .withSlider (s, "attack", "A").withSlider (s, "decay", "D")
                      .withSlider (s, "sustain", "S").withSlider (s, "release", "R")
-                     .withSideBody (ampEnvView, 160);
+                     .withSideBody (ampEnvView, 160, true);
 
         // Motores alternativos
         thereminSection.withCombo (s, "thereminModel")
@@ -486,14 +487,14 @@ public:
                       .withKnob (s, "vocoderMix", "Mix").withKnob (s, "vocoderFormant", "Formant");
         lfo.withToggle (s, "lfoOn").withCombo (s, "lfoTarget")
            .withKnob (s, "lfoRate", "Rate").withKnob (s, "lfoDepth", "Depth").withKnob (s, "lfoShape", "Shape").withKnob (s, "lfoSync", "Sync")
-           .withSideBody (lfoView, 170); // forma, alcance en el destino, Depth y Rate arrastrables (UI/ModViews.h)
+           .withSideBody (lfoView, 170, true); // forma, alcance en el destino, Depth y Rate arrastrables (UI/ModViews.h)
         lfo2Section.withToggle (s, "lfo2On").withCombo (s, "lfo2Target")
                    .withHeaderButton ("Matrix...", "Modulation matrix of the Synth engine: 8 slots, each a source (LFOs, envelopes, velocity, "
                                       "key, wheel, aftertouch, MPE timbre, random, bend) moving a destination per voice. The number in "
                                       "brackets is the count of active routes; amber rings on the knobs show their range.",
                                       [this] { openPanel ("Modulation Matrix", std::make_unique<MatrixPanel> (koni), 1100, 520); })
                    .withKnob (s, "lfo2Rate", "Rate").withKnob (s, "lfo2Depth", "Depth").withKnob (s, "lfo2Shape", "Shape").withKnob (s, "lfo2Sync", "Sync")
-                   .withSideBody (lfo2View, 170);
+                   .withSideBody (lfo2View, 170, true);
         formantSection.withToggle (s, "formantOn").withCombo (s, "formantVoice")
                       .withKnob (s, "formantVowel", "Vowel").withKnob (s, "formantShift", "Shift").withKnob (s, "formantRate", "Morph")
                       .withKnob (s, "formantDepth", "Depth").withKnob (s, "formantMix", "Mix");
