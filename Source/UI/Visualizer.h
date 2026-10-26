@@ -556,10 +556,10 @@ private:
 };
 
 // Ventana propia del display (Open in its own window): redimensionable; doble clic = pantalla completa
-struct VisualizerWindow : juce::DocumentWindow
+struct VisualizerWindow : PinnableWindow
 {
     VisualizerWindow (KoniSynthProcessor& p, int mode, int style, int bezelMode, std::function<void()> onClose)
-        : juce::DocumentWindow ("KoniSynth Display", juce::Colour (0xff1b1f24), juce::DocumentWindow::allButtons), view (p), closed (std::move (onClose))
+        : PinnableWindow ("KoniSynth Display", juce::Colour (0xff1b1f24), juce::DocumentWindow::allButtons), view (p), closed (std::move (onClose))
     {
         view.setMode (mode);
         view.setStyle (style);
@@ -568,7 +568,6 @@ struct VisualizerWindow : juce::DocumentWindow
         setContentNonOwned (&view, true);
         setResizable (true, true);
         setResizeLimits (300, 140, 8000, 5000);
-        setUsingNativeTitleBar (true);
         centreWithSize (getWidth(), getHeight());
         view.addMouseListener (this, false);
         setVisible (true);

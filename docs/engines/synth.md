@@ -58,10 +58,10 @@ Loop, Level, Root, Start, Length and a **Load** button. The file chooser accepts
 | Control | What it does | Range / default |
 |---|---|---|
 | Level | Sample volume; it goes through the filter and envelopes like an oscillator. | 0-100 % / 0 % |
-| Root (editor) | Note at which the sample plays at its original pitch. | C-1 to G9 / C4 |
-| Start (editor) | Playback start point. | 0-99 % / 0 % |
-| Length (editor) | Cuts the sample after this time with a short fade; short values give LA-style synthesis. | Full, up to 2000 ms / Full |
-| Loop (editor) | Loops from Start to the end while the note is held. | Off / On / Off |
+| Root | Note at which the sample plays at its original pitch. | C-1 to G9 / C4 |
+| Start | Playback start point. | 0-99 % / 0 % |
+| Length | Cuts the sample after this time with a short fade; short values give LA-style synthesis. | Full, up to 2000 ms / Full |
+| Loop | Loops from Start to the end while the note is held. | Off / On / Off |
 
 **String** (Karplus-Strong plucked string)
 

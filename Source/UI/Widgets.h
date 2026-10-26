@@ -1558,3 +1558,62 @@ struct ParamPanel : juce::Component
 private:
     std::vector<std::unique_ptr<Section>> sections;
 };
+
+// UI: ventana flotante (bloque desacoplado, teclado, superficie, display) con barra de título de JUCE: la nativa de Windows
+// no admite botones propios. No queda encima de las demás por defecto; la chincheta de la barra, a la izquierda de los
+// botones de la ventana, la fija encima (setAlwaysOnTop) y la suelta. El estado no se guarda: cada ventana nueva, suelta
+struct PinnableWindow : juce::DocumentWindow
+{
+    PinnableWindow (const juce::String& name, juce::Colour background, int buttons)
+        : juce::DocumentWindow (name, background, buttons)
+    {
+        setUsingNativeTitleBar (false);
+        setTitleBarHeight (26);
+        pin.setClickingTogglesState (true);
+        pin.setTooltip ("Keep this window on top of other windows.");
+        pin.onClick = [this] { setAlwaysOnTop (pin.getToggleState()); };
+        juce::Component::addAndMakeVisible (pin); // sobre la barra, fuera del contenido (ResizableWindow avisa si no)
+    }
+
+    void resized() override
+    {
+        juce::DocumentWindow::resized();
+        const auto bar = getTitleBarArea();
+        auto right = bar.getRight();
+        for (auto* b : { getCloseButton(), getMaximiseButton(), getMinimiseButton() })
+            if (b != nullptr && b->isVisible())
+                right = juce::jmin (right, b->getX());
+        pin.setBounds (right - bar.getHeight() - 4, bar.getY(), bar.getHeight(), bar.getHeight());
+        pin.toFront (false);
+    }
+
+    // Chincheta: suelta, inclinada 45° y gris; fijada, vertical, en el acento del skin y con el fondo marcado
+    struct Pin : juce::Button
+    {
+        Pin() : juce::Button ("Pin") {}
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto on = getToggleState();
+            const auto r = getLocalBounds().toFloat().reduced (3.0f);
+            if (on || over || down)
+            {
+                g.setColour (juce::Colours::white.withAlpha (on ? 0.16f : 0.08f));
+                g.fillRoundedRectangle (r, 4.0f);
+            }
+            // Dibujada vertical en un cuadro de 12 × 16 px centrado, y girada si está suelta
+            const auto c = r.getCentre();
+            juce::Path head, needle;
+            head.addRoundedRectangle (c.x - 4.0f, c.y - 8.0f, 8.0f, 3.0f, 1.0f);   // cabeza
+            head.addRectangle (c.x - 2.5f, c.y - 5.0f, 5.0f, 5.0f);                // cuerpo
+            head.addRoundedRectangle (c.x - 5.5f, c.y, 11.0f, 2.2f, 1.0f);         // collar
+            needle.startNewSubPath (c.x, c.y + 2.2f);
+            needle.lineTo (c.x, c.y + 8.0f);
+            const auto t = on ? juce::AffineTransform() : juce::AffineTransform::rotation (juce::MathConstants<float>::pi * 0.25f, c.x, c.y);
+            const auto colour = on ? Skin::accent() : juce::Colours::white.withAlpha (over ? 0.9f : 0.6f);
+            g.setColour (colour);
+            g.fillPath (head, t);
+            g.strokePath (needle, juce::PathStrokeType (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded), t);
+        }
+    };
+    Pin pin;
+};

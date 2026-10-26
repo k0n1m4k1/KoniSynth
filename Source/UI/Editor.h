@@ -158,7 +158,11 @@ public:
         keyboard.attachPlayRange (koni.apvts.state, [this] { editPlayHint(); });
         keyboard.onFavorite = [this] (int n) { loadFavorite (n); };
         keyboard.scaleInfo = [this] { return ScaleBar::info (koni.apvts); };
-        scaleBar.onChanged = [this] { keyboard.repaint(); };
+        scaleBar.onChanged = [this]
+        {
+            keyboard.repaint();
+            if (floatingKeyboard != nullptr) floatingKeyboard->keys.repaint();
+        };
         keyboard.onPcKeysChanged = [this] (const juce::String& line) { scope.showCaption ("PC keyboard", line); };
         // Al cambiar de preset, el display muestra cómo tocarlo si el preset lo indica (y quita el rótulo anterior si no)
         presetBar.onPresetChanged = [this] (int index)
@@ -202,7 +206,8 @@ public:
         // Sample, Wavetable y Sequencer: sección compacta + panel de edición propio (Edit Sample..., Edit Table..., Edit Steps...)
         sampleSection.withHeaderButton ("Edit Sample...", "Open the sample editor: load a file, see its waveform, set Start, Length and Loop.",
                                         [this] { openSamplePanel (KoniSynthProcessor::sourceSample); })
-                     .withKnob (s, "sampleLevel", "Level");
+                     .withKnob (s, "sampleLevel", "Level").withKnob (s, "sampleRoot", "Root").withKnob (s, "sampleStart", "Start")
+                     .withKnob (s, "sampleLength", "Length").withKnob (s, "sampleLoop", "Loop"); // también en Edit Sample...
         wavetableSection.withCombo (s, "wtTable")
                         .withHeaderButton ("Edit Table...", "Open the wavetable editor: see the frames, load your own table.", [this] { openWavetablePanel(); })
                         .withKnob (s, "wtLevel", "Level").withKnob (s, "wtPosition", "Position");
@@ -1135,10 +1140,17 @@ private:
         koni.apvts.state.setProperty ("keyboardMode", mode, nullptr);
         if (mode == 2 && floatingKeyboard == nullptr)
         {
-            floatingKeyboard = std::make_unique<KeyboardWindow> (koni.keyboardState, [safe = juce::Component::SafePointer<KoniSynthEditor> (this)]
+            floatingKeyboard = std::make_unique<KeyboardWindow> (koni.keyboardState, koni.apvts, lookAndFeel,
+                                                                 [safe = juce::Component::SafePointer<KoniSynthEditor> (this)]
             {
                 if (safe != nullptr) juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->setKeyboardMode (0); }); // al cerrar: vuelve abajo
             });
+            floatingKeyboard->keys.scaleInfo = [this] { return ScaleBar::info (koni.apvts); };
+            floatingKeyboard->bar.onChanged = [this]
+            {
+                keyboard.repaint();
+                if (floatingKeyboard != nullptr) floatingKeyboard->keys.repaint();
+            };
             floatingKeyboard->keys.attachPlayRange (koni.apvts.state, [this] { editPlayHint(); });
             floatingKeyboard->keys.onFavorite = [this] (int n) { loadFavorite (n); };
             floatingKeyboard->keys.onPcKeysChanged = [this] (const juce::String& line) { scope.showCaption ("PC keyboard", line); };
@@ -1756,17 +1768,18 @@ private:
     void setupBlocks()
     {
         blocks = {
-            { "PLAY", "foldPlay", "Performance: arpeggiator and step sequencer (for every engine).", { &arpSection, &seqSection } },
-            { "IN", "foldInput", "Audio input and vocoder. The input is the vocoder's modulator (\"mod\"); Monitor sends it dry "
-                                 "into the effects chain.", { &inputSection, &vocoderSection }, true, "mod" },
-            { "MACROS", "foldMacros", "Performance macros: 8 knobs, each moving several parameters at once.", { &macroSection } },
             { "COLOR", "foldColor", "Effects 1/7 - color: crush, formant filter, tube and parametric EQ.", { &crushSection, &formantSection, &tube, &eqSection }, true, nullptr, true },
             { "AMP", "foldAmp", "Effects 2/7 - tube amp and speaker cabinet (built-in or your impulse response, in Cabinet...).", { &ampSection }, true, nullptr, true },
             { "DYNAMICS", "foldDynamics", "Effects 3/7 - dynamics: transient shaper and compressor.", { &transSection, &compSection }, true, nullptr, true },
             { "MOD FX", "foldModFx", "Effects 4/7 - modulation: phaser, flanger and frequency shifter.", { &phaserSection, &flangerSection, &fshiftSection }, true, nullptr, true },
             { "ENSEMBLE", "foldEnsemble", "Effects 5/7 - ensemble: chorus and Leslie.", { &chorusSection, &leslieSection }, true, nullptr, true },
             { "SPACE", "foldSpace", "Effects 6/7 - space: tape echo, plate reverb and spring reverb.", { &echo, &ambient, &springSection }, true, nullptr, true },
-            { "OUTPUT", "foldOutput", "Effects 7/7 - output: media (tape, vinyl...), master and limiter.", { &mediaSection, &master, &limiterSection }, true, nullptr, true } };
+            { "OUTPUT", "foldOutput", "Effects 7/7 - output: media (tape, vinyl...), master and limiter.", { &mediaSection, &master, &limiterSection }, true, nullptr, true },
+            // Interpretación, entrada y macros: bajo la cadena de efectos, en línea propia (blockLines)
+            { "PLAY", "foldPlay", "Performance: arpeggiator and step sequencer (for every engine).", { &arpSection, &seqSection } },
+            { "IN", "foldInput", "Audio input and vocoder. The input is the vocoder's modulator (\"mod\"); Monitor sends it dry "
+                                 "into the effects chain.", { &inputSection, &vocoderSection }, true, "mod" },
+            { "MACROS", "foldMacros", "Performance macros: 8 knobs, each moving several parameters at once.", { &macroSection } } };
 
         // Plegados de la versión anterior (un grupo PLAY/MOD/IN y otro FX): se reparten entre sus bloques
         auto& st = koni.apvts.state;
@@ -1879,7 +1892,7 @@ private:
         }
     };
 
-    struct FloatWindow : juce::DocumentWindow
+    struct FloatWindow : PinnableWindow
     {
         FloatWindow (const juce::String& name, std::vector<std::pair<juce::Component*, float>> items, int w, int h,
                      juce::LookAndFeel& laf, std::function<void()> onClose)
@@ -1887,7 +1900,7 @@ private:
 
         FloatWindow (const juce::String& name, std::vector<std::vector<std::pair<juce::Component*, float>>> rows, int w, int h,
                      juce::LookAndFeel& laf, std::function<void()> onClose, std::vector<float> rowWeights = {})
-            : juce::DocumentWindow (name, Skin::c (0xff1b1f24), juce::DocumentWindow::closeButton), closed (std::move (onClose))
+            : PinnableWindow (name, Skin::c (0xff1b1f24), juce::DocumentWindow::closeButton), closed (std::move (onClose))
         {
             auto* holder = new FloatHolder();
             holder->setLookAndFeel (&laf); // fuera del editor no hereda su LookAndFeel
@@ -1900,8 +1913,6 @@ private:
             setContentOwned (holder, true);
             setResizable (true, true);
             setResizeLimits (160, 60, 3000, 1200);
-            setAlwaysOnTop (true);
-            setUsingNativeTitleBar (true);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }
@@ -2099,10 +2110,12 @@ private:
     }
 
     // Reparto en líneas de los bloques abiertos, en su orden: pestaña + 6 + 60 px por unidad de peso; baja de línea si no cabe
+    // y también al pasar de la cadena de efectos a los demás bloques (PLAY, IN, MACROS: siempre en línea aparte, debajo)
     std::vector<std::vector<size_t>> blockLines (int width) const
     {
         std::vector<std::vector<size_t>> lines;
         int used = 0;
+        bool prevFx = false;
         for (size_t b = 0; b < blocks.size(); ++b)
         {
             if (blockCollapsed (b))
@@ -2110,7 +2123,9 @@ private:
             float units = 0.0f;
             for (auto* sec : blocks[b].sections) units += sec->layoutWeight();
             const auto own = tabStrip + 6 + juce::roundToInt (units * 60.0f);
-            if (lines.empty() || used + blockGap + own > width)
+            const auto leavesChain = prevFx && ! blocks[b].fx;
+            prevFx = blocks[b].fx;
+            if (lines.empty() || leavesChain || used + blockGap + own > width)
             {
                 lines.emplace_back();
                 used = own;
@@ -2283,15 +2298,15 @@ private:
         else if (dockMode (bpmFoldId) == 1)
             bpmDisplay.setVisible (false);
 
-        // Pie del teclado (Transpose y escala, 30 px): siempre, también con el teclado plegado o flotante (sus parámetros no
-        // tienen otro control)
-        scaleBar.setBounds (r.removeFromBottom (30));
-        r.removeFromBottom (6);
-        // Keys: teclado acoplado (100 px) encima de la barra; oculto o flotante, su pestaña está en la barra
+        // Keys: teclado acoplado (100 px) con su pie (Transpose y escala, 30 px) debajo; el pie va siempre con el teclado:
+        // plegado, se pliega con él; flotante, va en su ventana (KeyboardWindow). Su pestaña, en la barra
         const auto mode = keyboardMode();
         groupTabs[3]->setVisible (true);
+        scaleBar.setVisible (mode == 0);
         if (mode == 0)
         {
+            scaleBar.setBounds (r.removeFromBottom (30));
+            r.removeFromBottom (6);
             auto band = r.removeFromBottom (100);
             groupTabs[3]->setFolded (false);
             groupTabs[3]->setFloating (false);
@@ -2791,29 +2806,41 @@ private:
         juce::ValueTree state;
         std::function<void()> onEditHint;
     };
-    // Teclado en ventana propia (modo Floating): otro teclado sobre el mismo MidiKeyboardState del procesador
-    struct KeyboardWindow : juce::DocumentWindow
+    // Teclado en ventana propia (modo Floating): otro teclado sobre el mismo MidiKeyboardState del procesador, con su pie
+    // (Transpose y escala: otra ScaleBar sobre los mismos parámetros) debajo, como acoplado
+    struct KeyboardWindow : PinnableWindow
     {
-        KeyboardWindow (juce::MidiKeyboardState& state, std::function<void()> onClose)
-            : juce::DocumentWindow ("KoniSynth Keyboard", Skin::c (0xff1b1f24), juce::DocumentWindow::closeButton),
-              keys (state, juce::MidiKeyboardComponent::horizontalKeyboard), closed (std::move (onClose))
+        KeyboardWindow (juce::MidiKeyboardState& state, APVTS& s, juce::LookAndFeel& laf, std::function<void()> onClose)
+            : PinnableWindow ("KoniSynth Keyboard", Skin::c (0xff1b1f24), juce::DocumentWindow::closeButton),
+              keys (state, juce::MidiKeyboardComponent::horizontalKeyboard), bar (s), closed (std::move (onClose))
         {
-            keys.setSize (1100, 110);
-            setContentNonOwned (&keys, true);
+            body.setLookAndFeel (&laf); // fuera del editor no hereda su LookAndFeel
+            body.addAndMakeVisible (keys);
+            body.addAndMakeVisible (bar);
+            body.onResize = [this]
+            {
+                auto r = body.getLocalBounds();
+                bar.setBounds (r.removeFromBottom (30));
+                keys.setBounds (r);
+                keys.setKeyWidth ((float) keys.getWidth() / 52.0f); // ~4 octavas y media visibles
+            };
+            body.setSize (1100, 140);
+            setContentNonOwned (&body, true);
             setResizable (true, true);
-            setResizeLimits (400, 80, 3000, 400);
-            setAlwaysOnTop (true);
-            setUsingNativeTitleBar (true);
+            setResizeLimits (400, 110, 3000, 430);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }
+        ~KeyboardWindow() override { body.setLookAndFeel (nullptr); }
         void closeButtonPressed() override { if (closed) closed(); }
-        void resized() override
+        struct Body : juce::Component
         {
-            juce::DocumentWindow::resized();
-            keys.setKeyWidth ((float) keys.getWidth() / 52.0f); // ~4 octavas y media visibles
-        }
+            std::function<void()> onResize;
+            void resized() override { if (onResize) onResize(); }
+        };
+        Body body;
         NoteKeyboard keys;
+        ScaleBar bar;
         std::function<void()> closed;
     };
     std::unique_ptr<KeyboardWindow> floatingKeyboard;
@@ -2828,18 +2855,17 @@ private:
         return kb != nullptr && ! kb->hasKeyboardFocus (false) ? kb : nullptr;
     }
 
-    // Superficie del motor en ventana propia (modo Floating de PAD): redimensionable, siempre encima; al cerrar vuelve abajo
-    struct SurfaceWindow : juce::DocumentWindow
+    // Superficie del motor en ventana propia (modo Floating de PAD): redimensionable, encima solo con la chincheta; al
+    // cerrar vuelve abajo
+    struct SurfaceWindow : PinnableWindow
     {
         SurfaceWindow (const juce::String& name, std::unique_ptr<juce::Component> body, int w, int h, std::function<void()> onClose)
-            : juce::DocumentWindow (name, Skin::c (0xff1b1f24), juce::DocumentWindow::closeButton), closed (std::move (onClose))
+            : PinnableWindow (name, Skin::c (0xff1b1f24), juce::DocumentWindow::closeButton), closed (std::move (onClose))
         {
             body->setSize (w, h);
             setContentOwned (body.release(), true);
             setResizable (true, true);
             setResizeLimits (300, 80, 3000, 1200);
-            setAlwaysOnTop (true);
-            setUsingNativeTitleBar (true);
             centreWithSize (getWidth(), getHeight());
             setVisible (true);
         }

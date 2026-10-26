@@ -1,6 +1,6 @@
 // Pie del teclado: Transpose, Key (raíz), Scale, Mode (Off / Round / Filter) y Rounding, como parámetros (preset,
 // automatización, menú de parámetro con MIDI Learn) y, a la derecha, las notas de la escala. Lo aplica Midi/ScaleQuantizer.h.
-// Visible siempre bajo el panel (también con el teclado plegado o flotante). Se incluye desde KoniSynth.cpp (mismo TU)
+// Va siempre con el teclado: bajo él acoplado, plegado con él y en su ventana si flota (otra instancia, Editor.h). Se incluye desde KoniSynth.cpp (mismo TU)
 class ScaleBar : public juce::Component, private juce::Timer
 {
 public:

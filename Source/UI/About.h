@@ -6,7 +6,8 @@
 // UI: configuración global (ventana emergente desde el botón Settings). La casilla AVX2 se guarda en
 // %APPDATA%\KoniSynth\config.settings y se aplica al instante en todas las instancias del proceso.
 // UI: panel grande y modal dentro del editor (sobre el contenido escalado): oscurece el fondo, muestra un cuerpo con título
-// y botón Close. Lo posee el editor; Close o Escape lo cierran de forma diferida (nunca dentro de su propio onClick).
+// y una X de cierre en la esquina superior derecha. Lo posee el editor; la X o Escape lo cierran de forma diferida (nunca
+// dentro de su propio onClick).
 class PanelDialog : public juce::Component
 {
 public:
@@ -37,7 +38,7 @@ public:
     {
         auto r = panel().reduced (16, 10);
         auto top = r.removeFromTop (28);
-        close.setBounds (top.removeFromRight (90));
+        close.setBounds (top.removeFromRight (28).translated (6, 0)); // 28 × 28 px, a 10 px de los cantos del panel
         r.removeFromTop (8);
         body->setBounds (r);
     }
@@ -73,7 +74,25 @@ private:
     std::unique_ptr<juce::Component> body;
     int panelW, panelH;
     std::function<void()> closeFn;
-    juce::TextButton close { "Close" };
+    // X de cierre: aspa de 2 px en un cuadrado de 10 px; al pasar el ratón, fondo rojo tenue y aspa blanca
+    struct CloseCross : juce::Button
+    {
+        CloseCross() : juce::Button ("Close") {}
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto r = getLocalBounds().toFloat().reduced (1.0f);
+            if (over || down)
+            {
+                g.setColour (juce::Colour (0xffd04040).withAlpha (down ? 0.75f : 0.55f));
+                g.fillRoundedRectangle (r, 5.0f);
+            }
+            const auto x = r.withSizeKeepingCentre (10.0f, 10.0f);
+            g.setColour (Skin::white().withAlpha (over || down ? 1.0f : 0.7f));
+            g.drawLine ({ x.getTopLeft(), x.getBottomRight() }, 2.0f);
+            g.drawLine ({ x.getTopRight(), x.getBottomLeft() }, 2.0f);
+        }
+    };
+    CloseCross close;
 };
 
 // UI: cuerpo del diálogo About (dentro de un PanelDialog). Retrato con inclinación tipo tarjeta holográfica que sigue al
