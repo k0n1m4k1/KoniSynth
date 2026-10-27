@@ -227,9 +227,10 @@ public:
     // asignaciones y nombres de las macros de interpretación (Params/PerfMacros.h) y la voz DX7 cargada de un .syx
     // ("n|NOMBRE", pantalla del FM 6-Op; vacía en los de fábrica)
     // (array estático: un std::initializer_list devuelto por valor apuntaría a un array temporal ya destruido)
-    static const std::array<const char*, 6>& textProperties()
+    // y el orden de la cadena de efectos ("fxOrder"; vacío = el de siempre)
+    static const std::array<const char*, 7>& textProperties()
     {
-        static const std::array<const char*, 6> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice" };
+        static const std::array<const char*, 7> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder" };
         return list;
     }
 

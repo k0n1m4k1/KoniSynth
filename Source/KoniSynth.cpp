@@ -681,262 +681,290 @@ public:
             for (int ch = 0; ch < numChannels; ++ch)
                 buffer.addFrom (ch, 0, inputMono.data(), numSamples, monitor);
 
-        // Crush: sample & hold a Crush Rate (fase acumulada: tasas no enteras sin deriva) y cuantización a 2^bits niveles
-        // repartidos en [-1, 1] (paso 2/(2^bits - 1); el 0 no es un nivel exacto). Sin antialias: el aliasing es el carácter buscado
-        if (params.crushOn->load() > 0.5f)
+        // Cadena de efectos: los 6 grupos en el orden elegido (fxOrder; por defecto COLOR, AMP, DYNAMICS, MOD FX, ENSEMBLE,
+        // SPACE, el de siempre). OUTPUT (soporte, Gain, Mono y limitador) va siempre al final, como el máster
+        const auto fxOrder = fxOrderPacked.load (std::memory_order_relaxed);
+        for (int slot = 0; slot < numFxGroups; ++slot)
         {
-            const auto steps = std::exp2 (params.crushBits->load()) - 1.0f;
-            const auto holdInc = params.crushRate->load() / (float) getSampleRate();
-            const auto mix = params.crushMix->load();
-            const auto drive = juce::Decibels::decibelsToGain (params.crushDrive->load());
-            for (int i = 0; i < numSamples; ++i)
+            switch ((int) (fxOrder >> (4 * slot)) & 0xF)
             {
-                crushPhase += holdInc;
-                const auto take = crushPhase >= 1.0f;
-                if (take)
-                    crushPhase -= std::floor (crushPhase);
-                for (int ch = 0; ch < numChannels; ++ch)
+                case fxColor:
                 {
-                    const auto x = buffer.getSample (ch, i);
-                    if (take)
+                // Crush: sample & hold a Crush Rate (fase acumulada: tasas no enteras sin deriva) y cuantización a 2^bits niveles
+                // repartidos en [-1, 1] (paso 2/(2^bits - 1); el 0 no es un nivel exacto). Sin antialias: el aliasing es el carácter buscado
+                if (params.crushOn->load() > 0.5f)
+                {
+                    const auto steps = std::exp2 (params.crushBits->load()) - 1.0f;
+                    const auto holdInc = params.crushRate->load() / (float) getSampleRate();
+                    const auto mix = params.crushMix->load();
+                    const auto drive = juce::Decibels::decibelsToGain (params.crushDrive->load());
+                    for (int i = 0; i < numSamples; ++i)
                     {
-                        const auto c = juce::jlimit (-1.0f, 1.0f, x * drive);
-                        crushHeld[(size_t) ch] = (std::round ((c + 1.0f) * 0.5f * steps) / steps * 2.0f - 1.0f) / drive;
+                        crushPhase += holdInc;
+                        const auto take = crushPhase >= 1.0f;
+                        if (take)
+                            crushPhase -= std::floor (crushPhase);
+                        for (int ch = 0; ch < numChannels; ++ch)
+                        {
+                            const auto x = buffer.getSample (ch, i);
+                            if (take)
+                            {
+                                const auto c = juce::jlimit (-1.0f, 1.0f, x * drive);
+                                crushHeld[(size_t) ch] = (std::round ((c + 1.0f) * 0.5f * steps) / steps * 2.0f - 1.0f) / drive;
+                            }
+                            buffer.setSample (ch, i, x + mix * (crushHeld[(size_t) ch] - x));
+                        }
                     }
-                    buffer.setSample (ch, i, x + mix * (crushHeld[(size_t) ch] - x));
                 }
-            }
-        }
 
-        // Filtro de formantes (tras el crush, antes de la válvula)
-        if (params.formantOn->load() > 0.5f)
-        {
-            if (! formantWasOn)
-                formant.reset();
-            formant.process (buffer, params);
-        }
-        formantWasOn = params.formantOn->load() > 0.5f;
-
-        processTube (buffer);
-
-        // Ecualizador (tras la válvula, antes de la modulación): ver Effects/Equalizer.h
-        const auto eqOn = params.eqOn->load() > 0.5f;
-        if (eqOn)
-        {
-            if (! eqWasOn) equalizer.reset();
-            static constexpr int orders[] = { 1, 2, 4, 0 }; // 0 = un polo (6 dB/oct), Effects/Equalizer.h
-            Eq::Settings es;
-            es.lowCut = params.eqLowCut->load(); es.highCut = params.eqHighCut->load();
-            es.lowFreq = params.eqLowFreq->load(); es.lowGain = params.eqLowGain->load();
-            es.mid1Freq = params.eqMid1Freq->load(); es.mid1Gain = params.eqMid1Gain->load(); es.mid1Q = params.eqMid1Q->load();
-            es.mid2Freq = params.eqMid2Freq->load(); es.mid2Gain = params.eqMid2Gain->load(); es.mid2Q = params.eqMid2Q->load();
-            es.highFreq = params.eqHighFreq->load(); es.highGain = params.eqHighGain->load(); es.outputDb = params.eqOutput->load();
-            es.lowCutOrder = orders[juce::jlimit (0, 3, (int) params.eqLowCutSlope->load())];
-            es.highCutOrder = orders[juce::jlimit (0, 3, (int) params.eqHighCutSlope->load())];
-            equalizer.process (buffer, es);
-        }
-        eqWasOn = eqOn;
-
-        // Ampli + pantalla (tras el color, antes de la dinámica): ver Effects/AmpSim.h
-        const auto ampOn = params.ampOn->load() > 0.5f;
-        if (ampOn)
-        {
-            if (! ampWasOn) ampSim.reset();
-            AmpSim::Settings as;
-            as.model = (int) params.ampModel->load(); as.cab = (int) params.cabType->load();
-            as.gain = params.ampGain->load(); as.bass = params.ampBass->load(); as.mid = params.ampMid->load();
-            as.treble = params.ampTreble->load(); as.presence = params.ampPresence->load(); as.master = params.ampMaster->load();
-            as.sag = params.ampSag->load(); as.outputDb = params.ampOutput->load(); as.cabMix = params.cabMix->load();
-            ampSim.process (buffer, as);
-        }
-        ampWasOn = ampOn;
-
-        // Dinámica: transitorios y compresor (tras el EQ, antes de la modulación): ver Effects/Dynamics.h
-        const auto transOn = params.transOn->load() > 0.5f;
-        if (transOn)
-        {
-            if (! transWasOn) transient.reset();
-            transient.process (buffer, params.transAttack->load(), params.transSustain->load());
-        }
-        transWasOn = transOn;
-        const auto compOn = params.compOn->load() > 0.5f;
-        if (compOn)
-        {
-            if (! compWasOn) compressor.reset();
-            Compressor::Settings cs;
-            cs.mode = juce::jlimit (0, 2, (int) params.compMode->load());
-            cs.thresholdDb = params.compThreshold->load(); cs.ratio = params.compRatio->load();
-            cs.attackMs = params.compAttack->load(); cs.releaseMs = params.compRelease->load();
-            cs.kneeDb = params.compKnee->load(); cs.makeupDb = params.compMakeup->load(); cs.mix = params.compMix->load();
-            cs.scHpf = params.compScHpf->load(); cs.external = (int) params.compSource->load() == 1;
-            compressor.process (buffer, inputMono.data(), cs);
-        }
-        else
-            compressor.meterGr.store (0.0f, std::memory_order_relaxed);
-        compWasOn = compOn;
-
-        // Cadena: voces/theremin -> válvula -> chorus -> echo -> ambient -> gain
-        // Phaser: 4 pasa-todo de 1er orden en serie, y = a·x + x1 - a·y1 con a = (t - 1)/(t + 1), t = tan(π·fc/fs).
-        // fc = 1 kHz · 2^(3·Depth·lfo) (±3 octavas a Depth 100 %: rango elegido, no medido del Small Stone); LFO seno con el
-        // canal derecho desfasado 90°; Color realimenta la salida de la 4ª etapa a la entrada.
-        if (params.phaserOn->load() > 0.5f)
-        {
-            const auto sr = getSampleRate();
-            const auto inc = params.phaserRate->load() / sr;
-            const auto depth = 3.0 * params.phaserDepth->load();
-            const auto fb = params.phaserFeedback->load();
-            const auto mix = params.phaserMix->load();
-            for (int i = 0; i < numSamples; ++i)
-            {
-                phaserPhase += inc;
-                if (phaserPhase >= 1.0) phaserPhase -= 1.0;
-                for (int ch = 0; ch < numChannels; ++ch)
+                // Filtro de formantes (tras el crush, antes de la válvula)
+                if (params.formantOn->load() > 0.5f)
                 {
-                    const auto lfo = std::sin (juce::MathConstants<double>::twoPi * (phaserPhase + 0.25 * ch));
-                    const auto fc = juce::jlimit (20.0, 0.45 * sr, 1000.0 * std::exp2 (depth * lfo));
-                    const auto t = std::tan (juce::MathConstants<double>::pi * fc / sr);
-                    const auto a = (float) ((t - 1.0) / (t + 1.0));
-                    auto& st = phaserState[(size_t) ch];
-                    const auto x = buffer.getSample (ch, i);
-                    auto v = x + fb * st.last;
-                    for (int k = 0; k < 4; ++k)
+                    if (! formantWasOn)
+                        formant.reset();
+                    formant.process (buffer, params);
+                }
+                formantWasOn = params.formantOn->load() > 0.5f;
+
+                processTube (buffer);
+
+                // Ecualizador (tras la válvula, antes de la modulación): ver Effects/Equalizer.h
+                const auto eqOn = params.eqOn->load() > 0.5f;
+                if (eqOn)
+                {
+                    if (! eqWasOn) equalizer.reset();
+                    static constexpr int orders[] = { 1, 2, 4, 0 }; // 0 = un polo (6 dB/oct), Effects/Equalizer.h
+                    Eq::Settings es;
+                    es.lowCut = params.eqLowCut->load(); es.highCut = params.eqHighCut->load();
+                    es.lowFreq = params.eqLowFreq->load(); es.lowGain = params.eqLowGain->load();
+                    es.mid1Freq = params.eqMid1Freq->load(); es.mid1Gain = params.eqMid1Gain->load(); es.mid1Q = params.eqMid1Q->load();
+                    es.mid2Freq = params.eqMid2Freq->load(); es.mid2Gain = params.eqMid2Gain->load(); es.mid2Q = params.eqMid2Q->load();
+                    es.highFreq = params.eqHighFreq->load(); es.highGain = params.eqHighGain->load(); es.outputDb = params.eqOutput->load();
+                    es.lowCutOrder = orders[juce::jlimit (0, 3, (int) params.eqLowCutSlope->load())];
+                    es.highCutOrder = orders[juce::jlimit (0, 3, (int) params.eqHighCutSlope->load())];
+                    equalizer.process (buffer, es);
+                }
+                eqWasOn = eqOn;
+                    break;
+                }
+                case fxAmp:
+                {
+                // Ampli + pantalla (tras el color, antes de la dinámica): ver Effects/AmpSim.h
+                const auto ampOn = params.ampOn->load() > 0.5f;
+                if (ampOn)
+                {
+                    if (! ampWasOn) ampSim.reset();
+                    AmpSim::Settings as;
+                    as.model = (int) params.ampModel->load(); as.cab = (int) params.cabType->load();
+                    as.gain = params.ampGain->load(); as.bass = params.ampBass->load(); as.mid = params.ampMid->load();
+                    as.treble = params.ampTreble->load(); as.presence = params.ampPresence->load(); as.master = params.ampMaster->load();
+                    as.sag = params.ampSag->load(); as.outputDb = params.ampOutput->load(); as.cabMix = params.cabMix->load();
+                    ampSim.process (buffer, as);
+                }
+                ampWasOn = ampOn;
+                    break;
+                }
+                case fxDynamics:
+                {
+                // Dinámica: transitorios y compresor (tras el EQ, antes de la modulación): ver Effects/Dynamics.h
+                const auto transOn = params.transOn->load() > 0.5f;
+                if (transOn)
+                {
+                    if (! transWasOn) transient.reset();
+                    transient.process (buffer, params.transAttack->load(), params.transSustain->load());
+                }
+                transWasOn = transOn;
+                const auto compOn = params.compOn->load() > 0.5f;
+                if (compOn)
+                {
+                    if (! compWasOn) compressor.reset();
+                    Compressor::Settings cs;
+                    cs.mode = juce::jlimit (0, 2, (int) params.compMode->load());
+                    cs.thresholdDb = params.compThreshold->load(); cs.ratio = params.compRatio->load();
+                    cs.attackMs = params.compAttack->load(); cs.releaseMs = params.compRelease->load();
+                    cs.kneeDb = params.compKnee->load(); cs.makeupDb = params.compMakeup->load(); cs.mix = params.compMix->load();
+                    cs.scHpf = params.compScHpf->load(); cs.external = (int) params.compSource->load() == 1;
+                    compressor.process (buffer, inputMono.data(), cs);
+                }
+                else
+                    compressor.meterGr.store (0.0f, std::memory_order_relaxed);
+                compWasOn = compOn;
+                    break;
+                }
+                case fxModFx:
+                {
+                // Phaser: 4 pasa-todo de 1er orden en serie, y = a·x + x1 - a·y1 con a = (t - 1)/(t + 1), t = tan(π·fc/fs).
+                // fc = 1 kHz · 2^(3·Depth·lfo) (±3 octavas a Depth 100 %: rango elegido, no medido del Small Stone); LFO seno con el
+                // canal derecho desfasado 90°; Color realimenta la salida de la 4ª etapa a la entrada.
+                if (params.phaserOn->load() > 0.5f)
+                {
+                    const auto sr = getSampleRate();
+                    const auto inc = params.phaserRate->load() / sr;
+                    const auto depth = 3.0 * params.phaserDepth->load();
+                    const auto fb = params.phaserFeedback->load();
+                    const auto mix = params.phaserMix->load();
+                    for (int i = 0; i < numSamples; ++i)
                     {
-                        const auto y = a * v + st.x1[(size_t) k] - a * st.y1[(size_t) k];
-                        st.x1[(size_t) k] = v;
-                        st.y1[(size_t) k] = y;
-                        v = y;
+                        phaserPhase += inc;
+                        if (phaserPhase >= 1.0) phaserPhase -= 1.0;
+                        for (int ch = 0; ch < numChannels; ++ch)
+                        {
+                            const auto lfo = std::sin (juce::MathConstants<double>::twoPi * (phaserPhase + 0.25 * ch));
+                            const auto fc = juce::jlimit (20.0, 0.45 * sr, 1000.0 * std::exp2 (depth * lfo));
+                            const auto t = std::tan (juce::MathConstants<double>::pi * fc / sr);
+                            const auto a = (float) ((t - 1.0) / (t + 1.0));
+                            auto& st = phaserState[(size_t) ch];
+                            const auto x = buffer.getSample (ch, i);
+                            auto v = x + fb * st.last;
+                            for (int k = 0; k < 4; ++k)
+                            {
+                                const auto y = a * v + st.x1[(size_t) k] - a * st.y1[(size_t) k];
+                                st.x1[(size_t) k] = v;
+                                st.y1[(size_t) k] = y;
+                                v = y;
+                            }
+                            st.last = v;
+                            buffer.setSample (ch, i, (1.0f - mix) * x + mix * v);
+                        }
                     }
-                    st.last = v;
-                    buffer.setSample (ch, i, (1.0f - mix) * x + mix * v);
                 }
-            }
-        }
 
-        // Flanger y desplazador de frecuencia (tras el phaser, antes del chorus)
-        const auto flangerOn = params.flangerOn->load() > 0.5f;
-        if (flangerOn)
-        {
-            if (! flangerWasOn) flanger.reset();
-            flanger.process (buffer, params.flangerRate->load(), params.flangerRange->load(), params.flangerColor->load(),
-                             params.flangerMatrix->load() > 0.5f, params.flangerMix->load());
-        }
-        flangerWasOn = flangerOn;
-        const auto fshiftOn = params.fshiftOn->load() > 0.5f;
-        if (fshiftOn)
-        {
-            if (! fshiftWasOn) freqShifter.reset();
-            freqShifter.process (buffer, params.fshiftHz->load(), params.fshiftBalance->load(), params.fshiftMix->load());
-        }
-        fshiftWasOn = fshiftOn;
-
-        const auto chorusOn = params.chorusOn->load() > 0.5f;
-        if (chorusOn)
-        {
-            if (! chorusWasOn)
-                chorus.reset();
-            chorus.process (buffer, (int) params.chorusMode->load(), params.chorusDepth->load(), params.chorusMix->load());
-        }
-        chorusWasOn = chorusOn;
-
-        // Leslie (después del chorus, antes del eco: el altavoz y luego la sala)
-        const auto leslieOn = params.leslieOn->load() > 0.5f;
-        if (leslieOn)
-        {
-            if (! leslieWasOn) leslie.reset();
-            leslie.process (buffer, (int) params.leslieSpeed->load(), params.leslieDrive->load(), params.leslieMix->load());
-        }
-        leslieWasOn = leslieOn;
-
-        // Echo de cinta: d = línea con tiempo modulado (wow/flutter), t = pasa-bajos(d) (Tone),
-        // y = x + mix·t,  línea <- x + feedback·tanh(1,5·t)/1,5 (pendiente 1 en 0: lineal a nivel bajo, acota la autooscilación)
-        const auto sampleRate = (float) getSampleRate();
-        const auto echoOn = params.echoOn->load() > 0.5f;
-        static constexpr float echoBeats[] = { 0.0f, 1.0f, 0.75f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f };
-        const auto echoSync = juce::jlimit (0, 7, (int) params.echoSync->load());
-        const auto echoMs = echoSync == 0 ? params.echoTime->load()
-                                          : juce::jlimit (10.0f, 1000.0f, (float) (60000.0 / params.tempoBpm.load()) * echoBeats[echoSync]);
-        const auto echoTarget = echoMs * 0.001f * sampleRate;
-
-        if (echoOn)
-        {
-            if (! echoWasOn) // al reactivar: sin ecos residuales ni barrido de tiempo
-            {
-                echo.reset();
-                echoDelay.setCurrentAndTargetValue (echoTarget);
-                toneState = {};
-            }
-
-            echoDelay.setTargetValue (echoTarget);
-            const auto feedback = params.echoFeedback->load();
-            const auto mix      = params.echoMix->load();
-            const auto toneCoef = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * params.echoTone->load() / sampleRate);
-            const auto wowDepth = params.echoWow->load() * sampleRate;   // en muestras por segundo de desviación
-            constexpr auto twoPi = juce::MathConstants<float>::twoPi;
-            const auto pingPong = numChannels == 2 && params.echoPingPong->load() > 0.5f;
-
-            for (int i = 0; i < numSamples; ++i)
-            {
-                wowPhase     += 0.5f / sampleRate;
-                flutterPhase += 6.3f / sampleRate;
-                if (wowPhase >= 1.0f)     wowPhase -= 1.0f;
-                if (flutterPhase >= 1.0f) flutterPhase -= 1.0f;
-
-                // ±2 ms a 0,5 Hz -> ±0,63 % de pitch; ±0,15 ms a 6,3 Hz -> ±0,59 % (a Wow 100 %)
-                const auto mod = wowDepth * (0.002f * std::sin (twoPi * wowPhase) + 0.00015f * std::sin (twoPi * flutterPhase));
-                const auto delay = echoDelay.getNextValue() + mod;
-
-                if (pingPong)
+                // Flanger y desplazador de frecuencia (tras el phaser, antes del chorus)
+                const auto flangerOn = params.flangerOn->load() > 0.5f;
+                if (flangerOn)
                 {
-                    // L <- entrada en mono + realimentación de R; R <- realimentación de L: repeticiones L, R, L...
-                    const auto xl = buffer.getSample (0, i), xr = buffer.getSample (1, i);
-                    for (int ch = 0; ch < 2; ++ch)
+                    if (! flangerWasOn) flanger.reset();
+                    flanger.process (buffer, params.flangerRate->load(), params.flangerRange->load(), params.flangerColor->load(),
+                                     params.flangerMatrix->load() > 0.5f, params.flangerMix->load());
+                }
+                flangerWasOn = flangerOn;
+                const auto fshiftOn = params.fshiftOn->load() > 0.5f;
+                if (fshiftOn)
+                {
+                    if (! fshiftWasOn) freqShifter.reset();
+                    freqShifter.process (buffer, params.fshiftHz->load(), params.fshiftBalance->load(), params.fshiftMix->load());
+                }
+                fshiftWasOn = fshiftOn;
+                    break;
+                }
+                case fxEnsemble:
+                {
+                const auto chorusOn = params.chorusOn->load() > 0.5f;
+                if (chorusOn)
+                {
+                    if (! chorusWasOn)
+                        chorus.reset();
+                    chorus.process (buffer, (int) params.chorusMode->load(), params.chorusDepth->load(), params.chorusMix->load());
+                }
+                chorusWasOn = chorusOn;
+
+                // Leslie (después del chorus, antes del eco: el altavoz y luego la sala)
+                const auto leslieOn = params.leslieOn->load() > 0.5f;
+                if (leslieOn)
+                {
+                    if (! leslieWasOn) leslie.reset();
+                    leslie.process (buffer, (int) params.leslieSpeed->load(), params.leslieDrive->load(), params.leslieMix->load());
+                }
+                leslieWasOn = leslieOn;
+                    break;
+                }
+                case fxSpace:
+                {
+                // Echo de cinta: d = línea con tiempo modulado (wow/flutter), t = pasa-bajos(d) (Tone),
+                // y = x + mix·t,  línea <- x + feedback·tanh(1,5·t)/1,5 (pendiente 1 en 0: lineal a nivel bajo, acota la autooscilación)
+                const auto sampleRate = (float) getSampleRate();
+                const auto echoOn = params.echoOn->load() > 0.5f;
+                static constexpr float echoBeats[] = { 0.0f, 1.0f, 0.75f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f };
+                const auto echoSync = juce::jlimit (0, 7, (int) params.echoSync->load());
+                const auto echoMs = echoSync == 0 ? params.echoTime->load()
+                                                  : juce::jlimit (10.0f, 1000.0f, (float) (60000.0 / params.tempoBpm.load()) * echoBeats[echoSync]);
+                const auto echoTarget = echoMs * 0.001f * sampleRate;
+
+                if (echoOn)
+                {
+                    if (! echoWasOn) // al reactivar: sin ecos residuales ni barrido de tiempo
                     {
-                        auto& t = toneState[(size_t) ch];
-                        t += toneCoef * (echo.popSample (ch, delay) - t);
+                        echo.reset();
+                        echoDelay.setCurrentAndTargetValue (echoTarget);
+                        toneState = {};
                     }
-                    const auto tl = toneState[0], tr = toneState[1];
-                    echo.pushSample (0, 0.5f * (xl + xr) + feedback * std::tanh (1.5f * tr) / 1.5f);
-                    echo.pushSample (1, feedback * std::tanh (1.5f * tl) / 1.5f);
-                    buffer.setSample (0, i, xl + mix * tl);
-                    buffer.setSample (1, i, xr + mix * tr);
-                    continue;
+
+                    echoDelay.setTargetValue (echoTarget);
+                    const auto feedback = params.echoFeedback->load();
+                    const auto mix      = params.echoMix->load();
+                    const auto toneCoef = 1.0f - std::exp (-juce::MathConstants<float>::twoPi * params.echoTone->load() / sampleRate);
+                    const auto wowDepth = params.echoWow->load() * sampleRate;   // en muestras por segundo de desviación
+                    constexpr auto twoPi = juce::MathConstants<float>::twoPi;
+                    const auto pingPong = numChannels == 2 && params.echoPingPong->load() > 0.5f;
+
+                    for (int i = 0; i < numSamples; ++i)
+                    {
+                        wowPhase     += 0.5f / sampleRate;
+                        flutterPhase += 6.3f / sampleRate;
+                        if (wowPhase >= 1.0f)     wowPhase -= 1.0f;
+                        if (flutterPhase >= 1.0f) flutterPhase -= 1.0f;
+
+                        // ±2 ms a 0,5 Hz -> ±0,63 % de pitch; ±0,15 ms a 6,3 Hz -> ±0,59 % (a Wow 100 %)
+                        const auto mod = wowDepth * (0.002f * std::sin (twoPi * wowPhase) + 0.00015f * std::sin (twoPi * flutterPhase));
+                        const auto delay = echoDelay.getNextValue() + mod;
+
+                        if (pingPong)
+                        {
+                            // L <- entrada en mono + realimentación de R; R <- realimentación de L: repeticiones L, R, L...
+                            const auto xl = buffer.getSample (0, i), xr = buffer.getSample (1, i);
+                            for (int ch = 0; ch < 2; ++ch)
+                            {
+                                auto& t = toneState[(size_t) ch];
+                                t += toneCoef * (echo.popSample (ch, delay) - t);
+                            }
+                            const auto tl = toneState[0], tr = toneState[1];
+                            echo.pushSample (0, 0.5f * (xl + xr) + feedback * std::tanh (1.5f * tr) / 1.5f);
+                            echo.pushSample (1, feedback * std::tanh (1.5f * tl) / 1.5f);
+                            buffer.setSample (0, i, xl + mix * tl);
+                            buffer.setSample (1, i, xr + mix * tr);
+                            continue;
+                        }
+                        for (int ch = 0; ch < numChannels; ++ch)
+                        {
+                            const auto x = buffer.getSample (ch, i);
+                            const auto d = echo.popSample (ch, delay);
+                            auto& t = toneState[(size_t) ch];
+                            t += toneCoef * (d - t);
+                            echo.pushSample (ch, x + feedback * std::tanh (1.5f * t) / 1.5f);
+                            buffer.setSample (ch, i, x + mix * t);
+                        }
+                    }
                 }
-                for (int ch = 0; ch < numChannels; ++ch)
+                echoWasOn = echoOn;
+
+                // Reverb de placa (Dattorro). Mezcla seco/húmedo a potencia constante, como el chorus
+                const auto ambientOn = params.ambientOn->load() > 0.5f;
+
+                if (ambientOn)
                 {
-                    const auto x = buffer.getSample (ch, i);
-                    const auto d = echo.popSample (ch, delay);
-                    auto& t = toneState[(size_t) ch];
-                    t += toneCoef * (d - t);
-                    echo.pushSample (ch, x + feedback * std::tanh (1.5f * t) / 1.5f);
-                    buffer.setSample (ch, i, x + mix * t);
+                    if (! ambientWasOn)
+                        reverb.reset();
+
+                    reverb.process (buffer, params.ambientSize->load(), params.reverbDecay->load(), params.reverbPredelay->load(),
+                                    params.reverbDiffusion->load(), params.reverbDamp->load(), params.reverbTone->load(),
+                                    params.reverbMod->load(), params.reverbWidth->load(), params.reverbFreeze->load() > 0.5f,
+                                    params.ambientMix->load());
                 }
+                ambientWasOn = ambientOn;
+
+                // Reverb de muelles (tras la de placa)
+                const auto springOn = params.springOn->load() > 0.5f;
+                if (springOn)
+                {
+                    if (! springWasOn) spring.reset();
+                    spring.process (buffer, params.springDecay->load(), params.springMix->load());
+                }
+                springWasOn = springOn;
+                    break;
+                }
+                default: break;
             }
         }
-        echoWasOn = echoOn;
-
-        // Reverb de placa (Dattorro). Mezcla seco/húmedo a potencia constante, como el chorus
-        const auto ambientOn = params.ambientOn->load() > 0.5f;
-
-        if (ambientOn)
-        {
-            if (! ambientWasOn)
-                reverb.reset();
-
-            reverb.process (buffer, params.ambientSize->load(), params.reverbDecay->load(), params.reverbPredelay->load(),
-                            params.reverbDiffusion->load(), params.reverbDamp->load(), params.reverbTone->load(),
-                            params.reverbMod->load(), params.reverbWidth->load(), params.reverbFreeze->load() > 0.5f,
-                            params.ambientMix->load());
-        }
-        ambientWasOn = ambientOn;
-
-        // Reverb de muelles (tras la de placa)
-        const auto springOn = params.springOn->load() > 0.5f;
-        if (springOn)
-        {
-            if (! springWasOn) spring.reset();
-            spring.process (buffer, params.springDecay->load(), params.springMix->load());
-        }
-        springWasOn = springOn;
 
         // Media: la mezcla completa se "graba" en el soporte (antes del Gain, como un máster)
         const auto mediaOn = params.mediaOn->load() > 0.5f;
@@ -1074,6 +1102,40 @@ public:
         }
     }
 
+    // Grupos de la cadena de efectos (bloques COLOR..SPACE del editor), en su orden de siempre
+    enum FxGroup { fxColor = 0, fxAmp, fxDynamics, fxModFx, fxEnsemble, fxSpace, numFxGroups };
+
+    // "3,0,1,2,4,5" -> orden; si no es una permutación de los 6 grupos, el de siempre
+    static std::array<int, 6> parseFxOrder (const juce::String& text)
+    {
+        std::array<int, 6> order { 0, 1, 2, 3, 4, 5 };
+        juce::StringArray parts;
+        parts.addTokens (text, ",", {});
+        if (parts.size() != numFxGroups)
+            return order;
+        std::array<bool, 6> seen {};
+        std::array<int, 6> read {};
+        for (int i = 0; i < numFxGroups; ++i)
+        {
+            const auto g = parts[i].trim().getIntValue();
+            if (! parts[i].trim().containsOnly ("0123456789") || g < 0 || g >= numFxGroups || seen[(size_t) g])
+                return order;
+            seen[(size_t) g] = true;
+            read[(size_t) i] = g;
+        }
+        return read;
+    }
+    std::array<int, 6> getFxOrder() const { return parseFxOrder (apvts.state.getProperty (fxOrderProp).toString()); }
+    // Hilo de mensajes (editor): el orden por defecto se guarda como propiedad vacía (los presets no la escriben)
+    void setFxOrder (const std::array<int, 6>& order)
+    {
+        juce::StringArray parts;
+        for (const auto g : order) parts.add (juce::String (g));
+        const auto isDefault = order == std::array<int, 6> { 0, 1, 2, 3, 4, 5 };
+        apvts.state.setProperty (fxOrderProp, isDefault ? juce::String() : parts.joinIntoString (","), nullptr);
+        refreshFxOrder();
+    }
+
     void setStateInformation (const void* data, int size) override
     {
         if (auto xml = getXmlFromBinary (data, size))
@@ -1125,6 +1187,8 @@ public:
                 perfMacros.update();
                 syncRandomState();
                 filterQualityRequested = juce::jlimit (0, 2, (int) apvts.state.getProperty (filterQualityProp, 0)); // sin ella: Classic
+                fxOrderText = "?"; // fuerza la relectura
+                refreshFxOrder();
 
                 restoreFiles (apvts.state.getProperty (samplePathProp).toString(), apvts.state.getProperty (wtPathProp).toString());
                 restoreSample (apvts.state.getProperty (osc2SamplePathProp).toString(), osc2Sample); // sin la propiedad (proyectos anteriores): sin fichero
@@ -1686,6 +1750,27 @@ private:
     const SampleSlot& slotFor (int which) const { return which == osc2Sample ? osc2SampleSlot : sampleSlot; }
     static const juce::Identifier& pathPropFor (int which) { return which == osc2Sample ? osc2SamplePathProp : samplePathProp; }
     static inline const juce::Identifier cabIrPathProp { "cabIrPath" }; // mismo nombre que el atributo del preset
+    // Orden de la cadena de efectos (propiedad de texto "fxOrder", también en los presets: los 6 grupos separados por comas;
+    // vacía o no válida = el orden de siempre). El audio lee la copia empaquetada: 4 bits por posición
+    static inline const juce::Identifier fxOrderProp { "fxOrder" };
+    static constexpr juce::uint32 defaultFxOrder = 0x543210;
+    std::atomic<juce::uint32> fxOrderPacked { defaultFxOrder };
+    juce::String fxOrderText;
+    void refreshFxOrder()
+    {
+        const auto text = apvts.state.getProperty (fxOrderProp).toString();
+        if (text == fxOrderText && fxOrderText.isNotEmpty())
+            return;
+        fxOrderText = text;
+        fxOrderPacked.store (packFxOrder (parseFxOrder (text)), std::memory_order_relaxed);
+    }
+    static juce::uint32 packFxOrder (const std::array<int, 6>& order)
+    {
+        juce::uint32 packed = 0;
+        for (int slot = 0; slot < numFxGroups; ++slot)
+            packed |= (juce::uint32) order[(size_t) slot] << (4 * slot);
+        return packed;
+    }
     static inline const juce::Identifier tuningSclProp { "tuningScl" }, tuningKbmProp { "tuningKbm" }, tuningNameProp { "tuningName" },
                                          mtsProp { "mtsEsp" };
 
@@ -1731,6 +1816,7 @@ private:
         updateMacros();
         perfMacros.update();
         updateBuiltInWavetable();
+        refreshFxOrder(); // un preset cargado puede traer otro orden de la cadena de efectos
     }
 
     // Ritmos de usuario de la caja de ritmos, el Omnichord y el VL-1 (Engines/UserRhythms.h): un banco por motor, se relee

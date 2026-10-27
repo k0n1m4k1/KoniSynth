@@ -440,6 +440,19 @@ ext_off = hf_ratio(render(ext, 1.5, ['57:0.05:1.4:127'], 'modlp.wav')[0], fs)
 ext_lp = hf_ratio(render(ext + ['Mod LP=150'], 1.5, ['57:0.05:1.4:127'], 'modlp.wav')[0], fs)
 c.check(ext_lp < ext_off - 6, 'Mod LP con Osc 2 como modulador: energía > 3 kHz %.1f dB frente a %.1f dB sin él' % (ext_lp, ext_off))
 
+# --- Orden de la cadena de efectos (propiedad fxOrder) ---
+FX = TONE + ['Crush On=On', 'Crush Bits=4', 'Echo On=On', 'Echo Time=120', 'Echo Feedback=50%', 'Echo Mix=60%']
+base, _ = render(FX, 1.5, ['57:0.05:0.5:127'], 'fxorder.wav')
+same, _ = render(FX + ['--prop=fxOrder=0,1,2,3,4,5'], 1.5, ['57:0.05:0.5:127'], 'fxorder.wav')
+moved, _ = render(FX + ['--prop=fxOrder=5,1,2,3,4,0'], 1.5, ['57:0.05:0.5:127'], 'fxorder.wav')
+bad, _ = render(FX + ['--prop=fxOrder=5,5,2,3,4,0'], 1.5, ['57:0.05:0.5:127'], 'fxorder.wav')
+# Con el eco antes del crush, las repeticiones pasan por los 4 bits: la cola tras la nota es escalonada (16 niveles)
+tail = lambda x: x[int(0.6 * fs):int(1.4 * fs)]
+levels = lambda x: len(np.unique(np.round(tail(x), 6)))
+c.check(np.array_equal(base, same) and np.array_equal(base, bad) and not np.array_equal(base, moved) and levels(moved) <= 16 < levels(base),
+        'fxOrder: el orden explícito de siempre y uno no válido = sin propiedad (bit a bit); SPACE antes que COLOR cambia el '
+        'sonido: la cola del eco pasa por el crush (%d niveles distintos frente a %d)' % (levels(moved), levels(base)))
+
 # --- Wavetable con el chunk "clm " de Serum: fotogramas de otro tamaño, remuestreados a 2048 ---
 import struct
 

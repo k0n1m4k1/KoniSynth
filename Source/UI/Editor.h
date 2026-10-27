@@ -17,7 +17,7 @@ extern "C" __declspec (dllimport) unsigned int __stdcall MapVirtualKeyW (unsigne
 void koniHookMaximiseFix (void* nativeHandle);
 void koniUnhookMaximiseFix (void* nativeHandle);
 
-class KoniSynthEditor : public juce::AudioProcessorEditor, private juce::Timer, private juce::ComponentListener
+class KoniSynthEditor : public juce::AudioProcessorEditor, public juce::DragAndDropContainer, private juce::Timer, private juce::ComponentListener
 {
 public:
     static constexpr int kWidth = 1636, kHeight = 1050; // 1636: +100 px de ancho (2026-10-21) para las filas más llenas // 1050: perilla >= ~37 px en filas con cabecera (6 filas)
@@ -1769,13 +1769,13 @@ private:
     void setupBlocks()
     {
         blocks = {
-            { "COLOR", "foldColor", "Effects 1/7 - color: crush, formant filter, tube and parametric EQ.", { &crushSection, &formantSection, &tube, &eqSection }, true, nullptr, true },
-            { "AMP", "foldAmp", "Effects 2/7 - tube amp and speaker cabinet (built-in or your impulse response, in Cabinet...).", { &ampSection }, true, nullptr, true },
-            { "DYNAMICS", "foldDynamics", "Effects 3/7 - dynamics: transient shaper and compressor.", { &transSection, &compSection }, true, nullptr, true },
-            { "MOD FX", "foldModFx", "Effects 4/7 - modulation: phaser, flanger and frequency shifter.", { &phaserSection, &flangerSection, &fshiftSection }, true, nullptr, true },
-            { "ENSEMBLE", "foldEnsemble", "Effects 5/7 - ensemble: chorus and Leslie.", { &chorusSection, &leslieSection }, true, nullptr, true },
-            { "SPACE", "foldSpace", "Effects 6/7 - space: tape echo, plate reverb and spring reverb.", { &echo, &ambient, &springSection }, true, nullptr, true },
-            { "OUTPUT", "foldOutput", "Effects 7/7 - output: media (tape, vinyl...), master and limiter.", { &mediaSection, &master, &limiterSection }, true, nullptr, true },
+            { "COLOR", "foldColor", "Effects - color: crush, formant filter, tube and parametric EQ.", { &crushSection, &formantSection, &tube, &eqSection }, true, nullptr, true },
+            { "AMP", "foldAmp", "Effects - tube amp and speaker cabinet (built-in or your impulse response, in Cabinet...).", { &ampSection }, true, nullptr, true },
+            { "DYNAMICS", "foldDynamics", "Effects - dynamics: transient shaper and compressor.", { &transSection, &compSection }, true, nullptr, true },
+            { "MOD FX", "foldModFx", "Effects - modulation: phaser, flanger and frequency shifter.", { &phaserSection, &flangerSection, &fshiftSection }, true, nullptr, true },
+            { "ENSEMBLE", "foldEnsemble", "Effects - ensemble: chorus and Leslie.", { &chorusSection, &leslieSection }, true, nullptr, true },
+            { "SPACE", "foldSpace", "Effects - space: tape echo, plate reverb and spring reverb.", { &echo, &ambient, &springSection }, true, nullptr, true },
+            { "OUTPUT", "foldOutput", "Effects - output: media (tape, vinyl...), master and limiter.", { &mediaSection, &master, &limiterSection }, true, nullptr, true },
             // Interpretación, entrada y macros: bajo la cadena de efectos, en línea propia (blockLines)
             { "PLAY", "foldPlay", "Performance: arpeggiator and step sequencer (for every engine).", { &arpSection, &seqSection } },
             { "IN", "foldInput", "Audio input and vocoder. The input is the vocoder's modulator (\"mod\"); Monitor sends it dry "
@@ -1799,8 +1799,31 @@ private:
         for (size_t b = 0; b < blocks.size(); ++b)
         {
             auto tab = std::make_unique<GroupTab> (blocks[b].name, [] {});
-            attachDockTab (*tab, blocks[b].foldId);
-            tab->setTooltip (juce::String (blocks[b].tip) + " Click to fold or unfold; right-click: docked, folded or floating window.");
+            const auto foldId = blocks[b].foldId;
+            if (b < (size_t) KoniSynthProcessor::numFxGroups) // grupo de efectos: su lugar en la cadena se elige
+            {
+                const auto group = (int) b;
+                tab->fxGroup = group;
+                tab->onFxDrop = [this] (int from, int to) { dropFx (from, to); };
+                attachModeTab (*tab, [this, foldId] { return dockMode (foldId); }, [this, foldId] (int m) { setDockMode (foldId, m); },
+                    [this, group] (juce::PopupMenu& m)
+                    {
+                        const auto order = koni.getFxOrder();
+                        const auto at = (int) (std::find (order.begin(), order.end(), group) - order.begin());
+                        m.addSeparator();
+                        m.addItem (100, "Move earlier in the chain", at > 0);
+                        m.addItem (101, "Move later in the chain", at < KoniSynthProcessor::numFxGroups - 1);
+                        m.addItem (102, "Reset chain order", order != std::array<int, 6> { 0, 1, 2, 3, 4, 5 });
+                    },
+                    [this, group] (int id) { if (id == 102) setFxOrder ({ 0, 1, 2, 3, 4, 5 }); else moveFx (group, id == 100 ? -1 : 1); });
+                tab->setTooltip (juce::String (blocks[b].tip) + " Click to fold or unfold; right-click: docked, folded or floating window, "
+                                 "and its place in the chain. Drag it onto another effects block to change the order of the chain.");
+            }
+            else
+            {
+                attachDockTab (*tab, foldId);
+                tab->setTooltip (juce::String (blocks[b].tip) + " Click to fold or unfold; right-click: docked, folded or floating window.");
+            }
             rows.addAndMakeVisible (*tab);
             blockTabs.push_back (std::move (tab));
         }
@@ -1834,22 +1857,66 @@ private:
     // Comportamiento común de todas las pestañas (DISPLAY, BPM, ENGINE, bloques, PAD, KEYS): clic = plegar / desplegar
     // (flotante: vuelve al panel); clic derecho = Docked / Folded / Floating window. get/set: modo 0/1/2 del elemento
     template <typename Tab> // GroupTab se declara más abajo en la clase
-    void attachModeTab (Tab& tab, std::function<int()> get, std::function<void (int)> set)
+    // extraItems / extraPicked: opciones propias tras las de acoplado (ids desde 100)
+    void attachModeTab (Tab& tab, std::function<int()> get, std::function<void (int)> set,
+                        std::function<void (juce::PopupMenu&)> extraItems = {}, std::function<void (int)> extraPicked = {})
     {
         tab.onClick = [get, set] { set (get() == 0 ? 1 : 0); };
-        tab.onRightClick = [this, get, set, t = &tab]
+        tab.onRightClick = [this, get, set, extraItems, extraPicked, t = &tab]
         {
             juce::PopupMenu m;
             const auto mode = get();
             m.addItem (1, "Docked", true, mode == 0);
             m.addItem (2, "Folded", true, mode == 1);
             m.addItem (3, "Floating window", true, mode == 2);
+            if (extraItems) extraItems (m);
             m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (t),
-                             [safe = SafePointer<KoniSynthEditor> (this), set] (int id)
+                             [safe = SafePointer<KoniSynthEditor> (this), set, extraPicked] (int id)
                              {
-                                 if (safe != nullptr && id > 0) set (id - 1);
+                                 if (safe == nullptr || id <= 0) return;
+                                 if (id >= 100) { if (extraPicked) extraPicked (id); }
+                                 else set (id - 1);
                              });
         };
+    }
+
+    // Orden de la cadena de efectos (KoniSynthProcessor::setFxOrder): los bloques COLOR..SPACE se recolocan en ese orden
+    void setFxOrder (const std::array<int, 6>& order)
+    {
+        koni.setFxOrder (order);
+        resized();
+    }
+    // Arrastre de un bloque sobre otro: 'from' pasa al lugar de 'to' y los de en medio se corren un puesto
+    void dropFx (int from, int to)
+    {
+        auto order = koni.getFxOrder();
+        std::vector<int> v (order.begin(), order.end());
+        const auto src = std::find (v.begin(), v.end(), from) - v.begin(), dst = std::find (v.begin(), v.end(), to) - v.begin();
+        if (src == dst || src >= (std::ptrdiff_t) v.size() || dst >= (std::ptrdiff_t) v.size())
+            return;
+        v.erase (v.begin() + src);
+        v.insert (v.begin() + dst, from);
+        std::copy (v.begin(), v.end(), order.begin());
+        setFxOrder (order);
+    }
+    void moveFx (int group, int delta)
+    {
+        auto order = koni.getFxOrder();
+        const auto at = (int) (std::find (order.begin(), order.end(), group) - order.begin());
+        const auto to = at + delta;
+        if (to < 0 || to >= KoniSynthProcessor::numFxGroups)
+            return;
+        std::swap (order[(size_t) at], order[(size_t) to]);
+        setFxOrder (order);
+    }
+    // Orden en pantalla de los bloques: los grupos de efectos en el de la cadena (bloque g = grupo g), después OUTPUT,
+    // PLAY, IN y MACROS
+    std::vector<size_t> blockOrder() const
+    {
+        std::vector<size_t> out;
+        for (const auto g : koni.getFxOrder()) out.push_back ((size_t) g);
+        for (size_t b = (size_t) KoniSynthProcessor::numFxGroups; b < blocks.size(); ++b) out.push_back (b);
+        return out;
     }
 
     template <typename Tab>
@@ -2055,6 +2122,12 @@ private:
 
     // Coloca los bloques abiertos en 'area' (incluye la columna de pestañas), una línea de alto unitHeight cada una. Los
     // plegados o flotantes no ocupan sitio aquí: su pestaña va a la barra inferior (layoutStatusBar)
+    int chainPosition (size_t block) const
+    {
+        const auto order = blockOrder();
+        return (int) (std::find (order.begin(), order.end(), block) - order.begin());
+    }
+
     void layoutBlocks (juce::Rectangle<int> area, int unitHeight)
     {
         for (size_t b = 0; b < blocks.size(); ++b)
@@ -2081,7 +2154,7 @@ private:
                 {
                     // Flecha de la cadena de efectos entre bloques FX consecutivos de la cadena (con uno plegado en medio
                     // no se dibuja: el audio pasa por él y la flecha no debe saltárselo)
-                    if (blocks[b].fx && blocks[line[i - 1]].fx && line[i - 1] + 1 == b)
+                    if (blocks[b].fx && blocks[line[i - 1]].fx && chainPosition (line[i - 1]) + 1 == chainPosition (b))
                         rows.arrows.push_back ({ (float) x + blockGap * 0.5f, (float) cellsRow.getY() + 24.0f });
                     x += blockGap;
                 }
@@ -2117,7 +2190,7 @@ private:
         std::vector<std::vector<size_t>> lines;
         int used = 0;
         bool prevFx = false;
-        for (size_t b = 0; b < blocks.size(); ++b)
+        for (const auto b : blockOrder())
         {
             if (blockCollapsed (b))
                 continue;
@@ -2151,7 +2224,7 @@ private:
         if (displayFolded) chips.push_back ({ displayTab.get(), dockMode (displayFoldId) == 2 });
         if (bpmMode != 0) chips.push_back ({ bpmTab.get(), bpmMode == 2 });
         if (engineCollapsed()) chips.push_back ({ groupTabs[0].get(), dockMode (engineFoldId) == 2 });
-        for (size_t b = 0; b < blocks.size(); ++b)
+        for (const auto b : blockOrder())
             if (blockCollapsed (b)) chips.push_back ({ blockTabs[b].get(), blockFloating (b) });
         if ((engine == 1 || engine == 3) && padMode() != 0) chips.push_back ({ padTab.get(), padMode() == 2 });
         if (keyboardMode() != 0) chips.push_back ({ groupTabs[3].get(), keyboardMode() == 2 });
@@ -2506,15 +2579,52 @@ private:
         avxButton.setEnabled (st.cpuHasAvx2.load() || ! st.tested.load());
     }
     // Pestaña lateral vertical de un grupo plegable: nombre girado (o abreviado si está plegada) y triángulo de estado
-    struct GroupTab : juce::Button
+    // Las de los grupos de efectos (fxGroup >= 0) se arrastran sobre otra para cambiar el orden de la cadena (onFxDrop)
+    struct GroupTab : juce::Button, juce::DragAndDropTarget
     {
         GroupTab (const juce::String& name, std::function<void()> click) : juce::Button (name) { onClick = std::move (click); }
         std::function<void()> onRightClick;
+        int fxGroup = -1;
+        std::function<void (int from, int to)> onFxDrop;
         void mouseDown (const juce::MouseEvent& e) override
         {
+            dragged = false;
             if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick(); }
             else juce::Button::mouseDown (e);
         }
+        void mouseDrag (const juce::MouseEvent& e) override
+        {
+            juce::Button::mouseDrag (e);
+            if (fxGroup < 0 || dragged || e.getDistanceFromDragStart() < 8 || e.mods.isPopupMenu())
+                return;
+            if (auto* c = juce::DragAndDropContainer::findParentDragContainerFor (this))
+            {
+                dragged = true;
+                c->startDragging ("fxgroup:" + juce::String (fxGroup), this);
+            }
+        }
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (! dragged) { juce::Button::mouseUp (e); return; }
+            dragged = false; // un arrastre no pliega el bloque
+            setState (juce::Button::buttonNormal);
+        }
+        bool isInterestedInDragSource (const SourceDetails& d) override
+        {
+            return fxGroup >= 0 && d.description.toString().startsWith ("fxgroup:");
+        }
+        void itemDragEnter (const SourceDetails&) override { dropTarget = true; repaint(); }
+        void itemDragExit (const SourceDetails&) override { dropTarget = false; repaint(); }
+        void itemDropped (const SourceDetails& d) override
+        {
+            dropTarget = false;
+            repaint();
+            const auto from = d.description.toString().fromFirstOccurrenceOf (":", false, false).getIntValue();
+            if (onFxDrop && from != fxGroup)
+                juce::MessageManager::callAsync ([safe = SafePointer<GroupTab> (this), from]
+                                                 { if (safe != nullptr && safe->onFxDrop) safe->onFxDrop (from, safe->fxGroup); });
+        }
+        bool dragged = false, dropTarget = false;
         void setFolded (bool f) { if (f != isFolded) { isFolded = f; repaint(); } }
         void setFloating (bool f) { if (f != isFloating) { isFloating = f; repaint(); } }
         void paintButton (juce::Graphics& g, bool highlighted, bool) override
@@ -2551,6 +2661,13 @@ private:
                 const auto t = juce::Rectangle<float> (r.getHeight() - 24.0f, r.getWidth()).withCentre (r.getCentre().translated (0.0f, 0.0f));
                 g.drawText (getButtonText(), t, juce::Justification::centred);
             }
+        }
+        void paintOverChildren (juce::Graphics& g) override
+        {
+            if (! dropTarget)
+                return;
+            g.setColour (Skin::accent());
+            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 4.0f, 2.0f); // destino del arrastre
         }
         bool isFolded = false, isFloating = false;
     };
