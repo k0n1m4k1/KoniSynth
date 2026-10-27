@@ -40,6 +40,15 @@ public:
         repaint();
     }
 
+    // Tercer botón, entre aceptar y cancelar (p. ej. Overwrite / Skip / Cancel): cierra con accepted = false y choice = -2
+    void setExtraButton (const juce::String& text)
+    {
+        extra.setButtonText (text);
+        extra.onClick = [this] { close (false, true); };
+        addAndMakeVisible (extra);
+        resized();
+    }
+
     ~Overlay() override
     {
         if (auto* parent = getParentComponent())
@@ -82,6 +91,11 @@ public:
         if (cancel.isVisible())
         {
             cancel.setBounds (buttons.removeFromRight (100));
+            buttons.removeFromRight (8);
+        }
+        if (extra.isVisible())
+        {
+            extra.setBounds (buttons.removeFromRight (100));
             buttons.removeFromRight (8);
         }
         ok.setBounds (buttons.removeFromRight (100));
@@ -138,14 +152,14 @@ private:
         }
     }
 
-    void close (bool accepted)
+    void close (bool accepted, bool extraButton = false)
     {
         if (closing)
             return;
         closing = true;
         setVisible (false);
         const auto value = field.getText().trim();
-        const auto chosen = choice.getSelectedItemIndex();
+        const auto chosen = extraButton ? -2 : choice.getSelectedItemIndex();
         // Diferido: este método se llama desde el onClick de un botón propio y el dueño destruirá el diálogo
         juce::MessageManager::callAsync ([safe = SafePointer<Overlay> (this), accepted, value, chosen]
         {
@@ -163,6 +177,6 @@ private:
     juce::TextEditor field;
     juce::Label choiceLabel;
     juce::ComboBox choice;
-    juce::TextButton ok, cancel;
+    juce::TextButton ok, cancel, extra;
     bool closing = false;
 };

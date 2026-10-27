@@ -9,6 +9,7 @@
 // Elegir una fila (clic o flechas) carga el preset para escucharlo; doble clic o Intro lo carga y cierra.
 // Favoritos con orden propio (las teclas 1-9 cargan los nueve primeros, cuyo número se ve junto a la estrella): con la
 // tabla ordenada por la columna ★ se reordenan arrastrando; en cualquier orden, con el menú del clic derecho o Alt+flechas.
+// Import... / Export...: presets de usuario sueltos (.xml) o en banco (.zip); con un nombre ya existente, Replace / Skip / Cancel.
 class PresetBrowser : public juce::Component, public juce::DragAndDropContainer, private juce::DragAndDropTarget,
                       private juce::TableListBoxModel
 {
@@ -53,6 +54,14 @@ public:
         count.setJustificationType (juce::Justification::centredRight);
         count.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         addAndMakeVisible (count);
+        importButton.setTooltip ("Import user presets: a KoniSynth preset (.xml) or a bank of presets (.zip). The samples, "
+                                 "impulse responses and wavetables they use are not included: copy them too, or use Locate... when loading.");
+        importButton.onClick = [this] { chooseImport(); };
+        addAndMakeVisible (importButton);
+        exportButton.setTooltip ("Export the selected user preset (.xml) or all your user presets as a bank (.zip). The files "
+                                 "they use (samples, impulse responses, wavetables) are not included.");
+        exportButton.onClick = [this] { showExportMenu(); };
+        addAndMakeVisible (exportButton);
         hint.setText (defaultHint(), juce::dontSendNotification);
         hint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.5f));
         addAndMakeVisible (hint);
@@ -69,6 +78,10 @@ public:
         auto r = getLocalBounds().reduced (8);
         auto top = r.removeFromTop (30);
         count.setBounds (top.removeFromRight (140));
+        exportButton.setBounds (top.removeFromRight (90));
+        top.removeFromRight (6);
+        importButton.setBounds (top.removeFromRight (90));
+        top.removeFromRight (8);
         search.setBounds (top);
         r.removeFromTop (8);
         auto bottom = r.removeFromBottom (20);
@@ -373,25 +386,149 @@ private:
         const auto i = visible[(size_t) row];
         if (e.mods.isPopupMenu())
         {
-            if (favPos[i] < 0) return;
-            const auto last = (int) presets.favoriteIndices().size() - 1;
+            const auto user = ! presets.getPresets()[i].factory;
+            if (favPos[i] < 0 && ! user) return;
             juce::PopupMenu m;
-            m.addItem (1, "Move to top", favPos[i] > 0);
-            m.addItem (2, "Move up", favPos[i] > 0);
-            m.addItem (3, "Move down", favPos[i] < last);
-            m.addItem (4, "Move to end", favPos[i] < last);
+            if (favPos[i] >= 0)
+            {
+                const auto last = (int) presets.favoriteIndices().size() - 1;
+                m.addItem (1, "Move to top", favPos[i] > 0);
+                m.addItem (2, "Move up", favPos[i] > 0);
+                m.addItem (3, "Move down", favPos[i] < last);
+                m.addItem (4, "Move to end", favPos[i] < last);
+            }
+            if (user)
+            {
+                m.addSeparator();
+                m.addItem (5, "Export...");
+            }
             m.showMenuAsync ({}, [this, i] (int r)
             {
                 if (r == 1) moveFavoriteBy (i, -1000000);
                 else if (r == 2) moveFavoriteBy (i, -1);
                 else if (r == 3) moveFavoriteBy (i, 1);
                 else if (r == 4) moveFavoriteBy (i, 1000000);
+                else if (r == 5) exportTo ((int) i);
             });
             return;
         }
         if (col != colFav) return;
         presets.toggleFavorite (i);
         refilter(); // posiciones (números 1-9) y, con el filtro de favoritos, la lista
+    }
+
+    //==========================================================================
+    // Exportar / importar presets de usuario (PresetManager::exportPreset, exportAll, readImport, writeImported)
+    int selectedUserPreset() const
+    {
+        const auto row = table.getSelectedRow();
+        if (row < 0 || row >= (int) visible.size()) return -1;
+        const auto i = visible[(size_t) row];
+        return presets.getPresets()[i].factory ? -1 : (int) i;
+    }
+
+    void showExportMenu()
+    {
+        const auto sel = selectedUserPreset();
+        juce::PopupMenu m;
+        m.addItem (1, sel >= 0 ? "Export \"" + presets.getPresets()[(size_t) sel].name + "\"..." : juce::String ("Export selected preset (select a user preset)"), sel >= 0);
+        m.addItem (2, "Export all user presets (.zip)...");
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (exportButton), [this, sel] (int r)
+        {
+            if (r == 1 && sel >= 0) exportTo (sel);
+            else if (r == 2) exportTo (-1);
+        });
+    }
+
+    // index >= 0: ese preset como .xml; -1: todos en un .zip
+    void exportTo (int index)
+    {
+        const auto docs = juce::File::getSpecialLocation (juce::File::userDocumentsDirectory);
+        const auto name = index >= 0 ? presets.getPresets()[(size_t) index].name + ".xml" : juce::String ("KoniSynth User Presets.zip");
+        chooser = std::make_unique<juce::FileChooser> ("Export", docs.getChildFile (name), index >= 0 ? "*.xml" : "*.zip");
+        chooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::warnAboutOverwriting,
+            [this, index] (const juce::FileChooser& fc)
+            {
+                auto f = fc.getResult();
+                if (f == juce::File()) return;
+                f = f.withFileExtension (index >= 0 ? "xml" : "zip");
+                const auto r = index >= 0 ? presets.exportPreset ((size_t) index, f) : presets.exportAll (f);
+                report (r.wasOk() ? "Exported to " + f.getFullPathName() + "." : r.getErrorMessage());
+            });
+    }
+
+    struct ImportJob
+    {
+        std::vector<PresetManager::Incoming> items;
+        size_t next = 0;
+        int imported = 0, skipped = 0;
+        juce::StringArray rejected;
+    };
+
+    void chooseImport()
+    {
+        chooser = std::make_unique<juce::FileChooser> ("Import presets", juce::File::getSpecialLocation (juce::File::userDocumentsDirectory), "*.xml;*.zip");
+        chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles, [this] (const juce::FileChooser& fc)
+        {
+            const auto f = fc.getResult();
+            if (! f.existsAsFile()) return;
+            auto job = std::make_shared<ImportJob>();
+            job->items = presets.readImport (f, job->rejected);
+            importNext (job);
+        });
+    }
+
+    // De uno en uno; con un nombre ya existente pregunta: Replace / Skip / Cancel (Cancel deja sin importar los que faltan)
+    void importNext (std::shared_ptr<ImportJob> job)
+    {
+        for (; job->next < job->items.size(); ++job->next)
+        {
+            const auto& p = job->items[job->next];
+            if (presets.userPresetExists (p.name))
+            {
+                overlay = Overlay::create (*this, "Import", "A user preset named \"" + p.name + "\" already exists.", std::nullopt,
+                                           "Replace", "Cancel", [this, job] (bool accepted, const juce::String&, int choice)
+                {
+                    overlay.reset();
+                    if (accepted) store (*job);
+                    else if (choice == -2) ++job->skipped;
+                    else { finishImport (*job, true); return; }
+                    ++job->next;
+                    importNext (job);
+                });
+                overlay->setExtraButton ("Skip");
+                return;
+            }
+            store (*job);
+        }
+        finishImport (*job, false);
+    }
+
+    void store (ImportJob& job)
+    {
+        const auto& p = job.items[job.next];
+        if (auto r = presets.writeImported (p); r.wasOk()) ++job.imported;
+        else job.rejected.add (p.name + ": " + r.getErrorMessage());
+    }
+
+    void finishImport (const ImportJob& job, bool cancelled)
+    {
+        presets.refresh();
+        refilter();
+        juce::String msg;
+        msg << "Imported " << job.imported << (job.imported == 1 ? " preset" : " presets");
+        if (job.skipped > 0) msg << ", skipped " << job.skipped;
+        if (cancelled) msg << ", cancelled (" << (int) (job.items.size() - job.next) << " not imported)";
+        msg << ".";
+        if (! job.rejected.isEmpty())
+            msg << " Not imported: " << job.rejected.joinIntoString ("; ", 0, 3) << (job.rejected.size() > 3 ? "..." : ".");
+        report (msg);
+    }
+
+    void report (const juce::String& message)
+    {
+        overlay = Overlay::create (*this, "Presets", message, std::nullopt, "OK", {}, [this] (bool, const juce::String&, int) { overlay.reset(); });
     }
 
     // Mueve el favorito del preset i delta posiciones en el orden global (acotado a los extremos)
@@ -481,6 +618,9 @@ private:
     ArrowForwarder arrows;
     juce::TableListBox table;
     juce::Label count, hint;
+    juce::TextButton importButton { "Import..." }, exportButton { "Export..." };
+    std::unique_ptr<juce::FileChooser> chooser;
+    std::unique_ptr<Overlay> overlay; // Replace / Skip / Cancel y el resumen de la importación o exportación
     std::vector<FilterRow> filterRows;
     std::array<juce::String, 3> selection {};
     std::vector<size_t> visible;

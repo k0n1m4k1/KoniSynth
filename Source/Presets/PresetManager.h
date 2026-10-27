@@ -254,6 +254,85 @@ public:
 
     bool userPresetExists (const juce::String& name) const { return fileFor (name).existsAsFile(); }
 
+    // Exportar e importar presets de usuario (navegador). Un preset viaja como su .xml tal cual; el banco, como un .zip con
+    // los .xml en la raíz. Los ficheros a los que apunta (samples, IR, wavetables) no viajan: el preset guarda sus rutas y, si
+    // faltan al cargarlo, se avisa con Locate... / Ignore
+    juce::Result exportPreset (size_t index, const juce::File& dest) const
+    {
+        if (index >= presets.size() || presets[index].factory)
+            return juce::Result::fail ("Only user presets can be exported.");
+        if (! presets[index].file.copyFileTo (dest))
+            return juce::Result::fail ("Could not write " + dest.getFullPathName() + ".");
+        return juce::Result::ok();
+    }
+
+    juce::Result exportAll (const juce::File& dest) const
+    {
+        juce::ZipFile::Builder zip;
+        int n = 0;
+        for (const auto& p : presets)
+            if (! p.factory && p.file.existsAsFile())
+                zip.addFile (p.file, 9, p.file.getFileName()), ++n;
+        if (n == 0)
+            return juce::Result::fail ("There are no user presets to export.");
+        dest.deleteFile(); // FileOutputStream añade al final de un fichero existente (el selector ya confirmó sobrescribir)
+        juce::FileOutputStream out (dest);
+        if (! out.openedOk() || ! zip.writeToStream (out, nullptr))
+            return juce::Result::fail ("Could not write " + dest.getFullPathName() + ".");
+        return juce::Result::ok();
+    }
+
+    // Presets legibles de un .xml o de un .zip (solo los .xml del archivo, sin sus carpetas): etiqueta KoniSynthPreset, nombre
+    // válido (validateName: no el de un preset de fábrica) y hasta 4 MB cada uno (un preset ocupa unos 30 kB). La versión de
+    // formato no se comprueba aquí: al cargarlo, migrateValues lo trae al actual o avisa si es de una versión posterior
+    struct Incoming { juce::String name, text; };
+    std::vector<Incoming> readImport (const juce::File& f, juce::StringArray& rejected) const
+    {
+        constexpr juce::int64 maxBytes = 4 << 20;
+        std::vector<Incoming> out;
+        const auto accept = [&] (const juce::String& fileName, const juce::String& text)
+        {
+            const auto name = fileName.upToLastOccurrenceOf (".", false, false);
+            const auto xml = juce::XmlDocument::parse (text);
+            if (xml == nullptr || ! xml->hasTagName (xmlTag))
+                rejected.add (fileName + ": not a KoniSynth preset");
+            else if (auto r = validateName (name); r.failed())
+                rejected.add (fileName + ": " + r.getErrorMessage());
+            else
+                out.push_back ({ name, text });
+        };
+        if (f.hasFileExtension ("zip"))
+        {
+            juce::ZipFile zip (f);
+            for (int i = 0; i < zip.getNumEntries(); ++i)
+            {
+                const auto* e = zip.getEntry (i);
+                const auto fileName = e->filename.fromLastOccurrenceOf ("/", false, false).fromLastOccurrenceOf ("\\", false, false);
+                if (! fileName.endsWithIgnoreCase (".xml"))
+                    continue;
+                if (e->uncompressedSize > maxBytes) { rejected.add (fileName + ": too large"); continue; }
+                if (std::unique_ptr<juce::InputStream> in (zip.createStreamForEntry (i)); in != nullptr)
+                    accept (fileName, in->readEntireStreamAsString());
+                else
+                    rejected.add (fileName + ": could not be read");
+            }
+        }
+        else if (f.getSize() > maxBytes)
+            rejected.add (f.getFileName() + ": too large");
+        else
+            accept (f.getFileName(), f.loadFileAsString());
+        return out;
+    }
+
+    // Escribe un preset importado en la carpeta de usuario (sobrescribe si existe: la confirmación la pide la UI)
+    juce::Result writeImported (const Incoming& p)
+    {
+        userDirectory().createDirectory();
+        if (! fileFor (p.name).replaceWithText (p.text))
+            return juce::Result::fail ("Could not write " + fileFor (p.name).getFullPathName() + ".");
+        return juce::Result::ok();
+    }
+
     // Crea o sobrescribe (la confirmación de sobrescritura la pide la UI).
     juce::Result saveAs (const juce::String& name, const juce::String& category)
     {
@@ -301,6 +380,16 @@ public:
             return juce::Result::fail ("A user preset named \"" + newName + "\" already exists.");
         if (! old.file.moveFileTo (target))
             return juce::Result::fail ("Cannot rename:\n" + old.file.getFullPathName());
+
+        // El favorito (y su puesto en el orden propio) sigue al preset: la clave lleva el nombre
+        const auto oldKey = favoriteKey (old), newKey = juce::String ("U:") + newName;
+        if (oldKey != newKey && favorites.erase (oldKey) > 0)
+        {
+            favorites.insert (newKey);
+            const auto at = favoriteOrder.indexOf (oldKey);
+            if (at >= 0) favoriteOrder.set (at, newKey); else favoriteOrder.add (newKey);
+            saveFavorites();
+        }
 
         refresh();
         setCurrent ({ newName, false, target, old.category });
@@ -381,16 +470,6 @@ private:
     {
         favoritesFile().getParentDirectory().createDirectory();
         favoritesFile().replaceWithText (favoritesOrderedMark + "\n" + favoriteOrder.joinIntoString ("\n") + "\n");
-        // El favorito (y su puesto en el orden propio) sigue al preset: la clave lleva el nombre
-        const auto oldKey = favoriteKey (old), newKey = juce::String ("U:") + newName;
-        if (oldKey != newKey && favorites.erase (oldKey) > 0)
-        {
-            favorites.insert (newKey);
-            const auto at = favoriteOrder.indexOf (oldKey);
-            if (at >= 0) favoriteOrder.set (at, newKey); else favoriteOrder.add (newKey);
-            saveFavorites();
-        }
-
     }
     // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, wtPathProp, osc2WtPathProp)
     static constexpr const char* sampleAttribute = "samplePath";
