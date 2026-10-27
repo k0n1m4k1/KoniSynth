@@ -46,11 +46,14 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 ## Features
 
 - **Synth engine:** besides the four summed sources, a second group of tabs (Osc 2, Osc 3, Noise), with Mute and Solo on
-  every source; Osc 2 can play the wavetable at its own position or its own sample file, and Osc 2 or Osc 3 can be the
-  modulator of the complex oscillator. Waveforms include the Minimoog Tri-Saw and the mixed waves of a Prophet-5 oscillator
+  every source; Osc 2 can play its own wavetable or its own sample file, and Osc 2 or Osc 3 can be the modulator of the
+  complex oscillator, through a low-pass filter if you want softer FM. Wavetables in the Serum format (2048 samples per
+  frame, or the frame size its `clm` chunk declares). Waveforms include the Minimoog Tri-Saw and the mixed waves of a Prophet-5 oscillator
   and of the Juno-106 (Saw+Pulse), and every triangle can be made lopsided and rounded like an analog one (Tri Sym, Tri Rnd).
-  The ladder filter has three qualities against aliasing with drive (Classic, Balanced 2x, High Quality 4x).
-- **Effects chain** (each group can be folded or opened in its own window), in signal order:
+  The ladder filter has three qualities against aliasing with drive (Classic, Balanced 2x, High Quality 4x), and the
+  per-voice saturation can sit after or before it. A strip above the sources shows the current signal path.
+- **Effects chain** (each group can be folded or opened in its own window), by default in this order; drag a group's
+  tab onto another (or use its right-click menu) to reorder the first six, saved with the preset; output stays last:
   color (bit crusher, formant filter, tube, parametric EQ with 6 to 48 dB/oct cuts) → amp and cabinet (built-in or your
   impulse response) → dynamics (transient shaper, compressor) → modulation (phaser, flanger, frequency shifter) → ensemble
   (chorus, Leslie) → space (tape echo, plate reverb, spring reverb) → output (media: cassette, vinyl, reel tape at three
@@ -72,9 +75,11 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   music), in modern, green or amber phosphor style. Its bezel follows the skin and style (graphite, terminal casing or
   brushed steel), or is brass, or none; with a bezel the screen has CRT-style glass. BPM display and transport next to it. The VL-1, DX7 and MT-32
   engines also show their own front-panel display, and the Drum Machine its step lights.
-- **Interface:** collapsible blocks, floating windows (handy on multi-monitor setups), resizable window, tooltips on every
-  control, right-click menu with Reset / Set value / MIDI Learn, skins (Default, Phosphor Green, Phosphor Amber, Brushed Metal;
-  the choice is global and remembered). Red LEDs keep their colour with every skin.
+- **Interface:** collapsible blocks, floating windows (handy on multi-monitor setups; a pin in the title bar keeps one on
+  top), resizable window, tooltips on every control, right-click menu with Reset / Set value / MIDI Learn, skins (Default,
+  Phosphor Green, Phosphor Amber, Brushed Metal; the choice is global and remembered). Knobs turn like real ones; choices of
+  a few options are stepped switches, on/off choices are keys, and waveform menus and switches show the waveform. The
+  transpose and scale bar goes with the on-screen keyboard. Red LEDs keep their colour with every skin.
 - **Agent control (MCP):** an AI agent such as Claude can read and set parameters, browse and save presets, play and listen to
   KoniSynth (see [Agent control](#agent-control-mcp)).
 
@@ -166,7 +171,7 @@ Windows, Linux and macOS: [docs/BUILDING.md](docs/BUILDING.md).
 | `test_units.py` | Undo/redo, transport (WAV bit-exact, MIDI timing), Scala tuning, saturation |
 | `test_regression.py` | Bit-exact renders of 12 engines with a fixed seed against stored hashes |
 | `test_filters.py` | Filter responses and slopes (ladder, SVF, MS-20, comb, dual), ladder self-oscillation, stability and quality modes, Clean Drive |
-| `test_voice.py` | Per-voice saturation (intermodulation, aliasing, level), analog VCA, microtuning, plucked string |
+| `test_voice.py` | Per-voice saturation (intermodulation, aliasing, level, position), analog VCA, microtuning, plucked string, Osc 2 wavetable and sample, Complex Mod LP, effects order, Serum `clm` frame size |
 | `test_midi_learn.py` | MIDI Learn of parameters and actions stored in the state |
 | `test_clap.py` | clap-validator (when `CLAP_VALIDATOR` points to it) |
 | `test_mt32.py` | MT-32 without valid ROMs is silent and safe; with `KONI_MT32_ROMS_REAL` it checks that it sounds |

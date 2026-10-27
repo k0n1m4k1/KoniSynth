@@ -3,7 +3,7 @@
 The Synth is KoniSynth's own polyphonic synthesizer. It does not emulate a specific instrument: it is a subtractive
 design with its own personality, combining four summed sources (a minBLEP oscillator with unison, a wavetable, a
 sample player and a Karplus-Strong plucked string), a Buchla 259-style complex oscillator, a second oscillator
-(classic and mixed waves, the wavetable or its own sample file), a third oscillator that grows from the classic sub, noise, 14 filter modes, per-voice saturation, two LFOs, an 8-slot modulation matrix and an analog-style drift
+(classic and mixed waves, its own wavetable or its own sample file), a third oscillator that grows from the classic sub, noise, 14 filter modes, per-voice saturation, two LFOs, an 8-slot modulation matrix and an analog-style drift
 model. Use it for basses, leads, pads, keys, plucks, sound effects and anything the emulated engines do not cover.
 
 Unlike the emulated engines, the Synth is not bound to an original. Its analog behaviours (drift, filter input
@@ -19,6 +19,11 @@ for the **User File** wavetable.
 
 The Synth fills three rows: sources -> Complex Oscillator -> Osc 2 / Osc 3 / Noise; Filter, Filter Envelope, Amp Envelope;
 Voice, LFO, LFO 2. Voice, LFO 2 and the matrix act only in the Synth.
+
+The **SIGNAL** strip above the sources draws the path the sound takes right now: the sources (with **Complex** attached to
+Osc 1 and its modulator when the complex oscillator is on, marked *LP* when Mod LP filters it), the mixer, filter and
+saturation in their current order, the amp, the effects (their order is in the FX tooltip) and the output. LEDs show what
+sounds or is on; on the right, the active modulations. Clicking a source opens its tab and its view on the wave display.
 
 ### Source tabs: Osc 1, Wavetable, Sample, String
 
@@ -43,7 +48,9 @@ silences the source without changing its level; mutes are off by default and pre
 | Tri Rnd | Triangle waveform only: rounds its tips (weaker odd harmonics); 100 % is a sine. | 0-100 % / 0 % |
 
 **Wavetable** (Edit Table... opens the wavetable editor: the frames in perspective, the table menu, Level, Position and a
-**Load** button for a WAV with 2048 samples per frame, the Serum format, or a single cycle)
+**Load** button for a WAV with 2048 samples per frame, the Serum format, or a single cycle. A WAV that declares another
+frame size in the `clm ` chunk written by Serum (`<!>1024 ...`) is read with that size and each frame is resampled to 2048;
+a stereo file is mixed to mono)
 
 | Control | What it does | Range / default |
 |---|---|---|
@@ -123,6 +130,7 @@ Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x overs
 | Timbre | Sine wavefolder: progressively adds harmonics. | 0-100 % / 0 % |
 | Symmetry | Wavefolder asymmetry. | -100 to +100 % / 0 % |
 | T.Mod | The modulator moves the wavefolder. | 0-100 % / 0 % |
+| Mod LP | One-pole low-pass (6 dB/oct) on the modulator (internal, Osc 2 or Osc 3) before the FM and the AM: a saw or square modulator gets rounder, for softer FM. With the internal modulator and 3 or more unison voices it runs without AVX2 (more CPU). | 20 Hz-20 kHz, Off at the top / Off |
 
 Notes on **Mod Src** = Osc 2 or Osc 3:
 
@@ -217,7 +225,7 @@ editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loo
 ### Filter
 
 The **Saturation...** header button opens the **Saturation** dialog: *Filter Input* (Clean Drive switch and Drive) and *Voice
-Saturation* (curve menu and Drive). The **Ladder quality** selector next to it chooses how the ladder modes are processed; see
+Saturation* (curve menu, Drive and Position). The **Ladder quality** selector next to it chooses how the ladder modes are processed; see
 *Ladder quality* below.
 
 | Control | What it does | Range / default |
@@ -234,6 +242,7 @@ Saturation* (curve menu and Drive). The **Ladder quality** selector next to it c
 | Sat | Per-voice saturation drive (same parameter as in Saturation...). | Off-36 dB / Off |
 | Clean Drive (Saturation...) | Off: the input stage always saturates a little, even at Drive 0 %. On: Drive 0 % is linear and saturation fades in over the first 25 % of Drive. | Off / On / **Off** |
 | Voice Sat curve (Saturation...) | Soft (tanh, overdriven OTA), Diode (asymmetric, even harmonics), Hard (clipping), Fold (sine wavefolder). | Soft, Diode, Hard, Fold / Soft |
+| Position (Saturation...) | Where the per-voice saturation sits: after the filter (it adds harmonics to the filtered sound) or before it (drive into the filter, which smooths what it adds). | Post-filter, Pre-filter / Post-filter |
 
 | Mode | Description (item tooltip) |
 |---|---|
@@ -368,7 +377,8 @@ These are the Synth's own design choices, not an emulation of a particular unit.
   The setting belongs to the project, like the tuning: it is saved with it, and loading a preset does not change it.
   All voices always use the same mode, so a change waits until every voice is silent (the selector shows *(pending)*);
   *Apply now* in its menu applies it at once by cutting the sound, like PANIC.
-- **Per-voice saturation** sits between filter and amp, each note on its own, so chords stay free of intermodulation.
+- **Per-voice saturation** sits between filter and amp (or before the filter, Position), each note on its own, so chords
+  stay free of intermodulation.
   Off at 0 dB, it fades in over the first 3 dB; level is compensated for Soft, Diode and Hard, not for Fold. Antialiased
   (ADAA), no added latency.
 - **Analog VCA** (both off by default): Click polarity and amount vary per voice; Leak keeps finished voices sounding.

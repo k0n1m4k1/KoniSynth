@@ -993,8 +993,9 @@ private:
 };
 
 //==============================================================================
-// Tira del recorrido de la señal del Synth, encima de las fuentes: fuentes A + Complex + fuentes B -> mezclador -> filtro
-// -> saturación -> VCA -> efectos -> salida, con un LED en lo que actúa (fuente que suena, Complex, filtro y saturación
+// Tira del recorrido de la señal del Synth, encima de las fuentes, tal como está ahora: fuentes A (Osc 1, con el Complex
+// pegado si lo genera, y su modulador) + fuentes B -> mezclador -> filtro y saturación en su orden -> VCA -> efectos (en el
+// orden de la cadena, en el tooltip) -> salida, con un LED en lo que actúa (fuente que suena, Complex, filtro y saturación
 // encendidos) y, a la derecha, las modulaciones activas (envolvente de filtro, LFO 1/2 con su destino, rutas de la matriz).
 // Solo informa: clic en una fuente = su pestaña y su vista en el display (onSourcePicked)
 class SignalStrip : public Section, public juce::TooltipClient, private juce::Timer
@@ -1083,12 +1084,26 @@ public:
         const auto sounding = [&] (int k) { return value (levels[k]) > 0.0f && (solo >= 0 ? solo == k : value (mutes[k]) < 0.5f); };
         const auto sourceTip = [] (int k) { return juce::String (names[k]) + ": LED lit while it sounds. Click: its tab and its view on the wave display."; };
 
+        const auto arrow = juce::String::fromUTF8 ("\xe2\x86\x92"), back = juce::String::fromUTF8 ("\xe2\x86\x90");
         auto x0 = x;
-        for (int k = 0; k < 4; ++k) chip (names[k], sounding (k) ? 1 : 0, k, sourceTip (k));
+        chip (names[0], sounding (0) ? 1 : 0, 0, sourceTip (0));
+        if (value ("complexOn") > 0.5f)
+        {
+            // Con el Complex encendido, Osc 1 ES el oscilador complejo: su modulador (interno, Osc 2 u Osc 3, con el Mod LP
+            // si está puesto) entra por la izquierda
+            const auto src = (int) value ("complexModSource");
+            const auto lp = value ("modLp") < 19999.0f;
+            glyph (back);
+            chip ("Complex", 1, -1, "Osc 1 is the complex oscillator: FM / AM / ring and wavefolder on its own carrier, "
+                                    "modulated by " + juce::String (src == 0 ? "its internal modulator" : src == 1 ? "Osc 2" : "Osc 3")
+                                    + (lp ? " through the Mod LP filter (" + text ("modLp") + ")." : "."));
+            glyph (back);
+            chip ((src == 0 ? juce::String ("Mod ") + text ("modWave") : juce::String (src == 1 ? "Osc 2" : "Osc 3")) + (lp ? " LP" : ""),
+                  -1, src == 1 ? 4 : src == 2 ? 5 : -1, "Modulator of the Complex" + juce::String (lp ? ", low-passed by Mod LP." : "."));
+        }
+        for (int k = 1; k < 4; ++k) chip (names[k], sounding (k) ? 1 : 0, k, sourceTip (k));
         outline (x0);
         x += 4.0f;
-        glyph ("+");
-        chip ("Complex", value ("complexOn") > 0.5f ? 1 : 0, -1, "Complex oscillator (FM / AM / ring on its own carrier): LED lit when it is on.");
         glyph ("+");
         x0 = x + 4.0f;
         x += 4.0f;
@@ -1098,13 +1113,25 @@ public:
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
         chip ("Mixer", -1, -1, "All sources are summed at their levels.", true);
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
-        chip ("Filter " + text ("filterMode"), value ("filterOn") > 0.5f ? 1 : 0, -1, "Filter: LED lit when it is on (off = the sound goes straight through).");
-        glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
-        chip ("Sat", value ("voiceSatDrive") > 0.0f ? 1 : 0, -1, "Per-voice saturation after the filter (Sat knob, Saturation... dialog): LED lit above 0.");
-        glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
+        const auto filterChip = [&] { chip ("Filter " + text ("filterMode"), value ("filterOn") > 0.5f ? 1 : 0, -1,
+                                            "Filter: LED lit when it is on (off = the sound goes straight through)."); };
+        const auto pre = value ("voiceSatPos") > 0.5f;
+        const auto satChip = [&] { chip ("Sat", value ("voiceSatDrive") > 0.0f ? 1 : 0, -1,
+                                         juce::String ("Per-voice saturation ") + (pre ? "before" : "after") + " the filter "
+                                         "(Saturation... dialog: drive, curve and position): LED lit above 0."); };
+        if (pre) { satChip(); glyph (arrow); filterChip(); }
+        else     { filterChip(); glyph (arrow); satChip(); }
+        glyph (arrow);
         chip ("VCA " + text ("envCurve"), -1, -1, "Amplifier with the Amp Envelope (curve shown).");
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
-        chip ("FX", -1, -1, "The effects chain: COLOR, AMP, DYNAMICS, MOD FX, ENSEMBLE, SPACE, OUTPUT blocks below.");
+        {
+            static const char* groups[] = { "COLOR", "AMP", "DYNAMICS", "MOD FX", "ENSEMBLE", "SPACE" };
+            juce::StringArray chain;
+            for (const auto grp : koni.getFxOrder()) chain.add (groups[grp]);
+            chain.add ("OUTPUT");
+            chip ("FX", -1, -1, "The effects chain, in this order: " + chain.joinIntoString (" " + arrow + " ")
+                                + ". Drag an effects block tab (or right-click it) to change the order.");
+        }
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
         chip ("Out", -1, -1, "Plugin output.");
 
@@ -1153,9 +1180,11 @@ private:
         // Repinta si cambia algo de lo que se muestra
         static const char* ids[] = { "osc1Level", "wtLevel", "sampleLevel", "stringLevel", "osc2Level", "subLevel", "noiseLevel",
                                      "osc1Mute", "wtMute", "sampleMute", "stringMute", "osc2Mute", "osc3Mute", "noiseMute",
-                                     "complexOn", "filterOn", "filterMode", "voiceSatDrive", "envCurve", "filterEnv",
+                                     "complexOn", "complexModSource", "modWave", "modLp", "filterOn", "filterMode", "voiceSatDrive", "voiceSatPos",
+                                     "envCurve", "filterEnv",
                                      "lfoOn", "lfoDepth", "lfoTarget", "lfo2On", "lfo2Depth", "lfo2Target", "pwmDepth" };
         std::uint64_t h = (std::uint64_t) (koni.getParams().soloSource.load() + 2);
+        for (const auto g : koni.getFxOrder()) h = h * 7u + (std::uint64_t) g; // orden de la cadena (tooltip de FX)
         for (const auto* id : ids)
             h = h * 1000003u ^ (std::uint64_t) std::hash<float>{} (value (id));
         if (h != lastHash) { lastHash = h; repaint(); }
