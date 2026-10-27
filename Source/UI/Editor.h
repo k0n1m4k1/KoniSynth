@@ -103,6 +103,12 @@ public:
         };
         updateAvxTooltip();
         content.addAndMakeVisible (avxButton);
+        // MCP: LED encendido = control por agente activo; el clic no conmuta, abre el diálogo Agent (MCP), donde se activa o
+        // desactiva y se prepara la conexión (UI/AgentPanel.h). El LED sigue al estado con el temporizador del editor (2 Hz)
+        mcpButton.setClickingTogglesState (false);
+        mcpButton.onClick = [this] { openPanel ("Agent (MCP)", std::make_unique<AgentPanel> (koni), 920, 360); };
+        updateMcpButton();
+        content.addAndMakeVisible (mcpButton);
         midiButton.setTooltip ("MIDI input (all engines): MIDI channel, fine tune, bend range and controller profiles "
                                "(Akai Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425, Yamaha reface YC).");
         midiButton.onClick = [this] { midiMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&midiButton)); };
@@ -1589,6 +1595,7 @@ private:
     void timerCallback() override
     {
         refreshSampleInfo();
+        updateMcpButton();
         if (engine == 14) // MT-32: por qué no suena (el LCD lo dibuja mt32Lcd) y nombres de programa según la memoria del aparato
         {
             const auto hasMachine = koni.hasMt32Machine();
@@ -2326,6 +2333,7 @@ private:
         title.setBounds (top.removeFromLeft (112));
         version.setBounds (top.removeFromLeft (72).withTrimmedBottom (6));
         avxButton.setBounds (top.removeFromLeft (70));
+        mcpButton.setBounds (top.removeFromLeft (64));
         tuningLed.setBounds (top.removeFromLeft (20).withTrimmedLeft (1).withTrimmedRight (3).withSizeKeepingCentre (16, 20)); // hueco de 20 px ante el motor
         // Orden del flujo: entrada MIDI -> motor | edición (deshacer) | presets; 15 px entre grupos
         midiButton.setBounds (top.removeFromLeft (34).withTrimmedRight (4));
@@ -2574,7 +2582,19 @@ private:
         }
         return false;
     }
-    juce::ToggleButton avxButton { "AVX2" };
+    juce::ToggleButton avxButton { "AVX2" }, mcpButton { "MCP" };
+
+    void updateMcpButton()
+    {
+        const auto on = koni.isAgentEnabled();
+        mcpButton.setToggleState (on, juce::dontSendNotification);
+        const auto clients = koni.agentClients();
+        mcpButton.setTooltip (on ? "Agent control (MCP): on, localhost:" + juce::String (koni.agentPort()) + ", "
+                                       + juce::String (clients) + (clients == 1 ? " agent connected" : " agents connected")
+                                       + ". Click to open the Agent dialog (turn it off, set up your agent)."
+                                 : juce::String ("Agent control (MCP): off, no port open. Click to open the Agent dialog (turn it on, "
+                                                 "set up your agent)."));
+    }
 
     void updateAvxTooltip()
     {

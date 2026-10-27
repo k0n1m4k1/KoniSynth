@@ -19,8 +19,9 @@ KoniSynth keeps the bridge in one folder of your user profile:
 | Windows | `%APPDATA%\KoniSynth\KoniSynth-mcp` |
 | Linux | `~/.config/KoniSynth/KoniSynth-mcp` |
 
-Everything below is in KoniSynth's *Agent (MCP)...* dialog (Options, or right-click the title). It shows which bridge it
-found and whether its Python environment is ready.
+Everything below is in KoniSynth's *Agent (MCP)...* dialog: click the **MCP** LED in the top bar (next to AVX2; lit while
+Agent control is on), or use Options / right-click the title. It shows which bridge it found and whether its Python
+environment is ready.
 
 ### 1. Get the bridge (once), in one of two ways
 

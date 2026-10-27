@@ -188,6 +188,7 @@ KoniSynth can be driven by an AI agent through the [Model Context Protocol](http
    client. Python 3.10+ is required (on Debian/Ubuntu also `python3-venv`). KoniSynth itself never connects to the
    internet.
 2. **Every time:** turn *Agent control* on in that dialog and ask your agent to connect. The agent starts the bridge itself.
+   The **MCP** LED in the top bar, next to AVX2, is lit while Agent control is on; click it to open the dialog.
 
 KoniSynth listens only on `127.0.0.1` (first free port in 47800-47899, announced with a random token); while it is off, no port
 is open. Details and the list of tools: [Agent/KoniSynth-mcp/README.md](Agent/KoniSynth-mcp/README.md).
