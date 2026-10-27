@@ -869,7 +869,7 @@ static APVTS::ParameterLayout createLayout()
     // apagado (sin efecto, bit a bit)
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "modLp", 1 },      "Mod LP", skewed (20.0f, 20000.0f, 1000.0f), 20000.0f,
         parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
-            { return v >= 19999.0f ? String ("Off") : v >= 1000.0f ? String (v / 1000.0f, 2) + " kHz" : String (roundToInt (v)) + " Hz"; }))));
+            { return v >= 19999.0f ? String ("Off") : v >= 1000.0f ? String (v / 1000.0f, 2) + " kHz" : String (roundToInt (v)) + " Hz"; }), false, true)));
 
     // Osc 2 en modo Wavetable (osc2Wave = Wavetable): su propia tabla (las incluidas o un fichero, ruta osc2WtPath en el
     // estado), independiente de la de la fuente Wavetable, como su sample, y su posición en ella

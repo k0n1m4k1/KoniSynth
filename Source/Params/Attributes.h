@@ -5,15 +5,16 @@
 //==============================================================================
 // Parámetros
 // Texto -> valor de un parámetro: número tras descartar prefijos no numéricos ("I 2.00"); "%" divide entre 100,
-// "kHz" multiplica por 1000, "ms" pasa a segundos si el parámetro está en segundos y "Off" es el mínimo. Hace reversible el formato de
-// cada parámetro (valor escrito en el host; la prueba param-conversions de clap-validator lo exige).
-static juce::AudioParameterFloatAttributes parsing (juce::AudioParameterFloatAttributes a, bool inSeconds = false)
+// "kHz" multiplica por 1000, "ms" pasa a segundos si el parámetro está en segundos y "Off" es el mínimo (offIsMax: el máximo,
+// p. ej. Mod LP abierto del todo). Hace reversible el formato de cada parámetro (valor escrito en el host; la prueba
+// param-conversions de clap-validator lo exige).
+static juce::AudioParameterFloatAttributes parsing (juce::AudioParameterFloatAttributes a, bool inSeconds = false, bool offIsMax = false)
 {
-    return a.withValueFromStringFunction ([inSeconds] (const juce::String& text)
+    return a.withValueFromStringFunction ([inSeconds, offIsMax] (const juce::String& text)
     {
         const auto t = text.trim();
         if (t.equalsIgnoreCase ("Off"))
-            return -1.0e30f; // "Off" = el mínimo del rango (convertTo0to1 recorta antes de aplicar la curva)
+            return offIsMax ? 1.0e30f : -1.0e30f; // el extremo del rango (convertTo0to1 recorta antes de aplicar la curva)
         int i = 0;
         while (i < t.length() && ! (juce::CharacterFunctions::isDigit (t[i]) || t[i] == '-' || t[i] == '+' || t[i] == '.'))
             ++i;
