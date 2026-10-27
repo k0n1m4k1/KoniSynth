@@ -36,9 +36,12 @@ def add(z: zipfile.ZipFile, src: Path, arc: str, executable: bool = False) -> No
     z.writestr(info, src.read_bytes())
 
 
+SKIP_SUFFIXES = (".iobj", ".ipdb", ".pdb", ".ilk", ".exp", ".lib")  # intermedios de MSVC (la enlazada incremental los deja en el bundle)
+
+
 def add_tree(z: zipfile.ZipFile, src: Path, arc: str, exec_suffixes: tuple[str, ...] = ()) -> None:
     for f in sorted(src.rglob("*")):
-        if f.is_file():
+        if f.is_file() and f.suffix.lower() not in SKIP_SUFFIXES:
             add(z, f, f"{arc}/{f.relative_to(src).as_posix()}", f.suffix in exec_suffixes)
 
 
