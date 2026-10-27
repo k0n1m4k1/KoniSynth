@@ -2,6 +2,8 @@
 
 **Version 1.0.0-beta** · by **@k0n1m4k1** 🇪🇸 · GNU AGPLv3
 
+[![M8ven Score](https://m8ven.ai/badge/mcp/k0n1m4k1-konisynth-knlbk4?v=1c9d31871080c40a85dd776478b0d476)](https://m8ven.ai/mcp/k0n1m4k1-konisynth-knlbk4?s=readme)
+
 KoniSynth is an experimental synthesizer laboratory for the sounds of the 60s to the 90s: fifteen engines, from an analog-style
 synth of its own to faithful emulations of the Casio VL-1, the Stylophone, the Omnichord, classic drum machines, the Yamaha
 DX7, the NES and Game Boy, the Polivoks, the ANS, the Mega Drive, the SNES, the N64, the AdLib/Sound Blaster OPL chips and
