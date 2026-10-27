@@ -484,4 +484,13 @@ c.check(d < 0.1 and abs(1200 * np.log2(p2048 / fa)) < 1 and abs(1200 * np.log2(p
         'chunk clm "<!>1024": fotogramas de 1024 muestras = la misma sierra en 2048 (armónicos a %.3f dB, < 0,1); sin el chunk, '
         'esos 2048 valores son un solo fotograma con dos ciclos: suena una octava arriba (%.2f Hz frente a %.2f Hz)'
         % (d, pno, p2048))
+# --- Env Curve Linear: soltar durante el decay con Sustain 0 (antes se cortaba en seco: juce::ADSR recalculaba el release
+# desde el sustain). Ataque 1 ms, decay 2 s: al soltar en 0,30 s el nivel es ≈ 0,85; release lineal de 0,5 s ---
+EL = ['Wave=Sine', 'Filter On=Off', 'Drift=0%', 'Env Curve=Linear', 'Attack=1 ms', 'Decay=2000 ms', 'Sustain=0%', 'Release=500 ms']
+x, fs = render(EL, 1.2, ['69:0.05:0.30:127'], 'envlin.wav')
+env = lambda t0, t1: np.sqrt(np.mean(x[int(t0 * fs):int(t1 * fs)] ** 2)) * np.sqrt(2)
+held, mid, late = env(0.30, 0.34), env(0.58, 0.62), env(0.95, 1.1)
+c.check(abs(mid / held - 0.5) < 0.06 and late < 1e-4,
+        'Env Linear, Sustain 0, soltar en el decay: la cola baja en línea recta (a mitad del release %.2f del nivel al soltar, '
+        'esperado 0,50) y acaba (%.1e tras el release)' % (mid / held, late))
 sys.exit(c.summary())

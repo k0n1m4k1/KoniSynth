@@ -62,19 +62,24 @@ private:
 };
 
 // Envolvente del motor Synth: lineal (juce::ADSR, la de siempre) o analógica RC según Env Curve. Corren las dos a la vez
-// (coste de unas pocas operaciones por muestra) para poder cambiar de curva con la nota sonando
+// (coste de unas pocas operaciones por muestra) para poder cambiar de curva con la nota sonando.
+// Tras el note-off la lineal no recibe parámetros: juce::ADSR::setParameters recalcula la pendiente del release como
+// sustain / (release·fs) (juce_ADSR.h:271) y, con sustain 0, la deja en 0 y pasa a idle (juce_ADSR.h:275): la nota se
+// cortaba en seco al soltar durante el decay. Así se queda la de noteOff, envelopeVal / (release·fs), desde el nivel real
+// (al soltar en sustain es el mismo valor: sin cambio). Un cambio de Release con la nota ya suelta no afecta a esa nota
 struct SynthEnvelope
 {
     void setSampleRate (double sr) { linear.setSampleRate (sr); analog.setSampleRate (sr); }
     void setParameters (const juce::ADSR::Parameters& p, bool analogCurve)
     {
-        linear.setParameters (p);
+        if (! released)
+            linear.setParameters (p);
         analog.setParameters (p.attack, p.decay, p.sustain, p.release);
         useAnalog = analogCurve;
     }
-    void noteOn() { linear.noteOn(); analog.noteOn(); }
-    void noteOff() { linear.noteOff(); analog.noteOff(); }
-    void reset() { linear.reset(); analog.reset(); }
+    void noteOn() { released = false; linear.noteOn(); analog.noteOn(); }
+    void noteOff() { released = true; linear.noteOff(); analog.noteOff(); }
+    void reset() { released = false; linear.reset(); analog.reset(); }
     bool isActive() const { return useAnalog ? analog.isActive() : linear.isActive(); }
     float getNextSample()
     {
@@ -85,5 +90,5 @@ struct SynthEnvelope
 private:
     juce::ADSR linear;
     AnalogEnvelope analog;
-    bool useAnalog = false;
+    bool useAnalog = false, released = false;
 };
