@@ -116,17 +116,24 @@ public:
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (linkBounds.contains (e.position)) // el autor lleva al repositorio
+        {
+            juce::URL (repositoryUrl).launchInDefaultBrowser();
+            return;
+        }
         if (! cardBounds().contains (e.position)) return;
         if (egg.isOn()) egg.stop(); else egg.start();
     }
 
     void mouseMove (const juce::MouseEvent& e) override
     {
-        setMouseCursor (cardBounds().contains (e.position) ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        const auto link = linkBounds.contains (e.position);
+        setMouseCursor (cardBounds().contains (e.position) || link ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+        if (link != overLink) { overLink = link; repaint(); }
         setTarget (e.position);
     }
     void mouseDrag (const juce::MouseEvent& e) override { setTarget (e.position); }
-    void mouseExit (const juce::MouseEvent&) override { hovering = false; }
+    void mouseExit (const juce::MouseEvent&) override { hovering = false; if (overLink) { overLink = false; repaint(); } }
 
     void paint (juce::Graphics& g) override
     {
@@ -210,14 +217,20 @@ public:
         g.drawText ("Version " + versionString() + "  -  2026", r.removeFromTop (24.0f), juce::Justification::centredLeft);
         r.removeFromTop (18.0f);
 
+        // "Author: " y el nombre como enlace al repositorio (subrayado; más claro con el ratón encima)
         g.setColour (Skin::white().withAlpha (0.92f));
         const juce::FontOptions authorFont (18.0f);
-        const juce::String author ("Author: @k0n1m4k1");
+        const juce::String prefix ("Author: "), handle ("@k0n1m4k1");
         auto authorRow = r.removeFromTop (28.0f);
         g.setFont (authorFont);
-        g.drawText (author, authorRow, juce::Justification::centredLeft);
-        const auto textW = juce::GlyphArrangement::getStringWidth (juce::Font (authorFont), author);
-        drawSpanishFlag (g, { authorRow.getX() + textW + 10.0f, authorRow.getCentreY() - 10.0f, 30.0f, 20.0f });
+        const auto prefixW = juce::GlyphArrangement::getStringWidth (juce::Font (authorFont), prefix);
+        const auto handleW = juce::GlyphArrangement::getStringWidth (juce::Font (authorFont), handle);
+        g.drawText (prefix, authorRow, juce::Justification::centredLeft);
+        linkBounds = { authorRow.getX() + prefixW, authorRow.getY(), handleW, authorRow.getHeight() };
+        g.setColour (overLink ? Skin::white() : Skin::c (0xff42a2c8));
+        g.drawText (handle, linkBounds, juce::Justification::centredLeft);
+        g.fillRect (linkBounds.getX(), linkBounds.getCentreY() + 10.0f, handleW, 1.0f);
+        drawSpanishFlag (g, { linkBounds.getRight() + 10.0f, authorRow.getCentreY() - 10.0f, 30.0f, 20.0f });
         r.removeFromTop (14.0f);
 
         g.setColour (Skin::white().withAlpha (0.8f));
@@ -229,6 +242,10 @@ public:
     }
 
 private:
+    static inline const juce::String repositoryUrl { "https://github.com/k0n1m4k1/KoniSynth" };
+    juce::Rectangle<float> linkBounds; // del nombre del autor, calculado al pintar
+    bool overLink = false;
+
     static juce::String versionString()
     {
        #ifdef KONI_VERSION_LABEL
