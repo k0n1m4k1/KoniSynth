@@ -1547,6 +1547,14 @@ struct ParamPanel : juce::Component
         return w;
     }
 
+    // Perilla de un parámetro en cualquiera de sus secciones (el editor atenúa los mandos inertes también en los diálogos)
+    Knob* knobFor (const juce::String& id)
+    {
+        for (auto& s : sections)
+            if (auto* k = s->knobFor (id)) return k;
+        return nullptr;
+    }
+
     void resized() override
     {
         auto r = getLocalBounds();

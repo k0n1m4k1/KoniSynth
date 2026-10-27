@@ -340,8 +340,9 @@ private:
         const auto now = juce::Time::getMillisecondCounterHiRes();
         const auto dt = juce::jlimit (0.0, 0.2, (now - lastMs) / 1000.0);
         lastMs = now;
-        // Fase visual: Rate en Hz (con Sync, ~1 Hz por no conocer aquí el tempo), dos ciclos a lo ancho
-        const auto hz = (int) v ("Sync") == 0 ? (double) v ("Rate") : 1.0;
+        // Fase visual: la frecuencia del LFO (con Sync, la figura al tempo actual, como el motor: Params::lfoHz), dos ciclos a
+        // lo ancho
+        const auto hz = dynamic_cast<KoniSynthProcessor&> (s.processor).getParams().lfoHz ((int) v ("Sync"), v ("Rate"));
         phase = std::fmod (phase + 0.5 * juce::jmin (hz, 20.0) * dt, 1.0);
         std::uint64_t h = 0;
         for (const auto* sfx : { "On", "Depth", "Shape", "Rate", "Sync", "Target" })

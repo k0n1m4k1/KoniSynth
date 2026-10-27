@@ -1109,6 +1109,7 @@ private:
     void loadFavorite (int n)
     {
         auto& pm = koni.presetManager;
+        paramPanel = body.get(); // updateInert atenúa también sus mandos
         const auto favs = pm.favoriteIndices(); // en el orden del usuario (se reordena en el navegador)
         if (n >= (int) favs.size())
         {
@@ -1508,7 +1509,8 @@ private:
         const auto mt32Multi = v ("mt32Multi") > 0.5f; // MT-32: con Multi el teclado no se enruta; Program solo en Part 1
         dim (mt32Section.knobFor ("mt32Mode"), mt32Multi);
         dim (mt32Section.listFor ("mt32Program"), mt32Multi || (int) v ("mt32Mode") == 1);
-        dim (ampEnvSection.knobFor ("voicePanMode"), std::abs (v ("voicePan")) < 1.0e-4f); // Synth.h: sin V.Pan no hay paneo que repartir
+        // Synth.h: sin V.Pan no hay paneo que repartir (Pan Mode está en el diálogo Voice Pan... de Amp Envelope)
+        dim (paramPanel != nullptr ? paramPanel->knobFor ("voicePanMode") : nullptr, std::abs (v ("voicePan")) < 1.0e-4f);
     }
 
     void updateRings()
@@ -3047,3 +3049,4 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KoniSynthEditor)
 };
+    juce::Component::SafePointer<ParamPanel> paramPanel; // el último diálogo de parámetros abierto (nulo al cerrarse)
