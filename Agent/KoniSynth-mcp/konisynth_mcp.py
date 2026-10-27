@@ -18,9 +18,23 @@ from typing import Any
 
 from mcp.server.mcpserver import MCPServer
 from mcp.server.mcpserver.exceptions import ToolError  # su mensaje llega al agente (RuntimeError se oculta)
+from mcp.types import ToolAnnotations
 
 import analysis
 import generator
+
+# Anotaciones MCP de las tools (pistas para el cliente: qué puede ejecutar sin pedir confirmación). Todas son de mundo
+# cerrado: el puente solo habla con KoniSynth en 127.0.0.1 y lee ficheros locales.
+#   READ: no cambia el sonido ni los presets (listen escribe solo su WAV de captura temporal).
+#   REPLACE: sustituye valores o el sonido actual (deshacible); repetirla igual no cambia más. WRITE: idem, pero cada
+#   llamada cambia de nuevo (aleatoria o relativa al valor actual). ADD: solo añade (save_preset falla si el nombre
+#   existe). PLAY: suena, sin cambiar nada guardado. STOP: suelta todas las notas (también las del usuario).
+READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+REPLACE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
+WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False)
+ADD = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
+PLAY = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=False)
+STOP = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 
 def _app_data() -> Path:
     """Carpeta de datos de la aplicación como la resuelve JUCE (userApplicationDataDirectory)."""
@@ -158,7 +172,7 @@ def _group(param_id: str) -> str:
     return head or param_id
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def list_instances() -> list[dict[str, Any]]:
     """List the running KoniSynth instances with Agent control enabled (port, engine, current preset)."""
     out = []
@@ -175,14 +189,14 @@ def list_instances() -> list[dict[str, Any]]:
     return out
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def status(port: int | None = None) -> dict[str, Any]:
     """Current engine, preset and whether it has unsaved changes. Call this first. `port` selects an instance
     (default: the most recently started one)."""
     return link.call("ping", port=port)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def describe_parameters(match: str = "", port: int | None = None) -> list[dict[str, Any]] | dict[str, Any]:
     """Describe parameters whose id or name contains `match` (case-insensitive): id, name, current value, min, max,
     default, type (continuous / stepped / choice / bool), options and help text. Without `match`, returns only the id
@@ -197,13 +211,13 @@ def describe_parameters(match: str = "", port: int | None = None) -> list[dict[s
             "hint": "call again with match='<group or name fragment>' for details"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def get_parameters(ids: list[str], port: int | None = None) -> dict[str, str]:
     """Current values (as displayed in KoniSynth) of the given parameter ids."""
     return link.call("get", port=port, ids=ids)
 
 
-@mcp.tool()
+@mcp.tool(annotations=REPLACE)
 def set_parameters(values: dict[str, str | float], port: int | None = None) -> dict[str, str]:
     """Set several parameters at once; returns the resulting displayed values. Strings use the parameter's format
     ("2 kHz", "350 ms", "40 %", "Saw", "C4"); numbers are real values in the parameter's unit. The whole call is one
@@ -211,7 +225,7 @@ def set_parameters(values: dict[str, str | float], port: int | None = None) -> d
     return link.call("set", port=port, values=values)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def list_presets(category: str = "", match: str = "", port: int | None = None) -> list[dict[str, Any]]:
     """List presets (index, name, category, factory or user), optionally filtered by category and/or a name fragment."""
     presets = link.call("presets", port=port)
@@ -219,7 +233,7 @@ def list_presets(category: str = "", match: str = "", port: int | None = None) -
     return [p for p in presets if (not cat or p["category"].lower() == cat) and (not m or m in p["name"].lower())]
 
 
-@mcp.tool()
+@mcp.tool(annotations=REPLACE)
 def load_preset(name: str = "", index: int = -1, port: int | None = None) -> dict[str, Any]:
     """Load a preset by exact name (case-insensitive) or by index from list_presets. One undo step."""
     if index >= 0:
@@ -229,7 +243,7 @@ def load_preset(name: str = "", index: int = -1, port: int | None = None) -> dic
     return link.call("load_preset", port=port, name=name)
 
 
-@mcp.tool()
+@mcp.tool(annotations=ADD)
 def save_preset(name: str, category: str = "Init", port: int | None = None) -> dict[str, Any]:
     """Save the current sound as a user preset with this name and category (fails if the name exists)."""
     return link.call("save_preset", port=port, name=name, category=category)
@@ -256,7 +270,7 @@ def _listen(seconds: float, port: int | None) -> dict[str, Any]:
     return {"wav": cap["path"], **analysis.analyze(cap["path"])}
 
 
-@mcp.tool()
+@mcp.tool(annotations=PLAY)
 def play_notes(notes: str | list[dict[str, Any]], duration: float = 1.0, velocity: int = 100,
                port: int | None = None) -> dict[str, Any]:
     """Play notes through KoniSynth's virtual keyboard without measuring. `notes`: "C4", "C4 E4 G4" (chord) or a list
@@ -264,13 +278,13 @@ def play_notes(notes: str | list[dict[str, Any]], duration: float = 1.0, velocit
     return link.call("play", port=port, notes=_notes(notes, duration, velocity))
 
 
-@mcp.tool()
+@mcp.tool(annotations=STOP)
 def stop_notes(port: int | None = None) -> bool:
     """Release all notes."""
     return link.call("stop_notes", port=port)
 
 
-@mcp.tool()
+@mcp.tool(annotations=PLAY)
 def audition(notes: str | list[dict[str, Any]] = "C4", duration: float = 1.0, velocity: int = 100, tail: float = 0.6,
              port: int | None = None) -> dict[str, Any]:
     """Play notes, wait for them to finish plus `tail` seconds (release, echo, reverb) and measure the result: pitch
@@ -292,13 +306,13 @@ def audition(notes: str | list[dict[str, Any]] = "C4", duration: float = 1.0, ve
     return {"wav": cap["path"], **analysis.analyze(cap["path"])}
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def listen(seconds: float = 2.0, port: int | None = None) -> dict[str, Any]:
     """Measure the last `seconds` (max 10) of KoniSynth's output, whatever is sounding (e.g. the user playing)."""
     return _listen(seconds, port)
 
 
-@mcp.tool()
+@mcp.tool(annotations=READ)
 def compare(reference_wav: str, candidate_wav: str = "") -> dict[str, Any]:
     """Compare a reference WAV supplied by the user (path) with the last capture (or another WAV): differences in level,
     pitch (cents), brightness (centroid and rolloff ratios), noisiness, attack/decay, octave-band profile and stereo,
@@ -322,7 +336,7 @@ def _audition_for_generator(notes: str, duration: float, velocity: int, tail: fl
     return audition(notes, duration, velocity, tail, port)
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE)
 def generate(style: str, engine: str = "", count: int = 3, amount: float = 0.35, seed: int | None = None,
              reference_wav: str = "", max_tries: int = 8, port: int | None = None) -> dict[str, Any]:
     """Generate new sounds with knowledge. `style`: bass, lead, pad, pluck, keys, strings, brass, fx, drums, chip,
@@ -350,7 +364,7 @@ def generate(style: str, engine: str = "", count: int = 3, amount: float = 0.35,
             "next": "use_candidate(n) to load one, then save_preset to keep it" if shown else "try a higher max_tries or another amount"}
 
 
-@mcp.tool()
+@mcp.tool(annotations=REPLACE)
 def use_candidate(n: int = 0, port: int | None = None) -> dict[str, Any]:
     """Load accepted candidate number `n` from the last `generate` (its base preset plus the same values)."""
     acc = _last_generation.get("accepted") or []
@@ -359,7 +373,7 @@ def use_candidate(n: int = 0, port: int | None = None) -> dict[str, Any]:
     return generator.apply_candidate(link.call, acc[n], port)
 
 
-@mcp.tool()
+@mcp.tool(annotations=WRITE)
 def mutate(amount: float = 0.2, seed: int | None = None, include_fx: bool = True, port: int | None = None) -> dict[str, Any]:
     """Vary the current sound around its present values (only parameters that matter for the selected engine, plus
     effects if `include_fx`). `amount` 0..1. One undo step. Returns the changed parameters with their new values."""
