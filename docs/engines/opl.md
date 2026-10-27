@@ -29,6 +29,9 @@ Sections: **OPL** and **OPL LFO / Output**; with Model = OPLL or VRC7, an **OPLL
 
 Default patch: 2 operators in FM, the modulator silent (TL 63) and the carrier a sine with AR 15, RR 7, EGT on.
 
+In the OPL editor (Operators...), each operator column shows its envelope with the chip's times (at C4, with KSR), drawn
+from the chip's own envelope generator; drag its points for AR, DR and SL, and RR.
+
 **OPL editor (Operators...).** Columns OP1-OP4 with the chip's own registers, carriers highlighted, algorithm written out;
 OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 

@@ -16,10 +16,19 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   NES triangle that freezes on its last step, a non-oversampling DAC that holds each sample... Anything that makes an engine *nicer* than the
   original (smoother ramps, cleaner resampling, continuous velocity where the machine had two levels) exists only as an option,
   and it is **off by default**.
-- **A synth with its own personality.** The *Synth* engine is not an emulation: it is KoniSynth's own design (physical drift,
-  minBLEP oscillators, analog-style envelopes, 14 filter models, per-voice saturation, a modulation matrix, MPE).
+- **A synth with its own personality.** The *Synth* engine is not an emulation: it is KoniSynth's own eight-voice polyphonic
+  design (Mono and Legato too) with Moog traits: a 4-pole ladder low-pass with three qualities against aliasing, the Minimoog
+  Tri-Saw and an analog triangle measured on two Model D units. Around them: minBLEP oscillators with up to 7-voice unison,
+  the Prophet-5 and Juno-106 waveform mixes, a Buchla 259-style complex oscillator (through-zero FM, ring, wavefolder; Osc 2
+  or Osc 3 can be its modulator), a wavetable (Serum format) and a sample player for Osc 2 as well, a Karplus-Strong plucked
+  string, 14 filter models (ladder, SVF, MS-20, comb, dual), per-voice saturation before or after the filter, analog RC
+  envelopes, 1/f drift with per-note or per-voice-card tolerances, an analog VCA (click and bleed), two tempo-synced LFOs,
+  an 8-slot modulation matrix, MPE and polyphonic aftertouch, and AVX2 for the unison.
 - **Measure, don't guess.** Behaviour is checked against measurements (spectra, levels, pitch, timing) and, where it was
   unclear, against reference recordings. Sources for the hardware data are cited in the code comments.
+- **Listen, too.** Presets recreated from a reference recording went through A/B/C listening tests: two or three candidates
+  rendered with the same notes and at the same level as the reference, chosen by ear. A recipe that met every measured
+  tolerance but did not sound right was discarded; the measurements of the chosen one are noted next to it in the code.
 - **Reproducible.** Randomness (drift, noise, analog tolerances) is seeded per project: a bounce sounds like what you heard.
 - **Low latency.** No added latency by default: the limiter's look-ahead is optional and off.
 
@@ -51,7 +60,13 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   frame, or the frame size its `clm` chunk declares). Waveforms include the Minimoog Tri-Saw and the mixed waves of a Prophet-5 oscillator
   and of the Juno-106 (Saw+Pulse), and every triangle can be made lopsided and rounded like an analog one (Tri Sym, Tri Rnd).
   The ladder filter has three qualities against aliasing with drive (Classic, Balanced 2x, High Quality 4x), and the
-  per-voice saturation can sit after or before it. A strip above the sources shows the current signal path.
+  per-voice saturation can sit after or before it. A strip above the sources shows the current signal path, and its
+  displays are editable: the wave display (each source, the mix and the result after the filter, with handles for pulse
+  width, wavetable position, sample start and loop...; with the Complex on, the complex oscillator's output), the filter
+  response (cutoff and resonance), the envelopes, the pitch envelope and the LFOs. The emulated engines show their own
+  envelopes the same way, with their real curves and steps (Polivoks, Mega Drive PSG, N64, Casio VL-1, Gen X-2 and each
+  OPL operator); the voice saturation, Crush and Tube show their transfer curves, and the compressor's curve is editable
+  (threshold, makeup, ratio) with the limiter ceiling on it.
 - **Effects chain** (each group can be folded or opened in its own window), by default in this order; drag a group's
   tab onto another (or use its right-click menu) to reorder the first six, saved with the preset; output stays last:
   color (bit crusher, formant filter, tube, parametric EQ with 6 to 48 dB/oct cuts) → amp and cabinet (built-in or your
@@ -60,17 +75,26 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   speeds, underwater; master; limiter).
 - **Performance:** arpeggiator, step sequencer, 8 performance macros, MIDI Learn on every knob and on the transport and PANIC
   buttons, MPE and polyphonic aftertouch (Synth), undo/redo.
-- **Microtuning:** Scala `.scl`/`.kbm` files and MTS-ESP (all engines).
-- **Transport:** record the session to WAV, play audio files, import and export MIDI.
-- **Presets:** 338 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
+- **Keyboard and scales:** under the on-screen keyboard, Transpose (±24 semitones) and a scale quantizer: 14 scales (major,
+  minor, modes, pentatonics, blues, whole tone...) on any key, with out-of-scale notes rounded to the scale (nearest, down
+  or up) or left out; the keyboard marks the notes of the scale. The computer keyboard plays it too (octave and velocity
+  keys, favorites on 1-9).
+- **Tuning:** fine tune (±100 cents), Scala `.scl`/`.kbm` microtuning (saved with the project; a LED shows it is active) and
+  MTS-ESP, in every engine.
+- **Audio input and vocoder:** a microphone or line input can go through the effects chain, or be the modulator of a channel
+  vocoder (VP-330 with 10 bands, 16 or 32 bands) with any engine as the carrier.
+- **Transport:** record the session to WAV, play audio files, import (also SysEx) and export MIDI.
+- **Presets:** 355 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
   favorites in your own order (keys 1-9 load the first nine) and a searchable browser with filters by category and engine.
   Presets say how to play them (on the display and in the browser) and grey out the keys outside their recommended range.
-  Presets that use your own files tell you when one is missing.
+  Presets that use your own files tell you when one is missing. User presets can be exported (one as `.xml`, all as a
+  `.zip` bank) and imported from the browser.
 - **Your own content:** samples (WAV, AIFF, FLAC), SoundFont zones, SNES BRR/SPC, DX7 SysEx banks, impulse responses, Roland
   MT-32 ROMs. None of them is included; you supply them.
 - **User rhythms:** 8 rhythms of your own for the Drum Machine, the Omnichord (with its auto bass) and the Casio VL-1,
   drawn in a rhythm editor or in any sequencer: each one is a MIDI file (see [User rhythms](docs/user-rhythms.md)).
-- **MIDI controllers:** setup profiles for the Akai Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425 and Yamaha reface YC.
+- **MIDI controllers:** setup profiles for the Akai Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425 and Yamaha reface YC;
+  a Controller Setup assistant learns the knobs of your unit one by one and suggests the settings for it.
 - **Display:** oscilloscope, spectrum, spectrogram, goniometer, VU meters and **Arcade** (a pixel-art shooter played by the
   music), in modern, green or amber phosphor style. Its bezel follows the skin and style (graphite, terminal casing or
   brushed steel), or is brass, or none; with a bezel the screen has CRT-style glass. BPM display and transport next to it. The VL-1, DX7 and MT-32
@@ -133,6 +157,10 @@ Not available yet: building requires a Mac with Xcode. See [docs/BUILDING.md](do
    - **Favorites:** click the star. The first nine show their number next to the star, and keys **1-9** load them (with
      the KoniSynth window focused, outside text fields). To reorder them: drag the rows while the table is sorted by the
      star column, or right-click a favorite (Move to top / up / down / to end), or Alt + Up / Down.
+   - **Import... / Export...** (next to the search): export the selected user preset (`.xml`, also from its right-click
+     menu) or all your user presets as a `.zip` bank; import a `.xml` or a `.zip`. If a user preset with the same name
+     exists you choose Replace, Skip or Cancel. The samples, impulse responses and wavetables a preset uses are not
+     included: copy them too, or use Locate... when the preset asks for them.
 5. **How to play each preset:** when a preset loads, the display shows its name and a hint for 8 seconds
    ("Bass line, C1-C3", "Slide on the PAD, or play C3-C6 legato"...); the browser shows the same hint when you hover a
    row and when you select it. Most presets also have a recommended range: the on-screen keyboard greys out the keys

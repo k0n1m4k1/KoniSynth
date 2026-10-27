@@ -35,6 +35,8 @@ and **Gen X-2 LFO / Filter / Delay**.
 
 ### Gen X-2 Osc / Envelope (experimental)
 
+The display shows the attack-decay envelope that moves the pitch and the filter, drawn with the engine's own formulas; drag its points to set the times and levels (right-click a point: MIDI Learn, Set value, Reset; double-click: default).
+
 | Control | What it does | Range / default |
 |---|---|---|
 | X (PWM) (switch) | The LFO sweeps the pulse width (50 % +/- 40 %). | Off / On / Off |

@@ -46,7 +46,7 @@ shows two rows: VCO and Mixer / VCF on top; Filter EG, Amp EG and LFO below.
 
 ### Polivoks Filter EG and Polivoks Amp EG
 
-Both sections have the same controls.
+Both sections have the same controls. Each shows its envelope (RC curves; with Repeat, two attack-decay cycles), drawn with the engine's own formulas; drag its points to set the times and levels (right-click a point: MIDI Learn, Set value, Reset; double-click: default).
 
 | Control | What it does | Range / default |
 |---|---|---|

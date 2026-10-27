@@ -69,6 +69,8 @@ written out (for example `(1 -> 2) + (3 -> 4)`). Per operator:
 
 ### MD PSG (SN76489)
 
+The display shows the driver envelope (2 dB steps, one every A/D/R video frames), drawn with the engine's own formulas; drag its points to set the times and levels (right-click a point: MIDI Learn, Set value, Reset; double-click: default).
+
 | Control | What it does | Range / default |
 |---|---|---|
 | Noise type (header menu) | White: 16-bit shift register, taps on bits 0 and 3 (Sega's PSG). Periodic: 16-step buzz at noise rate / 16. | White / Periodic; White |

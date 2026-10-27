@@ -19,6 +19,9 @@ three sections: **Casio VL-1**, **VL-1 Rhythm** and **Display**.
 
 ### Casio VL-1
 
+The display on the left shows the envelope of the A, D, SL, ST and R digits (15 levels on the 12 ms clock, from the ROM
+tables), drawn with the engine's own formulas; drag its points to set the times and levels (right-click a point: MIDI Learn, Set value, Reset; double-click: default).
+
 The digits A to T follow the VL-1 sound code (sound, A, D, SL, ST, R, V, T). The defaults are the Piano code
 `0 0 4 5 3 2 0 0`.
 

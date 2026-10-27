@@ -159,6 +159,8 @@ off by default.
 | FM Marimba | Pluck |
 | FM Bleep | Lead |
 | Industrial Metal Hit | Drums |
+| House Piano Stab FM | Keys |
+| House Organ Chord Stab | Keys |
 
 The FM E.Piano preset is KoniSynth's own conversion to the DX7 scale, not the ROM patch. FM Bleep is an original design
 after a 1990 bleep sound, not a copy of it.
