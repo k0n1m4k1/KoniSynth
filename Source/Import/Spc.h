@@ -35,11 +35,18 @@ struct SpcFile
             return nullptr;
         }
         const auto* bytes = static_cast<const uint8_t*> (spc->data.getData());
-        const auto text = [bytes] (size_t at, int len) { return juce::String::fromUTF8 (reinterpret_cast<const char*> (bytes + at), len).trim(); };
+        // Campo de texto de longitud fija hasta el primer NUL (antes se cortaba con upToFirstOccurrenceOf (charToString (0)):
+        // es la cadena vacía, que aparece en la posición 0, y los títulos salían vacíos)
+        const auto text = [bytes] (size_t at, int len)
+        {
+            int n = 0;
+            while (n < len && bytes[at + (size_t) n] != 0) ++n;
+            return juce::String::fromUTF8 (reinterpret_cast<const char*> (bytes + at), n).trim();
+        };
         if (bytes[0x23] == 26) // con etiqueta ID666
         {
-            spc->song = text (0x2e, 32).upToFirstOccurrenceOf (juce::String::charToString (0), false, false);
-            spc->game = text (0x4e, 32).upToFirstOccurrenceOf (juce::String::charToString (0), false, false);
+            spc->song = text (0x2e, 32);
+            spc->game = text (0x4e, 32);
         }
         const auto* dsp = bytes + kDsp;
         const auto dir = (size_t) dsp[0x5d] << 8;
