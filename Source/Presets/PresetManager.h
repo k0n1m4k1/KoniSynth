@@ -381,6 +381,16 @@ private:
     {
         favoritesFile().getParentDirectory().createDirectory();
         favoritesFile().replaceWithText (favoritesOrderedMark + "\n" + favoriteOrder.joinIntoString ("\n") + "\n");
+        // El favorito (y su puesto en el orden propio) sigue al preset: la clave lleva el nombre
+        const auto oldKey = favoriteKey (old), newKey = juce::String ("U:") + newName;
+        if (oldKey != newKey && favorites.erase (oldKey) > 0)
+        {
+            favorites.insert (newKey);
+            const auto at = favoriteOrder.indexOf (oldKey);
+            if (at >= 0) favoriteOrder.set (at, newKey); else favoriteOrder.add (newKey);
+            saveFavorites();
+        }
+
     }
     // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, wtPathProp, osc2WtPathProp)
     static constexpr const char* sampleAttribute = "samplePath";
