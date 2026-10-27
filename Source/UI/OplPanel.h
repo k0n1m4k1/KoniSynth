@@ -32,6 +32,8 @@ public:
             add ("Ar", "AR", Knob::Style::vertical); add ("Dr", "DR", Knob::Style::vertical);
             add ("Sl", "SL", Knob::Style::vertical); add ("Rr", "RR", Knob::Style::vertical);
             add ("Wave", "WAVE");
+            c.env = std::make_unique<StageEnvView> (s, EngineEnv::oplOperator (i + 1));
+            addAndMakeVisible (*c.env);
             static const char* flagNames[4][2] = { { "Am", "AM" }, { "Vib", "VIB" }, { "Egt", "EGT" }, { "Ksr", "KSR" } };
             for (size_t f = 0; f < 4; ++f)
             {
@@ -71,7 +73,8 @@ public:
             auto b = columnArea (i).reduced (4);
             auto& c = columns[(size_t) i];
             c.title.setBounds (b.removeFromTop (26));
-            const auto rowH = (b.getHeight() - 34) / 4;
+            const auto envH = 130;
+            const auto rowH = (b.getHeight() - 34 - envH - 8) / 4;
             auto row = [&] (int first, int count, int height)
             {
                 auto line = b.removeFromTop (height);
@@ -81,6 +84,8 @@ public:
             };
             row (0, 3, rowH);          // TL MULT KSL
             row (3, 4, rowH * 2);      // AR DR SL RR
+            c.env->setBounds (b.removeFromTop (envH).reduced (4, 0));
+            b.removeFromTop (8);
             auto flagRow = b.removeFromTop (34);
             const auto fw = flagRow.getWidth() / 4;
             for (auto& f : c.flags) f.setBounds (flagRow.removeFromLeft (fw).reduced (2, 4));
@@ -115,6 +120,8 @@ private:
             auto& c = columns[(size_t) k];
             for (auto& kn : c.knobs) kn->setEnabled (used);
             for (auto& f : c.flags) f.setEnabled (used);
+            c.env->setEnabled (used);
+            c.env->setAlpha (used ? 1.0f : 0.35f);
         }
         repaint();
     }
@@ -126,6 +133,7 @@ private:
         std::array<juce::ToggleButton, 4> flags;
         std::array<std::unique_ptr<APVTS::ButtonAttachment>, 4> attachments;
         std::array<std::unique_ptr<ParamMenu>, 4> menus;
+        std::unique_ptr<StageEnvView> env; // envolvente del operador con los tiempos del chip
     };
 
     KoniSynthProcessor& koni;

@@ -334,6 +334,8 @@ private:
             }
         }
 
+        if (view == osc1 && value ("complexOn") > 0.5f) { paintComplex (g, r, o, alpha); return; }
+
         // Traza a la amplitud de su nivel; debajo, la forma a nivel 100 % muy tenue (se lee aunque el nivel sea bajo)
         juce::Path p, full;
         const int n = juce::jmax (64, (int) r.getWidth());
@@ -367,6 +369,60 @@ private:
             g.drawText ("L", juce::Rectangle<float> (screen.getX() + 3.0f, y - 6.0f, 10.0f, 12.0f), juce::Justification::centred);
             g.drawText ("R", juce::Rectangle<float> (screen.getRight() - 13.0f, y - 6.0f, 10.0f, 12.0f), juce::Justification::centred);
         }
+    }
+
+    // Osc 1 con el Complex encendido: los dos primeros ciclos de la nota con la recursión de Synth::complexSample (fases desde
+    // 0 como al empezar la nota; FM lineal que atraviesa cero, AM / ring, sync duro) y el plegador de Synth::fold (Timbre más
+    // Timbre Mod por el modulador, Symmetry). Modulador interno (Mod Wave a Mod Ratio) u Osc 2 / Osc 3 con su forma y su
+    // relación; Osc 2 en Wavetable o Sample no se dibuja como modulador (queda a 0). Mod LP con la nota en C4 (261,63 Hz). Sin
+    // minBLEP ni el bloqueo de continua del plegador. Debajo, tenue, el modulador
+    void paintComplex (juce::Graphics& g, juce::Rectangle<float> r, const OscSpec& o, float alpha)
+    {
+        const int n = juce::jmax (256, 2 * (int) r.getWidth());
+        const auto dtP = cycles / (double) n;
+        const auto source = choice ("complexModSource");
+        const auto ext = source == 1 ? spec (osc2) : spec (osc3);
+        const auto extUsable = source != 0 && ! (source == 1 && (ext.wave == 4 || ext.wave == 5));
+        const auto modWave = waveFromChoice (choice ("modWave"));
+        const auto ratio = source == 0 ? (double) value ("modRatio") : ext.ratio;
+        const auto dtM = dtP * ratio;
+        const auto fm = (double) value ("fmIndex");
+        const auto am = value ("amDepth"), timbre = value ("timbre"), sym = value ("symmetry"), tMod = value ("timbreMod");
+        const auto sync = value ("modSync") > 0.5f;
+        const auto fc = value ("modLp");
+        const auto lpCoef = fc >= 19999.0f ? 0.0 : 1.0 - std::exp (-juce::MathConstants<double>::twoPi * fc / (261.63 * (double) n / cycles));
+        double phase = 0.0, modPhase = 0.0, lp = 0.0;
+        juce::Path p, mod;
+        for (int i = 0; i <= n; ++i)
+        {
+            float m = source == 0 ? oscillator (modWave, modPhase, 0.0) : extUsable ? sampleOsc (ext, modPhase) : 0.0f;
+            if (source == 0 && lpCoef > 0.0) { lp += lpCoef * ((double) m - lp); m = (float) lp; }
+            const auto dtInst = dtP + fm * dtM * (double) m;
+            auto y = oscillator (o.wave, phase, 0.0, o.pw, false);
+            y *= (1.0f - am) + am * m;
+            const auto t = juce::jlimit (0.0f, 1.0f, timbre + tMod * 0.5f * m);
+            if (t > 0.0f)
+            {
+                const auto a = juce::MathConstants<float>::halfPi * (1.0f + 9.0f * t);
+                y += juce::jmin (1.0f, t * 10.0f) * (std::sin (a * (y + 0.5f * sym)) - y);
+            }
+            modPhase += dtM;
+            const auto wrapped = modPhase >= 1.0;
+            if (wrapped) modPhase -= 1.0;
+            phase += dtInst;
+            phase -= std::floor (phase);
+            if (sync && wrapped) phase = modPhase / dtM * std::abs (dtInst);
+            const auto x = r.getX() + r.getWidth() * (float) i / (float) n;
+            if (i == 0) { p.startNewSubPath (x, yOf (r, o.level * y)); mod.startNewSubPath (x, yOf (r, m)); }
+            else        { p.lineTo (x, yOf (r, o.level * y)); mod.lineTo (x, yOf (r, m)); }
+        }
+        g.setColour (Skin::trace().withAlpha (0.16f));
+        g.strokePath (mod, juce::PathStrokeType (1.0f));
+        strokeTrace (g, p, alpha);
+        g.setColour (Skin::trace().withAlpha (0.7f));
+        g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 10.0f, juce::Font::plain));
+        g.drawText (juce::String ("CPLX ") + (source == 0 ? "INT" : source == 1 ? "OSC 2" : "OSC 3") + (extUsable || source == 0 ? "" : " (not drawn)"),
+                    r.withHeight (12.0f).translated (0.0f, -12.0f), juce::Justification::topRight, false);
     }
 
     // Flanco del pulso dentro del ciclo: la cuadrada sube a 0 y baja en t = d; las mezclas con pulso, alto desde t = 1 - d
@@ -972,7 +1028,8 @@ private:
         "stringLevel", "stringDecay", "stringBright", "stringPick", "stringPickup", "stringExcite", "stringDamping",
         "osc1Mute", "wtMute", "sampleMute", "stringMute", "osc2Mute", "osc3Mute", "noiseMute",
         "filterOn", "filterMode", "cutoff", "resonance", "filterDrive", "filterCleanDrive", "filterSpread", "filterKey", "filterEnv",
-        "filterSustain", "velToFilter", "lfoOn", "lfoTarget", "lfoDepth", "lfo2On", "lfo2Target", "lfo2Depth" };
+        "filterSustain", "velToFilter", "lfoOn", "lfoTarget", "lfoDepth", "lfo2On", "lfo2Target", "lfo2Depth",
+        "complexOn", "complexModSource", "modWave", "modRatio", "fmIndex", "amDepth", "timbre", "symmetry", "timbreMod", "modSync", "modLp" };
 
     KoniSynthProcessor& koni;
     APVTS& s;

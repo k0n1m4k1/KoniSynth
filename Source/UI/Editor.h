@@ -181,6 +181,7 @@ public:
            .withKnob (s, "pulseWidth", "PW").withKnob (s, "pwmDepth", "PWM").withKnob (s, "drift", "Drift")
            .withKnob (s, "pitchEnvAmount", "P.Env").withKnob (s, "pitchEnvDecay", "P.Decay")
            .withKnob (s, "osc1TriSym", "Tri Sym").withKnob (s, "osc1TriRound", "Tri Rnd")
+           .withSideBody (pitchEnvView, 120, true)
            .withControlRows (2); // 6 + 5 perillas: la fila del display es alta y así el display gana ancho
         complexSection.withToggle (s, "complexOn").withCombo (s, "modWave").withExtraToggle (s, "modSync", "Sync")
                       .withKnob (s, "complexModSource", "Mod Src").withKnob (s, "modRatio", "Ratio").withKnob (s, "fmIndex", "FM")
@@ -254,11 +255,11 @@ public:
               .withHeaderButton ("Saturation...", "Saturation: clean filter input (Drive 0 % linear) and per-voice saturation after or "
                                            "before the filter (curve Soft, Diode, Hard, Fold, drive and position).", [this]
               {
-                  openParamPanel ("Saturation", [] (ParamPanel& p, APVTS& st)
+                  openParamPanel ("Saturation", [this] (ParamPanel& p, APVTS& st)
                   {
                       p.add ("Filter Input").withToggle (st, "filterCleanDrive").withKnob (st, "filterDrive", "Drive");
                       p.add ("Voice Saturation").withCombo (st, "voiceSatMode").withKnob (st, "voiceSatDrive", "Drive")
-                                                .withKnob (st, "voiceSatPos", "Position");
+                                                .withKnob (st, "voiceSatPos", "Position").withSideBody (voiceSatView, 150, true);
                   });
               })
               .withHeaderControl ("Ladder quality", qualitySelector, 190)
@@ -301,7 +302,8 @@ public:
         vl1Section.withCombo (s, "vl1Sound")
                   .withKnob (s, "vl1Octave", "Octave").withSlider (s, "vl1Attack", "A").withSlider (s, "vl1Decay", "D")
                   .withSlider (s, "vl1SustainLevel", "SL").withSlider (s, "vl1SustainTime", "ST").withSlider (s, "vl1Release", "R")
-                  .withKnob (s, "vl1Vibrato", "V").withKnob (s, "vl1Tremolo", "T");
+                  .withKnob (s, "vl1Vibrato", "V").withKnob (s, "vl1Tremolo", "T")
+                  .withSideBody (vl1EnvView, 150, true);
         styloSection.withCombo (s, "styloModel").withExtraToggle (s, "styloVibrato", "Vibrato")
                    .withKnob (s, "styloRange", "Range").withKnob (s, "styloRegister", "Register")
                    .withKnob (s, "styloVibDepth", "Depth").withKnob (s, "styloTuning", "Tuning")
@@ -310,7 +312,8 @@ public:
         genxOscSection.withExtraToggle (s, "genxPwm", "X (PWM)")
                       .withKnob (s, "genxSub1", "-1").withKnob (s, "genxSub2", "-2")
                       .withKnob (s, "genxOctave", "Octave").withKnob (s, "genxAttack", "Attack").withKnob (s, "genxPitch", "Pitch")
-                      .withKnob (s, "genxDecay", "Decay").withKnob (s, "genxStrip", "Strip");
+                      .withKnob (s, "genxDecay", "Decay").withKnob (s, "genxStrip", "Strip")
+                      .withSideBody (genxEnvView, 130, true);
         genxFxSection.withExtraToggle (s, "genxDelay", "Delay")
                      .withKnob (s, "genxLfoWave", "Wave").withKnob (s, "genxLfoRate", "Rate").withKnob (s, "genxLfoDepth", "Depth")
                      .withKnob (s, "genxCutoff", "Cutoff").withKnob (s, "genxRes", "Res")
@@ -401,7 +404,8 @@ public:
                   .withKnob (s, "n64Pan", "Pan").withKnob (s, "n64Spread", "Spread");
         n64EnvSection.withExtraToggle (s, "n64Velocity", "Velocity")
                      .withKnob (s, "n64Attack", "Attack").withKnob (s, "n64Decay", "Decay").withKnob (s, "n64Release", "Release")
-                     .withKnob (s, "n64AttackVolume", "A Vol").withKnob (s, "n64DecayVolume", "D Vol");
+                     .withKnob (s, "n64AttackVolume", "A Vol").withKnob (s, "n64DecayVolume", "D Vol")
+                     .withSideBody (n64EnvView, 150, true);
         n64FxSection.withCombo (s, "n64Fx").withKnob (s, "n64FxMix", "Mix").withKnob (s, "n64Dac", "DAC");
         oplSection.withCombo (s, "oplModel").withExtraToggle (s, "oplFourOp", "4-Op")
                   .withHeaderButton ("Operators...", "Open the OPL editor: the operators with the chip's own registers.", [this] { openOplPanel(); })
@@ -423,7 +427,8 @@ public:
                       .withKnob (s, "mdCh3Op3", "Ch3 OP3");
         mdPsgSection.withCombo (s, "mdPsgNoise")
                     .withKnob (s, "mdPsgNoiseRate", "N.Rate").withSlider (s, "mdPsgAttack", "A").withSlider (s, "mdPsgDecay", "D")
-                    .withSlider (s, "mdPsgSustain", "S").withSlider (s, "mdPsgRelease", "R");
+                    .withSlider (s, "mdPsgSustain", "S").withSlider (s, "mdPsgRelease", "R")
+                    .withSideBody (mdPsgEnvView, 150, true);
         chipVrc6Section.withCombo (s, "chipExpansion").withExtraToggle (s, "chipVrc6Overdrive", "Overdrive")
                        .withKnob (s, "chipVrc6Duty", "Duty");
         chipStereoSection.withKnob (s, "chipPan1", "P1").withKnob (s, "chipPan2", "P2").withKnob (s, "chipPan3", "Wave")
@@ -436,9 +441,11 @@ public:
                        .withKnob (s, "pvMix1", "VCO 1").withKnob (s, "pvMix2", "VCO 2").withKnob (s, "pvNoise", "Noise")
                        .withKnob (s, "pvCutoff", "Cutoff").withKnob (s, "pvReso", "Reso").withKnob (s, "pvEnvAmount", "Env");
         pvFEnvSection.withExtraToggle (s, "pvFLoop", "Repeat")
-                     .withSlider (s, "pvFAttack", "A").withSlider (s, "pvFDecay", "D").withSlider (s, "pvFSustain", "S").withSlider (s, "pvFRelease", "R");
+                     .withSlider (s, "pvFAttack", "A").withSlider (s, "pvFDecay", "D").withSlider (s, "pvFSustain", "S").withSlider (s, "pvFRelease", "R")
+                     .withSideBody (pvFEnvView, 150, true);
         pvAEnvSection.withExtraToggle (s, "pvALoop", "Repeat")
-                     .withSlider (s, "pvAAttack", "A").withSlider (s, "pvADecay", "D").withSlider (s, "pvASustain", "S").withSlider (s, "pvARelease", "R");
+                     .withSlider (s, "pvAAttack", "A").withSlider (s, "pvADecay", "D").withSlider (s, "pvASustain", "S").withSlider (s, "pvARelease", "R")
+                     .withSideBody (pvAEnvView, 150, true);
         pvLfoSection.withCombo (s, "pvLfoWave")
                     .withKnob (s, "pvLfoRate", "Rate").withKnob (s, "pvLfoVco1", "VCO 1").withKnob (s, "pvLfoVco2", "VCO 2")
                     .withKnob (s, "pvLfoVcf", "VCF").withKnob (s, "pvLfoVca", "VCA");
@@ -544,12 +551,12 @@ public:
         // 4–5. Efectos en el orden de la cadena y master
         crushSection.withToggle (s, "crushOn")
                     .withKnob (s, "crushBits", "Bits").withKnob (s, "crushRate", "Rate").withKnob (s, "crushDrive", "Drive")
-                    .withKnob (s, "crushMix", "Mix");
+                    .withKnob (s, "crushMix", "Mix").withSideBody (crushView, 120, true);
         phaserSection.withToggle (s, "phaserOn")
                      .withKnob (s, "phaserRate", "Rate").withKnob (s, "phaserDepth", "Depth")
                      .withKnob (s, "phaserFeedback", "Color").withKnob (s, "phaserMix", "Mix");
         tube.withToggle (s, "tubeOn")
-            .withKnob (s, "tubeDrive", "Drive").withKnob (s, "tubeBias", "Bias");
+            .withKnob (s, "tubeDrive", "Drive").withKnob (s, "tubeBias", "Bias").withSideBody (tubeView, 120, true);
         // EQ: en el panel, como el de un ampli (Bass / Mid / Treble); todo lo demás, curva y nodos en EQ Bands...
         eqSection.withToggle (s, "eqOn")
                  .withHeaderButton ("EQ Bands...", "Parametric EQ: low/high cuts, shelves, two mid bands with Q, and the response curve "
@@ -1102,6 +1109,7 @@ private:
     {
         auto body = std::make_unique<ParamPanel>();
         build (*body, koni.apvts);
+        paramPanel = body.get(); // updateInert atenúa también sus mandos
         const auto w = juce::jlimit (420, kWidth - 40, juce::roundToInt (body->weight() * 78.0f) + 52);
         openPanel (panelTitle, std::move (body), w, 230);
     }
@@ -1109,7 +1117,6 @@ private:
     void loadFavorite (int n)
     {
         auto& pm = koni.presetManager;
-        paramPanel = body.get(); // updateInert atenúa también sus mandos
         const auto favs = pm.favoriteIndices(); // en el orden del usuario (se reordena en el navegador)
         if (n >= (int) favs.size())
         {
@@ -3008,6 +3015,13 @@ private:
     FilterView filterView { koni };   // antes que filter (cuerpo lateral de la sección): se destruye después
     EnvView filterEnvView { koni.apvts, "filterAttack", "filterDecay", "filterSustain", "filterRelease" }; // ídem, envolventes
     EnvView ampEnvView { koni.apvts, "attack", "decay", "sustain", "release" };
+    StageEnvView pitchEnvView { koni.apvts, EngineEnv::synthPitch() };
+    // Envolventes de los motores emulados (ModViews.h, EngineEnv)
+    StageEnvView vl1EnvView { koni.apvts, EngineEnv::vl1() }, genxEnvView { koni.apvts, EngineEnv::genx() },
+                 n64EnvView { koni.apvts, EngineEnv::n64() }, mdPsgEnvView { koni.apvts, EngineEnv::mdPsg() },
+                 pvFEnvView { koni.apvts, EngineEnv::polivoks ("pvF") }, pvAEnvView { koni.apvts, EngineEnv::polivoks ("pvA") };
+    // Curvas de transferencia: saturación por voz (diálogo Saturation...), Crush y Tube
+    ShaperView voiceSatView { koni.apvts, Shapers::voiceSat() }, crushView { koni.apvts, Shapers::crush() }, tubeView { koni.apvts, Shapers::tube() };
     LfoView lfoView { koni.apvts, false }, lfo2View { koni.apvts, true }; // ídem, LFO 1 y LFO 2
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
@@ -3037,6 +3051,7 @@ private:
             transSection { "Transient" }, compSection { "Compressor" }, limiterSection { "Limiter" },
             ampSection { "Amp" }, waveSection { "Wave" };
     std::unique_ptr<PanelDialog> panel;
+    juce::Component::SafePointer<ParamPanel> paramPanel; // el último diálogo de parámetros abierto (nulo al cerrarse)
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::unique_ptr<Overlay> overlay;
     NoteKeyboard keyboard;
@@ -3049,4 +3064,3 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KoniSynthEditor)
 };
-    juce::Component::SafePointer<ParamPanel> paramPanel; // el último diálogo de parámetros abierto (nulo al cerrarse)
