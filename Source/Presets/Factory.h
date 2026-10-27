@@ -1211,6 +1211,190 @@ static const std::vector<FactoryPreset>& factoryPresets()
                           { "filterAttack", 0.005f }, { "filterDecay", 1.5f }, { "filterSustain", 0.0f }, { "attack", 0.005f }, { "decay", 2.0f }, { "sustain", 0.0f },
                           { "release", 4.0f }, { "tubeOn", 1 }, { "tubeDrive", 9.0f }, { "ambientOn", 1 }, { "ambientMix", 0.5f }, { "reverbDecay", 4.0f } }, {}, "Hold any note" },
             // cualquier nota. Ninguna cifra publicada (deepai.org: ninguna síntesis de trueno iguala a la grabación). Todo estimado
+
+        // Lotes house/dance (1989-99) y ambient (2026-10-27): variantes elegidas de oído por el autor en A/B contra cada
+        // referencia; la medición de cada una queda anotada (las que no cumplen alguna tolerancia se eligieron igualmente)
+        // Stab de piano del piano house y del rave de 1989-92 (piano de ROM de una workstation de 1988 tocado a golpes de
+        // acorde). Referencia: YouTube B77pC76pvnk (demostración del piano de ROM tocado solo, sin batería ni voz),
+        // 1:17,7-1:26; acorde medido E3-E4-G#4-B4 en 1:24,9 (cuerda de 0,25 s). Las ROM de muestras no se usan: se aproxima
+        // con síntesis. Frase A/B: los 23 golpes F#m-B-A-E del mismo tramo
+        // Propuesta (A): sierra + cuadrada +1 oct, LP12 800 Hz con envolvente de filtro (0,85 · 5 oct, 0,25 s), amp RC decay
+        // 0,8 s, release 0,55 s; EQ -3 dB a 1 kHz y +9 dB a 3,5 kHz (el "mordisco" del martillo). Medido (ref -> render, misma
+        // nota): -20 dB 266 -> 270 ms [OK]; -40 dB 521 -> 540 ms [OK]; centroide 482 -> 485 Hz [OK]; octavas |Δ| 3,4 dB [OK].
+        // Pico a velocidad 100: 0,080 con gain 0,135
+        { "House Piano Stab", "Keys", { { "envCurve", 1 }, { "wave", 2 }, { "osc2Wave", 3 }, { "osc2Octave", 1 }, { "osc2Level", 0.5f }, { "attack", 0.001f }, { "decay", 0.8f }, { "sustain", 0.0f }, { "release", 0.55f }, { "filterMode", 1 }, { "cutoff", 800.0f }, { "filterEnv", 0.85f }, { "filterAttack", 0.001f }, { "filterDecay", 0.25f }, { "filterSustain", 0.0f }, { "filterKey", 0.5f }, { "drift", 0.05f }, { "eqOn", 1 }, { "eqMid1Freq", 1000.0f }, { "eqMid1Gain", -3.0f }, { "eqMid1Q", 1.0f }, { "eqMid2Freq", 3500.0f }, { "eqMid2Gain", 9.0f }, { "eqMid2Q", 0.7f }, { "eqLowGain", 3.0f }, { "gain", 0.135f } }, {}, "Play offbeat chord stabs C3-C5, e.g. E3-E4-G#4-B4", 48, 84 },
+
+        // Stab de piano del piano house y del rave de 1989-92 (piano de ROM de una workstation de 1988 tocado a golpes de
+        // acorde). Referencia: YouTube B77pC76pvnk (demostración del piano de ROM tocado solo, sin batería ni voz),
+        // 1:17,7-1:26; acorde medido E3-E4-G#4-B4 en 1:24,9 (cuerda de 0,25 s). Las ROM de muestras no se usan: se aproxima
+        // con síntesis. Frase A/B: los 23 golpes F#m-B-A-E del mismo tramo
+        // Propuesta (B): FM 6-Op, algoritmo 5: tres pares 1:1 con portadoras desafinadas ±3 y moduladores 1:1, 5:1 y 4:1 de
+        // caída rápida (R2 45-55), feedback 5. Medido (ref -> render, misma nota): -20 dB 266 -> 302 ms [OK]; -40 dB 521 ->
+        // 484 ms [OK]; centroide 482 -> 488 Hz [OK]; octavas |Δ| 4,0 dB [OK]. Pico a velocidad 100: 0,080 con gain 0,210
+        { "House Piano Stab FM", "Keys", { { "engine", 6 }, { "fmAlgorithm", 5 }, { "fmFeedback", 5 }, { "fm1Coarse", 1 }, { "fm1Level", 99 }, { "fm1R1", 99 }, { "fm1R2", 45 }, { "fm1R3", 30 }, { "fm1R4", 55 }, { "fm1L1", 99 }, { "fm1L2", 80 }, { "fm1L3", 0 }, { "fm2Coarse", 1 }, { "fm2Level", 82 }, { "fm2R1", 99 }, { "fm2R2", 45 }, { "fm2R3", 40 }, { "fm2R4", 70 }, { "fm2L2", 60 }, { "fm2L3", 0 }, { "fm3Coarse", 1 }, { "fm3Detune", 3 }, { "fm3Level", 99 }, { "fm3R1", 99 }, { "fm3R2", 65 }, { "fm3R3", 30 }, { "fm3R4", 80 }, { "fm3L2", 80 }, { "fm3L3", 0 }, { "fm4Coarse", 5 }, { "fm4Level", 75 }, { "fm4R1", 99 }, { "fm4R2", 45 }, { "fm4R3", 50 }, { "fm4R4", 70 }, { "fm4L2", 0 }, { "fm4L3", 0 }, { "fm5Coarse", 1 }, { "fm5Detune", -3 }, { "fm5Level", 85 }, { "fm5R1", 99 }, { "fm5R2", 35 }, { "fm5R3", 30 }, { "fm5R4", 80 }, { "fm5L2", 80 }, { "fm5L3", 0 }, { "fm6Coarse", 4 }, { "fm6Level", 88 }, { "fm6R1", 99 }, { "fm6R2", 55 }, { "fm6R3", 40 }, { "fm6R4", 70 }, { "fm6L2", 40 }, { "fm6L3", 0 }, { "gain", 0.21f } }, {}, "Play offbeat chord stabs C3-C5, e.g. E3-E4-G#4-B4", 48, 84 },
+
+        // Stab de piano del piano house y del rave de 1989-92 (piano de ROM de una workstation de 1988 tocado a golpes de
+        // acorde). Referencia: YouTube B77pC76pvnk (demostración del piano de ROM tocado solo, sin batería ni voz),
+        // 1:17,7-1:26; acorde medido E3-E4-G#4-B4 en 1:24,9 (cuerda de 0,25 s). Las ROM de muestras no se usan: se aproxima
+        // con síntesis. Frase A/B: los 23 golpes F#m-B-A-E del mismo tramo
+        // Propuesta (C): cuerda modelada (fuente String, excitación Pick en 0,2, brillo 0,5, decay 4 s) + sierra al 25 %, amp
+        // RC decay 0,5 s / sustain 0,2 / release 0,55 s, chorus I al 30 %. Medido (ref -> render, misma nota): -20 dB 266 ->
+        // 275 ms [OK]; -40 dB 521 -> 506 ms [OK]; centroide 482 -> 480 Hz [OK]; octavas |Δ| 3,1 dB [OK]. Pico a velocidad 100:
+        // 0,080 con gain 0,232
+        { "House Piano Stab Pluck", "Keys", { { "envCurve", 1 }, { "osc1Level", 0.0f }, { "stringLevel", 1.0f }, { "stringExcite", 1 }, { "stringDecay", 4.0f }, { "stringBright", 0.5f }, { "stringPick", 0.2f }, { "stringDamping", 0.0f }, { "osc2Wave", 2 }, { "osc2Level", 0.25f }, { "attack", 0.001f }, { "decay", 0.5f }, { "sustain", 0.2f }, { "release", 0.55f }, { "filterOn", 0 }, { "drift", 0.05f }, { "chorusOn", 1 }, { "chorusMode", 0 }, { "chorusMix", 0.3f }, { "gain", 0.232f } }, {}, "Play offbeat chord stabs C3-C5, e.g. E3-E4-G#4-B4", 48, 84 },
+
+        // Bajo FM "sólido" del deep house 1989-92 (preset de fábrica de un FM de 4 operadores de 1987). Receta del vídeo (no
+        // se ve el patch, solo la explicación): operadores 1-2 a ratio 0,5 y 3-4 a ratio 1, el 4 con feedback, el 3 con onda
+        // de media seno desafinado para el golpe inicial, el bajo depende mucho de la velocidad. El FM 6-Op solo tiene senos:
+        // la media seno no existe y se sustituye por un par seno con más índice. Referencia: YouTube i5beLtKguRE (el aparato
+        // solo en bucle, sin batería), 1:12,9-1:17,0; nota medida G1 (49,1 Hz) en 1:16,55. Frase A/B: el bucle de 4,1 s (E1
+        // con acentos, A1, B1, G1)
+        // Propuesta (C): motor Synth: seno + Osc 2 seno -1 oct, Complex Osc FM 0,5:1 índice 0,5 con la envolvente de filtro al
+        // índice; mono. Medido (ref -> render, misma nota): -20 dB 233 -> 227 ms [OK]; -40 dB 351 -> 270 ms [OK]; centroide 66
+        // -> 68 Hz [OK]; octavas |Δ| 4,7 dB [OK]; tono 49,1 -> 49,1 Hz, +0 ct [OK]. Pico a velocidad 100: 0,080 con gain 0,279
+        { "FM Solid Bass", "Bass", { { "voiceMode", 1 }, { "wave", 0 }, { "osc2Wave", 0 }, { "osc2Octave", -1 }, { "osc2Level", 0.9f }, { "complexOn", 1 }, { "modWave", 0 }, { "modRatio", 0.5f }, { "fmIndex", 0.5f }, { "mtxSrc1", 3 }, { "mtxDst1", 12 }, { "mtxAmt1", 0.2f }, { "filterOn", 0 }, { "filterAttack", 0.001f }, { "filterDecay", 0.3f }, { "filterSustain", 0.5f }, { "envCurve", 1 }, { "attack", 0.001f }, { "decay", 1.0f }, { "sustain", 1.0f }, { "release", 0.12f }, { "drift", 0.0f }, { "gain", 0.279f } }, {}, "Bass line C2-C4: sounds an octave lower (0.5 ratio), like the original", 36, 60 },
+
+        // Acorde de deep house (séptima mayor/novena con filtro). Referencia: YouTube x5MfExRuidk (preview de un pack de
+        // acordes de house; tramo 0:46,0-0:48,0 sin batería), Fmaj7 F3-A3-C4-E4 en 0:47,10. Es un pack actual de inspiración
+        // clásica, no un disco de 1985-92. Los -20/-40 dB no se pueden medir: el acorde suena hasta el siguiente golpe (375
+        // ms)
+        // Propuesta (B): pulso 20 % + cuadrada +1 oct al 60 %, LP24 4 kHz, decay 0,3 s a sustain 0,2, EQ -6 dB a 1 kHz (más
+        // hueco y "órgano"). Medido (ref -> render, misma nota): centroide 552 -> 545 Hz [OK]; octavas |Δ| 2,9 dB [OK]. Pico a
+        // velocidad 100: 0,080 con gain 0,223
+        { "Deep House Chord", "Keys", { { "wave", 3 }, { "pulseWidth", 0.2f }, { "osc2Wave", 3 }, { "osc2Octave", 1 }, { "osc2Level", 0.6f }, { "attack", 0.015f }, { "decay", 0.3f }, { "sustain", 0.2f }, { "release", 0.1f }, { "filterMode", 0 }, { "cutoff", 4000.0f }, { "resonance", 0.1f }, { "filterEnv", 0.1f }, { "filterAttack", 0.001f }, { "filterDecay", 0.3f }, { "filterSustain", 0.0f }, { "drift", 0.1f }, { "eqOn", 1 }, { "eqMid1Freq", 1000.0f }, { "eqMid1Gain", -6.0f }, { "gain", 0.223f } }, {}, "Play 7th chords, e.g. F3-A3-C4-E4", 48, 84 },
+
+        // Pad de trance de supersierras de 1996-99. Referencia: YouTube u0WBdMpK8ag (el pad terminado, con su eco y reverb,
+        // sin batería ni voz), 0:00-0:11; acorde F2-F3-F4-A4-C5 de 4,3 s. La receta del vídeo usa ruido y ecualización para el
+        // "aire": medido, el 7 % de la energía de la referencia está por encima de 6 kHz. Los -20/-40 dB no aplican (acorde
+        // sostenido). Diferencia con Gated Supersaw Pad y Supersaw Lab: sin puerta, con ruido y eco 1/8D
+        // Propuesta (A): 7 sierras a 15 ct (spread 100 %), ruido al 40 %, LP12 6 kHz, ataque 0,3 s, release 1,5 s, eco 1/8D
+        // ping-pong 35 %, placa de 8 s al 20 %, EQ +12 dB en 8 kHz. Medido (ref -> render, misma nota): centroide 1410 -> 1409
+        // Hz [OK]; octavas |Δ| 1,9 dB [OK]. Pico a velocidad 100: 0,080 con gain 0,088
+        { "Trance Supersaw Pad", "Pad", { { "wave", 2 }, { "unisonVoices", 7 }, { "unisonDetune", 15.0f }, { "unisonSpread", 1.0f }, { "noiseLevel", 0.4f }, { "attack", 0.3f }, { "decay", 1.0f }, { "sustain", 1.0f }, { "release", 1.5f }, { "filterMode", 1 }, { "cutoff", 6000.0f }, { "resonance", 0.1f }, { "echoOn", 1 }, { "echoSync", 2 }, { "echoFeedback", 0.35f }, { "echoMix", 0.25f }, { "echoPingPong", 1 }, { "ambientOn", 1 }, { "ambientMix", 0.2f }, { "reverbDecay", 8.0f }, { "drift", 0.1f }, { "eqOn", 1 }, { "eqHighFreq", 8000.0f }, { "eqHighGain", 12.0f }, { "eqLowCut", 80.0f }, { "gain", 0.088f } }, {}, "Hold chords with the bass an octave below, e.g. F2-F3-F4-A4-C5", 36, 84 },
+
+        // Stab de acorde de órgano del house de 1990 (acorde de órgano muestreado y tocado por el teclado). Referencia:
+        // YouTube iHKB1abCI_U (sin voz ni batería en 0:50-1:05), Dm7 D3-F3-A3-C4 en 0:53,755; medidos los armónicos 2, 3 y 4
+        // de cada nota (registros 8', 4', 2 2/3' y 2'). Frase A/B: 0:50,15-1:01,55 con el acorde transpuesto por tecla, como
+        // el sampler. Distinto de House Organ Bass (el mismo tipo de órgano tocado como bajo)
+        // Propuesta (A): FM 6-Op, algoritmo 32 (6 portadoras = registros de órgano) a ratios 1, 2, 3, 4, 10 y 12, feedback 7
+        // en el 6. Medido (ref -> render, misma nota): -20 dB 348 -> 405 ms [OK]; -40 dB 352 -> — ms [n/a]; centroide 622 ->
+        // 653 Hz [OK]; octavas |Δ| 2,8 dB [OK]. Pico a velocidad 100: 0,079 con gain 1,000 (con gain 1,0 el pico es 0,079: no
+        // llega a 0,08)
+        { "House Organ Chord Stab", "Keys", { { "engine", 6 }, { "fmAlgorithm", 32 }, { "fmFeedback", 7 }, { "fm1Coarse", 1 }, { "fm1Level", 85 }, { "fm2Coarse", 2 }, { "fm2Level", 80 }, { "fm3Coarse", 3 }, { "fm3Level", 75 }, { "fm4Coarse", 4 }, { "fm4Level", 92 }, { "fm5Coarse", 10 }, { "fm5Level", 65 }, { "fm6Coarse", 12 }, { "fm6Level", 65 }, { "gain", 1.0f }, { "fm1R1", 95 }, { "fm1R2", 40 }, { "fm1R3", 30 }, { "fm1R4", 90 }, { "fm1L1", 99 }, { "fm1L2", 93 }, { "fm1L3", 90 }, { "fm2R1", 95 }, { "fm2R2", 40 }, { "fm2R3", 30 }, { "fm2R4", 90 }, { "fm2L1", 99 }, { "fm2L2", 93 }, { "fm2L3", 90 }, { "fm3R1", 95 }, { "fm3R2", 40 }, { "fm3R3", 30 }, { "fm3R4", 90 }, { "fm3L1", 99 }, { "fm3L2", 93 }, { "fm3L3", 90 }, { "fm4R1", 95 }, { "fm4R2", 40 }, { "fm4R3", 30 }, { "fm4R4", 90 }, { "fm4L1", 99 }, { "fm4L2", 93 }, { "fm4L3", 90 }, { "fm5R1", 95 }, { "fm5R2", 40 }, { "fm5R3", 30 }, { "fm5R4", 90 }, { "fm5L1", 99 }, { "fm5L2", 93 }, { "fm5L3", 90 }, { "fm6R1", 95 }, { "fm6R2", 40 }, { "fm6R3", 30 }, { "fm6R4", 90 }, { "fm6L1", 99 }, { "fm6L2", 93 }, { "fm6L3", 90 } }, {}, "Play minor 7th chord stabs, e.g. D3-F3-A3-C4", 48, 84 },
+
+        // Lead de swells suaves (tono casi senoidal con trémolo lento). Referencia: Typhon capítulo 2, 0:38,2-0:49,5 (medido
+        // en la nota A#3 de 0:46,0: trémolo de 1,47 Hz y ±4,9 dB, 500 Hz a -14 dB del fundamental)
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (B): dos senos a +11 ct (batido de ~1,5 Hz en A#3 en lugar de LFO), chorus II al 40 %, eco 1/8D, placa de
+        // 2,5 s. Medido (ref -> render, misma frase): -20 dB 669 -> 668 ms [OK]; centroide 272 -> 283 Hz [OK]; octavas |Δ| 4,3
+        // dB [OK]. Pico a velocidad 100: 0,080 con gain 0,229
+        { "Cloud Swell Lead", "Lead", { { "voiceMode", 2 }, { "wave", 0 }, { "osc2Wave", 0 }, { "osc2Fine", 11.0f }, { "osc2Level", 1.0f }, { "filterOn", 0 }, { "attack", 0.25f }, { "decay", 1.5f }, { "sustain", 0.4f }, { "release", 2.0f }, { "chorusOn", 1 }, { "chorusMode", 1 }, { "chorusMix", 0.4f }, { "ambientOn", 1 }, { "ambientMix", 0.3f }, { "reverbDecay", 2.5f }, { "drift", 0.2f }, { "gain", 0.229f }, { "echoOn", 1 }, { "echoSync", 2 }, { "echoFeedback", 0.4f }, { "echoMix", 0.3f } }, {}, "Slow legato melody C3-C6; velocity sets the swell", 48, 84 },
+
+        // Lead de swells suaves (tono casi senoidal con trémolo lento). Referencia: Typhon capítulo 2, 0:38,2-0:49,5 (medido
+        // en la nota A#3 de 0:46,0: trémolo de 1,47 Hz y ±4,9 dB, 500 Hz a -14 dB del fundamental)
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (C): cuadrada, LP24 800 Hz res 0,3 con wah del LFO 1,47 Hz (±0,8 oct), eco 1/8D al 30 %. Medido (ref ->
+        // render, misma frase): -20 dB 669 -> 676 ms [OK]; centroide 272 -> 362 Hz [NO]; octavas |Δ| 5,1 dB [OK]. Pico a
+        // velocidad 100: 0,080 con gain 0,558
+        { "Cloud Swell Wah Lead", "Lead", { { "voiceMode", 2 }, { "wave", 3 }, { "filterMode", 0 }, { "cutoff", 800.0f }, { "resonance", 0.3f }, { "filterKey", 0.5f }, { "attack", 0.4f }, { "decay", 1.5f }, { "sustain", 0.4f }, { "release", 2.0f }, { "lfoOn", 1 }, { "lfoTarget", 2 }, { "lfoRate", 1.47f }, { "lfoDepth", 0.4f }, { "ambientOn", 1 }, { "ambientMix", 0.3f }, { "reverbDecay", 4.0f }, { "drift", 0.2f }, { "gain", 0.558f }, { "echoOn", 1 }, { "echoSync", 2 }, { "echoFeedback", 0.6f }, { "echoMix", 0.3f } }, {}, "Slow legato melody C3-C6; velocity sets the swell", 48, 84 },
+
+        // Drone evolutivo: una nota sostenida cuyo brillo sube y baja en ~20 s (centroide medido 160 -> 620 -> 220 Hz).
+        // Referencia: Typhon capítulo 9, 6:16-6:43 (D3 sostenido 24 s desde 6:18,1). En la referencia el barrido lo hace el
+        // intérprete; aquí lo hace un LFO lento o la envolvente de filtro
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (A): sierra + cuadrada +7 ct, seno -1 oct al 30 %, ruido 8 %, LP24 1,26 kHz res 0,6 barrido por el LFO 1
+        // (triángulo 0,03 Hz = 33 s, ±1,8 oct), vibrato LFO 2 de 3,9 Hz, placa de 6 s. Medido (ref -> render, misma frase):
+        // centroide 438 -> 453 Hz [OK]; octavas |Δ| 4,4 dB [OK]. Pico a velocidad 100: 0,080 con gain 0,221
+        { "Evolving Filter Drone", "Pad", { { "voiceMode", 1 }, { "wave", 2 }, { "osc2Wave", 3 }, { "osc2Fine", 7.0f }, { "osc2Level", 0.7f }, { "filterMode", 0 }, { "cutoff", 1260.0f }, { "resonance", 0.6f }, { "attack", 0.5f }, { "decay", 2.0f }, { "sustain", 1.0f }, { "release", 3.0f }, { "lfoOn", 1 }, { "lfoTarget", 2 }, { "lfoShape", 1 }, { "lfoRate", 0.03f }, { "lfoDepth", 0.9f }, { "lfo2On", 1 }, { "lfo2Target", 0 }, { "lfo2Rate", 3.9f }, { "lfo2Depth", 0.03f }, { "ambientOn", 1 }, { "ambientMix", 0.45f }, { "reverbDecay", 6.0f }, { "drift", 0.3f }, { "gain", 0.221f }, { "subLevel", 0.3f }, { "subOctave", 0 }, { "osc3Wave", 0 }, { "noiseLevel", 0.08f } }, {}, "Hold one low note (D3) for 20 s or more", 36, 60 },
+
+        // Drone evolutivo: una nota sostenida cuyo brillo sube y baja en ~20 s (centroide medido 160 -> 620 -> 220 Hz).
+        // Referencia: Typhon capítulo 9, 6:16-6:43 (D3 sostenido 24 s desde 6:18,1). En la referencia el barrido lo hace el
+        // intérprete; aquí lo hace un LFO lento o la envolvente de filtro
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (B): tabla Harmonic Sweep recorrida por el LFO 2 (triángulo 0,04 Hz, 90 %), seno -1 oct, LP12 4,2 kHz.
+        // Medido (ref -> render, misma frase): centroide 438 -> 264 Hz [NO]; octavas |Δ| 3,6 dB [OK]. Pico a velocidad 100:
+        // 0,080 con gain 0,442
+        { "Evolving Wavetable Drone", "Pad", { { "voiceMode", 1 }, { "osc1Level", 0.0f }, { "wtLevel", 1.0f }, { "wtTable", 2 }, { "wtPosition", 0.4f }, { "lfo2On", 1 }, { "lfo2Target", 5 }, { "lfo2Shape", 1 }, { "lfo2Rate", 0.04f }, { "lfo2Depth", 0.9f }, { "subLevel", 0.3f }, { "filterMode", 1 }, { "cutoff", 4200.0f }, { "attack", 0.5f }, { "decay", 2.0f }, { "sustain", 1.0f }, { "release", 3.0f }, { "ambientOn", 1 }, { "ambientMix", 0.15f }, { "reverbDecay", 2.5f }, { "drift", 0.3f }, { "gain", 0.442f }, { "subOctave", 0 }, { "osc3Wave", 0 }, { "noiseLevel", 0.08f } }, {}, "Hold one low note (D3) for 20 s or more", 36, 60 },
+
+        // Notas cortas de secuencia ambient con eco. Referencia: Typhon capítulo 8, 5:16,5-5:24,5 (corcheas de ~240 ms; nota
+        // B3 de 5:17,525: -20 dB a 122 ms, -40 dB a 205 ms, 500 Hz a -14 dB)
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (A): triángulo, LP12 1,4 kHz con seguimiento 50 %, amp RC 8 ms / decay 0,25 s, eco 1/8D al 25 %, placa de
+        // 4 s al 45 %. Medido (ref -> render, misma frase): -20 dB 690 -> — ms [n/a]; centroide 338 -> 346 Hz [OK]; octavas
+        // |Δ| 3,0 dB [OK]. Pico a velocidad 100: 0,080 con gain 0,874
+        { "Ambient Echo Arp", "Pluck", { { "wave", 1 }, { "filterMode", 1 }, { "cutoff", 1400.0f }, { "filterKey", 0.5f }, { "attack", 0.008f }, { "decay", 0.25f }, { "sustain", 0.0f }, { "release", 0.1f }, { "echoOn", 1 }, { "echoSync", 2 }, { "echoFeedback", 0.25f }, { "echoMix", 0.25f }, { "ambientOn", 1 }, { "ambientMix", 0.45f }, { "reverbDecay", 4.0f }, { "drift", 0.15f }, { "envCurve", 1 }, { "gain", 0.874f } }, {}, "Play 16th-note patterns around E4 (about 240 ms per note)", 55, 79 },
+
+        // Notas cortas de secuencia ambient con eco. Referencia: Typhon capítulo 8, 5:16,5-5:24,5 (corcheas de ~240 ms; nota
+        // B3 de 5:17,525: -20 dB a 122 ms, -40 dB a 205 ms, 500 Hz a -14 dB)
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (B): seno + seno +1 oct al 20 %, decay 80 ms, eco 1/8D ping-pong al 30 %, placa de 5 s. Medido (ref ->
+        // render, misma frase): -20 dB 690 -> 871 ms [NO]; centroide 338 -> 353 Hz [OK]; octavas |Δ| 2,8 dB [OK]. Pico a
+        // velocidad 100: 0,080 con gain 0,613
+        { "Ambient Echo Arp Glass", "Pluck", { { "wave", 0 }, { "osc2Wave", 0 }, { "osc2Octave", 1 }, { "osc2Level", 0.2f }, { "filterOn", 0 }, { "attack", 0.008f }, { "decay", 0.08f }, { "sustain", 0.0f }, { "release", 0.1f }, { "echoOn", 1 }, { "echoSync", 2 }, { "echoFeedback", 0.45f }, { "echoMix", 0.3f }, { "echoPingPong", 1 }, { "ambientOn", 1 }, { "ambientMix", 0.45f }, { "reverbDecay", 5.0f }, { "drift", 0.15f }, { "envCurve", 1 }, { "gain", 0.613f } }, {}, "Play 16th-note patterns around E4 (about 240 ms per note)", 55, 79 },
+
+        // Notas cortas de secuencia ambient con eco. Referencia: Typhon capítulo 8, 5:16,5-5:24,5 (corcheas de ~240 ms; nota
+        // B3 de 5:17,525: -20 dB a 122 ms, -40 dB a 205 ms, 500 Hz a -14 dB)
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (C): cuadrada, LP24 300 Hz con envolvente 0,35 (120 ms) y seguimiento 60 %, eco 1/8D realimentado 60 % al
+        // 10 %. Medido (ref -> render, misma frase): -20 dB 690 -> 42 ms [NO]; centroide 338 -> 338 Hz [OK]; octavas |Δ| 2,9
+        // dB [OK]. Pico a velocidad 100: 0,080 con gain 0,908
+        { "Ambient Echo Arp Dark", "Pluck", { { "wave", 3 }, { "filterMode", 0 }, { "cutoff", 300.0f }, { "resonance", 0.1f }, { "filterEnv", 0.35f }, { "filterAttack", 0.005f }, { "filterDecay", 0.12f }, { "filterSustain", 0.0f }, { "filterKey", 0.6f }, { "attack", 0.015f }, { "decay", 0.08f }, { "sustain", 0.0f }, { "release", 0.1f }, { "echoOn", 1 }, { "echoSync", 2 }, { "echoFeedback", 0.6f }, { "echoMix", 0.1f }, { "ambientOn", 1 }, { "ambientMix", 0.3f }, { "reverbDecay", 4.0f }, { "drift", 0.15f }, { "envCurve", 1 }, { "gain", 0.908f } }, {}, "Play 16th-note patterns around E4 (about 240 ms per note)", 55, 79 },
+
+        // Pad monofónico aireado con vibrato de 4 Hz (modulación de nivel medida: 4,0 Hz, 1,9 dB rms). Referencia: Typhon
+        // capítulo 15, 9:59,0-10:21,0 (B4 de 16 s desde 10:04,55)
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (A): sierra + triángulo -1 oct al 20 %, LP24 1,2 kHz, ataque 0,8 s, vibrato 4 Hz ±0,1 st, placa de 6 s al
+        // 40 %. Medido (ref -> render, misma frase): centroide 635 -> 624 Hz [OK]; octavas |Δ| 5,1 dB [OK]. Pico a velocidad
+        // 100: 0,080 con gain 0,339
+        { "Airy Vibrato Pad", "Pad", { { "voiceMode", 2 }, { "wave", 2 }, { "filterMode", 0 }, { "cutoff", 1200.0f }, { "resonance", 0.15f }, { "filterKey", 0.3f }, { "attack", 0.8f }, { "decay", 2.0f }, { "sustain", 1.0f }, { "release", 2.5f }, { "lfoOn", 1 }, { "lfoTarget", 0 }, { "lfoRate", 4.0f }, { "lfoDepth", 0.05f }, { "ambientOn", 1 }, { "ambientMix", 0.4f }, { "reverbDecay", 6.0f }, { "drift", 0.2f }, { "gain", 0.339f }, { "subLevel", 0.2f }, { "subOctave", 0 }, { "osc3Wave", 1 } }, {}, "Hold high notes B4-E5 for several seconds", 60, 88 },
+
+        // Silbido de resonancia que crece: con una G1 tocada suena un tono casi puro a 440 Hz (banda de 500 Hz a 0 dB, las
+        // demás a -28 dB o menos) que sube de -45 a -1 dB en 2,8 s. Referencia: Typhon capítulo 7, 4:22,6-4:36,1
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Ninguna variante del motor Synth iguala el espectro (el LP24 con resonancia 0,95 deja pasar los armónicos de la
+        // sierra); la B lo iguala con un operador FM a frecuencia fija, pero entonces el silbido no sigue la tecla
+        // Propuesta (A): sierra al 20 % en LP24 a 440 Hz fijo (sin seguimiento) con resonancia 0,95; ataque 3,5 s; placa de 8
+        // s al 50 %. Medido (ref -> render, misma frase): -20 dB 912 -> 893 ms [OK]; centroide 457 -> 412 Hz [OK]; octavas |Δ|
+        // 10,9 dB [NO]. Pico a velocidad 100: 0,080 con gain 0,406
+        { "Resonant Whistle Swell", "FX", { { "voiceMode", 1 }, { "wave", 2 }, { "filterMode", 0 }, { "cutoff", 440.0f }, { "resonance", 0.95f }, { "filterKey", 0.0f }, { "attack", 3.5f }, { "decay", 2.0f }, { "sustain", 1.0f }, { "release", 1.5f }, { "ambientOn", 1 }, { "ambientMix", 0.5f }, { "reverbDecay", 8.0f }, { "drift", 0.0f }, { "gain", 0.406f }, { "osc1Level", 0.2f } }, {}, "Hold a low note (G1) for 5 s: the whistle swells in", 24, 60 },
+
+        // Nota suave y oscura repetida, con eco (pulsación de pad). Referencia: Typhon capítulo 6, 3:51,1-4:00,1 (G3 de
+        // 3:51,44: ataque ~50 ms, 250 y 500 Hz dominantes, 1 kHz a -28 dB)
+        // Medida sobre la frase entera (mismas notas, tiempos y velocidades que la referencia; velocidad = 100 ·
+        // 10^(Δpico/20)): las notas del Typhon llevan encima las colas de eco/reverb de las anteriores y una nota sola no se
+        // puede aislar. Las octavas se comparan con suelo de -45 dB (hiss de la grabación). Los -20/-40 dB son de la frase
+        // (n/a si no cae)
+        // Propuesta (A): triángulo + seno +1 oct al 50 %, LP12 700 Hz, ataque 15 ms, decay 0,15 s a 0,3, eco 1/8 al 15 %,
+        // placa de 8 s al 15 %. Medido (ref -> render, misma frase): -20 dB 1743 -> — ms [n/a]; centroide 263 -> 263 Hz [OK];
+        // octavas |Δ| 2,7 dB [OK]. Pico a velocidad 100: 0,080 con gain 0,635
+        { "Soft Echo Pluck", "Pluck", { { "wave", 1 }, { "osc2Wave", 0 }, { "osc2Octave", 1 }, { "osc2Level", 0.5f }, { "filterMode", 1 }, { "cutoff", 700.0f }, { "filterKey", 0.5f }, { "attack", 0.015f }, { "decay", 0.15f }, { "sustain", 0.3f }, { "release", 0.4f }, { "echoOn", 1 }, { "echoSync", 3 }, { "echoFeedback", 0.3f }, { "echoMix", 0.15f }, { "ambientOn", 1 }, { "ambientMix", 0.15f }, { "reverbDecay", 8.0f }, { "drift", 0.2f }, { "gain", 0.635f } }, {}, "Repeat notes around G3 every 0.7 s", 48, 72 },
     };
     return list;
 }
