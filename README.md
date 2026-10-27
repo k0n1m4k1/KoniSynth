@@ -1,6 +1,6 @@
 # KoniSynth
 
-**Version 1.0.0-alpha** · by **@k0n1m4k1** 🇪🇸 · GNU AGPLv3
+**Version 1.0.0-beta** · by **@k0n1m4k1** 🇪🇸 · GNU AGPLv3
 
 KoniSynth is an experimental synthesizer laboratory for the sounds of the 60s to the 90s: fifteen engines, from an analog-style
 synth of its own to faithful emulations of the Casio VL-1, the Stylophone, the Omnichord, classic drum machines, the Yamaha
