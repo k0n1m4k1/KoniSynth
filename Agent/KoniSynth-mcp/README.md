@@ -7,23 +7,70 @@ save presets. It talks to KoniSynth's local control server (`Source/Agent/AgentS
 
 - KoniSynth 0.6+ with **Agent control** enabled: right-click the *KoniSynth* title (or *Options* in the standalone)
   > *Agent control (localhost)*. It is off by default; while off, KoniSynth opens no port.
-- Python 3.10+ (tested with 3.14.3), the official MCP SDK (`mcp`, MIT) and `numpy` (BSD-3-Clause), pinned in `requirements.txt`.
+- Python 3.10+ (tested with 3.14.3; on Debian/Ubuntu also the `python3-venv` package), the official MCP SDK (`mcp`, MIT)
+  and `numpy` (BSD-3-Clause), pinned in `requirements.txt`.
+
+## Setup
+
+KoniSynth keeps the bridge in one folder of your user profile:
+
+| System | Bridge folder |
+|---|---|
+| Windows | `%APPDATA%\KoniSynth\KoniSynth-mcp` |
+| Linux | `~/.config/KoniSynth/KoniSynth-mcp` |
+
+Everything below is in KoniSynth's *Agent (MCP)...* dialog (Options, or right-click the title). It shows which bridge it
+found and whether its Python environment is ready.
+
+### 1. Get the bridge (once), in one of two ways
+
+- **Download it automatically:** click *Copy install command* and paste it in a terminal (cmd, PowerShell or bash). It is
+  a single Python line that downloads this folder from the release tag of your KoniSynth version (for example
+  `v1.0.0-beta`) to the bridge folder, creates its Python environment (`.venv`), installs `requirements.txt` and writes the
+  version to `version.txt`. KoniSynth itself never connects to the internet: the command you run does.
+- **Copy it:** copy the `KoniSynth-mcp` folder of the release zip (the same version as your KoniSynth) into the bridge
+  folder above, for example to use it offline. KoniSynth detects it there. Then run *Copy install command* as well: with
+  the bridge already in place it downloads nothing and only creates the Python environment.
+
+If you run KoniSynth from the unzipped release folder, the `KoniSynth-mcp` folder next to it is found too. For a bridge in
+any other folder, use *Locate bridge...*.
+
+### 2. Register it in your agent (once)
+
+*Register in agent...* copies, with the paths of your machine:
+
+- **Claude Code** or **Codex CLI:** a command; paste it in a terminal.
+- **Other MCP clients** (Claude Desktop, Cursor, VS Code...): a JSON entry for their `mcpServers` configuration.
+
+By hand, with `<dir>` the bridge folder:
 
 ```
+claude mcp add KoniSynth --scope user -- "<dir>\.venv\Scripts\python.exe" "<dir>\konisynth_mcp.py"     # Claude Code, Windows
+claude mcp add KoniSynth --scope user -- "<dir>/.venv/bin/python" "<dir>/konisynth_mcp.py"               # Claude Code, Linux
+codex mcp add KoniSynth -- "<dir>\.venv\Scripts\python.exe" "<dir>\konisynth_mcp.py"                     # Codex CLI, Windows
+```
+
+```json
+{ "mcpServers": { "KoniSynth": { "command": "<dir>\\.venv\\Scripts\\python.exe", "args": ["<dir>\\konisynth_mcp.py"] } } }
+```
+
+The environment by hand, if you prefer it to the install command:
+
+```
+cd <dir>
 python -m venv .venv
-.venv\Scripts\python -m pip install -r requirements.txt
+.venv\Scripts\python -m pip install -r requirements.txt     # Windows (Linux: .venv/bin/python)
 ```
 
-## Register it in Claude Code
+### 3. Every time
 
-The easiest way: in KoniSynth open *Agent (MCP)...* (Options, or right-click the title) and use *Copy install command* and
-*Copy Claude Code command*: they contain the paths of your machine. By hand (user scope, every project), with `<dir>` the
-folder of this README:
+Turn *Agent control* on in the dialog and ask your agent to connect: the agent starts the bridge itself.
 
-```
-claude mcp add KoniSynth --scope user -- "<dir>\.venv\Scripts\python.exe" "<dir>\konisynth_mcp.py"     # Windows
-claude mcp add KoniSynth --scope user -- "<dir>/.venv/bin/python" "<dir>/konisynth_mcp.py"               # Linux
-```
+### After updating KoniSynth
+
+Get the bridge of the new version: run *Copy install command* again (the dialog warns when the downloaded bridge is from
+another version and the command then downloads the new one), or copy the new `KoniSynth-mcp` folder over the old one. The
+registration in your agent stays valid: the paths do not change.
 
 ## Tools
 

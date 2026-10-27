@@ -180,8 +180,13 @@ Each engine manual in [docs/engines](docs/engines) explains its controls and how
 
 KoniSynth can be driven by an AI agent through the [Model Context Protocol](https://modelcontextprotocol.io):
 
-1. **Once:** in KoniSynth open *Agent (MCP)...* and use *Copy install command* (creates the bridge's Python environment) and
-   *Copy Claude Code command* (registers it in Claude Code); run both in a terminal. Python 3.10+ is required.
+1. **Once:** in KoniSynth open *Agent (MCP)...* and get the bridge into `%APPDATA%\KoniSynth\KoniSynth-mcp` (Linux:
+   `~/.config/KoniSynth/KoniSynth-mcp`): either run *Copy install command* in a terminal, which downloads the bridge of your
+   KoniSynth version from this repository (its release tag) and installs its Python packages, or copy there the
+   `KoniSynth-mcp` folder of the release zip and run the same command, which then only installs the packages. Then
+   *Register in agent...* copies the command for Claude Code or Codex (run it too) or the JSON entry for any other MCP
+   client. Python 3.10+ is required (on Debian/Ubuntu also `python3-venv`). KoniSynth itself never connects to the
+   internet.
 2. **Every time:** turn *Agent control* on in that dialog and ask your agent to connect. The agent starts the bridge itself.
 
 KoniSynth listens only on `127.0.0.1` (first free port in 47800-47899, announced with a random token); while it is off, no port
