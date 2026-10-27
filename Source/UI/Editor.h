@@ -185,7 +185,7 @@ public:
         complexSection.withToggle (s, "complexOn").withCombo (s, "modWave").withExtraToggle (s, "modSync", "Sync")
                       .withKnob (s, "complexModSource", "Mod Src").withKnob (s, "modRatio", "Ratio").withKnob (s, "fmIndex", "FM")
                       .withKnob (s, "amDepth", "AM/Ring").withKnob (s, "timbre", "Timbre")
-                      .withKnob (s, "symmetry", "Symmetry").withKnob (s, "timbreMod", "T.Mod");
+                      .withKnob (s, "symmetry", "Symmetry").withKnob (s, "timbreMod", "T.Mod").withKnob (s, "modLp", "Mod LP");
         // Segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), con Mute/Solo como las fuentes de Osc 1
         osc2Section.withCombo (s, "osc2Wave").withExtraToggle (s, "osc2Sync", "Sync")
                    .withHeaderButton ("Osc 2 Sample...", "Open the sample editor of Osc 2 (Sample waveform): load its own file, see its waveform, "

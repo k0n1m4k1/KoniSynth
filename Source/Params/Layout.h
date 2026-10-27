@@ -865,6 +865,11 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "symmetry", 1 },   "Symmetry",  NormalisableRange<float> (-1.0f, 1.0f), 0.0f, bipolar));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "timbreMod", 1 },  "Timbre Mod", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "modSync", 1 },    "Mod Sync", false));
+    // Pasa-bajos de un polo sobre el modulador del Complex (interno, Osc 2 u Osc 3) antes de la FM y la AM: arriba del todo,
+    // apagado (sin efecto, bit a bit)
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "modLp", 1 },      "Mod LP", skewed (20.0f, 20000.0f, 1000.0f), 20000.0f,
+        parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            { return v >= 19999.0f ? String ("Off") : v >= 1000.0f ? String (v / 1000.0f, 2) + " kHz" : String (roundToInt (v)) + " Hz"; }))));
 
     // Osc 2 en modo Wavetable (osc2Wave = Wavetable): su propia tabla (las incluidas o un fichero, ruta osc2WtPath en el
     // estado), independiente de la de la fuente Wavetable, como su sample, y su posición en ella

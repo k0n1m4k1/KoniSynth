@@ -519,6 +519,8 @@ static juce::String paramHelp (const juce::String& id)
         { "timbre", "Wavefolding: progressively adds harmonics." },
         { "symmetry", "Wavefolder asymmetry." },
         { "timbreMod", "The modulator moves the wavefolder." },
+        { "modLp", "Low-pass filter on the Complex modulator (internal, Osc 2 or Osc 3) before the FM and the AM: a saw or square "
+                   "modulator becomes rounder, for softer FM. One pole (6 dB/oct). Default: Off (fully up)." },
         { "snesSource", "Sound source (BRR sample). Square, Saw, Sine: 32-sample loops; Strings, Choir: 4400-sample loops (3 detuned voices); Bass: 64-sample loop. All are KoniSynth's own samples, BRR-encoded. User Sample: the file in the Sample panel (Start, Length, Loop, Root), re-encoded to BRR." },
         { "snesUserRate", "Rate at which the user sample is stored in BRR (32, 16 or 8 kHz). Lower = more of the classic muffled SNES sound and longer samples within the 64 KB of audio RAM." },
         { "snesInterp", "Sample interpolation. Gaussian: the S-DSP's own 4-point filter with its 512-entry table (the muffled SNES sound). Linear and None are only for comparison: the console can't do them." },

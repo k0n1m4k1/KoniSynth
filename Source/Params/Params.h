@@ -185,7 +185,7 @@ struct Params
         reverbDamp = get ("reverbDamp"); reverbTone = get ("reverbTone"); reverbMod = get ("reverbMod");
         reverbWidth = get ("reverbWidth"); reverbFreeze = get ("reverbFreeze");
         complexOn = get ("complexOn"); modWave = get ("modWave"); modRatio = get ("modRatio"); fmIndex = get ("fmIndex");
-        amDepth = get ("amDepth"); timbre = get ("timbre"); symmetry = get ("symmetry"); timbreMod = get ("timbreMod");
+        amDepth = get ("amDepth"); timbre = get ("timbre"); symmetry = get ("symmetry"); timbreMod = get ("timbreMod"); modLp = get ("modLp");
         modSync = get ("modSync"); complexModSource = get ("complexModSource");
         osc2SampleRoot = get ("osc2SampleRoot"); osc2SampleStart = get ("osc2SampleStart"); osc2SampleLoop = get ("osc2SampleLoop"); osc2SampleLength = get ("osc2SampleLength");
     }
@@ -311,5 +311,5 @@ struct Params
                        *reverbDecay {}, *reverbPredelay {}, *reverbDiffusion {}, *reverbDamp {}, *reverbTone {},
                        *reverbMod {}, *reverbWidth {}, *reverbFreeze {},
                        *complexOn {}, *modWave {}, *modRatio {}, *fmIndex {}, *amDepth {}, *timbre {}, *symmetry {},
-                       *timbreMod {}, *modSync {}, *complexModSource {}, *osc2SampleRoot {}, *osc2SampleStart {}, *osc2SampleLoop {}, *osc2SampleLength {};
+                       *timbreMod {}, *modLp {}, *modSync {}, *complexModSource {}, *osc2SampleRoot {}, *osc2SampleStart {}, *osc2SampleLoop {}, *osc2SampleLength {};
 };

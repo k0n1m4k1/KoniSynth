@@ -213,6 +213,8 @@ struct SynthVoice : juce::SynthesiserVoice
         osR = {};
         for (auto& ph : lanes.modPhase)
             ph = 0.0; // modulador en fase con el principal: timbre de FM repetible nota a nota
+        std::fill (std::begin (modLpLane), std::end (modLpLane), 0.0);
+        modLpExt = 0.0;
         decimator.reset();
         foldDc = {};
         osc1Blep.reset();
@@ -341,7 +343,9 @@ struct SynthVoice : juce::SynthesiserVoice
         const auto cleanDrive = params.filterCleanDrive->load() > 0.5f;
         const auto cleanWet   = juce::jmin (1.0f, 4.0f * params.filterDrive->load());
         // Ruta AVX2 solo con 3+ osciladores de unísono: con 1–2, los 8 carriles fijos cuestan más que el escalar
-        const auto simd = numUnison >= 3 && simdActive();
+        // AVX2: el pasa-bajos del modulador interno (estado por carril) solo está en la ruta escalar
+        const auto simd = numUnison >= 3 && simdActive() && ! (params.complexOn->load() > 0.5f && params.modLp->load() < 19999.0f
+                                                                && (int) params.complexModSource->load() == 0);
 
         // Velocity -> cantidad de envolvente de filtro: Vel 100 % escala la envolvente por la velocity (0..1)
         const auto velAmount  = params.velToFilter->load();
@@ -454,6 +458,11 @@ struct SynthVoice : juce::SynthesiserVoice
         complex.timbreMod = params.timbreMod->load();
         complex.sync      = params.modSync->load() > 0.5f;
         complex.modSource = (int) params.complexModSource->load(); // 0 interno, 1 Osc 2, 2 Osc 3
+        {
+            // Pasa-bajos de un polo del modulador a 2·fs: c = 1 - e^(-2π·fc / (2·fs)); arriba del todo, apagado (c = 0)
+            const auto fc = params.modLp->load();
+            complex.modLpCoef = fc >= 19999.0f ? 0.0 : 1.0 - std::exp (-juce::MathConstants<double>::twoPi * fc / (2.0 * getSampleRate()));
+        }
         const auto externalMod = complex.on && complex.modSource != 0;
         const auto fmIndexBase = complex.fmIndex; // la matriz modula alrededor de estos valores
         const auto timbreBase = complex.timbre;
@@ -609,7 +618,14 @@ struct SynthVoice : juce::SynthesiserVoice
                     konisimd::ComplexArgs args { complex.wave, complex.modWave, complex.ratio, complex.fmIndex,
                                                  (double) complex.am, (double) complex.pw, complex.sync };
                     if (externalMod)
+                    {
                         externalModulator (sub, dt, osc2Mul, pw, args);
+                        if (complex.modLpCoef > 0.0) // Mod LP sobre el modulador externo (un solo valor para todos los carriles)
+                        {
+                            modLpExt += complex.modLpCoef * (args.extMod - modLpExt);
+                            args.extMod = modLpExt;
+                        }
+                    }
                     if (simd)
                     {
                         konisimd::complexStepAvx2 (lanes, args, 0.5 * dt, subL, subR, firstMod);
@@ -892,7 +908,10 @@ private:
         double fmIndex = 0.0;
         float am = 0.0f, timbre = 0.0f, symmetry = 0.0f, timbreMod = 0.0f;
         float pw = 0.5f; // ancho de pulso actual (PWM), también para el principal en modo complejo
+        double modLpCoef = 0.0; // pasa-bajos del modulador (Mod LP) a 2·fs; 0 = apagado
     };
+    double modLpLane[konisimd::kLanes] {}; // estado del Mod LP del modulador interno, por carril del unísono
+    double modLpExt = 0.0;                  // y del externo (Osc 2 u Osc 3)
 
     // Oscilador complejo (estilo Buchla 259) para el oscilador u del unísono. dtP = incremento de fase del principal.
     //  FM lineal que atraviesa cero: f = f_p + I·f_m·m(t) -> dt = dtP + I·dtM·m; con dt < 0 la fase retrocede.
@@ -904,7 +923,12 @@ private:
     float complexSample (size_t u, double dtP, float& modOut, const konisimd::ComplexArgs& args)
     {
         const auto dtM = args.external ? args.extDtM : dtP * complex.ratio;
-        const auto m = args.external ? (float) args.extMod : oscillator (complex.modWave, lanes.modPhase[u], dtM);
+        auto m = args.external ? (float) args.extMod : oscillator (complex.modWave, lanes.modPhase[u], dtM);
+        if (! args.external && complex.modLpCoef > 0.0) // Mod LP del modulador interno, por carril
+        {
+            modLpLane[u] += complex.modLpCoef * ((double) m - modLpLane[u]);
+            m = (float) modLpLane[u];
+        }
         modOut = m;
 
         const auto dtInst = dtP + complex.fmIndex * dtM * (double) m;

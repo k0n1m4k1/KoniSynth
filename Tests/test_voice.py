@@ -425,6 +425,21 @@ pre_hf = hf_ratio(render(LPF + ['Voice Sat Position=Pre-filter'], 1.5, ['57:0.05
 c.check(pre_hf < post_hf - 10, 'Sat antes del filtro LP 600 Hz: energía > 3 kHz %.1f dB frente a %.1f dB después (al menos 10 dB menos)'
         % (pre_hf, post_hf))
 
+# --- Mod LP: pasa-bajos del modulador del Complex ---
+ML = ['Wave=Sine', 'Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Complex On=On', 'Mod Wave=Saw',
+      'FM Index=I 2.00']
+off, fs = render(ML, 1.5, ['57:0.05:1.4:127'], 'modlp.wav')
+off2, _ = render(ML + ['Mod LP=20000'], 1.5, ['57:0.05:1.4:127'], 'modlp.wav')
+c.check(np.array_equal(off, off2), 'Mod LP arriba del todo = sin filtro (bit a bit)')
+lp_hf = hf_ratio(render(ML + ['Mod LP=150'], 1.5, ['57:0.05:1.4:127'], 'modlp.wav')[0], fs)
+off_hf = hf_ratio(off, fs)
+c.check(lp_hf < off_hf - 6, 'Mod LP 150 Hz sobre un modulador en sierra (FM I 2): energía > 3 kHz %.1f dB frente a %.1f dB sin él'
+        % (lp_hf, off_hf))
+ext = ML[:-2] + ['Complex Mod Source=Osc 2', 'Osc2 Wave=Saw', 'Osc2 Level=0%', 'FM Index=I 2.00']
+ext_off = hf_ratio(render(ext, 1.5, ['57:0.05:1.4:127'], 'modlp.wav')[0], fs)
+ext_lp = hf_ratio(render(ext + ['Mod LP=150'], 1.5, ['57:0.05:1.4:127'], 'modlp.wav')[0], fs)
+c.check(ext_lp < ext_off - 6, 'Mod LP con Osc 2 como modulador: energía > 3 kHz %.1f dB frente a %.1f dB sin él' % (ext_lp, ext_off))
+
 # --- Wavetable con el chunk "clm " de Serum: fotogramas de otro tamaño, remuestreados a 2048 ---
 import struct
 
