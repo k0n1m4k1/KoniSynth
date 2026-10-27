@@ -393,7 +393,7 @@ struct WavetableData
             if (std::memcmp (id, "clm ", 4) == 0)
             {
                 char data[256] {};
-                const auto got = in.read (data, (int) juce::jmin<juce::int64> (size, (juce::int64) sizeof (data) - 1));
+                const auto got = in.read (data, (int) std::min<juce::int64> (size, (juce::int64) sizeof (data) - 1)); // GCC: jmin<int64> instancia SIMDRegister
                 const auto text = juce::String::fromUTF8 (data, juce::jmax (0, got));
                 const auto n = text.startsWith ("<!>") ? text.substring (3).getIntValue() : 0;
                 return n >= 16 && n <= 16384 ? n : 0;
