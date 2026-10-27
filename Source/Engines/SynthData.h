@@ -374,10 +374,75 @@ struct WavetableData
         return fromFrames (frames, count, names[juce::jlimit (0, 4, index)]);
     }
 
-    // WAV/AIFF/FLAC: n × 2048 muestras = n fotogramas (máx. 256). Menos de 2048 muestras, o una longitud que no es múltiplo
-    // de 2048 sin llegar a 2 fotogramas: un único ciclo, remuestreado linealmente a 2048. Canales promediados.
+    // Tamaño de fotograma declarado en el chunk "clm " de un WAV (el que escribe Serum: texto ASCII "<!>2048 10000000 ...",
+    // tamaño en decimal tras "<!>"; formato según Surge XT, src/common/WAVFileSupport.cpp: export_wt_wav_portable lo escribe
+    // así y load_wt_wav_portable lo lee, aunque solo acepta 2048). 0 si no es WAV, no tiene el chunk o el tamaño no es válido
+    static int clmFrameSize (const juce::File& file)
+    {
+        juce::FileInputStream in (file);
+        char id[4] {};
+        if (! in.openedOk() || in.read (id, 4) != 4 || std::memcmp (id, "RIFF", 4) != 0)
+            return 0;
+        in.readInt(); // tamaño del RIFF
+        if (in.read (id, 4) != 4 || std::memcmp (id, "WAVE", 4) != 0)
+            return 0;
+        while (in.read (id, 4) == 4)
+        {
+            const auto size = (juce::int64) (juce::uint32) in.readInt(); // little-endian, como todo RIFF
+            const auto next = in.getPosition() + size + (size & 1);      // los chunks se alinean a 2 bytes
+            if (std::memcmp (id, "clm ", 4) == 0)
+            {
+                char data[256] {};
+                const auto got = in.read (data, (int) juce::jmin<juce::int64> (size, (juce::int64) sizeof (data) - 1));
+                const auto text = juce::String::fromUTF8 (data, juce::jmax (0, got));
+                const auto n = text.startsWith ("<!>") ? text.substring (3).getIntValue() : 0;
+                return n >= 16 && n <= 16384 ? n : 0;
+            }
+            if (! in.setPosition (next))
+                return 0;
+        }
+        return 0;
+    }
+
+    // Un ciclo de n muestras a 2048. Potencia de 2: por FFT (exacto para una señal periódica: los armónicos 1..min(n, 2048)/2 - 1
+    // se conservan tal cual; de más de 2048 se descartan los que no caben). Si no, interpolación lineal
+    static std::vector<float> resampleCycle (const float* src, int n)
+    {
+        std::vector<float> out ((size_t) frameSize);
+        if (juce::isPowerOfTwo (n))
+        {
+            const auto order = juce::roundToInt (std::log2 ((double) n));
+            juce::dsp::FFT fwd (order), inv (11);
+            std::vector<float> a ((size_t) n * 2, 0.0f), b ((size_t) frameSize * 2, 0.0f);
+            std::copy (src, src + n, a.begin());
+            fwd.performRealOnlyForwardTransform (a.data());
+            const auto bins = juce::jmin (n, frameSize) / 2; // sin el bin de Nyquist del más corto
+            const auto gain = (float) frameSize / (float) n;  // misma amplitud tras la inversa normalizada (1/N)
+            for (int k = 0; k < bins; ++k)
+            {
+                b[(size_t) (2 * k)] = a[(size_t) (2 * k)] * gain;
+                b[(size_t) (2 * k + 1)] = a[(size_t) (2 * k + 1)] * gain;
+            }
+            inv.performRealOnlyInverseTransform (b.data());
+            std::copy (b.begin(), b.begin() + frameSize, out.begin());
+            return out;
+        }
+        for (int i = 0; i < frameSize; ++i)
+        {
+            const auto pos = (double) i * n / frameSize;
+            const auto k = (int) pos;
+            const auto fr = (float) (pos - k);
+            out[(size_t) i] = src[k] + fr * (src[(k + 1) % n] - src[k]);
+        }
+        return out;
+    }
+
+    // WAV/AIFF/FLAC: n fotogramas (máx. 256) de 2048 muestras, o del tamaño que declare el chunk "clm " (clmFrameSize; cada
+    // fotograma se remuestrea a 2048). Sin chunk: menos de 2048 muestras, o una longitud que no es múltiplo de 2048 sin llegar
+    // a 2 fotogramas, es un único ciclo, remuestreado linealmente a 2048. Canales promediados.
     static std::unique_ptr<WavetableData> fromFile (const juce::File& file, juce::String& error)
     {
+        const auto clm = clmFrameSize (file);
         juce::AudioFormatManager formats;
         formats.registerBasicFormats();
         std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
@@ -386,7 +451,7 @@ struct WavetableData
             error = "Unsupported or unreadable audio file: " + file.getFileName();
             return nullptr;
         }
-        const auto length = (int) juce::jmin (reader->lengthInSamples, (juce::int64) frameSize * maxFrames);
+        const auto length = (int) juce::jmin (reader->lengthInSamples, (juce::int64) juce::jmax (frameSize, clm) * maxFrames);
         if (length < 16)
         {
             error = "The file is too short to be a wavetable: " + file.getFileName();
@@ -404,6 +469,18 @@ struct WavetableData
             mono[(size_t) i] = v / (float) channels;
         }
 
+        if (clm > 0 && clm != frameSize && length >= clm)
+        {
+            const auto count = length / clm;
+            std::vector<float> frames;
+            frames.reserve ((size_t) count * frameSize);
+            for (int f = 0; f < count; ++f)
+            {
+                const auto cycle = resampleCycle (mono.data() + (size_t) f * clm, clm);
+                frames.insert (frames.end(), cycle.begin(), cycle.end());
+            }
+            return fromFrames (frames, count, file.getFileName());
+        }
         if (length >= 2 * frameSize || length % frameSize == 0)
         {
             const auto count = length / frameSize;

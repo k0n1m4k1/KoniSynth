@@ -407,4 +407,35 @@ c.check(max(al['Saw+Pulse'], al['Saw+Pulse (Juno)']) < al['Saw'] + 1.0, 'Saw+Pul
 c.check(max(al['Saw+Tri'], al['Tri+Pulse'], al['Saw+Tri+Pulse']) < al['Triangle'] + 1.0,
         'mezclas con triángulo a C6: aliasing %.1f / %.1f / %.1f dB, no mayor que el triángulo %.1f dB (+1)'
         % (al['Saw+Tri'], al['Tri+Pulse'], al['Saw+Tri+Pulse'], al['Triangle']))
+# --- Wavetable con el chunk "clm " de Serum: fotogramas de otro tamaño, remuestreados a 2048 ---
+import struct
+
+
+def write_wt(path, frames, clm=None):
+    data = (np.clip(np.concatenate(frames), -1, 1) * 32767).astype('<i2').tobytes()
+    chunks = struct.pack('<4sIHHIIHH', b'fmt ', 16, 1, 1, 48000, 96000, 2, 16)
+    if clm is not None:
+        text = ('<!>%d 10000000 wavetable (test)' % clm).encode()
+        text += b'\0' * (len(text) & 1)
+        chunks += struct.pack('<4sI', b'clm ', len(text)) + text
+    chunks += struct.pack('<4sI', b'data', len(data)) + data
+    open(path, 'wb').write(b'RIFF' + struct.pack('<I', 4 + len(chunks)) + b'WAVE' + chunks)
+
+
+saw = lambda n: np.array([sum(np.sin(2 * np.pi * h * i / n) / h for h in range(1, 40)) * 0.5 for i in range(n)])
+W2048 = os.path.join(RENDERS, 'wt_2048.wav'); W1024 = os.path.join(RENDERS, 'wt_1024_clm.wav'); WNOCLM = os.path.join(RENDERS, 'wt_1024_noclm.wav')
+write_wt(W2048, [saw(2048)])
+write_wt(W1024, [saw(1024), saw(1024)], clm=1024)
+write_wt(WNOCLM, [saw(1024), saw(1024)])
+WTU = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%', 'Wavetable Level=100%',
+       'Wavetable=User File', 'Wavetable Position=0%']
+r2048, fs = render(WTU + ['--prop=wtPath=' + W2048], 1.5, ['57:0.05:1.4:127'], 'wtclm.wav')
+r1024, _ = render(WTU + ['--prop=wtPath=' + W1024], 1.5, ['57:0.05:1.4:127'], 'wtclm.wav')
+rno, _ = render(WTU + ['--prop=wtPath=' + WNOCLM], 1.5, ['57:0.05:1.4:127'], 'wtclm.wav')
+d = same_harmonics(harmonics(r2048, fs, fa), harmonics(r1024, fs, fa))
+p2048, pno = pitch(r2048, fs), pitch(rno, fs)
+c.check(d < 0.1 and abs(1200 * np.log2(p2048 / fa)) < 1 and abs(1200 * np.log2(pno / (2 * fa))) < 1,
+        'chunk clm "<!>1024": fotogramas de 1024 muestras = la misma sierra en 2048 (armónicos a %.3f dB, < 0,1); sin el chunk, '
+        'esos 2048 valores son un solo fotograma con dos ciclos: suena una octava arriba (%.2f Hz frente a %.2f Hz)'
+        % (d, pno, p2048))
 sys.exit(c.summary())
