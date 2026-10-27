@@ -792,6 +792,8 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "voiceSatDrive", 1 }, "Voice Sat Drive", NormalisableRange<float> (0.0f, 36.0f), 0.0f,
         parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
             { return v < 0.05f ? String ("Off") : String (v, 1) + " dB"; }))));
+    // Posición de la saturación por voz: tras el filtro (la de siempre) o antes (el filtro suaviza los armónicos que añade)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "voiceSatPos", 1 },   "Voice Sat Position", StringArray { "Post-filter", "Pre-filter" }, 0));
     // VCA analógico (motor Synth): feedthrough del control ("click"/thump) y fuga con el VCA cerrado (bleed). Off por defecto
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "vcaClick", 1 },      "VCA Click", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "vcaLeak", 1 },       "VCA Leak", NormalisableRange<float> (-100.0f, -30.0f), -100.0f,

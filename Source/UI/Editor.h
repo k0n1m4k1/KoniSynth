@@ -251,13 +251,14 @@ public:
                                     "(or use Apply now). Dimmed with the other filter modes: it can still be set, and applies to the ladder modes.");
         qualitySelector.onOpen = [this] { showQualityMenu(); };
         filter.withToggle (s, "filterOn").withCombo (s, "filterMode")
-              .withHeaderButton ("Saturation...", "Saturation: clean filter input (Drive 0 % linear) and per-voice saturation after the filter "
-                                           "(curve Soft, Diode, Hard, Fold, and drive).", [this]
+              .withHeaderButton ("Saturation...", "Saturation: clean filter input (Drive 0 % linear) and per-voice saturation after or "
+                                           "before the filter (curve Soft, Diode, Hard, Fold, drive and position).", [this]
               {
                   openParamPanel ("Saturation", [] (ParamPanel& p, APVTS& st)
                   {
                       p.add ("Filter Input").withToggle (st, "filterCleanDrive").withKnob (st, "filterDrive", "Drive");
-                      p.add ("Voice Saturation").withCombo (st, "voiceSatMode").withKnob (st, "voiceSatDrive", "Drive");
+                      p.add ("Voice Saturation").withCombo (st, "voiceSatMode").withKnob (st, "voiceSatDrive", "Drive")
+                                                .withKnob (st, "voiceSatPos", "Position");
                   });
               })
               .withHeaderControl ("Ladder quality", qualitySelector, 190)

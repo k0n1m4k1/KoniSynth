@@ -12,7 +12,7 @@ struct Params
         mpeOn = get ("mpeOn"); mpeBendRange = get ("mpeBendRange");
         voiceAssign = get ("voiceAssign"); oscPhase = get ("oscPhase"); voiceTolerance = get ("voiceTolerance");
         vcaClick = get ("vcaClick"); vcaLeak = get ("vcaLeak");
-        voiceSatMode = get ("voiceSatMode"); filterCleanDrive = get ("filterCleanDrive"); voiceSatDrive = get ("voiceSatDrive"); filterSpread = get ("filterSpread");
+        voiceSatMode = get ("voiceSatMode"); filterCleanDrive = get ("filterCleanDrive"); voiceSatDrive = get ("voiceSatDrive"); voiceSatPos = get ("voiceSatPos"); filterSpread = get ("filterSpread");
         stringPickup = get ("stringPickup"); stringDamping = get ("stringDamping"); stringExcite = get ("stringExcite");
         for (int m = 0; m < ModMatrix::numSlots; ++m)
         {
@@ -201,7 +201,7 @@ struct Params
     mutable std::atomic<double> lastNoteHz { 0.0 };
     mutable RandomClock randomClock; // Dsp/RandomClock.h: hilo de audio
     std::array<std::atomic<float>*, ModMatrix::numSlots> mtxSrc {}, mtxDst {}, mtxAmt {}; // matriz de modulación (Dsp/ModMatrix.h)
-    std::atomic<float>* mpeOn {}, *mpeBendRange {}, *voiceAssign {}, *oscPhase {}, *voiceTolerance {}, *vcaClick {}, *vcaLeak {}, *voiceSatMode {}, *voiceSatDrive {}, *filterCleanDrive {}, *filterSpread {}, *stringPickup {}, *stringDamping {}, *stringExcite {};
+    std::atomic<float>* mpeOn {}, *mpeBendRange {}, *voiceAssign {}, *oscPhase {}, *voiceTolerance {}, *vcaClick {}, *vcaLeak {}, *voiceSatMode {}, *voiceSatDrive {}, *voiceSatPos {}, *filterCleanDrive {}, *filterSpread {}, *stringPickup {}, *stringDamping {}, *stringExcite {};
     // Matriz: desplazamiento por destino de la última voz renderizada (para los anillos de la UI) y contador de bloques con voces
     mutable std::array<std::atomic<float>, ModMatrix::numDestinations> liveMod {};
     mutable std::atomic<unsigned> liveModTick { 0 };

@@ -407,6 +407,24 @@ c.check(max(al['Saw+Pulse'], al['Saw+Pulse (Juno)']) < al['Saw'] + 1.0, 'Saw+Pul
 c.check(max(al['Saw+Tri'], al['Tri+Pulse'], al['Saw+Tri+Pulse']) < al['Triangle'] + 1.0,
         'mezclas con triángulo a C6: aliasing %.1f / %.1f / %.1f dB, no mayor que el triángulo %.1f dB (+1)'
         % (al['Saw+Tri'], al['Tri+Pulse'], al['Saw+Tri+Pulse'], al['Triangle']))
+# --- Saturación por voz antes del filtro (Voice Sat Position = Pre-filter) ---
+SP = ['Wave=Saw'] + TONE[1:] + ['Voice Sat Mode=Soft', 'Voice Sat Drive=24 dB']
+post_off, fs = render(SP, 1.0, ['57:0.05:0.9:127'], 'satpos.wav')
+pre_off, _ = render(SP + ['Voice Sat Position=Pre-filter'], 1.0, ['57:0.05:0.9:127'], 'satpos.wav')
+c.check(np.array_equal(post_off, pre_off), 'Sat Position con el filtro apagado: antes = después (bit a bit)')
+LPF = [a for a in SP if a != 'Filter On=Off'] + ['Filter On=On', 'Filter Mode=LP 24', 'Cutoff=600 Hz']
+
+
+def hf_ratio(x, fs, fc=3000):
+    f, S = spectrum(x, fs)
+    return 10 * np.log10(S[f > fc].sum() / S.sum())
+
+
+post_hf = hf_ratio(render(LPF, 1.5, ['57:0.05:1.4:127'], 'satpos.wav')[0], fs)
+pre_hf = hf_ratio(render(LPF + ['Voice Sat Position=Pre-filter'], 1.5, ['57:0.05:1.4:127'], 'satpos.wav')[0], fs)
+c.check(pre_hf < post_hf - 10, 'Sat antes del filtro LP 600 Hz: energía > 3 kHz %.1f dB frente a %.1f dB después (al menos 10 dB menos)'
+        % (pre_hf, post_hf))
+
 # --- Wavetable con el chunk "clm " de Serum: fotogramas de otro tamaño, remuestreados a 2048 ---
 import struct
 

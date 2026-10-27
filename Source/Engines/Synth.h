@@ -304,6 +304,7 @@ struct SynthVoice : juce::SynthesiserVoice
         const auto satDriveDb = params.voiceSatDrive->load();
         const auto satMode = (int) params.voiceSatMode->load();
         const auto satOn = satDriveDb >= 0.05f || satWet > 0.0f;
+        const auto satPre = (int) params.voiceSatPos->load() == 1; // Pre-filter: antes del filtro
         const auto satWetTarget = juce::jlimit (0.0f, 1.0f, satDriveDb / 3.0f);
         const auto satGTarget = (double) juce::Decibels::decibelsToGain (satDriveDb);
         const auto satOutTarget = VoiceSat::makeup (satMode, satGTarget);
@@ -710,6 +711,13 @@ struct SynthVoice : juce::SynthesiserVoice
             left  += monoSources;
             right += monoSources;
 
+            if (satOn && satPre) // saturación de esta voz antes del filtro (Pre-filter): el filtro suaviza lo que añade
+            {
+                satGain += satGStep; satOut += satOutStep; satWet += satWetStep;
+                left  = satL.process (satMode, left, satGain, satOut, satWet, vcaHpfCoef);
+                right = satR.process (satMode, right, satGain, satOut, satWet, vcaHpfCoef);
+            }
+
             if (filterOn)
             {
                 const auto fc = juce::jlimit (20.0f, maxCutoff,
@@ -804,7 +812,7 @@ struct SynthVoice : juce::SynthesiserVoice
                 }
             }
 
-            if (satOn) // saturación de esta voz, tras el filtro y antes del VCA
+            if (satOn && ! satPre) // saturación de esta voz, tras el filtro y antes del VCA (Post-filter)
             {
                 satGain += satGStep; satOut += satOutStep; satWet += satWetStep;
                 left = satL.process (satMode, left, satGain, satOut, satWet, vcaHpfCoef);
