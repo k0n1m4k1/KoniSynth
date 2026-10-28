@@ -328,7 +328,7 @@ public:
         echo.setMaximumDelayInSamples ((int) std::ceil (sampleRate * 1.1)); // 1000 ms máx + 10 % de margen
         echoDelay.reset (sampleRate, 0.05); // 50 ms de rampa al girar Time: sin clicks
 
-        // Válvula: 2x (1 etapa) con half-band IIR polifásico: latencia de unas pocas muestras, no se reporta al host
+        // Válvula: 2x (1 etapa) con half-band IIR polifásico: su latencia se comunica al host con la válvula encendida (currentLatency)
         tubeOversampling = std::make_unique<juce::dsp::Oversampling<float>> (
             (size_t) getTotalNumOutputChannels(), 1, juce::dsp::Oversampling<float>::filterHalfBandPolyphaseIIR, true, false);
         tubeOversampling->initProcessing ((size_t) samplesPerBlock);
@@ -1773,7 +1773,11 @@ private:
     int currentLatency() const
     {
         const auto amp = params.ampOn != nullptr && params.ampOn->load() > 0.5f ? ampSim.latency() : 0;
-        return amp + currentLookahead();
+        // Sobremuestreo IIR de la válvula (2x) y del motor Polivoks (4x): JUCE da su retardo de fase a frecuencia muy baja
+        // (juce_Oversampling.cpp:285-289), el que interesa para alinear pistas; redondeado a muestras enteras
+        const auto tube = params.tubeOn->load() > 0.5f && tubeOversampling != nullptr ? (int) std::lround (tubeOversampling->getLatencyInSamples()) : 0;
+        const auto pv = (int) params.engine->load() == 8 ? polivoks.latency() : 0;
+        return amp + tube + pv + currentLookahead();
     }
     // Latencia del limitador (muestras): solo con el limitador encendido y la anticipación activa
     int currentLookahead() const
