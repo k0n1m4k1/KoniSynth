@@ -1,10 +1,10 @@
 # Pruebas unitarias compiladas en KoniBench (sin el plugin): historial de deshacer, transporte, afinación Scala y media
-# banda de la saturación. Cada una imprime "N fallos" al final.
+# banda de la saturación, ritmos de usuario y planificador de notas del agente. Cada una imprime "N fallos" al final.
 import subprocess, sys, re
 from common import EXE, Checker
 
 c = Checker('unitarias')
-for name in ('undotest', 'transporttest', 'tuningtest', 'sattest', 'rhythmtest'):
+for name in ('undotest', 'transporttest', 'tuningtest', 'sattest', 'rhythmtest', 'schedtest'):
     r = subprocess.run([EXE, name], capture_output=True, text=True, timeout=300)
     m = re.search(r'(\d+) fallos', r.stdout)
     lines = [l for l in r.stdout.splitlines() if l.strip()]

@@ -18,6 +18,8 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "../Source/Dsp/VoiceSaturator.h" // sattest: media banda 2x de la saturación por voz
 #include "../Source/Engines/RhythmPatterns.h" // rhythmtest: ritmos de usuario en MIDI (sin el plugin)
 #include "../Source/Engines/UserRhythms.h"
+#include <functional>
+#include "../Source/Agent/AgentScheduler.h" // schedtest: notas del agente con el reloj de audio (sin el plugin)
 
 namespace
 {
@@ -45,6 +47,7 @@ struct Scenario
     const char* name;
     std::vector<std::pair<const char*, float>> values; // nombre del parámetro, valor normalizado 0..1
     int notes;
+    int eventEvery = 0; // > 0: un pitch bend cada N muestras (eventos densos: cada uno parte el render de las voces)
 };
 
 void run (juce::AudioPluginInstance& plugin, const Scenario& s)
@@ -70,6 +73,9 @@ void run (juce::AudioPluginInstance& plugin, const Scenario& s)
         if (b == 0)
             for (int n = 0; n < s.notes; ++n)
                 midi.addEvent (juce::MidiMessage::noteOn (1, 48 + 3 * n, (juce::uint8) 100), 0);
+        if (s.eventEvery > 0) // barrido lento de ±1/8 del rango, para que el valor cambie en cada evento
+            for (int i = (b == 0 ? 1 : 0); i < kBlockSize; i += s.eventEvery)
+                midi.addEvent (juce::MidiMessage::pitchWheel (1, 8192 + (int) (1024.0 * std::sin (0.001 * (b * kBlockSize + i)))), i);
 
         buffer.clear();
         const auto t0 = std::chrono::high_resolution_clock::now();
@@ -865,12 +871,143 @@ int satTest()
     std::printf ("%d fallos\n", fails);
     return fails;
 }
+// schedtest: planificador de las notas del agente (Source/Agent/AgentScheduler.h) a 44,1/48/96 kHz y bloques de 64/128/512,
+// sin temporizadores. Las posiciones esperadas se calculan con enteros, aparte del planificador: entrega en la muestra
+// exacta (también a 1, 7 y 31 muestras de otra nota), orden note-off antes que note-on, redisparo de la misma altura,
+// secuencia larga en beats sin deriva, cancelación, capacidad y origen
+int schedTest()
+{
+    int fails = 0;
+    const auto check = [&fails] (bool ok, const juce::String& what)
+    {
+        std::printf ("%s %s\n", ok ? "OK   " : "FALLO", what.toRawUTF8());
+        if (! ok) ++fails;
+    };
+    struct Got { juce::int64 at; bool on; int note; };
+    // Corre el planificador bloque a bloque hasta 'total' muestras; 'atBlock' se llama antes de cada bloque (programar, cancelar)
+    const auto run = [] (AgentScheduler& s, double fs, int block, juce::int64 total, const std::function<void (int)>& atBlock)
+    {
+        std::vector<Got> got;
+        juce::MidiBuffer midi;
+        int b = 0;
+        for (juce::int64 pos = 0; pos < total; pos += block, ++b)
+        {
+            atBlock (b);
+            midi.clear();
+            s.process (midi, block, fs, (juce::uint64) pos);
+            for (const auto m : midi)
+                got.push_back ({ pos + m.samplePosition, m.getMessage().isNoteOn(), m.getMessage().getNoteNumber() });
+        }
+        return got;
+    };
+    const auto find = [] (const std::vector<Got>& got, int note, bool on, int nth = 0)
+    {
+        for (const auto& g : got)
+            if (g.note == note && g.on == on && nth-- == 0)
+                return g.at;
+        return (juce::int64) -1;
+    };
+
+    for (const int ifs : { 44100, 48000, 96000 })
+        for (const int block : { 64, 128, 512 })
+        {
+            const auto fs = (double) ifs;
+            const juce::String tag = juce::String (ifs) + " Hz, bloque " + juce::String (block) + ": ";
+            // 1) Notas a 1, 7 y 31 muestras de A (0,25 s); el play llega en el bloque 3: origen = 3 · bloque
+            {
+                AgentScheduler s;
+                const juce::int64 origin = 3 * block, a = origin + ifs / 4; // 0,25 s = fs/4 muestras exactas (fs múltiplo de 4)
+                std::vector<AgentScheduler::Note> notes { { 60, 100, 0.25, 0.1 } };
+                const int gaps[] = { 1, 7, 31 };
+                for (int k = 0; k < 3; ++k)
+                    notes.push_back ({ 61 + k, 100, 0.25 + gaps[k] / fs, 0.1 });
+                const auto got = run (s, fs, block, ifs, [&] (int b) { if (b == 3) s.schedule (7u, notes); });
+                auto exact = find (got, 60, true) == a && find (got, 60, false) == a + (juce::int64) std::llround (0.1 * fs);
+                for (int k = 0; k < 3; ++k)
+                    exact = exact && find (got, 61 + k, true) == a + gaps[k];
+                check (exact && s.originOf (7u) == origin, tag + "A en la muestra " + juce::String (find (got, 60, true) - origin)
+                       + " del origen; B a +1, +7, +31: " + juce::String (find (got, 61, true) - a) + ", " + juce::String (find (got, 62, true) - a)
+                       + ", " + juce::String (find (got, 63, true) - a) + "; origen " + juce::String (s.originOf (7u)));
+            }
+            // 2) Misma altura: solapada (redisparo, suena hasta el final de la última) y contigua (off antes que on)
+            {
+                AgentScheduler s;
+                std::vector<AgentScheduler::Note> notes { { 70, 100, 0.5, 0.2 }, { 70, 90, 0.6, 0.2 }, { 72, 100, 0.9, 0.1 }, { 72, 100, 1.0, 0.1 } };
+                const auto got = run (s, fs, block, 2 * ifs, [&] (int b) { if (b == 0) s.schedule (1u, notes); });
+                const auto t = [ifs] (int tenths) { return (juce::int64) ifs * tenths / 10; };
+                const auto offs70 = std::count_if (got.begin(), got.end(), [] (const Got& g) { return g.note == 70 && ! g.on; });
+                const auto redisparo = find (got, 70, true, 1) == t (6) && find (got, 70, false, 0) == t (6) && find (got, 70, false, 1) == t (8) && offs70 == 2;
+                juce::int64 iOff = -1, iOn = -1;
+                for (size_t i = 0; i < got.size(); ++i)
+                    if (got[i].note == 72 && got[i].at == t (10))
+                        (got[i].on ? iOn : iOff) = (juce::int64) i;
+                check (redisparo && iOff >= 0 && iOn > iOff, tag + "redisparo de 70 en 0,6 s (off+on), un solo off final en 0,8 s; 72 contiguas: off antes que on en 1,0 s");
+            }
+            // 3) Secuencia larga en beats: semicorcheas a 128 BPM durante 30 s (256 notas), como las convierte el servidor
+            //    (t = 60 / bpm · beat). Esperado con enteros: round(fs · 15 · k / 128)
+            {
+                AgentScheduler s;
+                std::vector<AgentScheduler::Note> notes;
+                for (int k = 0; k < 256; ++k)
+                    notes.push_back ({ 36 + k % 48, 100, 60.0 / 128.0 * (k / 4.0), 60.0 / 128.0 * 0.1 });
+                std::vector<Got> got;
+                const auto okSched = s.canSchedule (256);
+                got = run (s, fs, block, (juce::int64) 31 * ifs, [&] (int b) { if (b == 0) s.schedule (2u, notes); });
+                juce::int64 worst = 0;
+                int ons = 0;
+                for (const auto& g : got)
+                    if (g.on)
+                    {
+                        const auto k = (juce::int64) ons++;
+                        const auto num = (juce::int64) ifs * 15 * k;
+                        const auto want = (2 * num + 128) / 256; // round(num / 128), num >= 0
+                        worst = std::max (worst, std::abs (g.at - want));
+                    }
+                check (okSched && ons == 256 && worst == 0, tag + "256 semicorcheas a 128 BPM en 30 s: " + juce::String (ons) + " notas, error máximo "
+                       + juce::String (worst) + " muestras");
+            }
+        }
+
+    // 4) Cancelación: una nota sonando (0,1-2,1 s) y otra futura (1,0 s); cancelar en el bloque de 0,5 s
+    {
+        AgentScheduler s;
+        const double fs = 48000.0;
+        const int block = 480;
+        std::vector<AgentScheduler::Note> notes { { 60, 100, 0.1, 2.0 }, { 64, 100, 1.0, 0.5 } };
+        const auto got = run (s, fs, block, 3 * 48000, [&] (int b) { if (b == 0) s.schedule (1u, notes); if (b == 50) s.cancel(); });
+        const auto off60 = find (got, 60, false);
+        check (off60 == 50 * block && find (got, 64, true) < 0 && find (got, 60, false, 1) < 0 && s.idle(),
+               "cancelar: la nota que sonaba se suelta en el bloque de la cancelación (muestra " + juce::String (off60)
+               + "), la futura no suena y no queda nada pendiente");
+    }
+    // 5) Capacidad: 512 notas pendientes; una más se rechaza entera antes de sonar
+    {
+        AgentScheduler s;
+        std::vector<AgentScheduler::Note> notes (513, AgentScheduler::Note { 60, 100, 1.0, 0.1 });
+        const auto rejected = ! s.schedule (1u, notes);
+        notes.resize (512);
+        const auto accepted = s.schedule (2u, notes);
+        check (rejected && accepted && ! s.canSchedule (1), "capacidad: 513 notas rechazadas, 512 aceptadas, después ninguna más");
+    }
+    // 6) Origen: un segundo play toma su propio origen; originOf de otro número = -1
+    {
+        AgentScheduler s;
+        std::vector<AgentScheduler::Note> notes { { 60, 100, 0.0, 0.1 } };
+        run (s, 48000.0, 256, 48000, [&] (int b) { if (b == 2) s.schedule (5u, notes); if (b == 9) s.schedule (6u, notes); });
+        check (s.originOf (6u) == 9 * 256 && s.originOf (5u) == -1, "origen del último play: " + juce::String (s.originOf (6u)) + " (bloque 9 de 256)");
+    }
+    std::printf ("%d fallos\n", fails);
+    return fails;
+}
+
 } // namespace
 
 int main (int argc, char** argv)
 {
     if (argc >= 2 && juce::String (argv[1]) == "sattest")
         return satTest();
+    if (argc >= 2 && juce::String (argv[1]) == "schedtest")
+        return schedTest();
     if (argc >= 2 && juce::String (argv[1]) == "tuningtest")
     {
         juce::ScopedJuceInitialiser_GUI init;
@@ -1006,6 +1143,11 @@ int main (int argc, char** argv)
         { "21. Complex 2x + unisono 7, modulador Osc 3", { { "Complex On", 1.0f }, { "Unison Voices", 1.0f }, { "FM Index", 0.5f },
                                                           { "Timbre", 0.6f }, { "AM Depth", 0.3f }, { "Complex Mod Source", 1.0f },
                                                           { "Osc3 Semi", 1.0f } }, 8 },
+        // Eventos densos: con la subdivisión de 1 muestra del Synth (KoniSynth.cpp) cada evento parte el render de las voces
+        { "22. Init, 8 notas + pitch bend cada 32 muestras", {}, 8, 32 },
+        { "22b. Init, 8 notas + pitch bend cada 8 muestras", {}, 8, 8 },
+        { "22c. Init, 8 notas + pitch bend cada muestra", {}, 8, 1 },
+        { "23. Unisono 7 + filtro, 8 notas + pitch bend cada 8 muestras", { { "Unison Voices", 1.0f }, { "Resonance", 0.5f }, { "Filter Drive", 0.5f } }, 8, 8 },
     };
 
     for (const auto& s : scenarios)

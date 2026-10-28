@@ -128,6 +128,24 @@ async def run():
             lead = 20 * np.log10(max(env[: int(0.45 * fs)].max(), 1e-9))
             check(abs(onset - 0.5) < 0.03 and lead < -80, "silencio inicial conservado: pico %.1f dBFS en 0-0,45 s; ataque (-40 dBFS) en %.4f s (esperado 0,5)" % (lead, onset))
             check(au["pitch"].get("note") == "A4", "tono %s Hz (%s)" % (au["pitch"].get("f0_hz"), au["pitch"].get("note")))
+            first = int(np.flatnonzero(env > 0)[0])
+            check(abs(first - round(0.5 * fs)) <= 1, "entrega exacta: primera muestra no nula %d (pedida %d = 0,5 s · %d Hz)" % (first, round(0.5 * fs), fs))
+
+            # Secuencia en beats: 16 corcheas a 128 BPM (gate 40 %), ataque y release mínimos; cada ataque en su muestra
+            await s.call_tool("set_parameters", {"values": {"attack": "0.2 ms", "release": "0.2 ms"}})
+            seqn = [{"note": "A4", "start": k * 0.5, "duration": 0.2} for k in range(16)]
+            au3 = await tool("audition", {"notes": seqn, "bpm": 128, "tail": 0.2})
+            y, fs3 = read_wav(au3["wav"])
+            e3 = np.abs(y).max(axis=1) if y.ndim == 2 else np.abs(y)
+            errs = []
+            for k in range(16):
+                # Primera muestra no nula tras silencio digital (un umbral la retrasaría lo que tarda el ataque en cruzarlo)
+                want = round(fs3 * 60 / 128 * k * 0.5)
+                lo = max(0, want - 100)
+                nz = np.flatnonzero(e3[lo:want + 200] > 0)
+                valid = len(nz) > 0 and (nz[0] > 0 or lo == 0)  # nz[0] > 0: hay silencio digital justo antes
+                errs.append(int(lo + nz[0]) - want if valid else None)
+            check(all(e is not None and abs(e) <= 1 for e in errs), "16 corcheas a 128 BPM: error de cada ataque (muestras) %s" % errs)
             au2 = await tool("audition", {"notes": "A3", "duration": 0.3, "tail": 0.1})
             check(au2["wav"] != au["wav"] and Path(au["wav"]).exists() and Path(au2["wav"]).exists(),
                   "un WAV por captura: %s, %s (los dos existen)" % (Path(au["wav"]).name, Path(au2["wav"]).name))

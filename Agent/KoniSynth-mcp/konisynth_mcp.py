@@ -297,6 +297,15 @@ def _notes(notes: str | list[dict[str, Any]], duration: float, velocity: int) ->
     return [{"velocity": velocity, "start": 0.0, "duration": duration, **n} for n in notes]
 
 
+def _tempo(bpm: float | None) -> dict[str, float]:
+    """Argumento bpm de play (KoniSynth valida 20..999); sin bpm, tiempos en segundos."""
+    if bpm is None:
+        return {}
+    if not 20.0 <= float(bpm) <= 999.0:
+        raise ToolError("bpm must be 20..999")
+    return {"bpm": float(bpm)}
+
+
 _last_capture: dict[str, Any] = {}
 
 
@@ -319,14 +328,15 @@ def _listen(seconds: float, port: int | None) -> dict[str, Any]:
 
 
 @mcp.tool(annotations=PLAY)
-def play_notes(notes: str | list[dict[str, Any]], duration: float = 1.0, velocity: int = 100,
+def play_notes(notes: str | list[dict[str, Any]], duration: float = 1.0, velocity: int = 100, bpm: float | None = None,
                port: int | None = None) -> dict[str, Any]:
-    """Play notes through KoniSynth's virtual keyboard without measuring. `notes`: "C4", "C4 E4 G4" (chord) or a list
-    of {note ("C4", "F#3", "Bb2" or MIDI 0-127; required), velocity (integer 1-127), start (s), duration (s)} for
-    melodies (max 64 notes, all ending within 30 s). Any invalid note rejects the whole call and nothing sounds.
-    If transpose, scale, sequencer or arpeggiator are active, the notes go through them: the reply lists them under
-    `transforms` (turn them off with set_parameters if you need the exact notes)."""
-    return link.call("play", port=port, notes=_notes(notes, duration, velocity))
+    """Play notes without measuring, sample-accurate (KoniSynth schedules them on its audio clock). `notes`: "C4",
+    "C4 E4 G4" (chord) or a list of {note ("C4", "F#3", "Bb2" or MIDI 0-127; required), velocity (integer 1-127), start,
+    duration} for melodies (max 64 notes, all ending within 30 s). Times are seconds; with `bpm` (20-999) they are beats
+    (quarter note = 1, e.g. 0.25 = sixteenth) at that fixed tempo. Any invalid note rejects the whole call and nothing
+    sounds. If transpose, scale, sequencer or arpeggiator are active, the notes go through them: the reply lists them
+    under `transforms` (turn them off with set_parameters if you need the exact notes)."""
+    return link.call("play", port=port, notes=_notes(notes, duration, velocity), **_tempo(bpm))
 
 
 @mcp.tool(annotations=STOP)
@@ -337,26 +347,28 @@ def stop_notes(port: int | None = None) -> bool:
 
 @mcp.tool(annotations=PLAY)
 def audition(notes: str | list[dict[str, Any]] = "C4", duration: float = 1.0, velocity: int = 100, tail: float = 0.6,
-             port: int | None = None) -> dict[str, Any]:
+             bpm: float | None = None, port: int | None = None) -> dict[str, Any]:
     """Play notes, wait for them to finish plus `tail` seconds (release, echo, reverb) and measure the result: pitch
     (Hz, note, cents), level (dBFS), envelope (attack, decay), spectrum (centroid, rolloff, flatness, octave bands,
     harmonics) and stereo. The capture starts at the notes' time 0 (a late first note keeps its leading silence) and
     lasts until the last note ends plus `tail`; that total must be at most 10 s (longer requests are rejected before
-    playing). Also returns the WAV path and `capture` (requested and captured seconds, partial/truncated)."""
+    playing). With `bpm`, start and duration are beats as in play_notes (`tail` stays in seconds). Also returns the WAV
+    path and `capture` (requested and captured seconds, partial/truncated)."""
     seq = _notes(notes, duration, velocity)
+    tempo = _tempo(bpm)
     try:
-        ends = max(float(n["start"]) + float(n["duration"]) for n in seq)
+        ends = max(float(n["start"]) + float(n["duration"]) for n in seq) * (60.0 / bpm if bpm else 1.0)
     except (TypeError, ValueError) as e:
-        raise ToolError("start and duration must be numbers (seconds)") from e
+        raise ToolError("start and duration must be numbers") from e
     total = ends + max(0.0, tail)
     if total > MAX_LISTEN_S:
         raise ToolError(f"audition captures at most {MAX_LISTEN_S:g} s: the notes end at {ends:g} s plus tail {tail:g} s "
                         f"= {total:g} s. Shorten them, or use play_notes and listen.")
     link.call("stop_notes", port=port)
-    played = link.call("play", port=port, notes=seq)
+    played = link.call("play", port=port, notes=seq, **tempo)
     time.sleep(total + 0.15)
-    # Captura desde el origen del play, anclado a la muestra en que sonó su primera nota (no al reloj): si el hilo de
-    # mensajes de KoniSynth retrasó la nota, se espera a que estén escritos los segundos pedidos
+    # Captura desde el origen del play (la muestra en que el planificador de KoniSynth lo recibió, no el reloj de aquí):
+    # si aún no se han escrito los segundos pedidos, se espera
     for _ in range(20):
         cap = link.call("listen", port=port, seconds=max(0.05, total), fromPlay=True)
         if cap.get("truncated") != "notYetWritten":
@@ -396,7 +408,7 @@ _last_generation: dict[str, Any] = {}
 
 
 def _audition_for_generator(notes: str, duration: float, velocity: int, tail: float, port: int | None) -> dict[str, Any]:
-    return audition(notes, duration, velocity, tail, port)
+    return audition(notes, duration, velocity, tail, port=port)
 
 
 @mcp.tool(annotations=WRITE)

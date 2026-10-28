@@ -33,16 +33,18 @@
 //            recomendado playLow-playHigh en notas MIDI si los tiene)
 //   load_preset {"index": 12} | {"name": "Acid Bass"}
 //   save_preset {"name": "...", "category": "Bass"}
-//   play     {"notes": [{"note": "C4" | 60, "velocity": 100, "start": 0.0, "duration": 1.0}, ...]}   (F3) por el teclado
-//            virtual, como el teclado en pantalla; máximo 64 notas que acaban (start + duration) antes de 30 s. note es
-//            obligatoria (entero 0..127 o nombre C-1..G9 con # o b; C4 = 60); velocity entera 1..127 (100); start >= 0 (0);
-//            duration > 0 (1). Cualquier nota no válida o campo desconocido rechaza la orden entera
-//   stop_notes {}                           suelta todas las notas y cancela las programadas por play que aún no han sonado
-//            (cada play se suma a los anteriores; stop_notes los cancela todos)
+//   play     {"notes": [{"note": "C4" | 60, "velocity": 100, "start": 0.0, "duration": 1.0}, ...], "bpm": 128}   (F3, S2)
+//            con el reloj de audio (Agent/AgentScheduler.h): cada nota en su muestra, round(fs · t) desde el origen del
+//            play (el inicio del bloque en que llega al hilo de audio). Sin bpm, start y duration en segundos; con bpm, en
+//            beats (tempo congelado). Máximo 64 notas que acaban antes de 30 s (y 512 pendientes entre todos los play).
+//            note es obligatoria (entero 0..127 o nombre C-1..G9 con # o b; C4 = 60); velocity entera 1..127 (100);
+//            start >= 0 (0); duration > 0 (1). Cualquier nota no válida o campo desconocido rechaza la orden entera
+//   stop_notes {}                           suelta todas las notas (también las del teclado en pantalla) y cancela las
+//            programadas por play que aún no han sonado (cada play se suma a los anteriores; stop_notes los cancela todos)
 //   listen   {"seconds": 2.0, "fromPlay": false}   vuelca a un WAV temporal propio de cada captura (se conservan las 32
 //            últimas) los últimos N s de la salida (0,05..10 s) o, con fromPlay, N s desde el origen del último play
-//            (instante 0 de sus start, conservando el silencio inicial; se ancla a la muestra en que sonó su primera nota,
-//            así que no depende de retrasos del hilo de mensajes). Devuelve ruta, frecuencia, fotogramas pedidos y
+//            (instante 0 de sus start, conservando el silencio inicial; es la muestra exacta del origen del planificador,
+//            sin depender del hilo de mensajes). Devuelve ruta, frecuencia, fotogramas pedidos y
 //            capturados, posición de inicio, pico, "partial" si se capturó menos de lo pedido y "truncated" con el motivo
 //            ("notYetWritten": aún sonando, repetir; "notEnoughAudio": la captura empezó hace menos de N s)
 class AgentServer : private juce::Thread
@@ -54,8 +56,9 @@ public:
         PresetManager& presets;
         UndoHistory& undo;
         juce::String version;
-        juce::MidiKeyboardState& keyboard; // F3: tocar notas (el mismo estado que el teclado en pantalla)
+        juce::MidiKeyboardState& keyboard; // el teclado en pantalla: stop_notes también suelta sus notas
         AudioTap& tap;                     // F3: salida reciente (Agent/AudioTap.h)
+        AgentScheduler& scheduler;         // S2: notas de play con el reloj de audio (Agent/AgentScheduler.h)
     };
 
     static constexpr int firstPort = 47800, lastPort = 47899;
@@ -108,8 +111,7 @@ public:
     void stop()
     {
         *alive = false;              // órdenes pendientes en la cola de mensajes (y notas programadas): no se ejecutan
-        if (notesScheduled)
-            host.keyboard.allNotesOff (0); // las notas que el agente dejó sonando no quedan colgadas
+        host.scheduler.cancel(); // las notas que el agente dejó sonando o programadas no quedan colgadas
         signalThreadShouldExit();
         if (listener != nullptr) listener->close();
         stopThread (3000);               // tras parar el hilo de aceptación nadie más toca 'clients'
@@ -263,8 +265,8 @@ private:
         if (cmd == "presets")     return presetList();
         if (cmd == "load_preset") return loadPreset (req, error);
         if (cmd == "save_preset") return savePreset (req, error);
-        if (cmd == "play")        return play (req.getProperty ("notes", juce::var()), error);
-        if (cmd == "stop_notes")  { ++*playGeneration; host.keyboard.allNotesOff (0); return true; } // cancela lo programado
+        if (cmd == "play")        return play (req, error);
+        if (cmd == "stop_notes")  { host.scheduler.cancel(); host.keyboard.allNotesOff (0); return true; } // y lo programado
         if (cmd == "listen")      return listen (req.getProperty ("seconds", 2.0), (bool) req.getProperty ("fromPlay", false), error);
         error = "unknown cmd: " + cmd;
         return {};
@@ -627,8 +629,6 @@ private:
         return ping();
     }
 
-    // Notas por el teclado virtual (canal 1). Note-on y note-off con Timer::callAfterDelay (hilo de mensajes): resolución
-    // de un tic del temporizador (~1-16 ms según el sistema), suficiente para escuchar un sonido, no para secuenciar
     // Nota para play, estricta: entero 0..127 o nombre (letra, # o b, octava -1..9; C4 = 60). -1 si no es válida
     // (midiNoteFromText, la de los parámetros, es tolerante: ante un error daría C4)
     static int strictMidiNote (const juce::var& v)
@@ -657,12 +657,23 @@ private:
         return n >= 0 && n <= 127 ? n : -1;
     }
 
-    juce::var play (const juce::var& notes, juce::String& error)
+    // Notas al planificador del hilo de audio (Agent/AgentScheduler.h): cada una en su muestra exacta desde el origen del
+    // play. Con "bpm", start y duration van en beats (negra = 1) y se pasan a segundos aquí, una vez: t = 60 / bpm · beat,
+    // desde la posición absoluta (sin acumular intervalos); el tempo queda congelado para este play
+    juce::var play (const juce::var& req, juce::String& error)
     {
+        const auto notes = req.getProperty ("notes", juce::var());
         if (! notes.isArray() || notes.size() == 0 || notes.size() > 64) { error = "notes must be an array of 1..64 notes"; return {}; }
+        double bpm = 0.0;
+        if (req.hasProperty ("bpm") && (! finiteNumber (req.getProperty ("bpm", {}), bpm) || bpm < 20.0 || bpm > 999.0))
+        {
+            error = "bpm must be a number in 20..999 (nothing played)";
+            return {};
+        }
+        const auto toSeconds = bpm > 0.0 ? 60.0 / bpm : 1.0;
+        const juce::String unit = bpm > 0.0 ? "beats" : "seconds";
         double end = 0.0;
-        struct N { int note, velocity; double start, duration; };
-        std::vector<N> list;
+        std::vector<AgentScheduler::Note> list;
         // Validación previa de todas las notas: con una no válida no suena ninguna
         for (int i = 0; i < notes.size(); ++i)
         {
@@ -686,46 +697,28 @@ private:
             if (o->hasProperty ("start") && ! finiteNumber (o->getProperty ("start"), start)) start = -1.0;
             if (o->hasProperty ("duration") && ! finiteNumber (o->getProperty ("duration"), dur)) dur = 0.0;
             if (start < 0.0 || dur <= 0.0)
-                return bad ("start must be a number >= 0 and duration a number > 0 (seconds)");
+                return bad ("start must be a number >= 0 and duration a number > 0 (" + unit + ")");
+            start *= toSeconds;
+            dur *= toSeconds;
             if (start + dur > maxPlaySeconds)
                 return bad ("ends at " + juce::String (start + dur, 3) + " s; the limit is " + juce::String (maxPlaySeconds, 0) + " s");
             list.push_back ({ note, (int) vel, start, dur });
             end = juce::jmax (end, start + dur);
         }
-        notesScheduled = true;
-        auto& kb = host.keyboard;
-        auto& tap = host.tap;
-        // Origen de este play (el instante 0 de sus 'start') para listen fromPlay: se fija cuando suena su primera nota,
-        // restando su 'start'. 'seq' evita que la primera nota de un play anterior, aún pendiente, ancle este
-        const auto seq = ++playSeq;
-        playOrigin = -1;
-        playEpoch = tap.epochNumber();
-        const auto first = std::min_element (list.begin(), list.end(), [] (const N& a, const N& b) { return a.start < b.start; })->start;
-        // Generación de este play: stop_notes la incrementa y los temporizadores pendientes (note-on y note-off) ya no actúan.
-        // Así un note-off antiguo no corta una nota nueva de la misma altura tras un stop_notes
-        const auto gen = playGeneration->load();
-        for (const auto& n : list)
+        // Capacidad del planificador (512 notas pendientes a la vez entre todos los play): si no cabe, no suena nada
+        const auto seq = playSeq + 1;
+        if (! host.scheduler.schedule (seq, list))
         {
-            juce::Timer::callAfterDelay (juce::roundToInt (n.start * 1000.0), [this, &kb, &tap, n, first, seq, flag = alive, g = playGeneration, gen]
-            {
-                if (! *flag || g->load() != gen) return;
-                if (n.start == first && seq == playSeq && playOrigin < 0)
-                {
-                    // La nota entra en el siguiente bloque de audio (resolución: un bloque). Si la captura empezó después
-                    // del origen calculado, el origen queda en 0
-                    const auto at = (juce::int64) tap.framesWritten();
-                    playOrigin = juce::jmax ((juce::int64) 0, at - (juce::int64) std::llround (first * tap.sampleRate()));
-                }
-                kb.noteOn (1, n.note, (float) n.velocity / 127.0f);
-            });
-            juce::Timer::callAfterDelay (juce::roundToInt ((n.start + n.duration) * 1000.0), [&kb, n, flag = alive, g = playGeneration, gen]
-            {
-                if (*flag && g->load() == gen) kb.noteOff (1, n.note, 0.0f);
-            });
+            error = "too many notes scheduled; wait for them to finish or call stop_notes (nothing played)";
+            return {};
         }
+        playSeq = seq;
+        playEpoch = host.tap.epochNumber();
         auto o = std::make_unique<juce::DynamicObject>();
         o->setProperty ("scheduled", (int) list.size());
-        o->setProperty ("endsAt", end);
+        o->setProperty ("endsAt", end); // segundos
+        if (bpm > 0.0)
+            o->setProperty ("bpm", bpm);
         if (const auto tr = noteTransforms(); tr.size() > 0)
             o->setProperty ("transforms", tr); // lo que cambiará estas notas antes de sonar (ver state)
         return juce::var (o.release());
@@ -747,9 +740,10 @@ private:
         juce::String truncated;
         if (fromPlay)
         {
-            if (playOrigin < 0) { error = "fromPlay: no note of the last play has sounded yet"; return {}; }
+            const auto origin = host.scheduler.originOf (playSeq);
+            if (origin < 0) { error = "fromPlay: the last play has not started yet"; return {}; }
             if (playEpoch != tap.epochNumber()) { error = "fromPlay: the capture was reset (sample rate changed) after the last play"; return {}; }
-            start = (juce::uint64) playOrigin;
+            start = (juce::uint64) origin;
             if (written > start + (juce::uint64) tap.capacityFrames())
             {
                 error = "fromPlay: the last play started more than " + juce::String (AudioTap::secondsKept) + " s ago and is no longer in the capture";
@@ -801,10 +795,8 @@ private:
     static constexpr int keptCaptures = 32; // WAV de captura conservados por instancia (10 s a 48 kHz = 3,84 MB cada uno)
 
     Host host;
-    bool notesScheduled = false;
-    // Último play (hilo de mensajes): origen en la captura (-1 hasta que suena su primera nota), número de play y época del
-    // tap en que se programó
-    juce::int64 playOrigin = -1;
+    // Último play (hilo de mensajes): su número (el planificador da su origen, AgentScheduler::originOf) y la época del tap
+    // en que se programó
     juce::uint32 playSeq = 0, playEpoch = 0;
     int captureCount = 0;
     std::unique_ptr<juce::StreamingSocket> listener;
@@ -814,5 +806,4 @@ private:
     juce::File announce;
     juce::OwnedArray<ClientThread> clients;
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
-    std::shared_ptr<std::atomic<std::uint32_t>> playGeneration = std::make_shared<std::atomic<std::uint32_t>> (0); // stop_notes la sube
 };

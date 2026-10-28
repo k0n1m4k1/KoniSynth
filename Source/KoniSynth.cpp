@@ -29,6 +29,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 
 #include "Presets/PresetManager.h"
 #include "Agent/AudioTap.h"
+#include "Agent/AgentScheduler.h"
 #include "Transport/SessionTransport.h"
 #include "Agent/AgentServer.h" // control por agente: inerte si está desactivado
 
@@ -145,6 +146,11 @@ public:
         synth.assignMode = params.voiceAssign;
         monoSynth.addVoice (new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
         monoSynth.addSound (new SynthSound());
+        // Cada evento MIDI en su muestra: por defecto JUCE no parte el bloque si el siguiente evento está a menos de 32
+        // muestras y lo adelanta (medido: notas a 1, 7 y 31 muestras de otra sonaban a la vez que ella; juce_Synthesiser.cpp:217).
+        // Con 1 solo se agrupan eventos de la misma muestra; el bloque se parte solo donde hay eventos
+        synth.setMinimumRenderingSubdivisionSize (1, true);
+        monoSynth.setMinimumRenderingSubdivisionSize (1, true);
         perfMacros.attach (apvts);
         undoHistory.attach (*this, apvts, { PerfMacros::mapProp, PerfMacros::namesProp, chipMacrosProp, mdMacrosProp, snesMacrosProp,
                                             "presetName", "presetFactory", "dx7Voice" });
@@ -264,7 +270,11 @@ public:
     {
         randomAnchorPending = true; // un render offline empieza aquí: anclaje de la aleatoriedad
         if (agentTap != nullptr)
+        {
+            if (agentScheduler != nullptr && agentTap->sampleRate() != sampleRate)
+                agentScheduler->reset(); // notas del agente programadas a la frecuencia anterior: se descartan
             agentTap->prepare (sampleRate); // otra frecuencia: la captura se vacía y, si hace falta, se amplía
+        }
         sessionTransport.prepare (sampleRate);
         // Una vez por proceso; decide si la ruta AVX2 es utilizable. Con KONISYNTH_SIMD_BENCH, su informe de medida va a
         // config.settings (clave simdBench)
@@ -445,6 +455,13 @@ public:
             params.ladderQuality.store (q);
 
         keyboardState.processNextMidiBuffer (midi, 0, numSamples, true); // mezcla las notas del teclado en pantalla
+        // Notas de play del agente, en su muestra exacta (Agent/AgentScheduler.h); sin agente, nulo. La posición en la captura
+        // es la del inicio de este bloque (el tap lo recibe al final)
+        if (auto* scheduler = agentSchedulerActive.load (std::memory_order_acquire))
+        {
+            const auto* tap = agentTapActive.load (std::memory_order_acquire);
+            scheduler->process (midi, numSamples, getSampleRate(), tap != nullptr ? tap->framesWritten() : 0);
+        }
         sessionTransport.captureMidi (midi); // REC: lo que entra al motor (controlador, teclado y .mid), antes de secuenciador y arpegiador
         {
             // Transpose y escala (Midi/ScaleQuantizer.h). En la Drum Machine y la parte de ritmo del MT-32 la nota elige el
@@ -1536,12 +1553,17 @@ public:
     {
         if (on && agentServer == nullptr)
         {
-            if (agentTap == nullptr) // se crea una vez y no se libera hasta destruir el procesador (ver Agent/AudioTap.h)
+            if (agentTap == nullptr) // se crean una vez y no se liberan hasta destruir el procesador (ver Agent/AudioTap.h)
                 agentTap = std::make_unique<AudioTap> (getSampleRate());
+            if (agentScheduler == nullptr)
+                agentScheduler = std::make_unique<AgentScheduler>();
             agentServer = std::make_unique<AgentServer> (AgentServer::Host { apvts, presetManager, undoHistory, JucePlugin_VersionString,
-                                                                              keyboardState, *agentTap });
+                                                                              keyboardState, *agentTap, *agentScheduler });
             if (agentServer->start())
+            {
                 agentTapActive.store (agentTap.get(), std::memory_order_release);
+                agentSchedulerActive.store (agentScheduler.get(), std::memory_order_release);
+            }
             else
                 agentServer.reset();
         }
@@ -1558,9 +1580,15 @@ public:
             }
         return isAgentEnabled() == on;
     }
-    std::unique_ptr<AgentServer> agentServer;
     std::unique_ptr<AudioTap> agentTap;            // salida reciente para el agente (F3); nullptr hasta la primera activación
     std::atomic<AudioTap*> agentTapActive { nullptr }; // lo que lee processBlock: nulo con el control desactivado
+    // Notas de play del agente (S2). Publicado desde la primera activación y no se retira al desactivar: el stop del
+    // servidor le manda cancelar y el hilo de audio debe recibirlo para soltar las notas que sonaban. Después queda
+    // ocioso (comprobar su cola vacía por bloque: dos cargas atómicas)
+    std::unique_ptr<AgentScheduler> agentScheduler;
+    std::atomic<AgentScheduler*> agentSchedulerActive { nullptr };
+    // Tras tap y planificador: se destruye antes que ellos (su stop manda cancelar al planificador)
+    std::unique_ptr<AgentServer> agentServer;
 
 private:
     // Silencio inmediato: corta voces sin release y vacía todos los estados con memoria (colas de echo, reverb, chorus,

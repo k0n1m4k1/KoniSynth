@@ -83,8 +83,8 @@ registration in your agent stays valid: the paths do not change.
 | `get_parameters(ids)` | Current values: displayed text, exact real value, normalized position (0-1) and unit |
 | `set_parameters(values)` | Batch change; text in the parameter's format ("2 kHz", "Saw"), real numbers, true/false or `{"normalized": x}`. The whole batch is validated first (an invalid value changes nothing); one undo step |
 | `list_presets(category, match)` / `load_preset` / `save_preset` | Presets (the list gives the engine, how to play it and the recommended range) |
-| `play_notes(notes)` / `stop_notes` | Play a note, a chord ("C4 E4 G4") or a timed list through the virtual keyboard (an invalid note rejects the whole list) / release all notes and cancel the scheduled ones |
-| `audition(notes, duration, tail)` | Play and measure (up to 10 s, from the notes' time 0): pitch and pitch curve (glide, vibrato, drift), level, envelope, spectrum (centroid, rolloff, flatness, octave bands, harmonics), stereo |
+| `play_notes(notes)` / `stop_notes` | Play a note, a chord ("C4 E4 G4") or a timed list, sample-accurate on the audio clock; times in seconds or, with `bpm`, in beats (an invalid note rejects the whole list) / release all notes and cancel the scheduled ones |
+| `audition(notes, duration, tail, bpm)` | Play and measure (up to 10 s, from the notes' time 0): pitch and pitch curve (glide, vibrato, drift), level, envelope, spectrum (centroid, rolloff, flatness, octave bands, harmonics), stereo |
 | `listen(seconds)` | Measure the last 0.05-10 s of output, whatever is sounding (also the user playing). Each capture is its own WAV; the result says how much was captured |
 | `compare(reference_wav)` | Differences to a reference WAV supplied by the user (only audio you own or with a free license) |
 | `generate(style, engine, count, amount, seed, reference_wav)` | New sounds with knowledge: factory preset of the style + mutation of the parameters that matter for its engine and the effects + style rules + listening check; ranked by similarity with a reference. Reproducible with `seed` |
