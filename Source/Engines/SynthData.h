@@ -106,22 +106,35 @@ struct SampleData
     {
         juce::AudioFormatManager formats;
         formats.registerBasicFormats();
-        std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+        return fromReader (std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file)), file.getFileName(), error);
+    }
+
+    // Audio en memoria (samples de fábrica incrustados con BinaryData): los bytes deben vivir mientras dure la lectura
+    static std::unique_ptr<SampleData> fromMemory (const void* bytes, size_t size, const juce::String& name, juce::String& error)
+    {
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        return fromReader (std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (
+                               std::make_unique<juce::MemoryInputStream> (bytes, size, false))), name, error);
+    }
+
+    static std::unique_ptr<SampleData> fromReader (std::unique_ptr<juce::AudioFormatReader> reader, const juce::String& fileName, juce::String& error)
+    {
         if (reader == nullptr)
         {
-            error = "Unsupported or unreadable audio file: " + file.getFileName();
+            error = "Unsupported or unreadable audio file: " + fileName;
             return nullptr;
         }
 
         auto data = std::make_unique<SampleData>();
         data->sampleRate = reader->sampleRate > 0.0 ? reader->sampleRate : 44100.0;
-        data->name = file.getFileName();
+        data->name = fileName;
         const auto maxLength = (juce::int64) (60.0 * data->sampleRate);
         const auto length = (int) juce::jmin (reader->lengthInSamples, maxLength);
         data->truncated = reader->lengthInSamples > maxLength;
         if (length < 4)
         {
-            error = "The file is empty: " + file.getFileName();
+            error = "The file is empty: " + fileName;
             return nullptr;
         }
 

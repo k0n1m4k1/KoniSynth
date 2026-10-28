@@ -106,9 +106,13 @@ if(KONISYNTH_EMBED_REPO_PATH)
     target_compile_definitions(KoniSynth PUBLIC KONI_REPO_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
-# Recursos incrustados (diálogo About): avatar de https://steamcommunity.com/id/k0n1m4k1 (avatarFull, 184 × 184 JPEG)
+# Recursos incrustados: avatar del diálogo About (https://steamcommunity.com/id/k0n1m4k1, avatarFull, 184 × 184 JPEG) y los
+# tres samples originales de los presets de fábrica (Resources/samples, WAV de 16 bits a 48 kHz, 1,26 MB; "factory:<fichero>")
 juce_add_binary_data(KoniSynthData HEADER_NAME BinaryData.h NAMESPACE BinaryData
-    SOURCES Resources/about-avatar.jpg)
+    SOURCES Resources/about-avatar.jpg
+            Resources/samples/original-metal-C4.wav
+            Resources/samples/original-soft-key-C4.wav
+            Resources/samples/original-orbital-bloom-C3.wav)
 
 target_link_libraries(KoniSynth
     PRIVATE KoniSynthData

@@ -200,15 +200,20 @@ private:
 
 
         // Ficheros del preset (sample, wavetable, IR). Los presets de usuario anteriores a la 0.3 no tienen estos atributos:
-        // entonces no se tocan los ficheros cargados; los de fábrica no usan ficheros. El de Osc 2 en modo Sample no se hereda
-        // nunca: sin el atributo (formato < 3 o de fábrica) se quita, para que un preset no se guarde con el fichero de otro
+        // entonces no se tocan los ficheros cargados. Los de fábrica fijan los dos samples del Synth (el suyo incrustado,
+        // "factory:...", o ninguno) y no tocan wavetable ni IR. El de Osc 2 en modo Sample no se hereda nunca: sin el atributo
+        // (formato < 3) se quita, para que un preset no se guarde con el fichero de otro
         if (! preset.factory)
             if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr && xml->hasAttribute ("ansUser"))
                 apvts.state.setProperty ("ansUser", xml->getStringAttribute ("ansUser"), nullptr);
         if (onPresetFiles)
         {
             if (preset.factory)
-                onPresetFiles (std::nullopt, std::nullopt, std::nullopt, juce::String(), std::nullopt, {});
+            {
+                for (const auto& f : factoryPresets())
+                    if (f.name == preset.name)
+                        onPresetFiles (f.samplePath, std::nullopt, std::nullopt, f.osc2SamplePath, std::nullopt, {});
+            }
             else if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr)
             {
                 // Tabla de Osc 2: su atributo; en un formato < 4 Osc 2 leía la de la fuente Wavetable (mismo fichero)

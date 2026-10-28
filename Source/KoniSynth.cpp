@@ -203,17 +203,28 @@ public:
         auto data = SampleImport::load (file, item, error);
         if (data == nullptr)
             return error;
-
-        {
-            const juce::ScopedLock sl (sampleInfoLock);
-            auto& info = sampleInfos[(size_t) which];
-            info.text = data->name + (data->truncated ? " (truncated to 60 s)" : "");
-            info.rootKey = data->rootKey;
-            info.hasLoop = data->loopStart >= 0;
-        }
-        slotFor (which).replace (std::move (data));
-        apvts.state.setProperty (pathPropFor (which), SampleImport::pathOf (file, item), nullptr);
+        publishSample (std::move (data), SampleImport::pathOf (file, item), which);
         return {};
+    }
+
+    // Sample de fábrica incrustado (Resources/samples, BinaryData). path: "factory:<nombre del fichero>", la ruta que guardan
+    // el estado y los presets (no depende de ninguna carpeta del equipo). Devuelve el error o una cadena vacía
+    juce::String loadFactorySample (const juce::String& path, int which = sourceSample)
+    {
+        const auto fileName = path.fromFirstOccurrenceOf (SampleImport::factoryPrefix, false, false);
+        for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
+            if (fileName == BinaryData::originalFilenames[i])
+            {
+                int size = 0;
+                const auto* bytes = BinaryData::getNamedResource (BinaryData::namedResourceList[i], size);
+                juce::String error;
+                auto data = SampleData::fromMemory (bytes, (size_t) size, fileName, error);
+                if (data == nullptr)
+                    return error;
+                publishSample (std::move (data), path, which);
+                return {};
+            }
+        return "Factory sample not found: " + fileName;
     }
 
     // Tira de expresión del Gen X-2 tocada en el pad (UI/StylophonePad.h)
@@ -224,6 +235,20 @@ public:
     {
         const juce::ScopedLock sl (sampleInfoLock);
         return { sampleInfos[(size_t) which].rootKey, sampleInfos[(size_t) which].hasLoop };
+    }
+
+    // Publica un sample ya decodificado en su DataSlot, con su texto informativo y su ruta en el estado
+    void publishSample (std::unique_ptr<SampleData> data, const juce::String& path, int which)
+    {
+        {
+            const juce::ScopedLock sl (sampleInfoLock);
+            auto& info = sampleInfos[(size_t) which];
+            info.text = data->name + (data->truncated ? " (truncated to 60 s)" : "");
+            info.rootKey = data->rootKey;
+            info.hasLoop = data->loopStart >= 0;
+        }
+        slotFor (which).replace (std::move (data));
+        apvts.state.setProperty (pathPropFor (which), path, nullptr);
     }
 
     void clearSample (int which = sourceSample)
@@ -1341,6 +1366,17 @@ public:
         if (samplePath.isEmpty())
         {
             clearSample (which);
+        }
+        else if (SampleImport::isFactory (samplePath))
+        {
+            // Incrustado: solo falta si lo guardó una versión con un sample que esta no trae (no hay fichero que localizar)
+            if (const auto error = loadFactorySample (samplePath, which); error.isNotEmpty())
+            {
+                slotFor (which).replace (nullptr);
+                apvts.state.setProperty (pathPropFor (which), samplePath, nullptr);
+                const juce::ScopedLock sl (sampleInfoLock);
+                sampleInfos[(size_t) which].text = "(missing) " + samplePath;
+            }
         }
         else
         {

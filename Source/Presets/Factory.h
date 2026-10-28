@@ -21,6 +21,9 @@ struct FactoryPreset
     juce::String playHint {};
     // Rango recomendado (notas MIDI, C4 = 60; -1 = sin rango): el teclado en pantalla agrisa las teclas de fuera
     int playLow = -1, playHigh = -1;
+    // Samples de la fuente Sample y de Osc 2 en modo Sample: "factory:<fichero>" = WAV incrustado en el binario
+    // (Resources/samples, BinaryData); vacío = sin sample (no se hereda el del preset anterior)
+    juce::String samplePath {}, osc2SamplePath {};
 };
 
 // Categorías de presets: síntesis de las de Surge XT (carpetas de patches_factory en su repositorio: Basses, Brass,

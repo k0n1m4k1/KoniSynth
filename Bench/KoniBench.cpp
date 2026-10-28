@@ -131,8 +131,12 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
         else if (arg.startsWith ("--rate="))
             rate = arg.fromFirstOccurrenceOf ("=", false, false).getDoubleValue();
         else if (arg.startsWith ("--sample=") || arg.startsWith ("--osc2-sample="))
+        {
+            // "factory:<fichero>" (sample incrustado) pasa tal cual; lo demás es una ruta relativa a la carpeta actual
+            const auto path = arg.fromFirstOccurrenceOf ("=", false, false);
             props.push_back ({ arg.startsWith ("--sample=") ? "samplePath" : "osc2SamplePath",
-                               juce::File::getCurrentWorkingDirectory().getChildFile (arg.fromFirstOccurrenceOf ("=", false, false)).getFullPathName() });
+                               path.startsWith ("factory:") ? path : juce::File::getCurrentWorkingDirectory().getChildFile (path).getFullPathName() });
+        }
         else if (arg.startsWith ("--dump-state="))
             dumpState = juce::File::getCurrentWorkingDirectory().getChildFile (arg.fromFirstOccurrenceOf ("=", false, false));
         else if (arg.startsWith ("--param=")) // parámetro por su ID y valor real (como en los presets de fábrica)
