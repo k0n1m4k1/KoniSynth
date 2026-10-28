@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(KoniSynth VERSION 1.0.0) # numérica (VST3/CLAP); la visible es KONI_VERSION_LABEL
+project(KoniSynth VERSION 1.0.1) # numérica (VST3/CLAP); la visible es KONI_VERSION_LABEL
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -98,7 +98,7 @@ target_compile_definitions(KoniSynth PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
-    KONI_VERSION_LABEL="1.0.0-beta") # versión visible (título, About, zips)
+    KONI_VERSION_LABEL="1.0.1-beta") # versión visible (título, About, zips)
 # Solo para desarrollo: el diálogo Agent (MCP) busca el puente también en Agent/KoniSynth-mcp de este repositorio. Apagado
 # por defecto: una build de release no incrusta rutas del equipo que la compila
 option(KONISYNTH_EMBED_REPO_PATH "Let the Agent dialog find the MCP bridge in this source tree (development builds)" OFF)
