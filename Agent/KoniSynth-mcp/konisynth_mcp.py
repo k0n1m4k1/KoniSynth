@@ -50,7 +50,7 @@ TIMEOUT_S = 10.0
 
 INSTRUCTIONS = """\
 KoniSynth is an experimental 70s/80s synthesizer (VST3/CLAP/standalone) with several engines selected by the
-parameter `engine` (Synth, Theremin, Casio VL-1, Stylophone, Omnichord, Drum Machine, FM 6-Op, 8-Bit NES/Game Boy,
+parameter `engine` (Synth, Theremin, Casio VL-1, Stylophone, Omnichord, Drum Machine, FM 6-Op, 8-Bit/DPCM (NES/Game Boy),
 Polivoks, ANS, Mega Drive, SNES, N64, OPL, Roland MT-32 with the user's ROMs). It values fidelity to the original hardware, quirks included.
 
 How to work with it:
@@ -426,7 +426,7 @@ def generate(style: str, engine: str = "", count: int = 3, amount: float = 0.35,
              reference_wav: str = "", max_tries: int = 8, port: int | None = None) -> dict[str, Any]:
     """Generate new sounds with knowledge. `style`: bass, lead, pad, pluck, keys, strings, brass, fx, drums, chip,
     sequence, vocal, nature, machines. Starts from
-    a random factory preset of that style (optionally only of `engine`, e.g. "FM", "Mega Drive", "8-Bit"), mutates the
+    a random factory preset of that style (optionally only of `engine`, e.g. "FM", "Mega Drive", "8-Bit/DPCM"), mutates the
     relevant parameters (`amount` 0..1: 0.15 subtle, 0.35 varied, 0.7 wild), auditions each candidate and keeps those
     that pass (not silent, no clipping, pitched if the style needs it, envelope fits the style). With `reference_wav`
     (audio the user owns), accepted candidates are ranked by similarity. Same seed = same results. The last candidate

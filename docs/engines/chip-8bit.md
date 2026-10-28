@@ -1,4 +1,4 @@
-# 8-Bit (NES / Game Boy)
+# 8-Bit/DPCM (NES / Famicom / Game Boy)
 
 The 8-Bit engine emulates the sound chips of the Nintendo Entertainment System / Famicom (Ricoh 2A03 NTSC and 2A07 PAL)
 and of the Game Boy (DMG) and Game Boy Color (CGB), cycle by cycle at their own clocks, plus the Konami VRC6 expansion of
@@ -15,10 +15,10 @@ the Sample tab, in the Synth engine's sources). It is converted to 1-bit DPCM.
 
 ## Controls
 
-Select **8-Bit (NES / Game Boy)** in the Engine menu. Choosing it loads the representative preset of the current chip
+Select **8-Bit/DPCM** in the Engine menu. Choosing it loads the representative preset of the current chip
 model. The engine shows four sections in one row.
 
-### Chip
+### 8-Bit/DPCM
 
 | Control | What it does | Range / default |
 |---|---|---|
@@ -37,7 +37,7 @@ model. The engine shows four sections in one row.
 | W.Level | Game Boy wave channel volume. | 100, 50, 25 % / 100 % |
 | DPCM | NES DPCM sample: Kit plays drums from the drum keys; the others play one sample with the key choosing the playback rate. | Kit (keys), Kick, Snare, Tom, Timpani, Slap Bass, User Sample / Kit |
 
-### Chip Driver
+### 8-Bit/DPCM Driver
 
 | Control | What it does | Range / default |
 |---|---|---|

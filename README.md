@@ -45,7 +45,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 | Omnichord | Suzuki Omnichord: chord buttons, strum plate and rhythms | [omnichord.md](docs/engines/omnichord.md) |
 | Drum Machine | Mini Pops 7, CR-78 and TR-808 voices with patterns and step lights | [drum-machine.md](docs/engines/drum-machine.md) |
 | FM 6-Op | Yamaha DX7 (OPS chip arithmetic) with its 32 algorithms, pitch envelope and display; loads DX7 SysEx banks | [fm-6op.md](docs/engines/fm-6op.md) |
-| 8-Bit (NES / Game Boy) | 2A03 (NTSC/PAL), Famicom with VRC6, Game Boy / Color, with frame macros | [chip-8bit.md](docs/engines/chip-8bit.md) |
+| 8-Bit/DPCM | 2A03 (NTSC/PAL), Famicom with VRC6, Game Boy / Color, with frame macros | [chip-8bit.md](docs/engines/chip-8bit.md) |
 | Polivoks | The Soviet Polivoks synthesizer | [polivoks.md](docs/engines/polivoks.md) |
 | ANS | The photoelectronic ANS synthesizer: draw the score | [ans.md](docs/engines/ans.md) |
 | Mega Drive | YM2612 / YM3438 FM + SN76489 PSG + DAC | [mega-drive.md](docs/engines/mega-drive.md) |

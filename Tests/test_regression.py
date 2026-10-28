@@ -11,7 +11,7 @@ CASES = {
     'vl1': ['Engine=Casio VL-1', 'VL-1 Rhythm=Rock 1'],
     'stylo': ['Engine=Stylophone'], 'omni': ['Engine=Omnichord', 'Omnichord Rhythm=Rock 1'],
     'drums': ['Engine=Drum Machine', 'Drum Pattern=Rock 1'], 'fm': ['Engine=FM 6-Op', 'FM OP2 Level=80'],
-    'chip': ['Engine=8-Bit (NES / Game Boy)', 'Chip Voice=Poly'], 'polivoks': ['Engine=Polivoks'], 'ans': ['Engine=ANS'],
+    'chip': ['Engine=8-Bit/DPCM', '8-Bit/DPCM Voice=Poly'], 'polivoks': ['Engine=Polivoks'], 'ans': ['Engine=ANS'],
     'md': ['Engine=Mega Drive', 'MD OP3 Total Level=30', 'MD Algorithm=4'], 'snes': ['Engine=SNES', 'SNES Echo=1', 'SNES Source=Strings'],
 }
 NOTES = ['60:0.05:0.6:100', '64:0.1:0.5:90', '67:0.15:0.4:80']

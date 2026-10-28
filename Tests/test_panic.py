@@ -26,7 +26,7 @@ def db(v):
     return 20 * np.log10(max(float(v), 1e-9))
 
 
-ENGINES = ['Synth', 'Theremin', 'Casio VL-1', 'Stylophone', 'Omnichord', 'Drum Machine', 'FM 6-Op', '8-Bit (NES / Game Boy)',
+ENGINES = ['Synth', 'Theremin', 'Casio VL-1', 'Stylophone', 'Omnichord', 'Drum Machine', 'FM 6-Op', '8-Bit/DPCM',
            'Polivoks', 'ANS', 'Mega Drive', 'SNES', 'N64', 'OPL (AdLib / Sound Blaster)', 'Roland MT-32']
 for k, name in enumerate(ENGINES):
     base = ['--param=engine=%d' % k] + FX

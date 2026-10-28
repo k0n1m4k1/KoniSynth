@@ -3062,7 +3062,7 @@ private:
             stringSection { "Plucked String" }, arpSection { "Arpeggiator" }, wavetableSection { "Wavetable" },
             seqSection { "Sequencer" }, macroSection { "Macros" }, styloSection { "Stylophone" }, genxOscSection { "Gen X-2 Osc / Envelope (experimental)" }, genxFxSection { "Gen X-2 LFO / Filter / Delay" }, omniSection { "Omnichord" },
             omniRhythmSection { "Omnichord Rhythm" }, drumSection { "Drum Kit" }, drumPatternSection { "Pattern" },
-            fmSection { "FM 6-Op" }, fmLfoSection { "FM LFO" }, chipSection { "Chip" }, chipDriverSection { "Chip Driver" }, chipStereoSection { "GB Stereo" }, chipVrc6Section { "Famicom Expansion" },
+            fmSection { "FM 6-Op" }, fmLfoSection { "FM LFO" }, chipSection { "8-Bit/DPCM" }, chipDriverSection { "8-Bit/DPCM Driver" }, chipStereoSection { "GB Stereo" }, chipVrc6Section { "Famicom Expansion" },
             pvOscSection { "Polivoks VCO" }, pvFilterSection { "Polivoks Mixer / VCF" }, pvFEnvSection { "Polivoks Filter EG" },
             pvAEnvSection { "Polivoks Amp EG" }, pvLfoSection { "Polivoks LFO" }, ansSection { "ANS" },
             mdSection { "Mega Drive" }, mdLfoSection { "MD LFO" }, mdVoiceSection { "MD Voice" }, mdPsgSection { "MD PSG (SN76489)" }, snesSection { "SNES" }, snesEnvSection { "SNES Envelope" },
@@ -3079,7 +3079,7 @@ private:
     ThereminPad pad;
     StylophonePad styloPad;
     int shownStyloModel = -1, shownOplModel = -1;
-    int engine = 0; // 0 Synth, 1 Theremin, 2 Casio VL-1, 3 Stylophone, 4 Omnichord, 5 Drum Machine, 6 FM 6-Op, 7 Chip, 8 Polivoks, 9 ANS
+    int engine = 0; // 0 Synth, 1 Theremin, 2 Casio VL-1, 3 Stylophone, 4 Omnichord, 5 Drum Machine, 6 FM 6-Op, 7 8-Bit/DPCM, 8 Polivoks, 9 ANS
     juce::ParameterAttachment engineAttachment; // declarado al final: su callback usa todo lo anterior
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KoniSynthEditor)

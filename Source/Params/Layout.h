@@ -77,7 +77,7 @@ static APVTS::ParameterLayout createLayout()
 
     // Motor de sonido (excluyentes). Sustituye a thereminOn: estados (setStateInformation) y presets de usuario
     // (PresetManager::targetValues) antiguos se migran
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "engine", 1 }, "Engine", StringArray { "Synth", "Theremin", "Casio VL-1", "Stylophone", "Omnichord", "Drum Machine", "FM 6-Op", "8-Bit (NES / Game Boy)", "Polivoks", "ANS", "Mega Drive", "SNES", "N64", "OPL (AdLib / Sound Blaster)", "Roland MT-32" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "engine", 1 }, "Engine", StringArray { "Synth", "Theremin", "Casio VL-1", "Stylophone", "Omnichord", "Drum Machine", "FM 6-Op", "8-Bit/DPCM", "Polivoks", "ANS", "Mega Drive", "SNES", "N64", "OPL (AdLib / Sound Blaster)", "Roland MT-32" }, 0));
 
     // Oscilador + envolvente. Drift: deriva 1/f por voz, común y de Osc 2 (modelo y cifras: Synth.h, comentario de updateDrift)
     // Tri-Saw (triángulo/sierra del Minimoog) y después las mezclas Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse (Prophet-5) y
@@ -508,40 +508,40 @@ static APVTS::ParameterLayout createLayout()
     {
         const char* names[] = { "Pulse 1", "Pulse 2", "Wave", "Noise" };
         for (int k = 0; k < 4; ++k)
-            l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipPan" + String (k + 1), 1 }, String ("Chip Pan ") + names[k],
+            l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipPan" + String (k + 1), 1 }, String ("8-Bit/DPCM Pan ") + names[k],
                                                            StringArray { "Center", "Left", "Right", "Off" }, 0));
     }
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipModel", 1 },  "Chip Model",
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipModel", 1 },  "8-Bit/DPCM Model",
         StringArray { "NES NTSC (2A03)", "NES PAL (2A07)", "Famicom (2A03)", "Game Boy (DMG)", "GB Color (CGB)", "PAL Unadapted" }, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipVoice", 1 },  "Chip Voice",
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipVoice", 1 },  "8-Bit/DPCM Voice",
         StringArray { "Pulse", "Triangle / Wave", "Noise", "Poly", "MIDI Channels", "DPCM (NES)", "VRC6 Pulse", "VRC6 Saw", "Poly + VRC6" }, 0));
     // Expansión VRC6 (solo Famicom): duty de sus pulsos (1/16 a 8/16) y sierra con desbordamiento del acumulador
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipExpansion", 1 }, "Chip Expansion", StringArray { "None", "VRC6 (Famicom)" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipExpansion", 1 }, "8-Bit/DPCM Expansion", StringArray { "None", "VRC6 (Famicom)" }, 0));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipVrc6Duty", 1 }, "VRC6 Pulse Duty",
         StringArray { "1/16", "2/16", "3/16", "4/16", "5/16", "6/16", "7/16", "8/16" }, 7));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "chipVrc6Overdrive", 1 }, "VRC6 Saw Overdrive", false));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipDuty", 1 },   "Chip Duty", StringArray { "12.5 %", "25 %", "50 %", "75 %" }, 2));
-    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipVolume", 1 }, "Chip Volume", 0, 15, 12));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipEnvelope", 1 }, "Chip Envelope", StringArray { "Constant", "Decay", "Loop / Rise" }, 0));
-    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipEnvRate", 1 }, "Chip Envelope Rate", 0, 15, 4));
-    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipRelease", 1 }, "Chip Release", 0, 60, 0));
-    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipSweep", 1 },   "Chip Sweep", -7, 7, 0));
-    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipSweepRate", 1 }, "Chip Sweep Rate", 0, 7, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipArp", 1 },     "Chip Arpeggio", StringArray { "Off", "Up", "Down" }, 0));
-    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipArpSpeed", 1 }, "Chip Arpeggio Speed", 1, 8, 1));
-    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "chipVibDepth", 1 }, "Chip Vibrato Depth", NormalisableRange<float> (0.0f, 100.0f), 0.0f,
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipDuty", 1 },   "8-Bit/DPCM Duty", StringArray { "12.5 %", "25 %", "50 %", "75 %" }, 2));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipVolume", 1 }, "8-Bit/DPCM Volume", 0, 15, 12));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipEnvelope", 1 }, "8-Bit/DPCM Envelope", StringArray { "Constant", "Decay", "Loop / Rise" }, 0));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipEnvRate", 1 }, "8-Bit/DPCM Envelope Rate", 0, 15, 4));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipRelease", 1 }, "8-Bit/DPCM Release", 0, 60, 0));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipSweep", 1 },   "8-Bit/DPCM Sweep", -7, 7, 0));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipSweepRate", 1 }, "8-Bit/DPCM Sweep Rate", 0, 7, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipArp", 1 },     "8-Bit/DPCM Arpeggio", StringArray { "Off", "Up", "Down" }, 0));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipArpSpeed", 1 }, "8-Bit/DPCM Arpeggio Speed", 1, 8, 1));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "chipVibDepth", 1 }, "8-Bit/DPCM Vibrato Depth", NormalisableRange<float> (0.0f, 100.0f), 0.0f,
         parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (roundToInt (v)) + " ct"; }))));
-    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "chipVibRate", 1 }, "Chip Vibrato Rate", NormalisableRange<float> (0.5f, 15.0f), 6.0f, hertz));
-    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipVibDelay", 1 }, "Chip Vibrato Delay", 0, 60, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipNoiseMode", 1 }, "Chip Noise Mode", StringArray { "Long", "Short" }, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipWave", 1 },    "Chip Wave",
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "chipVibRate", 1 }, "8-Bit/DPCM Vibrato Rate", NormalisableRange<float> (0.5f, 15.0f), 6.0f, hertz));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "chipVibDelay", 1 }, "8-Bit/DPCM Vibrato Delay", 0, 60, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipNoiseMode", 1 }, "8-Bit/DPCM Noise Mode", StringArray { "Long", "Short" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipWave", 1 },    "8-Bit/DPCM Wave",
         StringArray { "Triangle", "Saw", "Sine", "Square", "Pulse 25 %", "Organ", "Boot RAM" }, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipWaveLevel", 1 }, "Chip Wave Level", StringArray { "100 %", "50 %", "25 %" }, 0));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipDpcm", 1 },    "Chip DPCM Sample",
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipWaveLevel", 1 }, "8-Bit/DPCM Wave Level", StringArray { "100 %", "50 %", "25 %" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "chipDpcm", 1 },    "8-Bit/DPCM DMC Sample",
         StringArray { "Kit (keys)", "Kick", "Snare", "Tom", "Timpani", "Slap Bass", "User Sample" }, 0));
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "chipDpcmLoop", 1 }, "Chip DPCM Loop", false));
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "chipVelocity", 1 }, "Chip Velocity", true));
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "chipFilter", 1 },  "Chip Console Filter", true));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "chipDpcmLoop", 1 }, "8-Bit/DPCM DMC Loop", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "chipVelocity", 1 }, "8-Bit/DPCM Velocity", true));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "chipFilter", 1 },  "8-Bit/DPCM Console Filter", true));
 
     // Polivoks: rangos del original donde se conocen (32'..2', corte 100 Hz - 10 kHz); tiempos y LFO estimados (ver el motor)
     {
