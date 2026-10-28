@@ -22,6 +22,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "../Source/Agent/AgentScheduler.h" // schedtest: notas del agente con el reloj de audio (sin el plugin)
 #include <array>
 #include "../Source/Midi/MonoNoteFilter.h" // monotest: filtro Mono / Legato (sin el plugin)
+#include <thread>
 
 namespace
 {
@@ -997,6 +998,94 @@ int schedTest()
         std::vector<AgentScheduler::Note> notes { { 60, 100, 0.0, 0.1 } };
         run (s, 48000.0, 256, 48000, [&] (int b) { if (b == 2) s.schedule (5u, notes); if (b == 9) s.schedule (6u, notes); });
         check (s.originOf (6u) == 9 * 256 && s.originOf (5u) == -1, "origen del último play: " + juce::String (s.originOf (6u)) + " (bloque 9 de 256)");
+    }
+    const auto ons = [] (const std::vector<Got>& got) { return (int) std::count_if (got.begin(), got.end(), [] (const Got& g) { return g.on; }); };
+    // 7) reset con la nota aún en la cola (antes del primer process): no suena nada y los créditos vuelven a 0
+    {
+        AgentScheduler s;
+        std::vector<AgentScheduler::Note> notes { { 60, 100, 0.2, 0.1 } };
+        s.schedule (1u, notes);
+        s.reset();
+        const auto got = run (s, 48000.0, 480, 48000, [] (int) {});
+        check (ons (got) == 0 && s.reservedEvents() == 0 && s.idle(), "reset con la nota en la cola: " + juce::String (ons (got))
+               + " note-on, créditos " + juce::String (s.reservedEvents()));
+    }
+    // 8) reset en el bloque de 0,5 s con 60 sonando (0,1-2,1 s) y 64 pendiente (1,0 s); 67 programada justo después del reset
+    //    (mismo bloque, antes del process) y 69 un bloque más tarde: 60 se suelta una vez, 64 no suena, 67 y 69 sí, en su muestra
+    {
+        AgentScheduler s;
+        const int block = 480;
+        std::vector<AgentScheduler::Note> notes { { 60, 100, 0.1, 2.0 }, { 64, 100, 1.0, 0.5 } }, n67 { { 67, 100, 0.1, 0.2 } }, n69 { { 69, 100, 0.1, 0.2 } };
+        const auto got = run (s, 48000.0, block, 3 * 48000, [&] (int b)
+        {
+            if (b == 0) s.schedule (1u, notes);
+            if (b == 50) { s.reset(); s.schedule (2u, n67); }
+            if (b == 51) s.schedule (3u, n69);
+        });
+        const auto off60 = find (got, 60, false);
+        const auto ok = off60 == 50 * block && find (got, 60, false, 1) < 0 && find (got, 64, true) < 0
+                        && find (got, 67, true) == 50 * block + 4800 && find (got, 67, false) == 50 * block + 4800 + 9600
+                        && find (got, 69, true) == 51 * block + 4800 && s.reservedEvents() == 0 && s.idle();
+        check (ok, "reset: 60 se suelta en " + juce::String (off60) + " (una vez), 64 no suena, 67 (tras el reset) en "
+               + juce::String (find (got, 67, true)) + ", 69 en " + juce::String (find (got, 69, true)) + "; créditos " + juce::String (s.reservedEvents()));
+    }
+    // 9) cancelar con la cola de comandos llena: el corte no pasa por la cola
+    {
+        AgentScheduler s;
+        std::vector<AgentScheduler::Note> one { { 60, 100, 0.5, 0.1 } };
+        int accepted = 0;
+        while (s.schedule ((juce::uint32) accepted + 1, one))
+            ++accepted;
+        s.cancel();
+        auto got = run (s, 48000.0, 480, 48000, [] (int) {});
+        const auto silent = ons (got) == 0 && s.reservedEvents() == 0;
+        got = run (s, 48000.0, 480, 48000, [&] (int b) { if (b == 0) s.schedule (9999u, one); });
+        check (accepted > 0 && silent && ons (got) == 1, "cancelar con la cola llena (" + juce::String (accepted)
+               + " plays aceptados): nada suena, créditos a 0, el siguiente play suena");
+    }
+    // 10) Saturación concurrente: un hilo programa lotes al azar sin pausa y otro procesa bloques. Cada nota aceptada da
+    //     exactamente un note-on, los lotes rechazados ninguno, cada note-on tiene su note-off y los créditos vuelven a 0
+    {
+        AgentScheduler s;
+        std::atomic<bool> done { false };
+        int acceptedNotes = 0, rejected = 0, attempts = 0;
+        std::thread producer ([&]
+        {
+            juce::Random r (0x5EED);
+            std::vector<AgentScheduler::Note> batch;
+            for (attempts = 0; attempts < 200000; ++attempts)
+            {
+                batch.clear();
+                const auto n = 1 + r.nextInt (64);
+                for (int k = 0; k < n; ++k)
+                    batch.push_back ({ 36 + r.nextInt (48), 100, r.nextDouble() * 0.05, 0.001 + r.nextDouble() * 0.02 });
+                if (s.schedule ((juce::uint32) attempts + 1, batch))
+                    acceptedNotes += n;
+                else
+                    ++rejected;
+            }
+            done = true;
+        });
+        int onCount = 0;
+        std::array<int, 128> balance {};
+        juce::MidiBuffer midi;
+        for (juce::int64 pos = 0; ! (done && s.idle() && s.reservedEvents() == 0); pos += 64)
+        {
+            midi.clear();
+            s.process (midi, 64, 48000.0, (juce::uint64) pos);
+            for (const auto m : midi)
+            {
+                const auto msg = m.getMessage();
+                balance[(size_t) msg.getNoteNumber()] += msg.isNoteOn() ? 1 : -1;
+                onCount += msg.isNoteOn() ? 1 : 0;
+            }
+        }
+        producer.join();
+        const auto balanced = std::all_of (balance.begin(), balance.end(), [] (int b) { return b == 0; });
+        check (rejected > 0 && onCount == acceptedNotes && balanced && s.reservedEvents() == 0,
+               "concurrente, " + juce::String (attempts) + " lotes: " + juce::String (acceptedNotes) + " notas aceptadas, "
+               + juce::String (onCount) + " note-on, " + juce::String (rejected) + " lotes rechazados; on/off equilibrados: "
+               + (balanced ? "sí" : "no") + "; créditos " + juce::String (s.reservedEvents()));
     }
     std::printf ("%d fallos\n", fails);
     return fails;

@@ -15,6 +15,16 @@
 // cola SPSC de capacidad fija (AbstractFifo); el hilo de audio no asigna ni bloquea. Capacidades explícitas: un play que no
 // quepa se rechaza antes de sonar (canSchedule).
 //
+// Créditos: cada nota aceptada reserva 2 eventos (on y off) en 'reserved' antes de publicarse en la cola, y los conserva en
+// todo el recorrido cola → pendientes; el hilo de audio los devuelve al entregar o descartar cada evento. Invariante:
+// eventos en la cola + eventos pendientes <= reserved <= maxPending, así que la inserción nunca se queda sin hueco (un
+// note-off no se puede perder). Solo el productor suma créditos: comprobar y sumar no compite con otro productor.
+//
+// Cortes (cancel desde el hilo de mensajes, reset desde el de audio): suben 'generation' (atómico, sin pasar por la cola:
+// funciona con la cola llena). Cada comando lleva la generación vigente al publicarse; el hilo de audio, al ver una
+// generación nueva, suelta las alturas que sonaban y descarta lo pendiente, y descarta de la cola los comandos de una
+// generación anterior. Un play publicado después del corte lleva la generación nueva y suena.
+//
 // Tiempo: un play fija su origen en la primera muestra del bloque en que el hilo de audio lo recibe. Cada evento va a
 // origen + round(fs · t), con t absoluto en segundos desde el origen (no se acumulan intervalos redondeados). El tempo de
 // un play en beats se convierte una vez al recibirlo (tempo congelado: no sigue un cambio de tempo del host posterior).
@@ -31,10 +41,11 @@ public:
 
     // --- Hilo de mensajes ---
 
-    // ¿Cabe un play de n notas? Cota conservadora: el hilo de audio solo puede haber vaciado más desde la lectura
+    // ¿Cabe un play de n notas? Cota conservadora: el hilo de audio solo puede haber devuelto créditos o vaciado la cola
+    // desde la lectura
     bool canSchedule (int notes) const
     {
-        return fifo.getFreeSpace() >= notes + 1 && pendingCount.load() + 2 * (fifo.getNumReady() + notes) <= maxPending;
+        return notes >= 0 && fifo.getFreeSpace() >= notes + 1 && reserved.load (std::memory_order_acquire) + 2 * notes <= maxPending;
     }
 
     // Programa un play: 'seq' lo identifica (originOf) y 'notes' van en segundos desde su origen. Llamar antes a canSchedule
@@ -44,13 +55,16 @@ public:
     {
         if (! canSchedule ((int) notes.size()))
             return false;
-        push ({ Command::kStart, seq, 0, 0, 0.0, 0.0 });
+        reserved.fetch_add (2 * (int) notes.size(), std::memory_order_acq_rel); // antes de publicar: el consumidor los devuelve
+        const auto gen = generation.load (std::memory_order_acquire);
+        push ({ Command::kStart, seq, gen, 0, 0, 0.0, 0.0 });
         for (const auto& n : notes)
-            push ({ Command::kNote, seq, n.note, n.velocity, n.start, n.duration });
+            push ({ Command::kNote, seq, gen, n.note, n.velocity, n.start, n.duration });
         return true;
     }
 
-    void cancel() { push ({ Command::kCancel, 0, 0, 0, 0.0, 0.0 }); }
+    // Descarta lo programado hasta ahora y suelta lo que sonaba (en el siguiente bloque). No usa la cola
+    void cancel() { generation.fetch_add (1, std::memory_order_acq_rel); }
 
     // Origen (posición en la captura de audio) del play 'seq', o -1 si el hilo de audio aún no lo ha recibido
     juce::int64 originOf (juce::uint32 seq) const
@@ -61,19 +75,16 @@ public:
 
     // --- Hilo de audio ---
 
-    // Al cambiar la frecuencia (prepareToPlay, sin process a la vez): lo pendiente se descarta y las alturas que sonaban
-    // se sueltan en el siguiente bloque
-    void reset() { dropAll = true; }
+    // PANIC o cambio de frecuencia (sin process a la vez): lo pendiente y lo que aún está en la cola se descarta, y las
+    // alturas que sonaban se sueltan en el siguiente bloque
+    void reset() { generation.fetch_add (1, std::memory_order_acq_rel); }
 
     // Añade a 'midi' los eventos de [ahora, ahora + numSamples). 'captureFrame' = posición en la captura de audio de la
     // primera muestra del bloque (para el origen que lee listen); fs = frecuencia actual
     void process (juce::MidiBuffer& midi, int numSamples, double fs, juce::uint64 captureFrame)
     {
-        if (dropAll)
-        {
-            dropAll = false;
-            releaseAll (midi);
-        }
+        if (const auto g = generation.load (std::memory_order_acquire); g != seenGen)
+            cut (midi, g);
         drain (midi, fs, captureFrame);
         const auto end = now + numSamples;
         int i = 0;
@@ -97,18 +108,19 @@ public:
             for (int k = i; k < count; ++k)
                 pending[(size_t) (k - i)] = pending[(size_t) k];
             count -= i;
+            reserved.fetch_sub (i, std::memory_order_acq_rel);
         }
-        pendingCount.store (count);
         now = end;
     }
 
     bool idle() const { return count == 0 && fifo.getNumReady() == 0; } // sin nada que entregar (hilo de audio)
+    int reservedEvents() const { return reserved.load(); }             // créditos en uso (pruebas)
 
 private:
     struct Command
     {
-        enum Kind { kStart, kNote, kCancel } kind;
-        juce::uint32 seq;
+        enum Kind { kStart, kNote } kind;
+        juce::uint32 seq, gen;
         int note, velocity;
         double start, duration;
     };
@@ -146,6 +158,15 @@ private:
 
     void apply (const Command& c, juce::MidiBuffer& midi, double fs, juce::uint64 captureFrame)
     {
+        const auto age = (juce::int32) (c.gen - seenGen); // diferencia con signo: vale aunque el contador dé la vuelta
+        if (age < 0) // de antes de un corte: fuera, y devuelve sus créditos
+        {
+            if (c.kind == Command::kNote)
+                reserved.fetch_sub (2, std::memory_order_acq_rel);
+            return;
+        }
+        if (age > 0) // publicado tras un corte que este bloque aún no había visto (leyó 'generation' antes): el corte primero
+            cut (midi, c.gen);
         switch (c.kind)
         {
             case Command::kStart:
@@ -160,16 +181,14 @@ private:
                 insert ({ off, nextOrder++, (juce::uint8) c.note, 0, false });
                 break;
             }
-            case Command::kCancel:
-                count = 0;
-                releaseAll (midi);
-                break;
         }
     }
 
-    // Inserción ordenada por (muestra, note-off antes que note-on, orden de llegada). Sin hueco (no ocurre: canSchedule)
+    // Inserción ordenada por (muestra, note-off antes que note-on, orden de llegada). Siempre hay hueco: los créditos lo
+    // reservaron al aceptar el play (invariante de la cabecera)
     void insert (const Event& e)
     {
+        jassert (count < maxPending);
         if (count >= maxPending)
             return;
         const auto before = [] (const Event& a, const Event& b)
@@ -188,8 +207,11 @@ private:
         ++count;
     }
 
-    void releaseAll (juce::MidiBuffer& midi)
+    // Corte: adopta la generación 'g', descarta lo pendiente (devuelve sus créditos) y suelta lo que sonaba
+    void cut (juce::MidiBuffer& midi, juce::uint32 g)
     {
+        seenGen = g;
+        reserved.fetch_sub (count, std::memory_order_acq_rel);
         count = 0;
         for (int n = 0; n < 128; ++n)
             if (active[(size_t) n] > 0)
@@ -207,10 +229,10 @@ private:
     int count = 0;
     std::array<int, 128> active {};
     juce::int64 now = 0, origin = 0;
-    juce::uint32 nextOrder = 0;
-    std::atomic<bool> dropAll { false };
-    // Publicado al hilo de mensajes
-    std::atomic<int> pendingCount { 0 };
+    juce::uint32 nextOrder = 0, seenGen = 0;
+    // Compartido entre los dos hilos
+    std::atomic<int> reserved { 0 };            // eventos aceptados aún no entregados ni descartados (cola + pendientes)
+    std::atomic<juce::uint32> generation { 0 }; // sube con cada corte (cancel, reset)
     // Último play recibido: número (24 bits) y origen (40 bits: 2^40 muestras = 132 días a 96 kHz)
     static constexpr int frameBits = 40;
     static constexpr juce::uint64 frameMask = (juce::uint64 (1) << frameBits) - 1, seqMask = (1u << 24) - 1, noOrigin = ~juce::uint64 (0);
