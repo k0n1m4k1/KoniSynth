@@ -76,7 +76,7 @@ async def run():
                   "con seqOn el secuenciador sustituye al arpegiador: %s" % c["noteTransforms"])
             a = await tool("audition", {"notes": "C4", "duration": 0.2, "tail": 0.1})
             check(len(a.get("transforms", [])) == 2, "audition también lo avisa: %s" % a.get("transforms"))
-            check(c["capturePoint"].startswith("final output"), "punto de captura: %s" % c["capturePoint"])
+            check(c["capturePoints"]["output"].startswith("final output") and "engine" in c["capturePoints"], "puntos de captura: %s" % c["capturePoints"])
             await s.call_tool("stop_notes", {})
             await s.call_tool("load_preset", {"name": "Init"})
 

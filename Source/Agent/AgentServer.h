@@ -46,7 +46,10 @@
 //            (instante 0 de sus start, conservando el silencio inicial; es la muestra exacta del origen del planificador,
 //            sin depender del hilo de mensajes). Devuelve ruta, frecuencia, fotogramas pedidos y
 //            capturados, posición de inicio, pico, "partial" si se capturó menos de lo pedido y "truncated" con el motivo
-//            ("notYetWritten": aún sonando, repetir; "notEnoughAudio": la captura empezó hace menos de N s)
+//            ("notYetWritten": aún sonando, repetir; "notEnoughAudio": la captura empezó hace menos de N s).
+//            "point": "output" (por defecto: salida final, tras efectos, Gain y limitador, más el audio del transporte) o
+//            "engine" (salida del motor con sus efectos propios, antes de vocoder, monitor de entrada, cadena de efectos,
+//            Gain y limitador; mismas posiciones que output)
 class AgentServer : private juce::Thread
 {
 public:
@@ -267,7 +270,8 @@ private:
         if (cmd == "save_preset") return savePreset (req, error);
         if (cmd == "play")        return play (req, error);
         if (cmd == "stop_notes")  { host.scheduler.cancel(); host.keyboard.allNotesOff (0); return true; } // y lo programado
-        if (cmd == "listen")      return listen (req.getProperty ("seconds", 2.0), (bool) req.getProperty ("fromPlay", false), error);
+        if (cmd == "listen")      return listen (req.getProperty ("seconds", 2.0), (bool) req.getProperty ("fromPlay", false),
+                                                 req.getProperty ("point", "output").toString(), error);
         error = "unknown cmd: " + cmd;
         return {};
     }
@@ -359,7 +363,10 @@ private:
             o->setProperty ("displayBpmFromHost", c.displayFromHost);
         }
         o->setProperty ("noteTransforms", noteTransforms());
-        o->setProperty ("capturePoint", "final output: after all effects and the limiter, plus audio played by the transport");
+        auto points = std::make_unique<juce::DynamicObject>(); // los dos puntos de listen
+        points->setProperty ("output", outputPointText);
+        points->setProperty ("engine", enginePointText);
+        o->setProperty ("capturePoints", juce::var (points.release()));
         return juce::var (o.release());
     }
 
@@ -724,8 +731,17 @@ private:
         return juce::var (o.release());
     }
 
-    juce::var listen (const juce::var& secondsVar, bool fromPlay, juce::String& error)
+    static constexpr const char* outputPointText = "final output: after all effects, Gain and the limiter, plus audio played by the transport";
+    static constexpr const char* enginePointText = "engine output with its own built-in effects (e.g. SNES echo, MT-32 reverb), before the "
+                                                   "vocoder, input monitor, effect chain, Gain and limiter";
+
+    juce::var listen (const juce::var& secondsVar, bool fromPlay, const juce::String& point, juce::String& error)
     {
+        if (point != "output" && point != "engine")
+        {
+            error = "point must be \"output\" or \"engine\"";
+            return {};
+        }
         double seconds = 0.0;
         if (! finiteNumber (secondsVar, seconds) || seconds < 0.05 || seconds > maxListenSeconds)
         {
@@ -752,7 +768,7 @@ private:
         }
         else
             start = written > (juce::uint64) requested ? written - (juce::uint64) requested : 0;
-        auto audio = tap.range (start, requested);
+        auto audio = tap.range (start, requested, point == "engine");
         if (audio.getNumSamples() == 0) { error = "no audio captured yet (is the audio device running?)"; return {}; }
         if (audio.getNumSamples() < requested)
             truncated = fromPlay ? "notYetWritten" : "notEnoughAudio";
@@ -778,6 +794,7 @@ private:
         }
         auto o = std::make_unique<juce::DynamicObject>();
         o->setProperty ("path", file.getFullPathName());
+        o->setProperty ("point", point);
         o->setProperty ("sampleRate", sr);
         o->setProperty ("seconds", (double) audio.getNumSamples() / sr);
         o->setProperty ("requestedFrames", requested);

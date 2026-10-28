@@ -163,6 +163,40 @@ async def run():
                     check(False, "servidor: listen %s s aceptado" % secs)
                 except Exception as ex:  # noqa: BLE001
                     check("0.05" in str(ex), "servidor: listen %s s rechazado: %s" % (secs, ex))
+
+            # --- Punto de captura "engine" (antes de lo añadido) frente a "output", sobre el mismo play ---
+            async def both(notes, tail):
+                out = await tool("audition", {"notes": notes, "duration": 0.4, "tail": tail})
+                eng = link.call("listen", seconds=out["capture"]["requested_s"], fromPlay=True, point="engine")
+                xo, _ = read_wav(out["wav"])
+                xe, _ = read_wav(eng["path"])
+                return out, eng, xo, xe
+
+            def tail_db(x, fs_, from_s):
+                return 20 * np.log10(max(np.abs(x[int(from_s * fs_):]).max(), 1e-9))
+
+            await s.call_tool("load_preset", {"name": "Init"})
+            gain = (await tool("get_parameters", {"ids": ["gain"]}))["gain"]["value"]
+            out, eng, xo, xe = await both("A4", 0.4)
+            n = min(len(xo), len(xe))
+            err = np.abs(xo[:n] - gain * xe[:n]).max()
+            check(eng["point"] == "engine" and out["capture"]["point"] == "output" and len(xo) == len(xe) and err < 1e-6,
+                  "Init sin efectos: salida = motor × Gain (%.2f) en las mismas muestras; error máximo %.2e" % (gain, err))
+            await s.call_tool("set_parameters", {"values": {"ambientOn": True, "reverbDecay": "3 s"}})
+            out, eng, xo, xe = await both("A4", 1.0)
+            fs_ = out["capture"]["sample_rate"]
+            to, te = tail_db(xo, fs_, 0.9), tail_db(xe, fs_, 0.9)
+            check(to > -60 and te < to - 40, "reverb añadida: cola tras el release %.1f dBFS en output, %.1f dBFS en engine" % (to, te))
+            await s.call_tool("load_preset", {"name": "Init"})
+            await s.call_tool("set_parameters", {"values": {"engine": "SNES", "snesEcho": False}})
+            _, _, _, dry_off = await both("A4", 1.0)
+            await s.call_tool("set_parameters", {"values": {"snesEcho": True}})
+            _, eng, _, dry_on = await both("A4", 1.0)
+            fs_ = eng["sampleRate"]
+            a, b = tail_db(dry_off, fs_, 0.9), tail_db(dry_on, fs_, 0.9)
+            check(b > a + 20, "eco nativo del SNES en la captura engine: cola %.1f dBFS sin eco, %.1f dBFS con eco" % (a, b))
+            st = (await tool("status", {}))["clock"]["capturePoints"]
+            check(set(st) == {"output", "engine"}, "status describe los dos puntos de captura")
             await s.call_tool("load_preset", {"name": "Init"})
 
 

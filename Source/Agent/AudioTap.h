@@ -10,8 +10,11 @@
 // control desactivado ese puntero es nulo y processBlock no hace más que leerlo (una carga atómica por bloque). El objeto,
 // una vez creado, no se destruye hasta destruir el procesador.
 // Un escritor (hilo de audio) sin bloqueos; lectores en el hilo de mensajes. Capacidad: 12 s a la frecuencia de trabajo
-// (mínimo 48 kHz): 4,6 MB a 48 kHz estéreo. Leer N s (máximo 10) mientras el audio avanza es seguro mientras la lectura
-// tarde menos que (12 s - N s), porque el escritor solo pisa lo que tiene delante.
+// (mínimo 48 kHz), dos señales estéreo: 9,2 MB a 48 kHz. Leer N s (máximo 10) mientras el audio avanza es seguro mientras
+// la lectura tarde menos que (12 s - N s), porque el escritor solo pisa lo que tiene delante.
+// Dos puntos de captura con las mismas posiciones: "output", la salida final (canales 0-1, push), y "engine", la salida del
+// motor con sus efectos propios (eco del SNES, reverb del MT-32...) antes de vocoder, monitor de entrada, cadena de efectos,
+// Gain y limitador (canales 2-3, pushEngine, en la posición del bloque que push cierra después).
 // Cambio de frecuencia (prepare): se vacía (no se mezclan muestras de dos tasas), se vuelve a reservar si 12 s ya no caben y
 // sube 'epoch' para que una posición anterior no se lea como de la captura nueva. Ocurre en prepareToPlay, sin push a la vez
 // (el host no llama a processBlock mientras prepara); los lectores se excluyen con 'lock', que push nunca toma.
@@ -46,10 +49,11 @@ public:
             return;
         if (const auto needed = secondsKept * juce::jmax (48000, juce::roundToInt (sr)); needed > capacity)
         {
-            data.setSize (2, needed);
+            data.setSize (4, needed);
             capacity = needed;
         }
         data.clear();
+        engineWritten = false;
         write.store (0, std::memory_order_release);
         rate.store (sr);
         ++epoch;
@@ -59,12 +63,29 @@ public:
     int capacityFrames() const { return capacity; }
     juce::uint32 epochNumber() const { return epoch.load(); } // cambia cada vez que la captura se vacía (otra frecuencia)
 
-    // Hilo de audio. Sin asignaciones ni bloqueos
+    // Hilo de audio, antes de push en el mismo bloque: la salida del motor (canales 2-3) en las posiciones de este bloque
+    void pushEngine (const juce::AudioBuffer<float>& buffer)
+    {
+        write2 (buffer, 2);
+        engineWritten = true;
+    }
+
+    // Hilo de audio. Sin asignaciones ni bloqueos. Cierra el bloque: la salida final (canales 0-1) y avanza la posición
     void push (const juce::AudioBuffer<float>& buffer, Clock c)
     {
         const auto n = buffer.getNumSamples();
-        const auto chans = buffer.getNumChannels();
         auto pos = write.load (std::memory_order_relaxed);
+        if (! engineWritten) // un bloque sin pushEngine: silencio en vez de lo que hubiera hace 12 s
+            for (int i = 0; i < n;)
+            {
+                const auto at = (int) ((pos + (juce::uint64) i) % (juce::uint64) capacity);
+                const auto chunk = juce::jmin (n - i, capacity - at);
+                data.clear (2, at, chunk);
+                data.clear (3, at, chunk);
+                i += chunk;
+            }
+        engineWritten = false;
+        write2 (buffer, 0);
         // Reloj con seqlock: el contador es impar mientras se escribe y el lector repite si cambia (el escritor no espera)
         c.frame = pos;
         c.blockSize = n;
@@ -73,16 +94,7 @@ public:
         std::atomic_thread_fence (std::memory_order_release);
         std::memcpy (&clockData, &c, sizeof (Clock));
         clockSeq.fetch_add (1, std::memory_order_release);
-        for (int i = 0; i < n;)
-        {
-            const auto chunk = juce::jmin (n - i, capacity - (int) (pos % (juce::uint64) capacity));
-            const auto at = (int) (pos % (juce::uint64) capacity);
-            for (int ch = 0; ch < 2; ++ch)
-                data.copyFrom (ch, at, buffer, juce::jmin (ch, chans - 1), i, chunk);
-            pos += (juce::uint64) chunk;
-            i += chunk;
-        }
-        write.store (pos, std::memory_order_release);
+        write.store (pos + (juce::uint64) n, std::memory_order_release);
     }
 
     juce::uint64 framesWritten() const { return write.load (std::memory_order_acquire); }
@@ -104,9 +116,10 @@ public:
         return {}; // sin copia estable (no ocurre a ritmo de bloque): valid = false
     }
 
-    // Hilo de mensajes: 'frames' fotogramas desde la posición absoluta 'start'. Devuelve lo ya escrito (puede ser menos:
-    // el resto aún no ha sonado); vacío si 'start' no se ha escrito todavía o ya se ha pisado (más de 12 s atrás)
-    juce::AudioBuffer<float> range (juce::uint64 start, int frames) const
+    // Hilo de mensajes: 'frames' fotogramas desde la posición absoluta 'start', de la salida final o (engine) de la del motor.
+    // Devuelve lo ya escrito (puede ser menos: el resto aún no ha sonado); vacío si 'start' no se ha escrito todavía o ya se
+    // ha pisado (más de 12 s atrás)
+    juce::AudioBuffer<float> range (juce::uint64 start, int frames, bool engine = false) const
     {
         const juce::ScopedLock sl (lock);
         const auto end = write.load (std::memory_order_acquire);
@@ -120,7 +133,7 @@ public:
             const auto at = (int) (pos % (juce::uint64) capacity);
             const auto chunk = juce::jmin (n - i, capacity - at);
             for (int ch = 0; ch < 2; ++ch)
-                out.copyFrom (ch, i, data, ch, at, chunk);
+                out.copyFrom (ch, i, data, (engine ? 2 : 0) + ch, at, chunk);
             pos += (juce::uint64) chunk;
             i += chunk;
         }
@@ -128,7 +141,24 @@ public:
     }
 
 private:
+    // Copia el bloque en dos canales del anillo desde 'first', en las posiciones del bloque actual (sin avanzar). Mono -> L=R
+    void write2 (const juce::AudioBuffer<float>& buffer, int first)
+    {
+        const auto n = buffer.getNumSamples();
+        const auto chans = buffer.getNumChannels();
+        const auto pos = write.load (std::memory_order_relaxed);
+        for (int i = 0; i < n;)
+        {
+            const auto at = (int) ((pos + (juce::uint64) i) % (juce::uint64) capacity);
+            const auto chunk = juce::jmin (n - i, capacity - at);
+            for (int ch = 0; ch < 2; ++ch)
+                data.copyFrom (first + ch, at, buffer, juce::jmin (ch, chans - 1), i, chunk);
+            i += chunk;
+        }
+    }
+
     int capacity = 0;
+    bool engineWritten = false; // hilo de audio: pushEngine ya escribió este bloque
     juce::AudioBuffer<float> data;
     std::atomic<juce::uint64> write { 0 };
     std::atomic<double> rate { 0.0 };

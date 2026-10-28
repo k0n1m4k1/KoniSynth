@@ -699,6 +699,10 @@ public:
         oplWasOn = oplOn;
         mt32WasOn = mt32On;
 
+        // Captura "engine" del agente: la salida del motor con sus efectos propios, antes de todo lo añadido (Agent/AudioTap.h)
+        if (auto* tap = agentTapActive.load (std::memory_order_acquire))
+            tap->pushEngine (buffer);
+
         // Vocoder: la salida del motor es la portadora y la entrada la moduladora
         const auto vocoderOn = params.vocoderOn->load() > 0.5f;
         if (vocoderOn)

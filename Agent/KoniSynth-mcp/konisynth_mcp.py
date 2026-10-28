@@ -315,16 +315,22 @@ def _measured(cap: dict[str, Any]) -> dict[str, Any]:
     _last_capture.update(cap)
     sr = float(cap["sampleRate"])
     capture = {"requested_s": round(cap["requestedFrames"] / sr, 4), "captured_s": round(cap["capturedFrames"] / sr, 4),
-               "sample_rate": sr, "partial": bool(cap.get("partial"))}
+               "sample_rate": sr, "partial": bool(cap.get("partial")), "point": cap.get("point", "output")}
     if cap.get("truncated"):
         capture["truncated"] = cap["truncated"]
     return {"wav": cap["path"], "capture": capture, **analysis.analyze(cap["path"])}
 
 
-def _listen(seconds: float, port: int | None) -> dict[str, Any]:
+def _point(point: str) -> str:
+    if point not in ("output", "engine"):
+        raise ToolError('point must be "output" or "engine"')
+    return point
+
+
+def _listen(seconds: float, port: int | None, point: str = "output") -> dict[str, Any]:
     if not 0.05 <= seconds <= MAX_LISTEN_S:
         raise ToolError(f"seconds must be 0.05..{MAX_LISTEN_S:g}")
-    return _measured(link.call("listen", port=port, seconds=seconds))
+    return _measured(link.call("listen", port=port, seconds=seconds, point=_point(point)))
 
 
 @mcp.tool(annotations=PLAY)
@@ -347,13 +353,16 @@ def stop_notes(port: int | None = None) -> bool:
 
 @mcp.tool(annotations=PLAY)
 def audition(notes: str | list[dict[str, Any]] = "C4", duration: float = 1.0, velocity: int = 100, tail: float = 0.6,
-             bpm: float | None = None, port: int | None = None) -> dict[str, Any]:
+             bpm: float | None = None, point: str = "output", port: int | None = None) -> dict[str, Any]:
     """Play notes, wait for them to finish plus `tail` seconds (release, echo, reverb) and measure the result: pitch
     (Hz, note, cents), level (dBFS), envelope (attack, decay), spectrum (centroid, rolloff, flatness, octave bands,
     harmonics) and stereo. The capture starts at the notes' time 0 (a late first note keeps its leading silence) and
     lasts until the last note ends plus `tail`; that total must be at most 10 s (longer requests are rejected before
     playing). With `bpm`, start and duration are beats as in play_notes (`tail` stays in seconds). Also returns the WAV
-    path and `capture` (requested and captured seconds, partial/truncated)."""
+    path and `capture` (requested and captured seconds, partial/truncated). `point`: "output" (default, what you hear:
+    after effects, Gain and limiter) or "engine" (the engine with its own built-in effects such as SNES echo or MT-32
+    reverb, before the vocoder, input monitor, added effects, Gain and limiter: to judge the raw sound)."""
+    point = _point(point)
     seq = _notes(notes, duration, velocity)
     tempo = _tempo(bpm)
     try:
@@ -370,7 +379,7 @@ def audition(notes: str | list[dict[str, Any]] = "C4", duration: float = 1.0, ve
     # Captura desde el origen del play (la muestra en que el planificador de KoniSynth lo recibió, no el reloj de aquí):
     # si aún no se han escrito los segundos pedidos, se espera
     for _ in range(20):
-        cap = link.call("listen", port=port, seconds=max(0.05, total), fromPlay=True)
+        cap = link.call("listen", port=port, seconds=max(0.05, total), fromPlay=True, point=point)
         if cap.get("truncated") != "notYetWritten":
             break
         time.sleep(0.1)
@@ -381,10 +390,11 @@ def audition(notes: str | list[dict[str, Any]] = "C4", duration: float = 1.0, ve
 
 
 @mcp.tool(annotations=READ)
-def listen(seconds: float = 2.0, port: int | None = None) -> dict[str, Any]:
+def listen(seconds: float = 2.0, point: str = "output", port: int | None = None) -> dict[str, Any]:
     """Measure the last `seconds` (0.05-10) of KoniSynth's output, whatever is sounding (e.g. the user playing).
-    `capture` says how much was captured (less than requested if the audio started less than `seconds` ago)."""
-    return _listen(seconds, port)
+    `point` as in audition ("output" or "engine": before the added effects). `capture` says how much was captured
+    (less than requested if the audio started less than `seconds` ago) and from which point."""
+    return _listen(seconds, port, point)
 
 
 @mcp.tool(annotations=READ)
