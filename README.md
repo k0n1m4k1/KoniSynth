@@ -86,13 +86,13 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 - **Audio input and vocoder:** a microphone or line input can go through the effects chain, or be the modulator of a channel
   vocoder (VP-330 with 10 bands, 16 or 32 bands) with any engine as the carrier.
 - **Transport:** record the session to WAV, play audio files, import (also SysEx) and export MIDI.
-- **Presets:** 355 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
+- **Presets:** 432 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
   favorites in your own order (keys 1-9 load the first nine) and a searchable browser with filters by category and engine.
   Presets say how to play them (on the display and in the browser) and grey out the keys outside their recommended range.
   Presets that use your own files tell you when one is missing. User presets can be exported (one as `.xml`, all as a
   `.zip` bank) and imported from the browser.
 - **Your own content:** samples (WAV, AIFF, FLAC), SoundFont zones, SNES BRR/SPC, DX7 SysEx banks, impulse responses, Roland
-  MT-32 ROMs. None of them is included; you supply them.
+  MT-32 ROMs. You supply them; KoniSynth only includes three original samples, used by its factory presets.
 - **User rhythms:** 8 rhythms of your own for the Drum Machine, the Omnichord (with its auto bass) and the Casio VL-1,
   drawn in a rhythm editor or in any sequencer: each one is a MIDI file (see [User rhythms](docs/user-rhythms.md)).
 - **MIDI controllers:** setup profiles for the M-Audio Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425 and Yamaha reface YC;

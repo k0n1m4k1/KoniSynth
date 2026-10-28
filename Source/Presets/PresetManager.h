@@ -20,6 +20,9 @@ public:
         int engine = 0; // índice del parámetro "engine" que deja el preset (navegador: filtro por motor)
         juce::String playHint; // cómo tocarlo (FactoryPreset::playHint; en los de usuario, el que se guardó con él)
         int playLow = -1, playHigh = -1; // rango recomendado (notas MIDI; -1 = sin rango)
+        // Categoría escrita en el fichero si no es una de presetCategories() (preset de una versión posterior): la lista lo
+        // muestra en Init, pero Save la conserva en vez de reescribirla como Init. Vacía si es conocida
+        juce::String unknownCategory {};
         // Fuentes del motor Synth que suenan (nivel > 0): un sample incrustado ("factory:...", fuente Sample u Osc 2 en modo
         // Sample) y la cuerda String. Las listas lo marcan tras el nombre: "(sa)", "(st)"
         bool embeddedSample = false, stringSource = false;
@@ -103,9 +106,9 @@ public:
                 engine = juce::roundToInt (xml->hasAttribute ("engine") ? xml->getDoubleAttribute ("engine")
                                                                         : (xml->getDoubleAttribute ("thereminOn") > 0.5 ? 1.0 : 0.0));
             }
-            if (! presetCategories().contains (category))
-                category = "Init";
-            presets.push_back ({ f.getFileNameWithoutExtension(), false, f, category, engine, hint, low, high });
+            const auto known = presetCategories().contains (category);
+            presets.push_back ({ f.getFileNameWithoutExtension(), false, f, known ? category : juce::String ("Init"), engine, hint, low, high,
+                                 known ? juce::String() : category });
             if (xml != nullptr && xml->hasTagName (xmlTag))
                 markSources (presets.back(), [&xml] (const char* id, float def) { return (float) xml->getDoubleAttribute (id, def); },
                              xml->getStringAttribute (sampleAttribute), xml->getStringAttribute (osc2SampleAttribute));
@@ -424,7 +427,7 @@ public:
             return juce::Result::fail ("Only user presets can be overwritten.");
 
         const auto& current = presets[(size_t) currentIndex()];
-        if (auto r = write (current.file, current.category); r.failed())
+        if (auto r = write (current.file, current.unknownCategory.isNotEmpty() ? current.unknownCategory : current.category); r.failed())
             return r;
 
         refresh(); // la indicación y el rango guardados pasan a la lista (navegador, display)

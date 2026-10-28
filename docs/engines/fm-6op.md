@@ -146,17 +146,17 @@ off by default.
 |---|---|
 | FM E.Piano | Keys |
 | FM Bells | Keys |
-| FM Tubular Bells | Keys |
-| FM Organ | Keys |
-| Tonewheel Organ B3 | Keys |
+| FM Tubular Bells | Mallets |
+| FM Organ | Organ |
+| Tonewheel Organ B3 | Organ |
 | DX7 E.Piano 1 | Keys |
-| Leslie Organ | Keys |
+| Leslie Organ | Organ |
 | FM Brass | Brass |
 | FM Bass | Bass |
 | DX7 Bass 1 | Bass |
 | FM Glass Pad | Pad |
 | FM Ensemble Strings | Strings |
-| FM Marimba | Pluck |
+| FM Marimba | Mallets |
 | FM Bleep | Lead |
 | Industrial Metal Hit | Drums |
 | House Piano Stab FM | Keys |

@@ -130,7 +130,7 @@ Optional "nicer" setting: Model = Clean (no analog filter). Defaults are Model 1
 | MD GEMS-Style Bass | Bass |
 | MD Grand Piano | Keys |
 | MD E.Piano | Keys |
-| MD Tubular Bells | Keys |
+| MD Tubular Bells | Mallets |
 | MD Synth Brass | Brass |
 | MD Additive Pad | Pad |
 

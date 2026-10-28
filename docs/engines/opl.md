@@ -111,7 +111,7 @@ Optional "nicer" settings: none. The code defines no beautification switch for t
 | Preset | Category |
 |---|---|
 | OPL2 E.Piano | Keys |
-| OPL2 Organ | Keys |
+| OPL2 Organ | Organ |
 | OPL2 Bass | Bass |
 | OPL2 Strings | Strings |
 | OPL3 Square Bass | Bass |
