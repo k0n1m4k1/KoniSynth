@@ -241,7 +241,8 @@ def set_parameters(values: dict[str, str | float], port: int | None = None) -> d
 
 @mcp.tool(annotations=READ)
 def list_presets(category: str = "", match: str = "", port: int | None = None) -> list[dict[str, Any]]:
-    """List presets (index, name, category, factory or user), optionally filtered by category and/or a name fragment."""
+    """List presets (index, name, category, factory or user, engine, and when the preset has them: playHint = how to play it,
+    playLow/playHigh = recommended range as MIDI notes, 60 = C4), optionally filtered by category and/or a name fragment."""
     presets = link.call("presets", port=port)
     cat, m = category.lower().strip(), match.lower().strip()
     return [p for p in presets if (not cat or p["category"].lower() == cat) and (not m or m in p["name"].lower())]

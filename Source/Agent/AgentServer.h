@@ -22,7 +22,8 @@
 //   set      {"values": {"cutoff": "2 kHz", "resonance": 0.4, "wave": {"normalized": 0.66}}}   texto = formato del
 //            parámetro; número = valor real; {"normalized": x} = posición 0..1 del control (F4: mutaciones).
 //            Todo el lote es un solo paso de deshacer
-//   presets  {}                             lista (índice, nombre, categoría, fábrica/usuario)
+//   presets  {}                             lista (índice, nombre, categoría, fábrica/usuario, motor, playHint y rango
+//            recomendado playLow-playHigh en notas MIDI si los tiene)
 //   load_preset {"index": 12} | {"name": "Acid Bass"}
 //   save_preset {"name": "...", "category": "Bass"}
 //   play     {"notes": [{"note": "C4" | 60, "velocity": 100, "start": 0.0, "duration": 1.0}, ...]}   (F3) por el teclado
@@ -338,13 +339,24 @@ private:
     {
         juce::Array<juce::var> list;
         const auto& all = host.presets.getPresets();
+        const auto* engines = dynamic_cast<juce::AudioParameterChoice*> (host.apvts.getParameter ("engine"));
         for (size_t i = 0; i < all.size(); ++i)
         {
+            const auto& p = all[i];
             auto o = std::make_unique<juce::DynamicObject>();
             o->setProperty ("index", (int) i);
-            o->setProperty ("name", all[i].name);
-            o->setProperty ("category", all[i].category);
-            o->setProperty ("factory", all[i].factory);
+            o->setProperty ("name", p.name);
+            o->setProperty ("category", p.category);
+            o->setProperty ("factory", p.factory);
+            // Motor, cómo tocarlo y rango recomendado (los metadatos del navegador; sin rango, no se envía)
+            o->setProperty ("engine", engines != nullptr ? engines->choices[p.engine] : juce::String (p.engine));
+            if (p.playHint.isNotEmpty())
+                o->setProperty ("playHint", p.playHint);
+            if (p.playLow >= 0 && p.playHigh >= p.playLow)
+            {
+                o->setProperty ("playLow", p.playLow); // notas MIDI (60 = C4)
+                o->setProperty ("playHigh", p.playHigh);
+            }
             list.add (juce::var (o.release()));
         }
         return list;

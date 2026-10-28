@@ -82,7 +82,7 @@ registration in your agent stays valid: the paths do not change.
 | `describe_parameters(match)` | Id, name, value, range, options and help of matching parameters (without `match`: groups and counts) |
 | `get_parameters(ids)` | Current displayed values |
 | `set_parameters(values)` | Batch change; text in the parameter's format ("2 kHz", "Saw") or real numbers; one undo step |
-| `list_presets(category, match)` / `load_preset` / `save_preset` | Presets |
+| `list_presets(category, match)` / `load_preset` / `save_preset` | Presets (the list gives the engine, how to play it and the recommended range) |
 | `play_notes(notes)` / `stop_notes` | Play a note, a chord ("C4 E4 G4") or a timed list through the virtual keyboard / release all notes and cancel the scheduled ones |
 | `audition(notes, duration, tail)` | Play and measure: pitch and pitch curve (glide, vibrato, drift), level, envelope, spectrum (centroid, rolloff, flatness, octave bands, harmonics), stereo |
 | `listen(seconds)` | Measure the last seconds of output, whatever is sounding (also the user playing) |
