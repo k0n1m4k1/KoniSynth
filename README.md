@@ -214,9 +214,13 @@ Windows, Linux and macOS: [docs/BUILDING.md](docs/BUILDING.md).
 | `test_mt32.py` | MT-32 without valid ROMs is silent and safe; with `KONI_MT32_ROMS_REAL` it checks that it sounds |
 | `test_ui_reach.py` | Every parameter and every engine is reachable from the interface; one dropdown per section |
 | `test_rhythms.py` | A user rhythm (MIDI file) with the same pattern as a factory one sounds the same on the Drum Machine, Omnichord (with its bass) and VL-1 |
+| `test_panic.py` | PANIC silences every engine and effect tail; self-running rhythms stay stopped until the next note |
 
-The VST3 also passes [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10. `KoniBench` (in `Bench/`)
-renders the plugin offline from the command line, for measurements.
+The VST3 also passes [pluginval](https://github.com/Tracktion/pluginval) at strictness level 10, and the CLAP passes
+[clap-validator](https://github.com/free-audio/clap-validator) 0.4.1 with no failures: 33 tests pass and 10 are skipped because
+they do not apply (preset discovery, 64-bit audio, configurable audio ports, Unix-only loading); the only warning is that
+random bytes given as a state load without error (the plug-in does not crash). `KoniBench` (in `Bench/`) renders the plugin
+offline from the command line, for measurements.
 
 ## License
 

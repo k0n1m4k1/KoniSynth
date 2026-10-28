@@ -88,8 +88,8 @@ signature and notarization, macOS Gatekeeper blocks the plugin until its quarant
 ## Tests
 
 ```
-python Tests/run_all.py                 # 9 suites (see README); needs KoniSynth_VST3 + KoniBench in Release and numpy
-CLAP_VALIDATOR=<path> python Tests/run_all.py   # also runs clap-validator
+python Tests/run_all.py                 # 10 suites (see README); needs KoniSynth_VST3 + KoniBench in Release and numpy
+CLAP_VALIDATOR=<path> python Tests/run_all.py   # also runs clap-validator on KoniSynth_CLAP (0 failures with 0.4.1)
 ```
 
 The test scripts run on Windows (they expect `build/.../KoniBench.exe`, see `Tests/common.py`); KoniBench has not been built on
