@@ -20,7 +20,29 @@ public:
         int engine = 0; // índice del parámetro "engine" que deja el preset (navegador: filtro por motor)
         juce::String playHint; // cómo tocarlo (FactoryPreset::playHint; en los de usuario, el que se guardó con él)
         int playLow = -1, playHigh = -1; // rango recomendado (notas MIDI; -1 = sin rango)
+        // Fuentes del motor Synth que suenan (nivel > 0): un sample incrustado ("factory:...", fuente Sample u Osc 2 en modo
+        // Sample) y la cuerda String. Las listas lo marcan tras el nombre: "(sa)", "(st)"
+        bool embeddedSample = false, stringSource = false;
+
+        juce::String displayName() const
+        {
+            return name + (embeddedSample ? " (sa)" : "") + (stringSource ? " (st)" : "");
+        }
     };
+
+    // get (id, valor por defecto): valor real de un parámetro del preset. samplePath y osc2SamplePath: sus ficheros ("factory:"
+    // = incrustado, SampleImport::factoryPrefix; esa cabecera se incluye después de esta)
+    template <typename Get>
+    static void markSources (Preset& p, Get&& get, const juce::String& samplePath, const juce::String& osc2SamplePath)
+    {
+        if (juce::roundToInt (get ("engine", 0.0f)) != 0)
+            return;
+        p.embeddedSample = (get ("sampleLevel", 0.0f) > 0.0f && samplePath.startsWith ("factory:"))
+                        || (juce::roundToInt (get ("osc2Wave", 2.0f)) == osc2WaveSample && get ("osc2Level", 0.0f) > 0.0f
+                            && osc2SamplePath.startsWith ("factory:"));
+        p.stringSource = get ("stringLevel", 0.0f) > 0.0f;
+    }
+    static constexpr int osc2WaveSample = 11; // osc2Wave: Sample, la última opción (formato 4)
 
     // Cómo tocar el preset actual: propiedades del estado (no son parámetros). Las fija la carga de un preset, se pueden
     // editar desde el teclado en pantalla (cuentan como cambio sin guardar, "*") y las escribe Save / Save As
@@ -56,6 +78,12 @@ public:
             for (const auto& v : f.values)
                 if (v.id == "engine") engine = juce::roundToInt (v.value);
             presets.push_back ({ f.name, true, {}, f.category, engine, f.playHint, f.playLow, f.playHigh });
+            markSources (presets.back(), [&f] (const char* id, float def)
+                         {
+                             for (const auto& v : f.values)
+                                 if (v.id == id) return v.value;
+                             return def;
+                         }, f.samplePath, f.osc2SamplePath);
         }
 
         auto files = userDirectory().findChildFiles (juce::File::findFiles, false, "*.xml");
@@ -65,7 +93,8 @@ public:
             // Categoría del preset de usuario: atributo presetCategory (sin él, presets anteriores -> "Init")
             juce::String category ("Init"), hint;
             int engine = 0, low = -1, high = -1;
-            if (const auto xml = juce::XmlDocument::parse (f); xml != nullptr && xml->hasTagName (xmlTag))
+            const auto xml = juce::XmlDocument::parse (f);
+            if (xml != nullptr && xml->hasTagName (xmlTag))
             {
                 category = xml->getStringAttribute (categoryAttribute, "Init");
                 hint = xml->getStringAttribute (playHintAttribute);
@@ -77,6 +106,9 @@ public:
             if (! presetCategories().contains (category))
                 category = "Init";
             presets.push_back ({ f.getFileNameWithoutExtension(), false, f, category, engine, hint, low, high });
+            if (xml != nullptr && xml->hasTagName (xmlTag))
+                markSources (presets.back(), [&xml] (const char* id, float def) { return (float) xml->getDoubleAttribute (id, def); },
+                             xml->getStringAttribute (sampleAttribute), xml->getStringAttribute (osc2SampleAttribute));
         }
     }
 

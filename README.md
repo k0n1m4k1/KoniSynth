@@ -156,6 +156,7 @@ Not available yet: building requires a Mac with Xcode. See [docs/BUILDING.md](do
    - **Filters** on the left: Source (All, ★ Favorites, Factory, User), Category and Engine, each with the number of
      presets it would leave.
    - Click a row or use the arrow keys to **listen**; double-click or Enter loads it and closes the browser.
+   - `(sa)` after a name: the preset plays one of the samples built into KoniSynth; `(st)`: it uses the String source.
    - **Favorites:** click the star. The first nine show their number next to the star, and keys **1-9** load them (with
      the KoniSynth window focused, outside text fields). To reorder them: drag the rows while the table is sorted by the
      star column, or right-click a favorite (Move to top / up / down / to end), or Alt + Up / Down.

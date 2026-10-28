@@ -109,7 +109,7 @@ private:
                 if (! section.empty())
                     combo.addSectionHeading (factory ? category : "User - " + category);
                 for (const auto i : section)
-                    combo.addItem (list[i].name, (int) i + 1); // id = índice + 1 (0 = sin selección)
+                    combo.addItem (list[i].displayName(), (int) i + 1); // id = índice + 1 (0 = sin selección)
             }
 
         lastIndex = -2; // fuerza el refresco
@@ -134,9 +134,9 @@ private:
         if (index < 0)
             combo.setSelectedId (0, juce::dontSendNotification);
         else if (combo.indexOfItemId (index + 1) < 0) // oculto por el filtro de categoría
-            combo.setText (presets.getPresets()[(size_t) index].name + (dirty ? " *" : ""), juce::dontSendNotification);
+            combo.setText (presets.getPresets()[(size_t) index].displayName() + (dirty ? " *" : ""), juce::dontSendNotification);
         else if (dirty)
-            combo.setText (presets.getPresets()[(size_t) index].name + " *", juce::dontSendNotification);
+            combo.setText (presets.getPresets()[(size_t) index].displayName() + " *", juce::dontSendNotification);
         else
             combo.setSelectedId (index + 1, juce::dontSendNotification);
 

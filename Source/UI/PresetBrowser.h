@@ -362,7 +362,7 @@ private:
                 }
                 break;
             }
-            case colName:     g.drawText (p.name, 4, 0, w - 8, h, juce::Justification::centredLeft, true); break;
+            case colName:     g.drawText (p.displayName(), 4, 0, w - 8, h, juce::Justification::centredLeft, true); break;
             case colCategory: g.drawText (p.category, 4, 0, w - 8, h, juce::Justification::centredLeft, true); break;
             case colEngine:   g.drawText (engineName (p.engine), 4, 0, w - 8, h, juce::Justification::centredLeft, true); break;
             default:
