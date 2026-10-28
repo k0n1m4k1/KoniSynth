@@ -493,4 +493,18 @@ held, mid, late = env(0.30, 0.34), env(0.58, 0.62), env(0.95, 1.1)
 c.check(abs(mid / held - 0.5) < 0.06 and late < 1e-4,
         'Env Linear, Sustain 0, soltar en el decay: la cola baja en línea recta (a mitad del release %.2f del nivel al soltar, '
         'esperado 0,50) y acaba (%.1e tras el release)' % (mid / held, late))
+
+# --- Texto -> valor de Reverb Decay (segundos): "900 ms" = 0,9 s, como "0.9 s" y el número 0.9 (antes "900 ms" daba 30 s) ---
+import re
+def state_value(args, pid):
+    st = os.path.join(RENDERS, 'rt60_state.txt')
+    render(args + ['--dump-state=' + st], 0.1, [], 'rt60.wav')
+    m = re.search(rb'id="%s" value="([^"]+)"' % pid.encode(), juce_base64(open(st).read()))
+    return float(m.group(1))
+for text, want in (('0.9 s', 0.9), ('900 ms', 0.9), ('750 ms', 0.75), ('200 ms', 0.2), ('30 s', 30.0), ('50 ms', 0.2), ('40 s', 30.0)):
+    got = state_value(['Reverb Decay=' + text], 'reverbDecay')
+    c.check(abs(got - want) < 1e-3, 'Reverb Decay "%s" = %.3f s (esperado %.3f%s)'
+            % (text, got, want, '; fuera de rango: el extremo' if text in ('50 ms', '40 s') else ''))
+got = state_value(['--param=reverbDecay=0.9'], 'reverbDecay')
+c.check(abs(got - 0.9) < 1e-3, 'Reverb Decay numérico 0.9 = %.3f s' % got)
 sys.exit(c.summary())

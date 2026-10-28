@@ -835,7 +835,7 @@ static APVTS::ParameterLayout createLayout()
 
     // Reverb de placa (Dattorro 1997, ver struct PlateReverb). Se conservan los ID ambient* por compatibilidad de presets.
     auto rt60 = parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
-        { return String (v, v < 10.0f ? 2 : 1) + " s"; }));
+        { return String (v, v < 10.0f ? 2 : 1) + " s"; }), true); // en segundos: "900 ms" = 0,9 s (antes, 900 -> 30 s)
     l.add (std::make_unique<AudioParameterBool>  (ParameterID { "ambientOn", 1 },       "Reverb On", false));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "ambientSize", 1 },     "Reverb Size", NormalisableRange<float> (0.0f, 1.0f), 0.6f, percent));
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "ambientMix", 1 },      "Reverb Mix",  NormalisableRange<float> (0.0f, 1.0f), 0.3f, percent));
