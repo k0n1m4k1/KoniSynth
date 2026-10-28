@@ -20,6 +20,21 @@ class AudioTap
 public:
     static constexpr int secondsKept = 12;
 
+    // Reloj del último bloque capturado (estado de tempo para el agente). Lo rellena processBlock con lo que ya decidió: el
+    // host (solo los datos que da; nada inventado) y el tempo efectivo del arpegiador/secuenciador/sync (Params::tempoBpm)
+    struct Clock
+    {
+        bool hasBpm = false, hasPpq = false, hasTime = false, playing = false;
+        double bpm = 0.0, ppq = 0.0;     // del host, al inicio del bloque
+        juce::int64 timeSamples = 0;     // del host, al inicio del bloque
+        double tempoBpm = 0.0;           // efectivo: el del host o, sin él, Arp BPM
+        float displayBpm = 0.0f;         // el del LED de BPM de la interfaz
+        bool displayFromHost = false;
+        int blockSize = 0, latencySamples = 0;
+        juce::uint64 frame = 0;          // posición en la captura del primer fotograma de ese bloque
+        bool valid = false;              // false hasta el primer bloque
+    };
+
     explicit AudioTap (double sampleRate) { prepare (sampleRate); }
 
     // prepareToPlay (o el hilo de mensajes al crearla). Misma frecuencia: no toca nada (hay hosts que preparan a menudo)
@@ -45,11 +60,19 @@ public:
     juce::uint32 epochNumber() const { return epoch.load(); } // cambia cada vez que la captura se vacía (otra frecuencia)
 
     // Hilo de audio. Sin asignaciones ni bloqueos
-    void push (const juce::AudioBuffer<float>& buffer)
+    void push (const juce::AudioBuffer<float>& buffer, Clock c)
     {
         const auto n = buffer.getNumSamples();
         const auto chans = buffer.getNumChannels();
         auto pos = write.load (std::memory_order_relaxed);
+        // Reloj con seqlock: el contador es impar mientras se escribe y el lector repite si cambia (el escritor no espera)
+        c.frame = pos;
+        c.blockSize = n;
+        c.valid = true;
+        clockSeq.fetch_add (1, std::memory_order_acq_rel);
+        std::atomic_thread_fence (std::memory_order_release);
+        std::memcpy (&clockData, &c, sizeof (Clock));
+        clockSeq.fetch_add (1, std::memory_order_release);
         for (int i = 0; i < n;)
         {
             const auto chunk = juce::jmin (n - i, capacity - (int) (pos % (juce::uint64) capacity));
@@ -63,6 +86,23 @@ public:
     }
 
     juce::uint64 framesWritten() const { return write.load (std::memory_order_acquire); }
+
+    // Hilo de mensajes: copia coherente del reloj del último bloque
+    Clock clock() const
+    {
+        Clock c;
+        for (int tries = 0; tries < 1000; ++tries)
+        {
+            const auto s0 = clockSeq.load (std::memory_order_acquire);
+            if ((s0 & 1u) != 0)
+                continue;
+            std::memcpy (&c, &clockData, sizeof (Clock));
+            std::atomic_thread_fence (std::memory_order_acquire);
+            if (clockSeq.load (std::memory_order_relaxed) == s0)
+                return c;
+        }
+        return {}; // sin copia estable (no ocurre a ritmo de bloque): valid = false
+    }
 
     // Hilo de mensajes: 'frames' fotogramas desde la posición absoluta 'start'. Devuelve lo ya escrito (puede ser menos:
     // el resto aún no ha sonado); vacío si 'start' no se ha escrito todavía o ya se ha pisado (más de 12 s atrás)
@@ -93,5 +133,7 @@ private:
     std::atomic<juce::uint64> write { 0 };
     std::atomic<double> rate { 0.0 };
     std::atomic<juce::uint32> epoch { 0 };
+    Clock clockData;                             // protegido por clockSeq (seqlock)
+    std::atomic<juce::uint32> clockSeq { 0 };
     juce::CriticalSection lock; // prepare frente a los lectores; push no la toma
 };

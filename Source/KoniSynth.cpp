@@ -458,6 +458,7 @@ public:
 
         // Arpegiador: sustituye las notas por el patrón (tempo y posición del host si los hay)
         StepClock::Transport transport; // reloj de los ritmos de Omnichord y Drum Machine
+        AudioTap::Clock tapClock;       // lo mismo, para el agente (solo se publica con el control por agente activo)
         {
             Arpeggiator::HostTime host;
             std::optional<juce::int64> hostSamples;
@@ -484,7 +485,17 @@ public:
                     shown = 60.0 / (32.0 * (0.0055 + (9.0 - params.vl1Tempo->load()) * 0.00098));
                 params.displayBpm.store ((float) shown, std::memory_order_relaxed);
                 params.displayBpmFromHost.store (host.bpm.has_value() && (int) params.engine->load() != 2, std::memory_order_relaxed);
+                tapClock.displayBpm = (float) shown;
+                tapClock.displayFromHost = host.bpm.has_value() && (int) params.engine->load() != 2;
             }
+            tapClock.hasBpm = host.bpm.has_value();
+            tapClock.bpm = host.bpm.value_or (0.0);
+            tapClock.hasPpq = host.ppq.has_value();
+            tapClock.ppq = host.ppq.value_or (0.0);
+            tapClock.playing = host.playing;
+            tapClock.hasTime = hostSamples.has_value();
+            tapClock.timeSamples = hostSamples.value_or (0);
+            tapClock.tempoBpm = params.tempoBpm.load();
             updateRandomClock (host.playing ? hostSamples : std::nullopt, numSamples); // antes del arpegiador (usa aleatorio)
             transport = { host.bpm, host.ppq, host.playing };
             sequencer.process (midi, numSamples, params, host); // si está activo, sustituye las notas antes que el arpegiador
@@ -1018,7 +1029,10 @@ public:
         sessionTransport.processAudio (buffer); // PLAY de un fichero de audio (se suma) y REC de lo que sale
         pushToScope (buffer);
         if (auto* tap = agentTapActive.load (std::memory_order_acquire)) // control por agente (F3); desactivado: nulo
-            tap->push (buffer);
+        {
+            tapClock.latencySamples = getLatencySamples();
+            tap->push (buffer, tapClock);
+        }
         sampleSlot.blocksDone.fetch_add (1, std::memory_order_release); // ver DataSlot
         for (auto& b : rhythmBanks) b.slot.blocksDone.fetch_add (1, std::memory_order_release);
         osc2SampleSlot.blocksDone.fetch_add (1, std::memory_order_release);

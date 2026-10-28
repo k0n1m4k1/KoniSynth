@@ -77,7 +77,7 @@ registration in your agent stays valid: the paths do not change.
 
 | Tool | What it does |
 |---|---|
-| `status` | Engine, preset and unsaved-changes flag |
+| `status` | Engine, preset and unsaved-changes flag, plus the clock: sample rate, block, latency, host tempo/position when the host gives them, effective tempo and its source, engine rhythm clock, active note transforms (transpose, scale, sequencer, arpeggiator) |
 | `list_instances` | Running KoniSynth instances with Agent control (one port each, 47800-47899) |
 | `describe_parameters(match)` | Id, name, value, range, options and help of matching parameters (without `match`: groups and counts) |
 | `get_parameters(ids)` | Current values: displayed text, exact real value, normalized position (0-1) and unit |
@@ -101,7 +101,8 @@ server keeps one connection open and reconnects if KoniSynth restarts.
 `test_e2e.py` starts the standalone with Agent control enabled (backing up and restoring the settings files), drives
 every tool through a real MCP client and checks the results; `test_f3.py` checks the listening tools against known
 values (A4 = 440 Hz, cutoff vs brightness, a 440 Hz sine reference, no stuck notes); `test_exact.py` checks exact
-values and units, batch validation, invalid notes and the capture timing:
+values and units, batch validation, invalid notes and the capture timing; `test_state.py` checks the clock and tempo
+state:
 
 ```
 .venv\Scripts\python test_e2e.py

@@ -26,6 +26,9 @@
 //            control (F4: mutaciones). El lote se valida entero antes de cambiar nada: un id, texto, número no finito o
 //            forma de objeto no válidos rechazan la orden sin tocar ningún parámetro. Todo el lote es un solo paso de
 //            deshacer
+//   state    {}                             tempo y reloj del último bloque: frecuencia, bloque, latencia, datos del host que
+//            existan (bpm, ppq, timeInSamples, playing), tempo efectivo y su fuente, reloj propio del motor (Omnichord,
+//            Drum Machine, VL-1), BPM del display, transformaciones activas de las notas y punto de captura
 //   presets  {}                             lista (índice, nombre, categoría, fábrica/usuario, motor, playHint y rango
 //            recomendado playLow-playHigh en notas MIDI si los tiene)
 //   load_preset {"index": 12} | {"name": "Acid Bass"}
@@ -256,6 +259,7 @@ private:
         if (cmd == "describe")    return describe (req.getProperty ("match", juce::var()).toString().toLowerCase());
         if (cmd == "get")         return get (req.getProperty ("ids", juce::var()), (bool) req.getProperty ("detail", false), error);
         if (cmd == "set")         return set (req.getProperty ("values", juce::var()), (bool) req.getProperty ("detail", false), error);
+        if (cmd == "state")       return state();
         if (cmd == "presets")     return presetList();
         if (cmd == "load_preset") return loadPreset (req, error);
         if (cmd == "save_preset") return savePreset (req, error);
@@ -276,6 +280,84 @@ private:
         const auto i = host.presets.currentIndex();
         o->setProperty ("preset", i >= 0 ? host.presets.getPresets()[(size_t) i].name : juce::String());
         o->setProperty ("modified", host.presets.isDirty());
+        return juce::var (o.release());
+    }
+
+    float raw (const char* id) const
+    {
+        const auto* v = host.apvts.getRawParameterValue (id);
+        return v != nullptr ? v->load() : 0.0f;
+    }
+
+    // Transformaciones que sufren las notas de play antes del motor, en el orden de processBlock: transposición, escala,
+    // secuenciador (si está activo sustituye las notas) o arpegiador. No se desactivan aquí: el cliente decide con set
+    juce::var noteTransforms() const
+    {
+        juce::Array<juce::var> list;
+        if (const auto t = (int) raw ("keyTranspose"); t != 0)
+            list.add ("transpose " + juce::String (t > 0 ? "+" : "") + juce::String (t) + " st (keyTranspose)");
+        if (raw ("scaleMode") > 0.5f)
+            list.add ("scale quantizer (scaleMode " + host.apvts.getParameter ("scaleMode")->getCurrentValueAsText() + ")");
+        if (raw ("seqOn") > 0.5f)
+            list.add ("step sequencer replaces the notes (seqOn)");
+        else if (raw ("arpOn") > 0.5f)
+            list.add ("arpeggiator replaces the notes (arpOn)");
+        return list;
+    }
+
+    // Estado de tempo y reloj (S6): lo que el procesador decidió en el último bloque capturado (AudioTap::Clock), sin
+    // recalcular el tempo efectivo. Del host solo se dan los datos que proporciona
+    juce::var state()
+    {
+        const auto c = host.tap.clock();
+        const auto sr = host.tap.sampleRate();
+        auto o = std::make_unique<juce::DynamicObject>();
+        o->setProperty ("audioRunning", c.valid);
+        o->setProperty ("sampleRate", sr);
+        if (c.valid)
+        {
+            o->setProperty ("blockSize", c.blockSize);
+            o->setProperty ("latencySamples", c.latencySamples);
+            o->setProperty ("latencyMs", 1000.0 * c.latencySamples / sr);
+            o->setProperty ("blockStartFrame", (juce::int64) c.frame); // posición en la captura de listen
+        }
+        auto h = std::make_unique<juce::DynamicObject>();
+        if (c.hasBpm)  h->setProperty ("bpm", c.bpm);
+        if (c.hasPpq)  h->setProperty ("ppq", c.ppq);
+        if (c.hasTime) h->setProperty ("timeInSamples", c.timeSamples);
+        h->setProperty ("playing", c.playing);
+        o->setProperty ("host", juce::var (h.release()));
+        // Tempo de arpegiador, secuenciador y sincronías (LFO, eco...): el del host o, sin él, Arp BPM
+        auto t = std::make_unique<juce::DynamicObject>();
+        t->setProperty ("bpm", c.valid ? c.tempoBpm : (double) raw ("arpBpm"));
+        t->setProperty ("source", c.hasBpm ? "host" : "internal (arpBpm)");
+        t->setProperty ("usedBy", "arpeggiator, step sequencer, tempo-synced LFOs and effects");
+        o->setProperty ("tempo", juce::var (t.release()));
+        // Reloj propio del motor: ritmos de Omnichord y Drum Machine (siguen al host solo si da BPM y PPQ:
+        // Dsp/StepClock.h) y el VL-1, que nunca sigue al host
+        const auto engine = (int) raw ("engine");
+        if (engine == 4 || engine == 5)
+        {
+            const auto synced = c.hasBpm && c.hasPpq;
+            auto r = std::make_unique<juce::DynamicObject>();
+            r->setProperty ("bpm", synced ? c.bpm : (double) raw (engine == 5 ? "drumTempo" : "omniTempo"));
+            r->setProperty ("source", synced ? juce::String ("host") : juce::String (engine == 5 ? "internal (drumTempo)" : "internal (omniTempo)"));
+            o->setProperty ("rhythmClock", juce::var (r.release()));
+        }
+        else if (engine == 2)
+        {
+            auto r = std::make_unique<juce::DynamicObject>();
+            r->setProperty ("bpm", (double) c.displayBpm); // fórmula del procesador (negra = 32 ticks)
+            r->setProperty ("source", "VL-1 own clock (vl1Tempo); never follows the host");
+            o->setProperty ("rhythmClock", juce::var (r.release()));
+        }
+        if (c.valid)
+        {
+            o->setProperty ("displayBpm", (double) c.displayBpm); // el LED de BPM de la interfaz
+            o->setProperty ("displayBpmFromHost", c.displayFromHost);
+        }
+        o->setProperty ("noteTransforms", noteTransforms());
+        o->setProperty ("capturePoint", "final output: after all effects and the limiter, plus audio played by the transport");
         return juce::var (o.release());
     }
 
@@ -644,6 +726,8 @@ private:
         auto o = std::make_unique<juce::DynamicObject>();
         o->setProperty ("scheduled", (int) list.size());
         o->setProperty ("endsAt", end);
+        if (const auto tr = noteTransforms(); tr.size() > 0)
+            o->setProperty ("transforms", tr); // lo que cambiará estas notas antes de sonar (ver state)
         return juce::var (o.release());
     }
 
