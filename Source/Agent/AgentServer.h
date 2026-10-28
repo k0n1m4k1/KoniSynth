@@ -18,21 +18,30 @@
 //   -> {"token": "...", "id": 1, "cmd": "ping" | "describe" | "get" | "set" | "presets" | "load_preset" | "save_preset", ...}
 //   <- {"id": 1, "ok": true, "result": ...}   |   {"id": 1, "ok": false, "error": "..."}
 //   describe {"match": "cutoff"}            parámetros (id, nombre, valor, rango, opciones, ayuda); match opcional
-//   get      {"ids": ["cutoff", ...]}       valores actuales
-//   set      {"values": {"cutoff": "2 kHz", "resonance": 0.4, "wave": {"normalized": 0.66}}}   texto = formato del
-//            parámetro; número = valor real; {"normalized": x} = posición 0..1 del control (F4: mutaciones).
-//            Todo el lote es un solo paso de deshacer
+//   get      {"ids": ["cutoff", ...], "detail": false}   valores actuales como texto; con detail, por id {text, value
+//            (valor real, el que admite set como número), normalized (0..1), unit (unidad de value; null si no se deduce)}
+//   set      {"values": {"cutoff": "2 kHz", "resonance": 0.4, "wave": {"normalized": 0.66}}, "detail": false}
+//            texto = formato del parámetro (en bool y choice, una de sus opciones); número = valor real (en choice, el
+//            índice; fuera de rango se recorta y, con detail, se marca "clamped"); {"normalized": x} = posición 0..1 del
+//            control (F4: mutaciones). El lote se valida entero antes de cambiar nada: un id, texto, número no finito o
+//            forma de objeto no válidos rechazan la orden sin tocar ningún parámetro. Todo el lote es un solo paso de
+//            deshacer
 //   presets  {}                             lista (índice, nombre, categoría, fábrica/usuario, motor, playHint y rango
 //            recomendado playLow-playHigh en notas MIDI si los tiene)
 //   load_preset {"index": 12} | {"name": "Acid Bass"}
 //   save_preset {"name": "...", "category": "Bass"}
 //   play     {"notes": [{"note": "C4" | 60, "velocity": 100, "start": 0.0, "duration": 1.0}, ...]}   (F3) por el teclado
-//            virtual, como el teclado en pantalla; máximo 64 notas, inicio y duración hasta 30 s
+//            virtual, como el teclado en pantalla; máximo 64 notas que acaban (start + duration) antes de 30 s. note es
+//            obligatoria (entero 0..127 o nombre C-1..G9 con # o b; C4 = 60); velocity entera 1..127 (100); start >= 0 (0);
+//            duration > 0 (1). Cualquier nota no válida o campo desconocido rechaza la orden entera
 //   stop_notes {}                           suelta todas las notas y cancela las programadas por play que aún no han sonado
 //            (cada play se suma a los anteriores; stop_notes los cancela todos)
-//   listen   {"seconds": 2.0, "fromPlay": false}   vuelca a un WAV temporal los últimos N s de la salida (máximo 10) o,
-//            con fromPlay, N s desde la muestra en que sonó la primera nota del último play (independiente de retrasos del
-//            hilo de mensajes); devuelve ruta, frecuencia, pico y "partial" si aún no se han escrito los N s
+//   listen   {"seconds": 2.0, "fromPlay": false}   vuelca a un WAV temporal propio de cada captura (se conservan las 32
+//            últimas) los últimos N s de la salida (0,05..10 s) o, con fromPlay, N s desde el origen del último play
+//            (instante 0 de sus start, conservando el silencio inicial; se ancla a la muestra en que sonó su primera nota,
+//            así que no depende de retrasos del hilo de mensajes). Devuelve ruta, frecuencia, fotogramas pedidos y
+//            capturados, posición de inicio, pico, "partial" si se capturó menos de lo pedido y "truncated" con el motivo
+//            ("notYetWritten": aún sonando, repetir; "notEnoughAudio": la captura empezó hace menos de N s)
 class AgentServer : private juce::Thread
 {
 public:
@@ -83,6 +92,11 @@ public:
             listener.reset();
             return false;
         }
+        // Capturas de una sesión anterior en este puerto (listen-<puerto>-<n>.wav; antes, listen-<puerto>.wav): se borran
+        for (const auto& f : captureDirectory().findChildFiles (juce::File::findFiles, false, "listen-" + juce::String (port) + "*.wav"))
+            if (const auto rest = f.getFileNameWithoutExtension().fromFirstOccurrenceOf ("listen-" + juce::String (port), false, false);
+                rest.isEmpty() || rest.startsWithChar ('-'))
+                f.deleteFile();
         startThread();
         return true;
     }
@@ -115,6 +129,11 @@ public:
     static juce::File discoveryDirectory()
     {
         return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("KoniSynth").getChildFile ("agent");
+    }
+
+    static juce::File captureDirectory()
+    {
+        return juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("KoniSynth-agent");
     }
 
 private:
@@ -235,14 +254,14 @@ private:
     {
         if (cmd == "ping")        return ping();
         if (cmd == "describe")    return describe (req.getProperty ("match", juce::var()).toString().toLowerCase());
-        if (cmd == "get")         return get (req.getProperty ("ids", juce::var()), error);
-        if (cmd == "set")         return set (req.getProperty ("values", juce::var()), error);
+        if (cmd == "get")         return get (req.getProperty ("ids", juce::var()), (bool) req.getProperty ("detail", false), error);
+        if (cmd == "set")         return set (req.getProperty ("values", juce::var()), (bool) req.getProperty ("detail", false), error);
         if (cmd == "presets")     return presetList();
         if (cmd == "load_preset") return loadPreset (req, error);
         if (cmd == "save_preset") return savePreset (req, error);
         if (cmd == "play")        return play (req.getProperty ("notes", juce::var()), error);
         if (cmd == "stop_notes")  { ++*playGeneration; host.keyboard.allNotesOff (0); return true; } // cancela lo programado
-        if (cmd == "listen")      return listen ((double) req.getProperty ("seconds", 2.0), (bool) req.getProperty ("fromPlay", false), error);
+        if (cmd == "listen")      return listen (req.getProperty ("seconds", 2.0), (bool) req.getProperty ("fromPlay", false), error);
         error = "unknown cmd: " + cmd;
         return {};
     }
@@ -260,6 +279,137 @@ private:
         return juce::var (o.release());
     }
 
+    static bool isBoolParam (juce::RangedAudioParameter& p)   { return dynamic_cast<juce::AudioParameterBool*> (&p) != nullptr; }
+    static bool isChoiceParam (juce::RangedAudioParameter& p) { return dynamic_cast<juce::AudioParameterChoice*> (&p) != nullptr; }
+
+    // Número JSON finito (entero o real; true/false no cuentan)
+    static bool finiteNumber (const juce::var& v, double& out)
+    {
+        if (! (v.isInt() || v.isInt64() || v.isDouble()))
+            return false;
+        out = (double) v;
+        return std::isfinite (out);
+    }
+
+    // Unidad del valor real (convertFrom0to1) de un parámetro, deducida de su propio texto: los formatos de Params/Layout.h
+    // muestran el valor con otra escala (0,35 s -> "350 ms"; 2000 Hz -> "2.00 kHz"; 0,4 -> "40 %"). Se compara el número
+    // mostrado con el valor real en el máximo, el centro y el mínimo del rango (tolerancia 2 %: el texto va redondeado); el 0
+    // no distingue escalas y se salta. "ratio" = 0..1 mostrado como %. null si no se reconoce (texto sin número)
+    static juce::var unitOf (juce::RangedAudioParameter& p)
+    {
+        if (isBoolParam (p))   return "bool";
+        if (isChoiceParam (p)) return "index";
+        for (const auto x : { 1.0f, 0.5f, 0.0f })
+        {
+            const auto real = (double) p.convertFrom0to1 (x);
+            const auto text = p.getText (x, 64).trim();
+            int i = 0;
+            while (i < text.length() && (juce::CharacterFunctions::isDigit (text[i]) || text[i] == '-' || text[i] == '+' || text[i] == '.'))
+                ++i;
+            if (std::abs (real) < 1.0e-6 || i == 0 || ! text.substring (0, i).containsAnyOf ("0123456789"))
+                continue;
+            const auto shown = text.substring (0, i).getDoubleValue();
+            const auto suffix = text.substring (i).trim();
+            const auto near = [real] (double v) { return std::abs (v - real) <= 0.02 * std::abs (real) + 1.0e-6; };
+            if (suffix == "kHz") return near (shown * 1000.0) ? juce::var ("Hz") : near (shown) ? juce::var ("kHz") : juce::var();
+            if (suffix == "ms")  return near (shown) ? juce::var ("ms") : near (shown / 1000.0) ? juce::var ("s") : juce::var();
+            if (suffix == "s")   return near (shown) ? juce::var ("s") : near (shown * 1000.0) ? juce::var ("ms") : juce::var();
+            if (suffix == "%")   return near (shown / 100.0) ? juce::var ("ratio") : near (shown) ? juce::var ("%") : juce::var();
+            return near (shown) ? juce::var (suffix) : juce::var();
+        }
+        return {};
+    }
+
+    static juce::var detailOf (juce::RangedAudioParameter& p)
+    {
+        auto o = std::make_unique<juce::DynamicObject>();
+        o->setProperty ("text", p.getCurrentValueAsText());
+        o->setProperty ("value", (double) p.convertFrom0to1 (p.getValue()));
+        o->setProperty ("normalized", (double) p.getValue());
+        o->setProperty ("unit", unitOf (p));
+        return juce::var (o.release());
+    }
+
+    // Valor pedido por set -> posición 0..1, sin tocar el parámetro. false (y el motivo en 'why') si no es válido. JUCE no
+    // sirve para validar texto: en choice, un texto desconocido da la opción 0, y en bool cualquier texto da Off
+    // (juce_AudioParameterChoice.cpp:61,79; juce_AudioParameterBool.cpp:50-65)
+    static bool resolveValue (juce::RangedAudioParameter& p, const juce::var& v, float& norm, bool& clamped, juce::String& why)
+    {
+        clamped = false;
+        const auto steps = p.getNumSteps();
+        const auto discrete = isBoolParam (p) || isChoiceParam (p);
+        if (v.isObject())
+        {
+            const auto* o = v.getDynamicObject();
+            double x = 0.0;
+            if (o == nullptr || o->getProperties().size() != 1 || ! o->hasProperty ("normalized"))
+            {
+                why = "an object value must be exactly {\"normalized\": 0..1}";
+                return false;
+            }
+            if (! finiteNumber (o->getProperty ("normalized"), x) || x < 0.0 || x > 1.0)
+            {
+                why = "normalized must be a number in 0..1";
+                return false;
+            }
+            norm = (float) x;
+            return true;
+        }
+        if (v.isString())
+        {
+            const auto t = v.toString().trim();
+            if (discrete)
+            {
+                juce::StringArray options;
+                for (int k = 0; k < steps; ++k)
+                    options.add (p.getText ((float) k / (float) (steps - 1), 64));
+                auto k = options.indexOf (t, true);
+                if (k < 0 && isBoolParam (p)) // alias habituales de un interruptor
+                    k = juce::StringArray { "off", "no", "false", "0" }.contains (t, true) ? 0
+                      : juce::StringArray { "on", "yes", "true", "1" }.contains (t, true) ? 1 : -1;
+                if (k < 0)
+                {
+                    why = "unknown option \"" + t + "\" (options: " + options.joinIntoString (", ") + ")";
+                    return false;
+                }
+                norm = (float) k / (float) (steps - 1);
+                return true;
+            }
+            norm = p.getValueForText (t);
+            // Sin cifras solo vale un texto que el parámetro muestra tal cual ("Off", la vocal "E"): si al leerlo y volver a
+            // mostrarlo no sale lo mismo, el formato no lo ha entendido (y habría dado el mínimo sin avisar)
+            if (! std::isfinite (norm) || (! t.containsAnyOf ("0123456789") && ! p.getText (norm, 64).trim().equalsIgnoreCase (t)))
+            {
+                why = "cannot read \"" + t + "\" (format like \"" + p.getCurrentValueAsText() + "\")";
+                return false;
+            }
+            norm = juce::jlimit (0.0f, 1.0f, norm);
+            return true;
+        }
+        if (v.isBool())
+        {
+            if (! isBoolParam (p)) { why = "true/false only for on/off parameters"; return false; }
+            norm = (bool) v ? 1.0f : 0.0f;
+            return true;
+        }
+        double x = 0.0;
+        if (! finiteNumber (v, x))
+        {
+            why = v.isInt() || v.isInt64() || v.isDouble() ? "the number must be finite"
+                                                            : "a value must be text, a number or {\"normalized\": 0..1}";
+            return false;
+        }
+        if (discrete && (x != std::floor (x) || x < 0.0 || x > (double) (steps - 1)))
+        {
+            why = "must be an option index 0.." + juce::String (steps - 1) + (isBoolParam (p) ? " (or true/false)" : "");
+            return false;
+        }
+        const auto& r = p.getNormalisableRange();
+        clamped = x < (double) r.start || x > (double) r.end;
+        norm = p.convertTo0to1 ((float) juce::jlimit ((double) r.start, (double) r.end, x));
+        return true;
+    }
+
     static juce::var describeOne (juce::RangedAudioParameter& p)
     {
         auto o = std::make_unique<juce::DynamicObject>();
@@ -267,6 +417,7 @@ private:
         o->setProperty ("name", p.getName (64));
         o->setProperty ("value", p.getCurrentValueAsText());
         o->setProperty ("normalized", p.getValue());
+        o->setProperty ("unit", unitOf (p)); // unidad de los números que admite set
         o->setProperty ("min", p.getText (0.0f, 64));
         o->setProperty ("max", p.getText (1.0f, 64));
         o->setProperty ("default", p.getText (p.getDefaultValue(), 64));
@@ -298,7 +449,7 @@ private:
         return list;
     }
 
-    juce::var get (const juce::var& ids, juce::String& error)
+    juce::var get (const juce::var& ids, bool detail, juce::String& error)
     {
         if (! ids.isArray()) { error = "ids must be an array"; return {}; }
         auto o = std::make_unique<juce::DynamicObject>();
@@ -306,30 +457,38 @@ private:
         {
             auto* p = host.apvts.getParameter (v.toString());
             if (p == nullptr) { error = "unknown parameter: " + v.toString(); return {}; }
-            o->setProperty (v.toString(), p->getCurrentValueAsText());
+            o->setProperty (v.toString(), detail ? detailOf (*p) : juce::var (p->getCurrentValueAsText()));
         }
         return juce::var (o.release());
     }
 
-    juce::var set (const juce::var& values, juce::String& error)
+    juce::var set (const juce::var& values, bool detail, juce::String& error)
     {
         auto* obj = values.getDynamicObject();
         if (obj == nullptr) { error = "values must be an object"; return {}; }
-        // Validación previa: si algún ID no existe no se cambia nada
-        for (const auto& kv : obj->getProperties())
-            if (host.apvts.getParameter (kv.name.toString()) == nullptr) { error = "unknown parameter: " + kv.name.toString(); return {}; }
-        host.undo.beginGroup();
-        auto applied = std::make_unique<juce::DynamicObject>();
+        // Validación previa del lote entero: si un id o un valor no es válido no se cambia nada
+        struct Change { juce::RangedAudioParameter* p; juce::Identifier id; float norm; bool clamped; };
+        std::vector<Change> changes;
         for (const auto& kv : obj->getProperties())
         {
             auto* p = host.apvts.getParameter (kv.name.toString());
-            const auto norm = kv.value.isString() ? p->getValueForText (kv.value.toString())
-                            : kv.value.isObject() ? (float) (double) kv.value.getProperty ("normalized", p->getValue())
-                                                  : p->convertTo0to1 ((float) (double) kv.value);
-            p->beginChangeGesture();
-            p->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, norm));
-            p->endChangeGesture();
-            applied->setProperty (kv.name, p->getCurrentValueAsText());
+            if (p == nullptr) { error = "unknown parameter: " + kv.name.toString(); return {}; }
+            Change c { p, kv.name, 0.0f, false };
+            juce::String why;
+            if (! resolveValue (*p, kv.value, c.norm, c.clamped, why)) { error = kv.name.toString() + ": " + why + " (nothing changed)"; return {}; }
+            changes.push_back (c);
+        }
+        host.undo.beginGroup();
+        auto applied = std::make_unique<juce::DynamicObject>();
+        for (const auto& c : changes)
+        {
+            c.p->beginChangeGesture();
+            c.p->setValueNotifyingHost (c.norm);
+            c.p->endChangeGesture();
+            auto d = detail ? detailOf (*c.p) : juce::var (c.p->getCurrentValueAsText());
+            if (detail && c.clamped)
+                d.getDynamicObject()->setProperty ("clamped", true); // el número pedido estaba fuera del rango
+            applied->setProperty (c.id, d);
         }
         host.undo.endGroup();
         return juce::var (applied.release());
@@ -388,42 +547,93 @@ private:
 
     // Notas por el teclado virtual (canal 1). Note-on y note-off con Timer::callAfterDelay (hilo de mensajes): resolución
     // de un tic del temporizador (~1-16 ms según el sistema), suficiente para escuchar un sonido, no para secuenciar
+    // Nota para play, estricta: entero 0..127 o nombre (letra, # o b, octava -1..9; C4 = 60). -1 si no es válida
+    // (midiNoteFromText, la de los parámetros, es tolerante: ante un error daría C4)
+    static int strictMidiNote (const juce::var& v)
+    {
+        double x = 0.0;
+        if (finiteNumber (v, x))
+            return x == std::floor (x) && x >= 0.0 && x <= 127.0 ? (int) x : -1;
+        if (! v.isString())
+            return -1;
+        const auto t = v.toString().trim();
+        if (t.isNotEmpty() && t.length() <= 3 && t.containsOnly ("0123456789"))
+            return t.getIntValue() <= 127 ? t.getIntValue() : -1;
+        static const int pcs[] = { 9, 11, 0, 2, 4, 5, 7 }; // A B C D E F G
+        const auto letter = juce::CharacterFunctions::toUpperCase (t[0]);
+        if (t.length() < 2 || letter < 'A' || letter > 'G')
+            return -1;
+        auto pc = pcs[letter - 'A'];
+        int i = 1;
+        if (t[i] == '#') { ++pc; ++i; }
+        else if (t[i] == 'b') { --pc; ++i; }
+        const auto octave = t.substring (i);
+        const auto digits = octave.startsWithChar ('-') ? octave.substring (1) : octave;
+        if (digits.isEmpty() || digits.length() > 1 || ! digits.containsOnly ("0123456789"))
+            return -1;
+        const auto n = (octave.getIntValue() + 1) * 12 + pc;
+        return n >= 0 && n <= 127 ? n : -1;
+    }
+
     juce::var play (const juce::var& notes, juce::String& error)
     {
         if (! notes.isArray() || notes.size() == 0 || notes.size() > 64) { error = "notes must be an array of 1..64 notes"; return {}; }
         double end = 0.0;
         struct N { int note, velocity; double start, duration; };
         std::vector<N> list;
-        for (const auto& n : *notes.getArray())
+        // Validación previa de todas las notas: con una no válida no suena ninguna
+        for (int i = 0; i < notes.size(); ++i)
         {
-            const auto nv = n.getProperty ("note", 60);
-            const auto note = nv.isString() ? midiNoteFromText (nv.toString()) : (int) nv;
-            const auto vel = (int) n.getProperty ("velocity", 100);
-            const auto start = (double) n.getProperty ("start", 0.0);
-            const auto dur = (double) n.getProperty ("duration", 1.0);
-            if (note < 0 || note > 127 || vel < 1 || vel > 127 || start < 0.0 || start > 30.0 || dur <= 0.0 || dur > 30.0)
-            {
-                error = "note out of range (note 0..127, velocity 1..127, start 0..30 s, duration 0..30 s)";
-                return {};
-            }
-            list.push_back ({ note, vel, start, dur });
+            const auto& n = notes[i];
+            const auto bad = [&error, i] (const juce::String& why) { error = "note " + juce::String (i) + ": " + why + " (nothing played)"; return juce::var(); };
+            const auto* o = n.getDynamicObject();
+            if (o == nullptr)
+                return bad ("must be an object {note, velocity, start, duration}");
+            for (const auto& kv : o->getProperties())
+                if (! juce::StringArray { "note", "velocity", "start", "duration" }.contains (kv.name.toString()))
+                    return bad ("unknown field \"" + kv.name.toString() + "\"");
+            if (! o->hasProperty ("note"))
+                return bad ("missing note");
+            const auto note = strictMidiNote (o->getProperty ("note"));
+            if (note < 0)
+                return bad ("invalid note \"" + o->getProperty ("note").toString() + "\" (C-1..G9, e.g. C4 = 60, or 0..127)");
+            double vel = 100.0, start = 0.0, dur = 1.0;
+            if (o->hasProperty ("velocity") && ! finiteNumber (o->getProperty ("velocity"), vel)) vel = -1.0;
+            if (vel != std::floor (vel) || vel < 1.0 || vel > 127.0)
+                return bad ("velocity must be an integer 1..127");
+            if (o->hasProperty ("start") && ! finiteNumber (o->getProperty ("start"), start)) start = -1.0;
+            if (o->hasProperty ("duration") && ! finiteNumber (o->getProperty ("duration"), dur)) dur = 0.0;
+            if (start < 0.0 || dur <= 0.0)
+                return bad ("start must be a number >= 0 and duration a number > 0 (seconds)");
+            if (start + dur > maxPlaySeconds)
+                return bad ("ends at " + juce::String (start + dur, 3) + " s; the limit is " + juce::String (maxPlaySeconds, 0) + " s");
+            list.push_back ({ note, (int) vel, start, dur });
             end = juce::jmax (end, start + dur);
         }
         notesScheduled = true;
         auto& kb = host.keyboard;
         auto& tap = host.tap;
-        playStart = 0;
+        // Origen de este play (el instante 0 de sus 'start') para listen fromPlay: se fija cuando suena su primera nota,
+        // restando su 'start'. 'seq' evita que la primera nota de un play anterior, aún pendiente, ancle este
+        const auto seq = ++playSeq;
+        playOrigin = -1;
+        playEpoch = tap.epochNumber();
         const auto first = std::min_element (list.begin(), list.end(), [] (const N& a, const N& b) { return a.start < b.start; })->start;
         // Generación de este play: stop_notes la incrementa y los temporizadores pendientes (note-on y note-off) ya no actúan.
         // Así un note-off antiguo no corta una nota nueva de la misma altura tras un stop_notes
         const auto gen = playGeneration->load();
         for (const auto& n : list)
         {
-            juce::Timer::callAfterDelay (juce::roundToInt (n.start * 1000.0), [this, &kb, &tap, n, first, flag = alive, g = playGeneration, gen]
+            juce::Timer::callAfterDelay (juce::roundToInt (n.start * 1000.0), [this, &kb, &tap, n, first, seq, flag = alive, g = playGeneration, gen]
             {
                 if (! *flag || g->load() != gen) return;
-                if (n.start == first && playStart == 0)
-                    playStart = tap.framesWritten(); // la nota entra en el siguiente bloque de audio: ancla de 'fromPlay'
+                if (n.start == first && seq == playSeq && playOrigin < 0)
+                {
+                    // La nota entra en el siguiente bloque de audio (resolución: un bloque). Si la captura empezó después
+                    // del origen calculado, el origen queda en 0
+                    const auto at = (juce::int64) tap.framesWritten();
+                    playOrigin = juce::jmax ((juce::int64) 0, at - (juce::int64) std::llround (first * tap.sampleRate()));
+                }
                 kb.noteOn (1, n.note, (float) n.velocity / 127.0f);
             });
             juce::Timer::callAfterDelay (juce::roundToInt ((n.start + n.duration) * 1000.0), [&kb, n, flag = alive, g = playGeneration, gen]
@@ -437,17 +647,45 @@ private:
         return juce::var (o.release());
     }
 
-    juce::var listen (double seconds, bool fromPlay, juce::String& error)
+    juce::var listen (const juce::var& secondsVar, bool fromPlay, juce::String& error)
     {
-        seconds = juce::jlimit (0.05, 10.0, seconds);
-        const auto sr = host.tap.sampleRate();
-        const auto frames = juce::roundToInt (seconds * sr);
-        if (fromPlay && playStart == 0) { error = "fromPlay: no note has sounded since the last play"; return {}; }
-        auto audio = fromPlay ? host.tap.range (playStart, frames) : host.tap.last (frames);
+        double seconds = 0.0;
+        if (! finiteNumber (secondsVar, seconds) || seconds < 0.05 || seconds > maxListenSeconds)
+        {
+            error = "seconds must be a number in 0.05.." + juce::String (maxListenSeconds, 0);
+            return {};
+        }
+        auto& tap = host.tap;
+        const auto sr = tap.sampleRate();
+        const auto requested = juce::roundToInt (seconds * sr);
+        const auto written = tap.framesWritten();
+        juce::uint64 start = 0;
+        juce::String truncated;
+        if (fromPlay)
+        {
+            if (playOrigin < 0) { error = "fromPlay: no note of the last play has sounded yet"; return {}; }
+            if (playEpoch != tap.epochNumber()) { error = "fromPlay: the capture was reset (sample rate changed) after the last play"; return {}; }
+            start = (juce::uint64) playOrigin;
+            if (written > start + (juce::uint64) tap.capacityFrames())
+            {
+                error = "fromPlay: the last play started more than " + juce::String (AudioTap::secondsKept) + " s ago and is no longer in the capture";
+                return {};
+            }
+        }
+        else
+            start = written > (juce::uint64) requested ? written - (juce::uint64) requested : 0;
+        auto audio = tap.range (start, requested);
         if (audio.getNumSamples() == 0) { error = "no audio captured yet (is the audio device running?)"; return {}; }
-        const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("KoniSynth-agent");
+        if (audio.getNumSamples() < requested)
+            truncated = fromPlay ? "notYetWritten" : "notEnoughAudio";
+        // Un fichero por captura: las anteriores siguen valiendo para compare (se conservan las keptCaptures últimas)
+        const auto dir = captureDirectory();
         dir.createDirectory();
-        const auto file = dir.getChildFile ("listen-" + juce::String (port) + ".wav");
+        const auto n = ++captureCount;
+        const auto name = [this] (int k) { return "listen-" + juce::String (port) + "-" + juce::String (k) + ".wav"; };
+        if (n > keptCaptures)
+            dir.getChildFile (name (n - keptCaptures)).deleteFile();
+        const auto file = dir.getChildFile (name (n));
         file.deleteFile();
         {
             juce::WavAudioFormat wav;
@@ -464,15 +702,27 @@ private:
         o->setProperty ("path", file.getFullPathName());
         o->setProperty ("sampleRate", sr);
         o->setProperty ("seconds", (double) audio.getNumSamples() / sr);
-        o->setProperty ("partial", audio.getNumSamples() < frames);
+        o->setProperty ("requestedFrames", requested);
+        o->setProperty ("capturedFrames", audio.getNumSamples());
+        o->setProperty ("startFrame", (juce::int64) start); // posición absoluta en la captura (fromPlay: origen del play)
+        o->setProperty ("partial", audio.getNumSamples() < requested);
+        if (truncated.isNotEmpty())
+            o->setProperty ("truncated", truncated);
         const auto peak = juce::jmax (audio.getMagnitude (0, 0, audio.getNumSamples()), audio.getMagnitude (1, 0, audio.getNumSamples()));
         o->setProperty ("peakDb", juce::Decibels::gainToDecibels (peak, -120.0f));
         return juce::var (o.release());
     }
 
+    static constexpr double maxPlaySeconds = 30.0, maxListenSeconds = 10.0;
+    static constexpr int keptCaptures = 32; // WAV de captura conservados por instancia (10 s a 48 kHz = 3,84 MB cada uno)
+
     Host host;
     bool notesScheduled = false;
-    juce::uint64 playStart = 0; // posición del tap cuando sonó la primera nota del último play (hilo de mensajes)
+    // Último play (hilo de mensajes): origen en la captura (-1 hasta que suena su primera nota), número de play y época del
+    // tap en que se programó
+    juce::int64 playOrigin = -1;
+    juce::uint32 playSeq = 0, playEpoch = 0;
+    int captureCount = 0;
     std::unique_ptr<juce::StreamingSocket> listener;
     int port = 0;
     std::atomic<int> activeClients { 0 };

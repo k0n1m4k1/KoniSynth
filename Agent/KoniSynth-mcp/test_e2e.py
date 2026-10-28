@@ -49,9 +49,10 @@ async def run():
             cut = payload(await s.call_tool("describe_parameters", {"match": "cutoff"}))
             check(any(p["id"] == "cutoff" and p.get("help") for p in cut), "describe match=cutoff: %s" % [p["id"] for p in cut])
             res = payload(await s.call_tool("set_parameters", {"values": {"cutoff": "1.2 kHz", "resonance": 0.55, "filterMode": "BP 12"}}))
-            check(res == {"cutoff": "1.20 kHz", "resonance": "55 %", "filterMode": "BP 12"}, "set_parameters: %s" % res)
+            check({k: v["text"] for k, v in res.items()} == {"cutoff": "1.20 kHz", "resonance": "55 %", "filterMode": "BP 12"}
+                  and abs(res["cutoff"]["value"] - 1200) < 0.01 and res["cutoff"]["unit"] == "Hz", "set_parameters: %s" % res)
             got = payload(await s.call_tool("get_parameters", {"ids": ["cutoff", "resonance"]}))
-            check(got["cutoff"] == "1.20 kHz", "get_parameters: %s" % got)
+            check(got["cutoff"]["text"] == "1.20 kHz" and got["resonance"]["value"] == res["resonance"]["value"], "get_parameters: %s" % got)
             bad = await s.call_tool("set_parameters", {"values": {"noExiste": 1}})
             check(bad.is_error and "noExiste" in bad.content[0].text, "set con id inexistente -> error visible para el agente: %s" % bad.content[0].text[:80])
             pads = payload(await s.call_tool("list_presets", {"category": "Pad"}))

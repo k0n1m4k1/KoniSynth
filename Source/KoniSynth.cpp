@@ -264,7 +264,7 @@ public:
     {
         randomAnchorPending = true; // un render offline empieza aquí: anclaje de la aleatoriedad
         if (agentTap != nullptr)
-            agentTap->setSampleRate (sampleRate);
+            agentTap->prepare (sampleRate); // otra frecuencia: la captura se vacía y, si hace falta, se amplía
         sessionTransport.prepare (sampleRate);
         // Una vez por proceso; decide si la ruta AVX2 es utilizable. Con KONISYNTH_SIMD_BENCH, su informe de medida va a
         // config.settings (clave simdBench)

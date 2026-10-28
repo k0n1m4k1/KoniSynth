@@ -150,6 +150,10 @@ class KoniLink:
             return reply.get("result")
 
     def _send(self, cmd: str, port: int | None, args: dict[str, Any], retry: bool) -> dict[str, Any]:
+        try:  # antes de conectar: NaN o Infinity no son JSON (Python los escribiría igualmente)
+            json.dumps(args, allow_nan=False)
+        except ValueError as e:
+            raise ToolError(f"invalid value for '{cmd}': numbers must be finite (no NaN or Infinity)") from e
         for attempt in (0, 1) if retry else (1,):
             if self._sock is None or (port is not None and port != self._port):
                 self._close()
@@ -174,6 +178,7 @@ class KoniLink:
 
 
 link = KoniLink()
+MAX_LISTEN_S = 10.0  # captura máxima de listen en KoniSynth (AgentServer.h, maxListenSeconds)
 
 
 def _group(param_id: str) -> str:
@@ -226,17 +231,23 @@ def describe_parameters(match: str = "", port: int | None = None) -> list[dict[s
 
 
 @mcp.tool(annotations=READ)
-def get_parameters(ids: list[str], port: int | None = None) -> dict[str, str]:
-    """Current values (as displayed in KoniSynth) of the given parameter ids."""
-    return link.call("get", port=port, ids=ids)
+def get_parameters(ids: list[str], port: int | None = None) -> dict[str, dict[str, Any]]:
+    """Current values of the given parameter ids: per id {text (as displayed), value (exact real value, the number
+    set_parameters accepts), normalized (0..1 control position), unit (unit of value: Hz, s, ms, dB, st...; "ratio" =
+    0..1 shown as %; "index" = choice option number; "bool"; "" = plain number; null if unknown)}."""
+    return link.call("get", port=port, ids=ids, detail=True)
 
 
 @mcp.tool(annotations=REPLACE)
-def set_parameters(values: dict[str, str | float], port: int | None = None) -> dict[str, str]:
-    """Set several parameters at once; returns the resulting displayed values. Strings use the parameter's format
-    ("2 kHz", "350 ms", "40 %", "Saw", "C4"); numbers are real values in the parameter's unit. The whole call is one
-    undo step in KoniSynth. If any id is unknown, nothing is changed."""
-    return link.call("set", port=port, values=values)
+def set_parameters(values: dict[str, str | float | bool | dict[str, float]],
+                   port: int | None = None) -> dict[str, dict[str, Any]]:
+    """Set several parameters at once. Each value is one of: text in the parameter's format ("2 kHz", "350 ms",
+    "40 %", "C4"; for switches and choices one of its options, e.g. "Saw", "On"); a number = real value in the unit
+    given by get_parameters/describe_parameters (for choices the option index; out-of-range numbers are clamped and
+    marked "clamped"); true/false for switches; or {"normalized": 0..1} = control position. The whole call is validated
+    first: an unknown id, unreadable text, non-finite number or other object shape changes nothing. One undo step in
+    KoniSynth. Returns the same detail as get_parameters for each id."""
+    return link.call("set", port=port, values=values, detail=True)
 
 
 @mcp.tool(annotations=READ)
@@ -271,25 +282,42 @@ def _notes(notes: str | list[dict[str, Any]], duration: float, velocity: int) ->
         if not names:
             raise ToolError("no notes given")
         return [{"note": n, "velocity": velocity, "start": 0.0, "duration": duration} for n in names]
-    return [{"note": n.get("note", 60), "velocity": n.get("velocity", velocity), "start": n.get("start", 0.0),
-             "duration": n.get("duration", duration)} for n in notes]
+    # Los campos que falten toman los valores por defecto; note es obligatoria y KoniSynth rechaza campos desconocidos
+    if not isinstance(notes, list) or not all(isinstance(n, dict) for n in notes):
+        raise ToolError("notes must be a string of note names or a list of {note, velocity, start, duration}")
+    for i, n in enumerate(notes):
+        if "note" not in n:
+            raise ToolError(f"note {i}: missing note")
+    return [{"velocity": velocity, "start": 0.0, "duration": duration, **n} for n in notes]
 
 
 _last_capture: dict[str, Any] = {}
 
 
-def _listen(seconds: float, port: int | None) -> dict[str, Any]:
-    cap = link.call("listen", port=port, seconds=seconds)
+def _measured(cap: dict[str, Any]) -> dict[str, Any]:
+    """Medida de una captura de listen, con lo que se pidió y lo que se obtuvo."""
     _last_capture.clear()
     _last_capture.update(cap)
-    return {"wav": cap["path"], **analysis.analyze(cap["path"])}
+    sr = float(cap["sampleRate"])
+    capture = {"requested_s": round(cap["requestedFrames"] / sr, 4), "captured_s": round(cap["capturedFrames"] / sr, 4),
+               "sample_rate": sr, "partial": bool(cap.get("partial"))}
+    if cap.get("truncated"):
+        capture["truncated"] = cap["truncated"]
+    return {"wav": cap["path"], "capture": capture, **analysis.analyze(cap["path"])}
+
+
+def _listen(seconds: float, port: int | None) -> dict[str, Any]:
+    if not 0.05 <= seconds <= MAX_LISTEN_S:
+        raise ToolError(f"seconds must be 0.05..{MAX_LISTEN_S:g}")
+    return _measured(link.call("listen", port=port, seconds=seconds))
 
 
 @mcp.tool(annotations=PLAY)
 def play_notes(notes: str | list[dict[str, Any]], duration: float = 1.0, velocity: int = 100,
                port: int | None = None) -> dict[str, Any]:
     """Play notes through KoniSynth's virtual keyboard without measuring. `notes`: "C4", "C4 E4 G4" (chord) or a list
-    of {note, velocity (1-127), start (s), duration (s)} for melodies (max 64 notes, up to 30 s)."""
+    of {note ("C4", "F#3", "Bb2" or MIDI 0-127; required), velocity (integer 1-127), start (s), duration (s)} for
+    melodies (max 64 notes, all ending within 30 s). Any invalid note rejects the whole call and nothing sounds."""
     return link.call("play", port=port, notes=_notes(notes, duration, velocity))
 
 
@@ -304,26 +332,35 @@ def audition(notes: str | list[dict[str, Any]] = "C4", duration: float = 1.0, ve
              port: int | None = None) -> dict[str, Any]:
     """Play notes, wait for them to finish plus `tail` seconds (release, echo, reverb) and measure the result: pitch
     (Hz, note, cents), level (dBFS), envelope (attack, decay), spectrum (centroid, rolloff, flatness, octave bands,
-    harmonics) and stereo. Total length is capped at 10 s. Also returns the WAV path of the capture."""
+    harmonics) and stereo. The capture starts at the notes' time 0 (a late first note keeps its leading silence) and
+    lasts until the last note ends plus `tail`; that total must be at most 10 s (longer requests are rejected before
+    playing). Also returns the WAV path and `capture` (requested and captured seconds, partial/truncated)."""
+    seq = _notes(notes, duration, velocity)
+    try:
+        ends = max(float(n["start"]) + float(n["duration"]) for n in seq)
+    except (TypeError, ValueError) as e:
+        raise ToolError("start and duration must be numbers (seconds)") from e
+    total = ends + max(0.0, tail)
+    if total > MAX_LISTEN_S:
+        raise ToolError(f"audition captures at most {MAX_LISTEN_S:g} s: the notes end at {ends:g} s plus tail {tail:g} s "
+                        f"= {total:g} s. Shorten them, or use play_notes and listen.")
     link.call("stop_notes", port=port)
-    played = link.call("play", port=port, notes=_notes(notes, duration, velocity))
-    total = min(10.0, float(played["endsAt"]) + max(0.0, tail))
+    link.call("play", port=port, notes=seq)
     time.sleep(total + 0.15)
-    # Captura anclada a la muestra en que sonó la primera nota (no al reloj): si el hilo de mensajes de KoniSynth retrasó
-    # la nota, se espera a que estén escritos los segundos pedidos
+    # Captura desde el origen del play, anclado a la muestra en que sonó su primera nota (no al reloj): si el hilo de
+    # mensajes de KoniSynth retrasó la nota, se espera a que estén escritos los segundos pedidos
     for _ in range(20):
-        cap = link.call("listen", port=port, seconds=total, fromPlay=True)
-        if not cap.get("partial"):
+        cap = link.call("listen", port=port, seconds=max(0.05, total), fromPlay=True)
+        if cap.get("truncated") != "notYetWritten":
             break
         time.sleep(0.1)
-    _last_capture.clear()
-    _last_capture.update(cap)
-    return {"wav": cap["path"], **analysis.analyze(cap["path"])}
+    return _measured(cap)
 
 
 @mcp.tool(annotations=READ)
 def listen(seconds: float = 2.0, port: int | None = None) -> dict[str, Any]:
-    """Measure the last `seconds` (max 10) of KoniSynth's output, whatever is sounding (e.g. the user playing)."""
+    """Measure the last `seconds` (0.05-10) of KoniSynth's output, whatever is sounding (e.g. the user playing).
+    `capture` says how much was captured (less than requested if the audio started less than `seconds` ago)."""
     return _listen(seconds, port)
 
 
