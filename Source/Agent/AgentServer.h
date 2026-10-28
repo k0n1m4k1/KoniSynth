@@ -411,6 +411,56 @@ private:
         return {};
     }
 
+    // "900 ms" -> 900 y "ms"; "-6dB" -> -6 y "dB". false si el texto no empieza por un número completo
+    static bool splitNumber (const juce::String& t, double& number, juce::String& suffix)
+    {
+        int i = (t.startsWithChar ('-') || t.startsWithChar ('+')) ? 1 : 0;
+        int digits = 0, dots = 0;
+        for (; i < t.length() && (juce::CharacterFunctions::isDigit (t[i]) || t[i] == '.'); ++i)
+            (t[i] == '.' ? dots : digits)++;
+        if (digits == 0 || dots > 1)
+            return false;
+        number = t.substring (0, i).getDoubleValue();
+        suffix = t.substring (i).trim();
+        return std::isfinite (number);
+    }
+
+    // Primer número del texto, con su signo: "Q 1.50" -> 1,5; "C-1" -> -1; "x2.00" -> 2. 0 si no hay
+    static double leadingNumber (const juce::String& s)
+    {
+        int i = 0;
+        while (i < s.length() && ! juce::CharacterFunctions::isDigit (s[i]))
+            ++i;
+        if (i == s.length())
+            return 0.0;
+        const auto negative = i > 0 && s[i - 1] == '-';
+        const auto v = s.substring (i).initialSectionContainingOnly ("0123456789.").getDoubleValue();
+        return negative ? -v : v;
+    }
+
+    // Factor de 'suffix' a la unidad del valor real 'base' (la de unitOf); 0 si no es una unidad de ese parámetro. Sin
+    // unidad: el número ya está en la unidad del valor real, como un número JSON
+    static double unitMultiplier (const juce::String& suffix, const juce::String& base)
+    {
+        if (suffix.isEmpty())
+            return 1.0;
+        const auto is = [&suffix] (const char* u) { return suffix == u; };
+        if (base == "ratio") return is ("%") ? 0.01 : 0.0;
+        if (base == "Hz")    return is ("Hz") ? 1.0 : is ("kHz") ? 1000.0 : 0.0;
+        if (base == "kHz")   return is ("kHz") ? 1.0 : is ("Hz") ? 0.001 : 0.0;
+        if (base == "s")     return is ("s") ? 1.0 : is ("ms") ? 0.001 : 0.0;
+        if (base == "ms")    return is ("ms") ? 1.0 : is ("s") ? 1000.0 : 0.0;
+        return base.isNotEmpty() && suffix == base ? 1.0 : 0.0;
+    }
+
+    static juce::String allowedUnits (const juce::String& base)
+    {
+        if (base == "ratio")             return "use %, or a plain number as a ratio 0..1";
+        if (base == "Hz" || base == "kHz") return "use Hz or kHz";
+        if (base == "s" || base == "ms")   return "use s or ms";
+        return base.isEmpty() ? "it has no unit: use a plain number" : "use " + base;
+    }
+
     static juce::var detailOf (juce::RangedAudioParameter& p)
     {
         auto o = std::make_unique<juce::DynamicObject>();
@@ -466,15 +516,56 @@ private:
                 norm = (float) k / (float) (steps - 1);
                 return true;
             }
+            // Cifra + unidad ("900 ms", "1.5 kHz", "-6 dB"): se convierte a la unidad del valor real (unitOf, la misma que
+            // los números) y se limita al rango como un número, avisando con 'clamped'. Una unidad que no corresponde al
+            // parámetro es un error: el formato de JUCE la ignoraría y leería solo la cifra
+            const auto base = unitOf (p);
+            double number = 0.0;
+            juce::String suffix;
+            if (base.isString() && splitNumber (t, number, suffix))
+            {
+                const auto mult = unitMultiplier (suffix, base.toString());
+                if (mult <= 0.0)
+                {
+                    why = "unknown unit \"" + suffix + "\" for this parameter (" + allowedUnits (base.toString()) + ")";
+                    return false;
+                }
+                const auto x = number * mult;
+                const auto& r = p.getNormalisableRange();
+                clamped = x < (double) r.start || x > (double) r.end;
+                norm = p.convertTo0to1 ((float) juce::jlimit ((double) r.start, (double) r.end, x));
+                return true;
+            }
+            // Formatos propios sin unidad deducida ("Q 1.50", "I 2.00", "x1.00", nombres de nota) o texto sin cifras. Vale:
+            //  - el texto tal como se muestra ("Off", la vocal "E", "C4"), sin distinguir mayúsculas;
+            //  - con cifras, el mismo formato que el mostrado quitando las cifras ("Q 1.5" frente a "Q 1.50"), o solo la cifra;
+            //  - un nombre de nota que el parámetro muestra con otra grafía ("Db4" se muestra "C#4").
+            // Lo demás es un error: el formato de JUCE leería solo la cifra y descartaría el resto sin avisar
             norm = p.getValueForText (t);
-            // Sin cifras solo vale un texto que el parámetro muestra tal cual ("Off", la vocal "E"): si al leerlo y volver a
-            // mostrarlo no sale lo mismo, el formato no lo ha entendido (y habría dado el mínimo sin avisar)
-            if (! std::isfinite (norm) || (! t.containsAnyOf ("0123456789") && ! p.getText (norm, 64).trim().equalsIgnoreCase (t)))
+            if (! std::isfinite (norm))
             {
                 why = "cannot read \"" + t + "\" (format like \"" + p.getCurrentValueAsText() + "\")";
                 return false;
             }
             norm = juce::jlimit (0.0f, 1.0f, norm);
+            const auto shown = p.getText (norm, 64).trim();
+            const auto shape = [] (const juce::String& s) { return s.removeCharacters ("0123456789.+- ").toLowerCase(); };
+            const auto hasDigits = t.containsAnyOf ("0123456789");
+            const auto note = strictMidiNote (t);
+            const auto ok = shown.equalsIgnoreCase (t)
+                            || (hasDigits && (shape (t).isEmpty() || shape (t) == shape (shown)))
+                            || (note >= 0 && shown == juce::MidiMessage::getMidiNoteName (note, true, true, 4));
+            if (! ok)
+            {
+                why = "cannot read \"" + t + "\" (format like \"" + p.getCurrentValueAsText() + "\")";
+                return false;
+            }
+            // Límite: en un extremo del rango, la cifra pedida queda más allá de la mostrada
+            if (hasDigits && (norm <= 0.0f || norm >= 1.0f))
+            {
+                const auto wanted = leadingNumber (t), got = leadingNumber (shown);
+                clamped = norm <= 0.0f ? wanted < got : wanted > got;
+            }
             return true;
         }
         if (v.isBool())

@@ -249,9 +249,10 @@ def set_parameters(values: dict[str, str | float | bool | dict[str, float]],
                    port: int | None = None) -> dict[str, dict[str, Any]]:
     """Set several parameters at once. Each value is one of: text in the parameter's format ("2 kHz", "350 ms",
     "40 %", "C4"; for switches and choices one of its options, e.g. "Saw", "On"); a number = real value in the unit
-    given by get_parameters/describe_parameters (for choices the option index; out-of-range numbers are clamped and
-    marked "clamped"); true/false for switches; or {"normalized": 0..1} = control position. The whole call is validated
-    first: an unknown id, unreadable text, non-finite number or other object shape changes nothing. One undo step in
+    given by get_parameters/describe_parameters (for choices the option index); true/false for switches; or
+    {"normalized": 0..1} = control position. Out-of-range numbers and texts are clamped and marked "clamped". The whole
+    call is validated first: an unknown id, unreadable text, a unit that does not belong to the parameter (e.g.
+    "900 Hz" for a time), non-finite number or other object shape changes nothing. One undo step in
     KoniSynth. Returns the same detail as get_parameters for each id."""
     return link.call("set", port=port, values=values, detail=True)
 

@@ -54,6 +54,21 @@ async def run():
             check(n["cutoff"].get("clamped") is True and n["cutoff"]["value"] == 20000, "fuera de rango: 50000 -> %s, clamped" % n["cutoff"]["text"])
             check(n["wave"]["text"] == "Square" and n["formantOn"]["text"] == "On" and n["formantVowel"]["value"] == 1,
                   "índice 3 -> %s; true -> %s; \"E\" (texto sin cifras) -> %s" % (n["wave"]["text"], n["formantOn"]["text"], n["formantVowel"]["value"]))
+            # Texto fuera de rango: se limita como un número y avisa; dentro del rango, sin aviso
+            n = await tool("set_parameters", {"values": {"attack": "900 s", "cutoff": "25 kHz", "resonance": "40 %"}})
+            lim = await tool("get_parameters", {"ids": ["attack"]})
+            check(n["attack"].get("clamped") is True and n["attack"]["value"] == lim["attack"]["value"] and n["cutoff"].get("clamped") is True
+                  and n["cutoff"]["value"] == 20000 and "clamped" not in n["resonance"],
+                  "texto fuera de rango: \"900 s\" -> %s, \"25 kHz\" -> %s, clamped; \"40 %%\" sin aviso" % (n["attack"]["text"], n["cutoff"]["text"]))
+            # Formatos propios sin unidad deducida: Q, nombres de nota
+            n = await tool("set_parameters", {"values": {"eqMid1Q": "Q 2.5", "eqMid2Q": "4", "sampleRoot": "Db4", "osc2SampleRoot": "60"}})
+            check(n["eqMid1Q"]["text"] == "Q 2.50" and n["eqMid2Q"]["text"] == "Q 4.00" and n["sampleRoot"]["text"] == "C#4"
+                  and n["osc2SampleRoot"]["text"] == "C4" and not any("clamped" in v for v in n.values()),
+                  "formatos propios: \"Q 2.5\" -> %s, \"4\" -> %s, \"Db4\" -> %s, \"60\" -> %s"
+                  % (n["eqMid1Q"]["text"], n["eqMid2Q"]["text"], n["sampleRoot"]["text"], n["osc2SampleRoot"]["text"]))
+            n = await tool("set_parameters", {"values": {"eqMid1Q": "Q 50", "omniSplit": "C1"}})
+            check(n["eqMid1Q"].get("clamped") is True and n["omniSplit"].get("clamped") is True,
+                  "formatos propios fuera de rango: \"Q 50\" -> %s, \"C1\" -> %s, clamped" % (n["eqMid1Q"]["text"], n["omniSplit"]["text"]))
             n = await tool("set_parameters", {"values": {"modLp": "Off", "cutoff": {"normalized": 0.5}}})
             check(n["modLp"]["text"] == "Off" and abs(n["cutoff"]["normalized"] - 0.5) < 1e-6, "\"Off\" (máximo) -> %s; {normalized: 0.5} -> %s" % (n["modLp"]["text"], n["cutoff"]["text"]))
 
@@ -81,6 +96,11 @@ async def run():
                 ({"cutoff": "1 kHz", "wave": 99}, "índice fuera de rango"),
                 ({"cutoff": "1 kHz", "resonance": True}, "true en un parámetro continuo"),
                 ({"cutoff": "1 kHz", "noSuchParam": 1}, "id desconocido"),
+                ({"cutoff": "1 kHz", "attack": "900 unidad_inventada"}, "unidad desconocida"),
+                ({"cutoff": "1 kHz", "attack": "900 Hz"}, "unidad de otro parámetro"),
+                ({"cutoff": "1 kHz", "resonance": "40 dB"}, "dB en un parámetro en %"),
+                ({"cutoff": "1 kHz", "eqMid1Q": "2 unidad_inventada"}, "unidad desconocida en un formato propio"),
+                ({"cutoff": "1 kHz", "sampleRoot": "900 unidad_inventada"}, "unidad desconocida en una nota"),
             ]
             for values, what in bad:
                 e = await error("set_parameters", {"values": values})
