@@ -29,7 +29,7 @@ import generator
 #   REPLACE: sustituye valores o el sonido actual (deshacible); repetirla igual no cambia más. WRITE: idem, pero cada
 #   llamada cambia de nuevo (aleatoria o relativa al valor actual). ADD: solo añade (save_preset falla si el nombre
 #   existe). PLAY: suena, sin cambiar nada guardado. STOP: suelta todas las notas (también las del usuario).
-READ = ToolAnnotations(read_only_hint=True, open_world_hint=False)
+READ = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 REPLACE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False)
 ADD = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
