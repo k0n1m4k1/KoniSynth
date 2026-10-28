@@ -23,6 +23,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include <array>
 #include "../Source/Midi/MonoNoteFilter.h" // monotest: filtro Mono / Legato (sin el plugin)
 #include <thread>
+#include "../Source/Agent/AudioTap.h" // taptest: reloj de la captura del agente con lectores concurrentes (sin el plugin)
 
 namespace
 {
@@ -1134,10 +1135,66 @@ int monoTest()
     return fails;
 }
 
+// taptest: el reloj de AudioTap (seqlock) con un escritor y un lector a la vez y sin pausas. Cada bloque k escribe campos
+// ligados entre sí (bpm = k, ppq = 2k, timeSamples = 3k, tempoBpm = k + 0,5, latencySamples = k mod 100000, frame = 16k);
+// una copia mezclada de dos bloques rompería el invariante. Sin TSan en MSVC: la ausencia de carrera de datos se sostiene
+// por construcción (todo acceso compartido es atómico), y esta prueba comprueba la coherencia de las copias
+int tapTest()
+{
+    int fails = 0;
+    const auto check = [&fails] (bool ok, const juce::String& what)
+    {
+        std::printf ("%s %s\n", ok ? "OK   " : "FALLO", what.toRawUTF8());
+        if (! ok) ++fails;
+    };
+    AudioTap tap (48000.0);
+    juce::AudioBuffer<float> block (2, 16);
+    block.clear();
+    constexpr juce::int64 blocks = 2000000;
+    std::atomic<bool> done { false };
+    std::thread writer ([&]
+    {
+        for (juce::int64 k = 0; k < blocks; ++k)
+        {
+            AudioTap::Clock c;
+            c.hasBpm = c.hasPpq = c.hasTime = c.playing = true;
+            c.bpm = (double) k;
+            c.ppq = 2.0 * (double) k;
+            c.timeSamples = 3 * k;
+            c.tempoBpm = (double) k + 0.5;
+            c.latencySamples = (int) (k % 100000);
+            tap.push (block, c);
+        }
+        done = true;
+    });
+    juce::int64 copies = 0, bad = 0, invalid = 0, last = -1, backwards = 0;
+    while (! done)
+    {
+        const auto c = tap.clock();
+        if (! c.valid) { ++invalid; continue; }
+        ++copies;
+        const auto k = (juce::int64) c.bpm;
+        const auto coherent = c.ppq == 2.0 * (double) k && c.timeSamples == 3 * k && c.tempoBpm == (double) k + 0.5
+                              && c.latencySamples == (int) (k % 100000) && c.frame == (juce::uint64) (16 * k) && c.blockSize == 16;
+        bad += coherent ? 0 : 1;
+        backwards += k < last ? 1 : 0; // un escritor: el bloque leído no retrocede
+        last = k;
+    }
+    writer.join();
+    const auto lastClock = tap.clock();
+    check (copies > 1000 && bad == 0 && backwards == 0 && lastClock.bpm == (double) (blocks - 1),
+           juce::String (blocks) + " bloques escritos, " + juce::String (copies) + " copias leídas a la vez: " + juce::String (bad)
+           + " incoherentes, " + juce::String (backwards) + " hacia atrás, " + juce::String (invalid) + " sin copia estable");
+    std::printf ("%d fallos\n", fails);
+    return fails;
+}
+
 } // namespace
 
 int main (int argc, char** argv)
 {
+    if (argc >= 2 && juce::String (argv[1]) == "taptest")
+        return tapTest();
     if (argc >= 2 && juce::String (argv[1]) == "sattest")
         return satTest();
     if (argc >= 2 && juce::String (argv[1]) == "schedtest")

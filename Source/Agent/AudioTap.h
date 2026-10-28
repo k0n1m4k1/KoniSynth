@@ -1,6 +1,10 @@
-// Se incluye desde KoniSynth.cpp, dentro de la misma unidad de compilación; usa las declaraciones previas de
-// KoniSynth.cpp (JUCE). No es una cabecera independiente.
+// Cabecera independiente (solo JUCE): la incluye KoniSynth.cpp y también Bench/KoniBench.cpp (taptest), sin el plugin.
 #pragma once
+
+#include <array>
+#include <atomic>
+#include <cstring>
+#include <type_traits>
 
 //==============================================================================
 // Control por agente (F3): copia circular de la salida final del plugin para que el agente "escuche" (Agent/AgentServer.h
@@ -86,14 +90,10 @@ public:
             }
         engineWritten = false;
         write2 (buffer, 0);
-        // Reloj con seqlock: el contador es impar mientras se escribe y el lector repite si cambia (el escritor no espera)
         c.frame = pos;
         c.blockSize = n;
         c.valid = true;
-        clockSeq.fetch_add (1, std::memory_order_acq_rel);
-        std::atomic_thread_fence (std::memory_order_release);
-        std::memcpy (&clockData, &c, sizeof (Clock));
-        clockSeq.fetch_add (1, std::memory_order_release);
+        storeClock (c);
         write.store (pos + (juce::uint64) n, std::memory_order_release);
     }
 
@@ -102,18 +102,36 @@ public:
     // Hilo de mensajes: copia coherente del reloj del último bloque
     Clock clock() const
     {
-        Clock c;
+        std::array<juce::uint64, clockWords> w {};
         for (int tries = 0; tries < 1000; ++tries)
         {
             const auto s0 = clockSeq.load (std::memory_order_acquire);
             if ((s0 & 1u) != 0)
                 continue;
-            std::memcpy (&c, &clockData, sizeof (Clock));
-            std::atomic_thread_fence (std::memory_order_acquire);
+            for (size_t i = 0; i < clockWords; ++i)
+                w[i] = clockData[i].load (std::memory_order_relaxed);
+            std::atomic_thread_fence (std::memory_order_acquire); // las cargas de arriba, antes de releer el contador
             if (clockSeq.load (std::memory_order_relaxed) == s0)
+            {
+                Clock c;
+                std::memcpy (&c, w.data(), sizeof (Clock)); // copia local: ya sin compartir
                 return c;
+            }
         }
         return {}; // sin copia estable (no ocurre a ritmo de bloque): valid = false
+    }
+
+    // Hilo de audio (lo usa push; público para la prueba concurrente de KoniBench)
+    void storeClock (const Clock& c)
+    {
+        std::array<juce::uint64, clockWords> w {};
+        std::memcpy (w.data(), &c, sizeof (Clock));
+        const auto s = clockSeq.load (std::memory_order_relaxed); // un solo escritor
+        clockSeq.store (s + 1, std::memory_order_relaxed);        // impar: escribiendo
+        std::atomic_thread_fence (std::memory_order_release);     // el impar, antes que cualquier palabra nueva
+        for (size_t i = 0; i < clockWords; ++i)
+            clockData[i].store (w[i], std::memory_order_relaxed);
+        clockSeq.store (s + 2, std::memory_order_release);        // par: las palabras, antes que el par
     }
 
     // Hilo de mensajes: 'frames' fotogramas desde la posición absoluta 'start', de la salida final o (engine) de la del motor.
@@ -163,7 +181,12 @@ private:
     std::atomic<juce::uint64> write { 0 };
     std::atomic<double> rate { 0.0 };
     std::atomic<juce::uint32> epoch { 0 };
-    Clock clockData;                             // protegido por clockSeq (seqlock)
+    // Reloj con seqlock (Boehm, "Can seqlocks get along with programming language memory models?", 2012): el contador es
+    // impar mientras se escribe y el lector repite si cambia (el escritor no espera). El reloj se guarda en palabras
+    // atómicas de 64 bits: lectura y escritura a la vez no son una carrera de datos (con memcpy de un Clock compartido sí)
+    static_assert (std::is_trivially_copyable_v<Clock>);
+    static constexpr size_t clockWords = (sizeof (Clock) + 7) / 8;
+    std::array<std::atomic<juce::uint64>, clockWords> clockData {};
     std::atomic<juce::uint32> clockSeq { 0 };
     juce::CriticalSection lock; // prepare frente a los lectores; push no la toma
 };
