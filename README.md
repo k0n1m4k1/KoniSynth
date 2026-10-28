@@ -95,7 +95,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   MT-32 ROMs. None of them is included; you supply them.
 - **User rhythms:** 8 rhythms of your own for the Drum Machine, the Omnichord (with its auto bass) and the Casio VL-1,
   drawn in a rhythm editor or in any sequencer: each one is a MIDI file (see [User rhythms](docs/user-rhythms.md)).
-- **MIDI controllers:** setup profiles for the Akai Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425 and Yamaha reface YC;
+- **MIDI controllers:** setup profiles for the M-Audio Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425 and Yamaha reface YC;
   a Controller Setup assistant learns the knobs of your unit one by one and suggests the settings for it.
 - **Display:** oscilloscope, spectrum, spectrogram, goniometer, VU meters and **Arcade** (a pixel-art shooter played by the
   music), in modern, green or amber phosphor style. Its bezel follows the skin and style (graphite, terminal casing or

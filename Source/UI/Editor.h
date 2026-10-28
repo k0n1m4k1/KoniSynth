@@ -110,7 +110,7 @@ public:
         updateMcpButton();
         content.addAndMakeVisible (mcpButton);
         midiButton.setTooltip ("MIDI input (all engines): MIDI channel, fine tune, bend range and controller profiles "
-                               "(Akai Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425, Yamaha reface YC).");
+                               "(M-Audio Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425, Yamaha reface YC).");
         midiButton.onClick = [this] { midiMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&midiButton)); };
         content.addAndMakeVisible (midiButton);
         tuningLed.setMouseCursor (juce::MouseCursor::PointingHandCursor);
@@ -1232,7 +1232,7 @@ private:
             });
         });
         midi.addSeparator();
-        midi.addItem ("Controller: Akai Oxygen Pro Mini...", [this] { openControllerPanel (oxygenProMini()); });
+        midi.addItem ("Controller: M-Audio Oxygen Pro Mini...", [this] { openControllerPanel (oxygenProMini()); });
         midi.addItem ("Controller: Casio CT-S400...", [this] { openControllerPanel (casioCtS400()); });
         midi.addItem ("Controller: Yamaha PSR-EW425...", [this] { openControllerPanel (yamahaPsrEw425()); });
         midi.addItem ("Controller: Yamaha reface YC...", [this] { openControllerPanel (yamahaRefaceYc()); });
