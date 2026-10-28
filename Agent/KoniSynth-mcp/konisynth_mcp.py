@@ -134,29 +134,43 @@ class KoniLink:
                 errors.append(f"{a['port']}: {e}")
         raise ToolError("KoniSynth announces found but none answered: " + "; ".join(errors))
 
+    # Órdenes que no deben repetirse si se pierde la respuesta: KoniSynth pudo ejecutarlas (play sonaría dos veces; save_preset
+    # fallaría la segunda vez con "el nombre existe"). Antes de enviarlas se comprueba la conexión con ping, que sí se reintenta:
+    # una conexión caducada (KoniSynth reiniciado) se renueva sin riesgo de duplicar la orden
+    NOT_IDEMPOTENT = frozenset({"play", "save_preset"})
+
     def call(self, cmd: str, port: int | None = None, **args: Any) -> Any:
         with self._lock:
-            for attempt in (0, 1):
-                if self._sock is None or (port is not None and port != self._port):
-                    self._close()
-                    self._connect(port)
-                self._next_id += 1
-                request = dict(token=self._token, id=self._next_id, cmd=cmd, **args)
-                try:
-                    self._file.write((json.dumps(request) + "\n").encode("utf-8"))
-                    self._file.flush()
-                    line = self._file.readline()
-                    if not line:
-                        raise ConnectionError("connection closed")
-                    reply = json.loads(line)
-                    break
-                except (OSError, ValueError) as e:
-                    self._close()
-                    if attempt == 1:
-                        raise ToolError(f"KoniSynth connection failed: {e}") from e
+            once = cmd in self.NOT_IDEMPOTENT
+            if once:
+                self._send("ping", port, {}, retry=True)
+            reply = self._send(cmd, port, args, retry=not once)
             if not reply.get("ok"):
                 raise ToolError(f"KoniSynth: {reply.get('error')}")
             return reply.get("result")
+
+    def _send(self, cmd: str, port: int | None, args: dict[str, Any], retry: bool) -> dict[str, Any]:
+        for attempt in (0, 1) if retry else (1,):
+            if self._sock is None or (port is not None and port != self._port):
+                self._close()
+                self._connect(port)
+            self._next_id += 1
+            request = dict(token=self._token, id=self._next_id, cmd=cmd, **args)
+            try:
+                self._file.write((json.dumps(request) + "\n").encode("utf-8"))
+                self._file.flush()
+                line = self._file.readline()
+                if not line:
+                    raise ConnectionError("connection closed")
+                return json.loads(line)
+            except (OSError, ValueError) as e:
+                self._close()
+                if attempt == 1:
+                    if not retry:
+                        raise ToolError(f"KoniSynth connection lost after sending '{cmd}': it may have been executed. "
+                                        "Check with status (or listen) before sending it again.") from e
+                    raise ToolError(f"KoniSynth connection failed: {e}") from e
+        raise ToolError("KoniSynth connection failed")
 
 
 link = KoniLink()
@@ -280,7 +294,7 @@ def play_notes(notes: str | list[dict[str, Any]], duration: float = 1.0, velocit
 
 @mcp.tool(annotations=STOP)
 def stop_notes(port: int | None = None) -> bool:
-    """Release all notes."""
+    """Release all notes and cancel the notes scheduled by play_notes or audition that have not sounded yet."""
     return link.call("stop_notes", port=port)
 
 

@@ -27,7 +27,8 @@
 //   save_preset {"name": "...", "category": "Bass"}
 //   play     {"notes": [{"note": "C4" | 60, "velocity": 100, "start": 0.0, "duration": 1.0}, ...]}   (F3) por el teclado
 //            virtual, como el teclado en pantalla; máximo 64 notas, inicio y duración hasta 30 s
-//   stop_notes {}                           suelta todas las notas
+//   stop_notes {}                           suelta todas las notas y cancela las programadas por play que aún no han sonado
+//            (cada play se suma a los anteriores; stop_notes los cancela todos)
 //   listen   {"seconds": 2.0, "fromPlay": false}   vuelca a un WAV temporal los últimos N s de la salida (máximo 10) o,
 //            con fromPlay, N s desde la muestra en que sonó la primera nota del último play (independiente de retrasos del
 //            hilo de mensajes); devuelve ruta, frecuencia, pico y "partial" si aún no se han escrito los N s
@@ -239,7 +240,7 @@ private:
         if (cmd == "load_preset") return loadPreset (req, error);
         if (cmd == "save_preset") return savePreset (req, error);
         if (cmd == "play")        return play (req.getProperty ("notes", juce::var()), error);
-        if (cmd == "stop_notes")  { host.keyboard.allNotesOff (0); return true; }
+        if (cmd == "stop_notes")  { ++*playGeneration; host.keyboard.allNotesOff (0); return true; } // cancela lo programado
         if (cmd == "listen")      return listen ((double) req.getProperty ("seconds", 2.0), (bool) req.getProperty ("fromPlay", false), error);
         error = "unknown cmd: " + cmd;
         return {};
@@ -401,18 +402,21 @@ private:
         auto& tap = host.tap;
         playStart = 0;
         const auto first = std::min_element (list.begin(), list.end(), [] (const N& a, const N& b) { return a.start < b.start; })->start;
+        // Generación de este play: stop_notes la incrementa y los temporizadores pendientes (note-on y note-off) ya no actúan.
+        // Así un note-off antiguo no corta una nota nueva de la misma altura tras un stop_notes
+        const auto gen = playGeneration->load();
         for (const auto& n : list)
         {
-            juce::Timer::callAfterDelay (juce::roundToInt (n.start * 1000.0), [this, &kb, &tap, n, first, flag = alive]
+            juce::Timer::callAfterDelay (juce::roundToInt (n.start * 1000.0), [this, &kb, &tap, n, first, flag = alive, g = playGeneration, gen]
             {
-                if (! *flag) return;
+                if (! *flag || g->load() != gen) return;
                 if (n.start == first && playStart == 0)
                     playStart = tap.framesWritten(); // la nota entra en el siguiente bloque de audio: ancla de 'fromPlay'
                 kb.noteOn (1, n.note, (float) n.velocity / 127.0f);
             });
-            juce::Timer::callAfterDelay (juce::roundToInt ((n.start + n.duration) * 1000.0), [&kb, n, flag = alive]
+            juce::Timer::callAfterDelay (juce::roundToInt ((n.start + n.duration) * 1000.0), [&kb, n, flag = alive, g = playGeneration, gen]
             {
-                if (*flag) kb.noteOff (1, n.note, 0.0f);
+                if (*flag && g->load() == gen) kb.noteOff (1, n.note, 0.0f);
             });
         }
         auto o = std::make_unique<juce::DynamicObject>();
@@ -464,4 +468,5 @@ private:
     juce::File announce;
     juce::OwnedArray<ClientThread> clients;
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
+    std::shared_ptr<std::atomic<std::uint32_t>> playGeneration = std::make_shared<std::atomic<std::uint32_t>> (0); // stop_notes la sube
 };
