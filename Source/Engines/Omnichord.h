@@ -33,6 +33,9 @@ struct Omnichord
         reset();
     }
 
+    // PANIC (silencio total): el ritmo queda parado hasta la siguiente nota
+    void stopRhythm() { rhythmStopped = true; }
+
     void reset()
     {
         kit.reset();
@@ -60,6 +63,14 @@ struct Omnichord
         const auto bassLevel = p.omniBassLevel->load(), rhythmLevel = p.omniRhythmLevel->load();
         const auto tune = (double) p.fineTune->load();
 
+        if (rhythmStopped) // parado por PANIC: arranca de nuevo, desde el principio, con la siguiente nota
+            for (const auto m : midi)
+                if (m.getMessage().isNoteOn())
+                {
+                    rhythmStopped = false;
+                    clock.restart();
+                    break;
+                }
         const auto newRhythm = (int) p.omniRhythm->load() - 1; // 0 = Off
         if (newRhythm != rhythm)
         {
@@ -77,7 +88,7 @@ struct Omnichord
         struct Hit { int sample; DrumSlot slot; char c; };
         std::array<Hit, 64> hits;
         int numHits = 0;
-        if (active != nullptr)
+        if (active != nullptr && ! rhythmStopped)
         {
             const auto& pat = *active;
             clock.process (out.getNumSamples(), sampleRate, (double) p.omniTempo->load(), pat.stepsPerBeat, 0.0, transport,
@@ -285,6 +296,7 @@ private:
     StepClock clock;
     int rhythm = -2, split = 60, harpOctave = 0, lastZone = -1;
     bool rhythmRunning = false;
+    bool rhythmStopped = false; // PANIC: sin ritmo hasta la siguiente nota
     std::atomic<long long> stepCount { -1 };
     std::array<int, 10> chordKeys {};
     int numChordKeys = 0, chordRoot = 0, bassNote = 48;

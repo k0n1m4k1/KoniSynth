@@ -50,6 +50,10 @@ struct SnesEngine
         zoh.reset();
     }
 
+    // PANIC, tras reset: 64 muestras del chip (2 ms a 32 kHz) de silencio en las que la etapa de salida (paso bajo y paso alto)
+    // sigue a la entrada; después arranca en equilibrio y no deja un escalón de continua (como en Mega Drive)
+    void settleOutput() { settle = 64; }
+
     // Macros por frame (Dsp/FrameMacro.h, propiedad "snesMacros"), EXPERIMENTAL: el driver N-SPC avanza por ticks de su timer
     // según el tempo, no por frames; aquí van a 60,10 Hz como en un driver de efectos. Volumen: escala VxVOL (macro/15);
     // arpegio; pitch: registro de tono, 8 unidades por paso (+ = más grave); "duty" = NON, ruido en esa voz (bit 0).
@@ -587,12 +591,14 @@ private:
             {
                 const auto lp = 0.25 * y + 0.75 * lpPrev[side];
                 lpPrev[side] = y;
-                hpOut[side] = lp - hpIn[side] + (1.0 - 1.0 / 256.0) * hpOut[side];
+                hpOut[side] = settle > 0 ? 0.0 : lp - hpIn[side] + (1.0 - 1.0 / 256.0) * hpOut[side];
                 hpIn[side] = lp;
                 y = hpOut[side];
             }
             result[side] = (float) y;
         }
+        if (settle > 0)
+            --settle;
         return result;
     }
 
@@ -609,6 +615,7 @@ private:
     int gainRate = 0, directGain = 127, noiseRate = 0, baseVolume = 80, mainVolume = 127, edl = 0, efb = 0, evol = 0, firPreset = 0;
     bool noiseOn = false, velocityOn = true, echoOn = false, filterOn = true;
     std::array<double, 2> lpPrev {}, hpIn {}, hpOut {};
+    int settle = 0; // muestras del chip de asentamiento de la salida que quedan (settleOutput)
     double tuneCents = 0.0, userRoot = kRate;
     float pan = 0.0f, spread = 0.0f;
     bool monoOutput = false; // salida RF: L + R

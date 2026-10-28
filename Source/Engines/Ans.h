@@ -103,6 +103,9 @@ struct AnsEngine
         reset();
     }
 
+    // PANIC (silencio total): con Hold, la placa queda parada hasta la siguiente nota
+    void stopHold() { holdStopped = true; }
+
     void reset()
     {
         amp.fill (0.0f);
@@ -139,6 +142,7 @@ struct AnsEngine
                 const auto m = (*midiIt).getMessage();
                 if (m.isNoteOn())
                 {
+                    holdStopped = false;
                     if (numHeld == 0 && ! hold) column = 0.0; // la placa empieza al pulsar
                     if (numHeld < (int) held.size()) held[(size_t) numHeld++] = m.getNoteNumber();
                     transpose = (m.getNoteNumber() - 60) * 6;
@@ -152,7 +156,7 @@ struct AnsEngine
                 }
                 else if (m.isAllNotesOff() || m.isAllSoundOff()) numHeld = 0;
             }
-            const auto playing = score != nullptr && (hold || numHeld > 0);
+            const auto playing = score != nullptr && ((hold && ! holdStopped) || numHeld > 0);
             if (playing)
             {
                 column += speed / sampleRate;
@@ -211,6 +215,7 @@ struct AnsEngine
 private:
     double sampleRate = 44100.0, ampCoef = 0.0, column = 0.0;
     std::array<float, AnsScore::kRows> amp {}, target {}, wander {};
+    bool holdStopped = false; // PANIC: Hold sin efecto hasta la siguiente nota
     std::array<double, AnsScore::kRows> re {}, im {}, cw {}, sw {};
     std::array<bool, AnsScore::kRows> nyquistOk {};
     std::array<int, 16> held {};

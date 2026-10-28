@@ -1612,12 +1612,41 @@ public:
 private:
     // Silencio inmediato: corta voces sin release y vacía todos los estados con memoria (colas de echo, reverb, chorus,
     // soporte, oversampling y theremin). Hilo de audio.
+    // PANIC: silencio total desde este bloque. Todos los motores y efectos vuelven a reposo (sus reset ya se usan en este
+    // hilo al cambiar de motor o encender un efecto), el transporte se pone en pausa, se descartan las notas del agente y los
+    // ritmos que suenan solos (Drum Machine, Omnichord, ANS con Hold) quedan parados hasta la siguiente nota. Lo que se toca
+    // con un control mantenido (Theremin, monitor de entrada) vuelve a sonar en cuanto llega su señal
     void panic()
     {
         allVoicesOff();
         keyboardState.allNotesOff (0); // suelta también las teclas pulsadas en pantalla
         theremin.reset();
         vl1.reset();
+        stylophone.reset();
+        omnichord.reset();
+        omnichord.stopRhythm();
+        drumMachine.reset();
+        drumMachine.stopRhythm();
+        fmEngine.reset();
+        chipEngine.reset();
+        polivoks.reset();
+        ansEngine.reset();
+        ansEngine.stopHold();
+        mdEngine.reset();
+        mdEngine.settleOutput();
+        snesEngine.reset();
+        snesEngine.settleOutput();
+        n64Engine.reset();
+        oplEngine.reset();
+        mt32Engine.reset();
+        flanger.reset();
+        freqShifter.reset();
+        leslie.reset();
+        spring.reset();
+        underwater.reset();
+        sessionTransport.pauseFromAudioThread();
+        if (auto* scheduler = agentSchedulerActive.load (std::memory_order_acquire))
+            scheduler->reset(); // notas programadas por play: fuera, y se sueltan las que sonaban
         arp.reset();
         sequencer.reset();
         noteScale.reset();

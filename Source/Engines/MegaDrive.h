@@ -69,6 +69,11 @@ struct MegaDriveEngine
         resampler.reset();
     }
 
+    // PANIC, tras reset: el chip en reposo da continua (escalera del DAC) y el bloqueo de continua, recién puesto a cero, la
+    // dejaría pasar como un escalón que tarda ~0,2 s en irse (medido: +0,0185). Durante 64 muestras (1,3 ms a 48 kHz, más
+    // que el remuestreador) la salida calla y el filtro sigue a la entrada: después arranca en equilibrio
+    void settleOutput() { settle = 64; }
+
     void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const SampleData* userSample, int rootNote,
                  const MacroSet* macroSet)
     {
@@ -101,11 +106,13 @@ struct MegaDriveEngine
             std::array<float, 2> y {};
             for (size_t side = 0; side < 2; ++side)
             {
-                const auto dc = lr[side] - dcIn[side] + dcCoef * dcOut[side];
+                const auto dc = settle > 0 ? 0.0 : lr[side] - dcIn[side] + dcCoef * dcOut[side];
                 dcIn[side] = lr[side];
                 dcOut[side] = dc;
                 y[side] = (float) dc;
             }
+            if (settle > 0)
+                --settle;
             if (monoOutput)
                 y[0] = y[1] = 0.5f * (y[0] + y[1]);
             if (out.getNumChannels() >= 2)
@@ -965,6 +972,7 @@ private:
     int lfoCount = 0, lfoQuot = 0, lfoAm = 0;
     int egTimer = 0, egQuot = 0, egShiftLock = 0, egTimerLow = 0;
     std::array<double, 2> lp {}, dcIn {}, dcOut {};
+    int settle = 0; // muestras de asentamiento de la salida que quedan (settleOutput)
     double lpCoef = 0.0, dcCoef = 0.0, tuneCents = 0.0;
     bool monoOutput = false; // salida AV/RF del Model 1: L + R
     int panMode = 0; // 0 Center, 1 Left, 2 Right, 3 Alternate (canales pares L, impares R), 4 Spread (L, C, R...)

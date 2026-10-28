@@ -486,6 +486,9 @@ struct DrumMachine
     void prepare (double sr) { sampleRate = sr; kit.prepare (sr); reset(); }
     void reseed (juce::int64 seed) { kit.reseed (seed); }
     void reset() { kit.reset(); clock.restart(); pattern = pattern2 = -2; ledStep.store (-1, std::memory_order_relaxed); }
+    // PANIC (silencio total): el ritmo queda parado hasta la siguiente nota
+    void stopRhythm() { rhythmStopped = true; }
+
 
     // LED encendido de la fila de pasos (se lee desde la UI): posición en el compás del último paso, 0..15; -1 parado
     int currentLed() const noexcept { return ledStep.load (std::memory_order_relaxed); }
@@ -514,6 +517,14 @@ struct DrumMachine
         const auto accent = p.drumAccent->load();
         const auto continuousVelocity = p.drumVelocity->load() > 0.5f;
 
+        if (rhythmStopped) // parado por PANIC: arranca de nuevo, desde el principio, con la siguiente nota
+            for (const auto m : midi)
+                if (m.getMessage().isNoteOn())
+                {
+                    rhythmStopped = false;
+                    clock.restart();
+                    break;
+                }
         const auto newPattern = (int) p.drumPattern->load() - 1; // 0 = Off
         const auto newPattern2 = (int) p.drumPattern2->load() - 1;
         if (newPattern != pattern || newPattern2 != pattern2)
@@ -549,7 +560,7 @@ struct DrumMachine
             if ((skips >> c & 1u) == 0)
                 playable[(size_t) numPlayable++] = c;
         const auto anyPattern = active[0] != nullptr || active[1] != nullptr;
-        if (anyPattern && numPlayable > 0)
+        if (anyPattern && numPlayable > 0 && ! rhythmStopped)
         {
             clock.process (out.getNumSamples(), sampleRate, (double) p.drumTempo->load(), stepsPerBeat,
                            stepsPerBeat == 4 ? (double) p.drumSwing->load() : 0.0, transport,
@@ -622,6 +633,7 @@ struct DrumMachine
     DrumKit kit;
     StepClock clock;
     int pattern = -2, pattern2 = -2;
+    bool rhythmStopped = false; // PANIC: sin ritmo hasta la siguiente nota
     std::atomic<int> ledStep { -1 };
     std::atomic<long long> stepCount { -1 };
 };

@@ -87,6 +87,7 @@ struct Theremin
         logFreq = -1.0f; // < 0: sin inicializar; el primer bloque salta al tono sin barrido
         distance = -1.0;
         hpState = hpPrev = 0.0f;
+        numHeld = 0; // notas MIDI que lo tocaban: sin esto, PANIC lo dejaba sonando con la tecla aún pulsada
     }
 
     // Además del pad, notas MIDI (controlador o teclado en pantalla): monofónico, última nota; las notas fuera del rango

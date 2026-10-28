@@ -111,6 +111,13 @@ public:
             flushNotes.store (true);
     }
 
+    // PANIC (hilo de audio, sin bloqueos): pausa la reproducción como pause() y suelta las notas del .mid; REC sigue
+    void pauseFromAudioThread()
+    {
+        if (playing.exchange (false))
+            flushNotes.store (true);
+    }
+
     // STOP: para la grabación y la reproducción y vuelve al principio
     void stop()
     {
