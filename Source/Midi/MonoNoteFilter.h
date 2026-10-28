@@ -5,7 +5,9 @@
 // Modo Mono / Legato del motor Synth: convierte el MIDI en una línea monofónica con prioridad a la última nota.
 // Pulsar con otra tecla pulsada -> note-on de la nueva (el sintetizador de una voz la roba; Legato no reinicia
 // envolventes). Soltar la nota que suena -> vuelve a la anterior aún pulsada (note-on) o note-off si no queda ninguna.
-// Soltar una tecla que no suena -> se quita de la pila, sin mensaje. Sin asignaciones (pila fija, buffer reservado).
+// Soltar una tecla que no suena -> se quita de la pila, sin mensaje. All Notes Off (CC 123) y All Sound Off (CC 120) vacían
+// la pila y pasan: sin eso, soltar después una tecla que seguía en la pila volvía a disparar la anterior. Sin asignaciones
+// (pila fija, buffer reservado).
 struct MonoNoteFilter
 {
     void prepare() { out.ensureSize (1024); reset(); }
@@ -38,6 +40,8 @@ struct MonoNoteFilter
             }
             else
             {
+                if (msg.isAllNotesOff() || msg.isAllSoundOff())
+                    count = 0;
                 out.addEvent (msg, m.samplePosition);
             }
         }

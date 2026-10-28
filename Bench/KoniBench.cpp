@@ -20,6 +20,8 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "../Source/Engines/UserRhythms.h"
 #include <functional>
 #include "../Source/Agent/AgentScheduler.h" // schedtest: notas del agente con el reloj de audio (sin el plugin)
+#include <array>
+#include "../Source/Midi/MonoNoteFilter.h" // monotest: filtro Mono / Legato (sin el plugin)
 
 namespace
 {
@@ -1000,6 +1002,49 @@ int schedTest()
     return fails;
 }
 
+// monotest: filtro Mono / Legato (Source/Midi/MonoNoteFilter.h). Pila de prioridad a la última nota; All Notes Off (CC 123)
+// y All Sound Off (CC 120) la vacían: soltar después la tecla que sonaba no debe volver a disparar la anterior
+int monoTest()
+{
+    int fails = 0;
+    const auto check = [&fails] (bool ok, const juce::String& what)
+    {
+        std::printf ("%s %s\n", ok ? "OK   " : "FALLO", what.toRawUTF8());
+        if (! ok) ++fails;
+    };
+    // Pasa una secuencia de mensajes (uno por bloque) y devuelve lo que sale, como texto
+    const auto run = [] (std::initializer_list<juce::MidiMessage> msgs)
+    {
+        MonoNoteFilter f;
+        f.prepare();
+        juce::StringArray got;
+        for (const auto& m : msgs)
+        {
+            juce::MidiBuffer b;
+            b.addEvent (m, 0);
+            f.process (b);
+            for (const auto e : b)
+            {
+                const auto o = e.getMessage();
+                got.add (o.isNoteOn() ? "on " + juce::String (o.getNoteNumber()) : o.isNoteOff() ? "off " + juce::String (o.getNoteNumber())
+                                                                                              : "cc " + juce::String (o.getControllerNumber()));
+            }
+        }
+        return got.joinIntoString (", ");
+    };
+    using M = juce::MidiMessage;
+    const auto legato = run ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOn (1, 64, (juce::uint8) 100), M::noteOff (1, 64) });
+    check (legato == "on 60, on 64, on 60", "prioridad a la última: C4, E4, soltar E4 -> vuelve C4 (" + legato + ")");
+    const auto cc123 = run ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOn (1, 64, (juce::uint8) 100), M::allNotesOff (1), M::noteOff (1, 64) });
+    check (cc123 == "on 60, on 64, cc 123", "CC 123 vacía la pila: soltar E4 después no redispara C4 (" + cc123 + ")");
+    const auto cc120 = run ({ M::noteOn (1, 60, (juce::uint8) 100), M::noteOn (1, 64, (juce::uint8) 100), M::allSoundOff (1), M::noteOff (1, 64) });
+    check (cc120 == "on 60, on 64, cc 120", "CC 120 igual (" + cc120 + ")");
+    const auto after = run ({ M::noteOn (1, 60, (juce::uint8) 100), M::allNotesOff (1), M::noteOn (1, 67, (juce::uint8) 100), M::noteOff (1, 67) });
+    check (after == "on 60, cc 123, on 67, off 67", "tras CC 123 la pila vuelve a funcionar (" + after + ")");
+    std::printf ("%d fallos\n", fails);
+    return fails;
+}
+
 } // namespace
 
 int main (int argc, char** argv)
@@ -1008,6 +1053,8 @@ int main (int argc, char** argv)
         return satTest();
     if (argc >= 2 && juce::String (argv[1]) == "schedtest")
         return schedTest();
+    if (argc >= 2 && juce::String (argv[1]) == "monotest")
+        return monoTest();
     if (argc >= 2 && juce::String (argv[1]) == "tuningtest")
     {
         juce::ScopedJuceInitialiser_GUI init;
