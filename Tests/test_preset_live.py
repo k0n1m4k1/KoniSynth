@@ -17,8 +17,12 @@ before = sorted(os.listdir(PRE))
 results = []
 def check(ok, what): results.append(ok); print(('ok    ' if ok else 'FALLO ') + what)
 v1 = os.path.join(PRE, 'zzKoniTest v1.xml'); v3 = os.path.join(PRE, 'zzKoniTest v3.xml'); saved = os.path.join(PRE, 'zzKoniTest Saved.xml')
+# Formato 4: KSL del OPL como valor de registro (OPL2: 1 = 3 dB/oct); en OPLL el registro ya iba en dB (1 = 1,5 dB/oct)
+k4 = os.path.join(PRE, 'zzKoniTest ksl4.xml'); k4l = os.path.join(PRE, 'zzKoniTest ksl4 opll.xml')
+open(k4, 'w', encoding='utf-8').write('<?xml version="1.0" encoding="UTF-8"?>\n<KoniSynthPreset formatVersion="4" pluginVersion="1.0.0" presetCategory="Keys" engine="13" oplModel="0" opl2Ksl="1" opl1Ksl="2" opl3Ksl="3"/>\n')
+open(k4l, 'w', encoding='utf-8').write('<?xml version="1.0" encoding="UTF-8"?>\n<KoniSynthPreset formatVersion="4" pluginVersion="1.0.0" presetCategory="Keys" engine="13" oplModel="2" opl2Ksl="1"/>\n')
 open(v1, 'w', encoding='utf-8').write('<?xml version="1.0" encoding="UTF-8"?>\n<KoniSynthPreset presetCategory="Lead" thereminOn="1" cutoff="1000"/>\n')
-open(v3, 'w', encoding='utf-8').write('<?xml version="1.0" encoding="UTF-8"?>\n<KoniSynthPreset formatVersion="3" pluginVersion="9.9.0" presetCategory="Pad" engine="0" cutoff="2000" futureKnob="0.5"/>\n')
+open(v3, 'w', encoding='utf-8').write('<?xml version="1.0" encoding="UTF-8"?>\n<KoniSynthPreset formatVersion="99" pluginVersion="9.9.0" presetCategory="Pad" engine="0" cutoff="2000" futureKnob="0.5"/>\n')
 p = None
 try:
     txt = open(CFG, encoding='utf-8').read()
@@ -43,18 +47,25 @@ try:
     note = r.get('result', {}).get('note', '')
     g = call('get', ids=['cutoff'])
     check(r['ok'] and r['result']['engine'] == 'Synth' and 'newer KoniSynth (9.9.0' in note and 'futureKnob' in note and g['result']['cutoff'].startswith('2.00 k'),
-          'formato 3 (posterior): carga lo conocido (cutoff %s) y avisa: "%s"' % (g['result']['cutoff'], note))
+          'formato 99 (posterior): carga lo conocido (cutoff %s) y avisa: "%s"' % (g['result']['cutoff'], note))
     r = call('save_preset', name='zzKoniTest Saved', category='Lead')
     head = open(saved, encoding='utf-8').read()[:300] if os.path.exists(saved) else ''
     m1 = re.search(r'formatVersion="(\d+)"', head); m2 = re.search(r'pluginVersion="([^"]+)"', head)
-    check(r['ok'] and m1 and m1.group(1) == '2' and m2 is not None, 'guardado: formatVersion=%s pluginVersion=%s' % (m1 and m1.group(1), m2 and m2.group(1)))
+    check(r['ok'] and m1 and m1.group(1) == '5' and m2 is not None, 'guardado: formatVersion=%s pluginVersion=%s' % (m1 and m1.group(1), m2 and m2.group(1)))
+    r = call('load_preset', name='zzKoniTest ksl4')
+    g = call('get', ids=['opl1Ksl', 'opl2Ksl', 'opl3Ksl'])['result']
+    check(r['ok'] and g == {'opl1Ksl': '1.5 dB/oct', 'opl2Ksl': '3 dB/oct', 'opl3Ksl': '6 dB/oct'},
+          'formato 4, OPL2: KSL de registro 2/1/3 -> %s (mismo sonido)' % g)
+    r = call('load_preset', name='zzKoniTest ksl4 opll')
+    g = call('get', ids=['opl2Ksl'])['result']
+    check(r['ok'] and g == {'opl2Ksl': '1.5 dB/oct'}, 'formato 4, OPLL: KSL 1 sigue en %s (su registro ya iba en dB)' % g['opl2Ksl'])
     r = call('presets')
     names = [x['name'] if isinstance(x, dict) else x for x in r['result']]
-    check(r['ok'] and sum(1 for x in names if str(x).startswith('zzKoniTest')) == 3, 'presets: %d en total, 3 de prueba' % len(names))
+    check(r['ok'] and sum(1 for x in names if str(x).startswith('zzKoniTest')) == 5, 'presets: %d en total, 5 de prueba' % len(names))
     f.close(); s.close()
 finally:
     if p: p.kill(); p.wait()
-    for x in (v1, v3, saved):
+    for x in (v1, v3, saved, k4, k4l):
         if os.path.exists(x): os.remove(x)
     for fl, b in bak.items(): shutil.copy2(b, fl)
     for a in glob.glob(os.path.join(AGENT, '*.json')): os.remove(a)

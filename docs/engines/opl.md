@@ -39,7 +39,7 @@ OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 |---|---|---|
 | TL | Total level (as above). | 0-63 |
 | MULT | Frequency multiple: 0 = x0.5, 1-10, 12, 15 (11 and 13 give 10 and 12, as on the chip). | 0-15; 1 |
-| KSL | Key scale level: attenuation that grows with pitch. | 0 / 1.5 / 3 / 6 dB/oct; 0 |
+| KSL | Key scale level: attenuation that grows with pitch. The control is in dB/oct on every chip (on the OPL2/OPL3 register, value 1 is 3 dB/oct and 2 is 1.5 dB/oct; KoniSynth writes the right one). | 0 / 1.5 / 3 / 6 dB/oct; 0 |
 | AR | Attack rate (15 = instant). | 0-15; 15 |
 | DR | Decay rate from full level to the sustain level. | 0-15; 0 |
 | SL | Sustain level in 3 dB steps (15 = -93 dB). | 0-15; 0 |

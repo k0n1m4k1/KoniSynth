@@ -507,4 +507,15 @@ for text, want in (('0.9 s', 0.9), ('900 ms', 0.9), ('750 ms', 0.75), ('200 ms',
             % (text, got, want, '; fuera de rango: el extremo' if text in ('50 ms', '40 s') else ''))
 got = state_value(['--param=reverbDecay=0.9'], 'reverbDecay')
 c.check(abs(got - 0.9) < 1e-3, 'Reverb Decay numérico 0.9 = %.3f s' % got)
+
+# --- KSL del OPL en dB/oct: un proyecto anterior (sin la marca kslDb="1") con OPL2/OPL3 guardaba el valor de registro
+# (1 = 3 dB/oct, 2 = 1,5 dB/oct) y al cargarlo se intercambian 1 y 2; OPLL no cambia; un estado actual tampoco ---
+OPL = ['--param=engine=13', '--param=opl2Ksl=1', '--param=opl3Ksl=2']
+for args, want, what in ((OPL + ['--param=oplModel=0', '--prop=kslDb=0'], (2, 1), 'OPL2 anterior: se intercambian'),
+                         (OPL + ['--param=oplModel=1', '--prop=kslDb=0'], (2, 1), 'OPL3 anterior: se intercambian'),
+                         (OPL + ['--param=oplModel=2', '--prop=kslDb=0'], (1, 2), 'OPLL anterior: igual'),
+                         (OPL + ['--param=oplModel=0'], (1, 2), 'OPL2 actual (con la marca): igual')):
+    got = (state_value(args, 'opl2Ksl'), state_value(args, 'opl3Ksl'))
+    c.check(got == want, 'KSL de un proyecto, %s: opl2/opl3 1, 2 -> %d, %d' % (what, got[0], got[1]))
+c.check(b'kslDb="1"' in juce_base64(open(os.path.join(RENDERS, 'rt60_state.txt')).read()), 'el estado guardado lleva la marca kslDb="1"')
 sys.exit(c.summary())

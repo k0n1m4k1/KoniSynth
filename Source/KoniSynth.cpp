@@ -1138,9 +1138,12 @@ public:
                     map->setAttribute ("param", juce::String ("action:") + MidiLearn::actionId (index - MidiLearn::actionBase));
                 }
             }
+            // KSL de los operadores OPL en dB/oct (PresetManager::swapOplKsl): un estado sin esta marca es anterior
+            xml->setAttribute (kslDbAttribute, 1);
             copyXmlToBinary (*xml, dest);
         }
     }
+    static constexpr const char* kslDbAttribute = "kslDb";
 
     // Grupos de la cadena de efectos (bloques COLOR..SPACE del editor), en su orden de siempre
     enum FxGroup { fxColor = 0, fxAmp, fxDynamics, fxModFx, fxEnsemble, fxSpace, numFxGroups };
@@ -1198,6 +1201,18 @@ public:
                     }
                     xml->removeChildElement (learnXml, true); // no debe entrar en el ValueTree de parámetros
                 }
+
+                // Estados anteriores al KSL del OPL en dB/oct (sin la marca kslDb="1"): con OPL2/OPL3 se intercambian 1 y 2 para que suene
+                // igual. La marca no se queda en el estado: la pone getStateInformation al guardar
+                if (xml->getIntAttribute (kslDbAttribute, 0) != 1)
+                {
+                    const auto param = [&xml] (const juce::String& id) { return xml->getChildByAttribute ("id", id); };
+                    PresetManager::swapOplKsl ([&param] (const juce::String& id, float def)
+                                               { const auto* e = param (id); return e != nullptr ? (float) e->getDoubleAttribute ("value") : def; },
+                                               [&param] (const juce::String& id, float v)
+                                               { if (auto* e = param (id)) e->setAttribute ("value", (double) v); });
+                }
+                xml->removeAttribute (kslDbAttribute);
 
                 // Estados guardados antes de "engine": <PARAM id="thereminOn" value="1"/> -> engine = Theremin
                 if (auto* legacy = xml->getChildByAttribute ("id", "thereminOn"); legacy != nullptr && xml->getChildByAttribute ("id", "engine") == nullptr)

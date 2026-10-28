@@ -28,8 +28,9 @@ public:
 
     // 1: hasta la 0.6 (sin atributo). 2: formatVersion y pluginVersion; thereminOn ya migrado a engine. 3: Osc 2 en modo Sample, con su
     // fichero (atributo osc2SamplePath). 4: tabla propia de Osc 2 en modo Wavetable (osc2WtTable, fichero en osc2WtPath) y
-    // osc2Wave con Wavetable y Sample al final de la lista
-    static constexpr int formatVersion = 4;
+    // osc2Wave con Wavetable y Sample al final de la lista. 5: KSL de los operadores OPL en dB/oct (antes, en OPL2/OPL3, el valor
+    // de registro: 1 = 3 dB/oct, 2 = 1,5 dB/oct)
+    static constexpr int formatVersion = 5;
 
     explicit PresetManager (APVTS& s) : apvts (s)
     {
@@ -526,6 +527,31 @@ private:
             if (const auto it = real.find ("osc2Wave"); it != real.end())
                 it->second = (float) osc2WaveFromFormat3 (juce::roundToInt (it->second));
         }
+        if (from < 5) // 4 -> 5: KSL del OPL en dB/oct; con OPL2/OPL3 se intercambian 1 y 2 para que suene igual
+            swapOplKslIfRegisterOrder (real);
+    }
+
+public:
+    // KSL de los operadores OPL guardado como valor de registro (presets de formato < 5 y proyectos sin el atributo kslDb):
+    // en OPL2/OPL3 (oplModel 0, 1) el registro 1 era 3 dB/oct y el 2, 1,5 dB/oct; en dB/oct van al revés. OPLL y VRC7 no
+    // cambian (su registro ya era monótono). get (id, por defecto) lee y set (id, valor) escribe el valor real de un parámetro
+    template <typename Get, typename Set>
+    static void swapOplKsl (Get&& get, Set&& set)
+    {
+        if (juce::roundToInt (get ("engine", 0.0f)) != 13 || juce::roundToInt (get ("oplModel", 0.0f)) > 1)
+            return;
+        for (int op = 1; op <= 4; ++op)
+        {
+            const auto id = "opl" + juce::String (op) + "Ksl";
+            if (const auto k = juce::roundToInt (get (id, 0.0f)); k == 1 || k == 2)
+                set (id, (float) (3 - k));
+        }
+    }
+private:
+    static void swapOplKslIfRegisterOrder (std::map<juce::String, float>& real)
+    {
+        swapOplKsl ([&real] (const juce::String& id, float def) { const auto it = real.find (id); return it != real.end() ? it->second : def; },
+                    [&real] (const juce::String& id, float v) { real[id] = v; });
     }
 
 public:

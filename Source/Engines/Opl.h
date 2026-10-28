@@ -292,7 +292,10 @@ private:
     // Envolvente de un operador (OPL3_EnvelopeCalc)
     void envelope (Slot& s, const OpRegs& o, const Voice& v, int extraTl)
     {
-        static const int kslShift[4] = { 8, 1, 2, 0 };
+        // KSL: el parámetro va en dB/oct (0, 1,5, 3, 6: lo comparte con el OPLL, cuyo registro es monótono). En el OPL2/OPL3 el
+        // registro no lo es: 1 = 3 dB/oct y 2 = 1,5 dB/oct (kslshift {8, 1, 2, 0} por valor de registro, Nuked-OPL3 opl3.c;
+        // hoja de datos del YM3812). Por eso aquí se indexa por dB: 0 -> registro 0, 1,5 -> 2, 3 -> 1, 6 -> 3
+        static const int kslShift[4] = { 8, 2, 1, 0 };
         static const int incStep[4][4] = { { 0, 0, 0, 0 }, { 1, 0, 0, 0 }, { 1, 0, 1, 0 }, { 1, 1, 1, 0 } };
         s.egOut = s.egRout + ((std::min (63, o.tl + extraTl)) << 2) + (v.kslBase >> kslShift[o.ksl]) + (o.am ? tremolo : 0);
         int regRate = 0;
