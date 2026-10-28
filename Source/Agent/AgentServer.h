@@ -15,7 +15,7 @@
 // se borra al parar (si el proceso muere, queda un anuncio huérfano: el cliente lo descarta si no responde a ping).
 //
 // Protocolo: una línea JSON por petición y otra por respuesta (UTF-8, '\n'; máximo 1 MiB por línea).
-//   -> {"token": "...", "id": 1, "cmd": "ping" | "describe" | "get" | "set" | "presets" | "load_preset" | "save_preset", ...}
+//   -> {"token": "...", "id": 1, "cmd": "ping" | "describe" | "get" | "set" | "presets" | "load_preset" | "save_preset" | "panic", ...}
 //   <- {"id": 1, "ok": true, "result": ...}   |   {"id": 1, "ok": false, "error": "..."}
 //   describe {"match": "cutoff"}            parámetros (id, nombre, valor, rango, opciones, ayuda); match opcional
 //   get      {"ids": ["cutoff", ...], "detail": false}   valores actuales como texto; con detail, por id {text, value
@@ -32,13 +32,18 @@
 //   presets  {}                             lista (índice, nombre, categoría, fábrica/usuario, motor, playHint y rango
 //            recomendado playLow-playHigh en notas MIDI si los tiene)
 //   load_preset {"index": 12} | {"name": "Acid Bass"}
-//   save_preset {"name": "...", "category": "Bass"}
+//   save_preset {"name": "...", "category": "Bass", "playHint": "...", "playLow": 48, "playHigh": 72}   nuevo preset de usuario
+//            (falla si ya existe uno con ese nombre). category: una de las de presetCategories() (sin distinguir mayúsculas;
+//            por defecto Init). playHint (hasta 200 caracteres) y playLow/playHigh (notas MIDI 0..127, los dos o ninguno,
+//            low <= high) son opcionales: sin ellos se guardan los del estado (los del preset cargado o los editados)
 //   play     {"notes": [{"note": "C4" | 60, "velocity": 100, "start": 0.0, "duration": 1.0}, ...], "bpm": 128}   (F3, S2)
 //            con el reloj de audio (Agent/AgentScheduler.h): cada nota en su muestra, round(fs · t) desde el origen del
 //            play (el inicio del bloque en que llega al hilo de audio). Sin bpm, start y duration en segundos; con bpm, en
 //            beats (tempo congelado). Máximo 64 notas que acaban antes de 30 s (y 512 pendientes entre todos los play).
 //            note es obligatoria (entero 0..127 o nombre C-1..G9 con # o b; C4 = 60); velocity entera 1..127 (100);
 //            start >= 0 (0); duration > 0 (1). Cualquier nota no válida o campo desconocido rechaza la orden entera
+//   panic    {}                             el botón PANIC (KoniSynthProcessor::panic, en el siguiente bloque de audio):
+//            silencio total, motores y efectos en reposo, transporte en pausa y notas del agente descartadas
 //   stop_notes {}                           suelta todas las notas (también las del teclado en pantalla) y cancela las
 //            programadas por play que aún no han sonado (cada play se suma a los anteriores; stop_notes los cancela todos)
 //   listen   {"seconds": 2.0, "fromPlay": false}   vuelca a un WAV temporal propio de cada captura (se conservan las 32
@@ -62,6 +67,7 @@ public:
         juce::MidiKeyboardState& keyboard; // el teclado en pantalla: stop_notes también suelta sus notas
         AudioTap& tap;                     // F3: salida reciente (Agent/AudioTap.h)
         AgentScheduler& scheduler;         // S2: notas de play con el reloj de audio (Agent/AgentScheduler.h)
+        std::function<void()> panic;       // el del botón PANIC (KoniSynthProcessor::requestPanic)
     };
 
     static constexpr int firstPort = 47800, lastPort = 47899;
@@ -270,6 +276,7 @@ private:
         if (cmd == "save_preset") return savePreset (req, error);
         if (cmd == "play")        return play (req, error);
         if (cmd == "stop_notes")  { host.scheduler.cancel(); host.keyboard.allNotesOff (0); return true; } // y lo programado
+        if (cmd == "panic")       { host.panic(); return true; } // el panic del audio también vacía el planificador
         if (cmd == "listen")      return listen (req.getProperty ("seconds", 2.0), (bool) req.getProperty ("fromPlay", false),
                                                  req.getProperty ("point", "output").toString(), error);
         error = "unknown cmd: " + cmd;
@@ -721,9 +728,42 @@ private:
     juce::var savePreset (const juce::var& req, juce::String& error)
     {
         const auto name = req.getProperty ("name", {}).toString().trim();
-        const auto category = req.getProperty ("category", "Init").toString();
         if (const auto v = host.presets.validateName (name); v.failed()) { error = v.getErrorMessage(); return {}; }
-        if (const auto r = host.presets.saveAs (name, category); r.failed()) { error = r.getErrorMessage(); return {}; }
+        if (host.presets.userPresetExists (name)) { error = "a user preset named \"" + name + "\" already exists"; return {}; }
+        // Categoría: una de la lista (una desconocida acabaría mostrándose como Init)
+        const auto asked = req.getProperty ("category", "Init").toString().trim();
+        const auto c = presetCategories().indexOf (asked, true);
+        if (c < 0) { error = "unknown category \"" + asked + "\"; use one of: " + presetCategories().joinIntoString (", "); return {}; }
+
+        // Cómo tocarlo: se valida todo antes de tocar el estado, que es de donde lo escribe saveAs
+        const bool hasHint = req.hasProperty ("playHint"), hasRange = req.hasProperty ("playLow") || req.hasProperty ("playHigh");
+        const auto hint = req.getProperty ("playHint", {}).toString().trim();
+        if (hasHint && (! req.getProperty ("playHint", {}).isString() || hint.length() > 200)) { error = "playHint must be text of up to 200 characters"; return {}; }
+        int low = -1, high = -1;
+        if (hasRange)
+        {
+            double l = 0.0, h = 0.0;
+            if (! finiteNumber (req.getProperty ("playLow", {}), l) || ! finiteNumber (req.getProperty ("playHigh", {}), h)
+                || l != std::floor (l) || h != std::floor (h) || l < 0.0 || h > 127.0 || l > h)
+            {
+                error = "playLow and playHigh must both be MIDI notes 0..127 with playLow <= playHigh";
+                return {};
+            }
+            low = (int) l; high = (int) h;
+        }
+        using PM = PresetManager;
+        const auto old = std::array<juce::var, 3> { host.apvts.state.getProperty (PM::playHintProp), host.apvts.state.getProperty (PM::playLowProp),
+                                                    host.apvts.state.getProperty (PM::playHighProp) };
+        if (hasHint) host.apvts.state.setProperty (PM::playHintProp, hint, nullptr);
+        if (hasRange) { host.apvts.state.setProperty (PM::playLowProp, low, nullptr); host.apvts.state.setProperty (PM::playHighProp, high, nullptr); }
+        if (const auto r = host.presets.saveAs (name, presetCategories()[c]); r.failed())
+        {
+            host.apvts.state.setProperty (PM::playHintProp, old[0], nullptr); // sin guardar: el estado queda como estaba
+            host.apvts.state.setProperty (PM::playLowProp, old[1], nullptr);
+            host.apvts.state.setProperty (PM::playHighProp, old[2], nullptr);
+            error = r.getErrorMessage();
+            return {};
+        }
         return ping();
     }
 

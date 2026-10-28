@@ -38,7 +38,7 @@ async def run():
             check(init.server_info.name == "KoniSynth-mcp", "initialize: %s %s" % (init.server_info.name, init.server_info.version))
             tools = sorted(t.name for t in (await s.list_tools()).tools)
             check(tools == sorted(["list_instances", "status", "describe_parameters", "get_parameters", "set_parameters",
-                                   "list_presets", "load_preset", "save_preset", "play_notes", "stop_notes", "audition", "listen", "compare", "generate", "use_candidate", "mutate"]), "herramientas: %s" % tools)
+                                   "list_presets", "load_preset", "save_preset", "play_notes", "stop_notes", "panic", "audition", "listen", "compare", "generate", "use_candidate", "mutate"]), "herramientas: %s" % tools)
             t0 = time.perf_counter()
             st = payload(await s.call_tool("status", {}))
             check(st.get("product") == "KoniSynth", "status: %s (%.1f ms ida y vuelta MCP+TCP)" % (st, (time.perf_counter() - t0) * 1000))
@@ -60,13 +60,34 @@ async def run():
             ld = payload(await s.call_tool("load_preset", {"name": pads[0]["name"]}))
             check(ld["preset"] == pads[0]["name"], "load_preset: %s" % ld)
             name = "MCP Test %d" % int(time.time())
-            sv = payload(await s.call_tool("save_preset", {"name": name, "category": "Pad"}))
+            sv = payload(await s.call_tool("save_preset", {"name": name, "category": "woodwind", "play_hint": "Hold C3-C5 chords",
+                                                           "play_low": 48, "play_high": 72}))
             check(sv["preset"] == name, "save_preset: %s" % sv)
             user = Path(os.environ["APPDATA"]) / "KoniSynth" / "Presets"
             files = list(user.glob(name + "*.xml"))
             check(len(files) == 1, "fichero del preset de usuario: %s" % [f.name for f in files])
+            head = files[0].read_text(encoding="utf-8")[:400] if files else ""
+            check('presetCategory="Woodwind"' in head and 'playHint="Hold C3-C5 chords"' in head and 'playLow="48"' in head
+                  and 'playHigh="72"' in head, "save_preset escribe categoría normalizada, indicación y rango")
+            listed = [p for p in payload(await s.call_tool("list_presets", {"match": name})) if not p["factory"]]
+            check(listed and listed[0]["category"] == "Woodwind" and listed[0].get("playHint") == "Hold C3-C5 chords"
+                  and listed[0].get("playLow") == 48, "list_presets lo ve sin reiniciar: %s" % listed)
+            dup = await s.call_tool("save_preset", {"name": name, "category": "Pad"})
+            check(dup.is_error and "already exists" in dup.content[0].text, "save_preset con nombre existente -> error: %s" % dup.content[0].text[:80])
+            badcat = await s.call_tool("save_preset", {"name": name + " B", "category": "Secuencias"})
+            check(badcat.is_error and "unknown category" in badcat.content[0].text, "categoría desconocida -> error: %s" % badcat.content[0].text[:60])
+            badrng = await s.call_tool("save_preset", {"name": name + " B", "category": "Pad", "play_low": 80, "play_high": 60})
+            check(badrng.is_error and not list(user.glob(name + " B*.xml")), "rango invertido -> error, sin fichero: %s" % badrng.content[0].text[:60])
             for f in files:
                 f.unlink()  # la prueba no deja presets
+            check(payload(await s.call_tool("panic", {})) is True, "panic")
+            # Sample incrustado (factory:): el preset de fábrica suena sin ficheros del equipo; uno sin sample lo quita
+            for preset, expect in (("Orbital Bloom", True), ("Init", False)):
+                payload(await s.call_tool("load_preset", {"name": preset}))
+                payload(await s.call_tool("set_parameters", {"values": {"sampleLevel": 1.0, "osc1Level": 0.0}}))
+                au = payload(await s.call_tool("audition", {"notes": "C3", "duration": 1.0, "tail": 0.2}))
+                pk = au.get("peak_dbfs", -999)
+                check((pk > -40.0) == expect, "%s + Sample 100 %%, Osc 1 0 %%: pico %.1f dBFS (%s)" % (preset, pk, "suena" if expect else "silencio"))
 
 
 def main():

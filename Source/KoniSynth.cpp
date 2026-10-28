@@ -1663,7 +1663,8 @@ public:
             if (agentScheduler == nullptr)
                 agentScheduler = std::make_unique<AgentScheduler>();
             agentServer = std::make_unique<AgentServer> (AgentServer::Host { apvts, presetManager, undoHistory, JucePlugin_VersionString,
-                                                                              keyboardState, *agentTap, *agentScheduler });
+                                                                              keyboardState, *agentTap, *agentScheduler,
+                                                                              [this] { requestPanic(); } });
             if (agentServer->start())
             {
                 agentTapActive.store (agentTap.get(), std::memory_order_release);

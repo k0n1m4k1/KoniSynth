@@ -28,7 +28,8 @@ import generator
 #   READ: no cambia el sonido ni los presets (listen escribe solo su WAV de captura temporal).
 #   REPLACE: sustituye valores o el sonido actual (deshacible); repetirla igual no cambia más. WRITE: idem, pero cada
 #   llamada cambia de nuevo (aleatoria o relativa al valor actual). ADD: solo añade (save_preset falla si el nombre
-#   existe). PLAY: suena, sin cambiar nada guardado. STOP: suelta todas las notas (también las del usuario).
+#   existe). PLAY: suena, sin cambiar nada guardado. STOP: suelta todas las notas (también las del usuario); panic
+#   además corta efectos y ritmos, como el botón PANIC.
 READ = ToolAnnotations(read_only_hint=True, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 REPLACE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False)
 WRITE = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False, open_world_hint=False)
@@ -55,14 +56,14 @@ Polivoks, ANS, Mega Drive, SNES, N64, OPL, Roland MT-32 with the user's ROMs). I
 
 How to work with it:
 - Call `status` first. If it fails, ask the user to enable Agent control in KoniSynth (right-click the title).
-- Parameters are many (about 680). Use `describe_parameters` with a `match` (id or name fragment: "cutoff", "lfo",
+- Parameters are many (about 830). Use `describe_parameters` with a `match` (id or name fragment: "cutoff", "lfo",
   "fm", "chip", "reverb"...) to see ids, current values, ranges, options and a help text for each. Calling it without
   `match` returns only the id groups and counts.
 - `set_parameters` takes {id: value}. A string value uses the parameter's own format ("2 kHz", "350 ms", "40 %",
   "Saw", "C4"); a number is the real value in the parameter's unit (Hz, s, dB, 0..1 for percentages). Each call is
   one undo step for the user (Ctrl+Z), so group related changes in one call.
-- Factory presets (about 240, by category) are good starting points and examples of each engine: `list_presets`,
-  then `load_preset`. Save results with `save_preset` (user presets).
+- Factory presets (about 430, by category) are good starting points and examples of each engine: `list_presets`,
+  then `load_preset`. Save results with `save_preset` (user presets, with an optional play hint and range).
 - Engine-specific parameters only sound when that engine is selected; change `engine` first.
 - You cannot hear, but you can measure: `audition` plays notes and returns the measured sound (pitch, level,
   attack/decay, spectral centroid and octave-band profile, harmonics, stereo); `listen` measures whatever is sounding
@@ -225,7 +226,7 @@ def status(port: int | None = None) -> dict[str, Any]:
 def describe_parameters(match: str = "", port: int | None = None) -> list[dict[str, Any]] | dict[str, Any]:
     """Describe parameters whose id or name contains `match` (case-insensitive): id, name, current value, min, max,
     default, type (continuous / stepped / choice / bool), options and help text. Without `match`, returns only the id
-    groups with their counts (about 680 parameters in total) so you can narrow down."""
+    groups with their counts (about 830 parameters in total) so you can narrow down."""
     if match.strip():
         return link.call("describe", port=port, match=match.strip())
     params = link.call("describe", port=port)
@@ -277,9 +278,20 @@ def load_preset(name: str = "", index: int = -1, port: int | None = None) -> dic
 
 
 @mcp.tool(annotations=ADD)
-def save_preset(name: str, category: str = "Init", port: int | None = None) -> dict[str, Any]:
-    """Save the current sound as a user preset with this name and category (fails if the name exists)."""
-    return link.call("save_preset", port=port, name=name, category=category)
+def save_preset(name: str, category: str = "Init", play_hint: str | None = None, play_low: int | None = None,
+                play_high: int | None = None, port: int | None = None) -> dict[str, Any]:
+    """Save the current sound as a new user preset (fails if a user preset with that name exists). `category` must be one
+    of the categories shown by list_presets (Bass, Lead, Pad, Keys, Organ, Mallets, Brass, Woodwind, Strings, Guitar,
+    Pluck, World, Sequence, Drums, FX, Cinematic, Hybrid, 8-Bit, Nature, Vocal, Vocoder, Machines or Init).
+    `play_hint`: how to play it, in English, up to 200 characters ("Hold E3; release stops the pattern").
+    `play_low`/`play_high`: recommended range as MIDI notes (60 = C4), both or neither. Omitted, the preset keeps the
+    hint and range of the current sound (those of the loaded preset)."""
+    args: dict[str, Any] = {"name": name, "category": category}
+    if play_hint is not None:
+        args["playHint"] = play_hint
+    if play_low is not None or play_high is not None:
+        args["playLow"], args["playHigh"] = play_low, play_high
+    return link.call("save_preset", port=port, **args)
 
 
 def _notes(notes: str | list[dict[str, Any]], duration: float, velocity: int) -> list[dict[str, Any]]:
@@ -350,6 +362,14 @@ def play_notes(notes: str | list[dict[str, Any]], duration: float = 1.0, velocit
 def stop_notes(port: int | None = None) -> bool:
     """Release all notes and cancel the notes scheduled by play_notes or audition that have not sounded yet."""
     return link.call("stop_notes", port=port)
+
+
+@mcp.tool(annotations=STOP)
+def panic(port: int | None = None) -> bool:
+    """The PANIC button: total silence from the next audio block. Releases all notes (also the user's), resets every
+    engine and effect tail (echo, reverb), pauses the transport, stops self-running rhythms (Drum Machine, Omnichord)
+    and discards scheduled notes. Use stop_notes to only release notes."""
+    return link.call("panic", port=port)
 
 
 @mcp.tool(annotations=PLAY)

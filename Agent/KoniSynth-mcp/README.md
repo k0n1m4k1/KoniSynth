@@ -82,8 +82,9 @@ registration in your agent stays valid: the paths do not change.
 | `describe_parameters(match)` | Id, name, value, range, options and help of matching parameters (without `match`: groups and counts) |
 | `get_parameters(ids)` | Current values: displayed text, exact real value, normalized position (0-1) and unit |
 | `set_parameters(values)` | Batch change; text in the parameter's format ("2 kHz", "Saw"), real numbers, true/false or `{"normalized": x}`. The whole batch is validated first (an invalid value changes nothing); one undo step |
-| `list_presets(category, match)` / `load_preset` / `save_preset` | Presets (the list gives the engine, how to play it and the recommended range) |
+| `list_presets(category, match)` / `load_preset` / `save_preset(name, category, play_hint, play_low, play_high)` | Presets (the list gives the engine, how to play it and the recommended range; saving creates a new user preset, with an optional hint and range) |
 | `play_notes(notes)` / `stop_notes` | Play a note, a chord ("C4 E4 G4") or a timed list, sample-accurate on the audio clock; times in seconds or, with `bpm`, in beats (an invalid note rejects the whole list) / release all notes and cancel the scheduled ones |
+| `panic` | The PANIC button: silence, engines and effect tails reset, transport paused, rhythms stopped |
 | `audition(notes, duration, tail, bpm, point)` | Play and measure (up to 10 s, from the notes' time 0): pitch and pitch curve (glide, vibrato, drift), level, envelope, spectrum (centroid, rolloff, flatness, octave bands, harmonics), stereo |
 | `listen(seconds, point)` | Measure the last 0.05-10 s of output, whatever is sounding (also the user playing). Each capture is its own WAV; the result says how much was captured. `point`: `output` (what you hear) or `engine` (the engine with its own built-in effects, before the vocoder, added effects, Gain and limiter; also in `audition`) |
 | `compare(reference_wav)` | Differences to a reference WAV supplied by the user (only audio you own or with a free license) |
