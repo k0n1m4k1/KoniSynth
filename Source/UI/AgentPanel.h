@@ -104,10 +104,8 @@ private:
     static constexpr const char* venvPython = ".venv/bin/python", * pythonExe = "python3", * pathSep = ":", * systemPython = "python3";
    #endif
 
-    static juce::File rememberFile()
-    {
-        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("KoniSynth/mcp-bridge.txt");
-    }
+    // Puente elegido con Locate: config.settings, clave mcpBridge (antes mcp-bridge.txt, que se migra)
+    static juce::File rememberedScript() { return juce::File (configText ("mcpBridge", "mcp-bridge.txt").trim()); }
 
     // Puente que ya está en disco y se usa donde está, por orden: el elegido con Locate (recordado), el del repositorio (builds
     // de desarrollo), el de la carpeta de datos (descargado o copiado a mano del zip) y el que va junto al ejecutable o al
@@ -115,7 +113,7 @@ private:
     // la carpeta de datos, se descarga
     static juce::File localScript()
     {
-        if (const auto saved = juce::File (rememberFile().loadFileAsString().trim()); saved.existsAsFile())
+        if (const auto saved = rememberedScript(); saved.existsAsFile())
             return saved;
        #ifdef KONI_REPO_DIR
         if (const auto repo = juce::File (KONI_REPO_DIR).getChildFile ("Agent/KoniSynth-mcp/konisynth_mcp.py"); repo.existsAsFile())
@@ -233,8 +231,7 @@ private:
             {
                 if (safe == nullptr || fc.getResult() == juce::File())
                     return;
-                rememberFile().getParentDirectory().createDirectory();
-                rememberFile().replaceWithText (fc.getResult().getFullPathName());
+                setConfigText ("mcpBridge", fc.getResult().getFullPathName());
                 safe->refresh();
             });
     }

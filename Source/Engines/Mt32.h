@@ -31,29 +31,6 @@ struct Mt32Machine
         if (pcm != nullptr)     MT32Emu::ROMImage::freeROMImage (pcm);
     }
 
-    // Carpeta de ROM: la elegida por el usuario (fichero de ajustes global) o Documentos/KoniSynth/ROMs/MT-32
-    static juce::File settingsFile()
-    {
-        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("KoniSynth/mt32-roms.txt");
-    }
-    static juce::File defaultFolder()
-    {
-        return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("KoniSynth/ROMs/MT-32");
-    }
-    static juce::File romFolder()
-    {
-        // KONI_MT32_ROMS (pruebas y KoniBench): carpeta sin tocar el ajuste del usuario
-        if (const auto env = juce::SystemStats::getEnvironmentVariable ("KONI_MT32_ROMS", {}); env.isNotEmpty())
-            return juce::File (env);
-        const auto path = settingsFile().loadFileAsString().trim();
-        return path.isNotEmpty() && juce::File::isAbsolutePath (path) ? juce::File (path) : defaultFolder();
-    }
-    static void setRomFolder (const juce::File& folder)
-    {
-        settingsFile().getParentDirectory().createDirectory();
-        settingsFile().replaceWithText (folder.getFullPathName());
-    }
-
     // Busca y abre una pareja control + PCM. model: 0 = MT-32 (1.ª generación primero), 1 = CM-32L. Si falta el modelo pedido
     // y hay el otro, abre el otro y lo dice en 'report'. nullptr si no hay pareja válida
     static std::unique_ptr<Mt32Machine> open (const juce::File& folder, int model, double hostRate, juce::String& report)

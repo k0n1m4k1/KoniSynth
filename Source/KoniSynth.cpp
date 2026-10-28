@@ -8,6 +8,7 @@
 
 using APVTS = juce::AudioProcessorValueTreeState;
 
+#include "Settings/Config.h" // config.settings: ajustes globales (skin, AVX2, Agent, favoritos...)
 #include "Params/Attributes.h"
 
 #include "Engines/RhythmPatterns.h"
@@ -149,6 +150,7 @@ public:
                                             "presetName", "presetFactory", "dx7Voice" });
         presetManager.onBulkChange = [this] (bool begin) { if (begin) undoHistory.beginGroup(); else undoHistory.endGroup(); };
 
+        migrateLegacyConfig(); // .txt de ajustes de versiones anteriores -> config.settings (Settings/Config.h)
         if (auto config = openConfig())
         {
             simdStatus().userEnabled = config->getBoolValue ("useAvx2", true);
@@ -230,12 +232,12 @@ public:
         mt32BuiltModel = (int) params.mt32Model->load();
         mt32Rate = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
         juce::String report;
-        auto machine = Mt32Machine::open (Mt32Machine::romFolder(), mt32BuiltModel, mt32Rate, report);
+        auto machine = Mt32Machine::open (mt32RomFolder(), mt32BuiltModel, mt32Rate, report);
         mt32Engine.slot.replace (std::move (machine));
         const juce::ScopedLock sl (sampleInfoLock);
         mt32Status = report;
     }
-    void setMt32Folder (const juce::File& folder) { Mt32Machine::setRomFolder (folder); rebuildMt32(); }
+    void setMt32Folder (const juce::File& folder) { setMt32RomFolder (folder); rebuildMt32(); }
     juce::String getMt32Status() const { const juce::ScopedLock sl (sampleInfoLock); return mt32Status; }
     juce::String getMt32Lcd() const { return mt32Engine.lcdText(); }
     bool getMt32Led() const { return mt32Engine.lcdLed(); }
@@ -264,7 +266,10 @@ public:
         if (agentTap != nullptr)
             agentTap->setSampleRate (sampleRate);
         sessionTransport.prepare (sampleRate);
-        runSimdSelfTest(); // una vez por proceso; decide si la ruta AVX2 es utilizable
+        // Una vez por proceso; decide si la ruta AVX2 es utilizable. Con KONISYNTH_SIMD_BENCH, su informe de medida va a
+        // config.settings (clave simdBench)
+        if (const auto bench = runSimdSelfTest(); bench.isNotEmpty())
+            setConfigText ("simdBench", bench);
         synth.setCurrentPlaybackSampleRate (sampleRate);
         monoSynth.setCurrentPlaybackSampleRate (sampleRate);
         monoFilter.prepare();

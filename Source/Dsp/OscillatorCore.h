@@ -23,17 +23,6 @@ static bool simdActive()
     return s.cpuHasAvx2.load() && s.selfTestPassed.load() && s.userEnabled.load();
 }
 
-// Configuración global del plugin (no va en presets ni en el proyecto): %APPDATA%\KoniSynth\config.settings
-static std::unique_ptr<juce::PropertiesFile> openConfig()
-{
-    juce::PropertiesFile::Options options;
-    options.applicationName = "config";
-    options.filenameSuffix = ".settings";
-    options.folderName = "KoniSynth";
-    options.osxLibrarySubFolder = "Application Support";
-    return std::make_unique<juce::PropertiesFile> (options);
-}
-
 //==============================================================================
 // Osciladores. phase en [0, 1), dt = f / fs (incremento de fase por muestra).
 
@@ -289,17 +278,17 @@ static void fmRenderScalar (konisimd::FmLanes& l, const konisimd::FmArgs& a, int
 // 4 ondas × {unísono, complejo, complejo + sync, modulador externo, externo + sync} × 2000 pasos desde estados
 // aleatorios idénticos. Tolerancia 1e-4
 // (el seno AVX2 es un polinomio con error < 6e-8; el resto son diferencias de redondeo float/double).
-// Con la variable de entorno KONISYNTH_SIMD_BENCH, mide además ambas rutas y escribe
-// %APPDATA%\KoniSynth\simd-selftest.txt (permite medir dentro de un host sin un ejecutable propio).
-static void runSimdSelfTest()
+// Con la variable de entorno KONISYNTH_SIMD_BENCH, mide además ambas rutas y devuelve el informe (el procesador lo guarda en
+// config.settings; permite medir dentro de un host sin un ejecutable propio). Sin medida, devuelve texto vacío
+static juce::String runSimdSelfTest()
 {
     auto& status = simdStatus();
     if (status.tested.exchange (true))
-        return;
+        return {};
 
     status.cpuHasAvx2 = juce::SystemStats::hasAVX2();
     if (! status.cpuHasAvx2.load())
-        return;
+        return {};
 
     juce::Random rng (12345);
     auto randomLanes = [&rng]
@@ -407,7 +396,7 @@ static void runSimdSelfTest()
     status.selfTestPassed = maxErr < 1.0e-4;
 
     if (juce::SystemStats::getEnvironmentVariable ("KONISYNTH_SIMD_BENCH", {}).isEmpty())
-        return;
+        return {};
 
     // Medida: 400 000 pasos por ruta (≈ 8,3 s de audio a 48 kHz para una voz con 8 osciladores)
     auto timeIt = [] (auto&& fn)
@@ -457,6 +446,5 @@ static void runSimdSelfTest()
                << juce::String (fScalar / fSimd, 2) << ")\n";
     }
 
-    juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-        .getChildFile ("KoniSynth").getChildFile ("simd-selftest.txt").replaceWithText (report);
+    return report;
 }

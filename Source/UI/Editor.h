@@ -864,7 +864,7 @@ private:
         m.addSectionHeader (status.isEmpty() ? juce::String ("Not scanned yet") : status);
         m.addItem ("Choose ROM folder...", [this]
         {
-            fileChooser = std::make_unique<juce::FileChooser> ("MT-32 / CM-32L ROM folder", Mt32Machine::romFolder());
+            fileChooser = std::make_unique<juce::FileChooser> ("MT-32 / CM-32L ROM folder", mt32RomFolder());
             fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
                 [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
                 {
@@ -872,7 +872,7 @@ private:
                         safe->koni.setMt32Folder (fc.getResult());
                 });
         });
-        m.addItem ("Open ROM folder", [] { const auto f = Mt32Machine::romFolder(); f.createDirectory(); f.startAsProcess(); });
+        m.addItem ("Open ROM folder", [] { const auto f = mt32RomFolder(); f.createDirectory(); f.startAsProcess(); });
         m.addItem ("Rescan", [this] { koni.rebuildMt32(); });
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&mt32Section));
     }

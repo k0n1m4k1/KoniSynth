@@ -7,11 +7,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP = os.path.join(ROOT, 'build', 'KoniSynth_artefacts', 'Release', 'Standalone', 'KoniSynth.exe')
 K = os.path.join(os.environ['APPDATA'], 'KoniSynth')
 CFG, SET, AGENT, PRE = os.path.join(K, 'config.settings'), os.path.join(K, 'KoniSynth.settings'), os.path.join(K, 'agent'), os.path.join(K, 'Presets')
-bak = {f: os.path.join(S, os.path.basename(f) + '.pvbak') for f in (CFG, SET)}
+# config.settings, KoniSynth.settings y los .txt de ajustes de versiones anteriores que existan: el standalone los migra a
+# config.settings y los borra, así que se guardan y se restauran todos
+LEGACY = [os.path.join(K, n) for n in ('favorites.txt', 'mt32-roms.txt', 'mcp-bridge.txt', 'simd-selftest.txt')]
+bak = {f: os.path.join(S, os.path.basename(f) + '.pvbak') for f in [CFG, SET] + [x for x in LEGACY if os.path.exists(x)]}
 for f, b in bak.items(): shutil.copy2(f, b)
 os.makedirs(PRE, exist_ok=True)
 before = sorted(os.listdir(PRE))
-fav = os.path.join(K, 'favorites.txt'); fav_before = open(fav, encoding='utf-8').read() if os.path.exists(fav) else None
 results = []
 def check(ok, what): results.append(ok); print(('ok    ' if ok else 'FALLO ') + what)
 v1 = os.path.join(PRE, 'zzKoniTest v1.xml'); v3 = os.path.join(PRE, 'zzKoniTest v3.xml'); saved = os.path.join(PRE, 'zzKoniTest Saved.xml')
@@ -56,7 +58,7 @@ finally:
         if os.path.exists(x): os.remove(x)
     for fl, b in bak.items(): shutil.copy2(b, fl)
     for a in glob.glob(os.path.join(AGENT, '*.json')): os.remove(a)
-    print('config y settings restaurados, idénticos:', all(filecmp.cmp(b, fl, shallow=False) for fl, b in bak.items()))
-    print('carpeta de presets como estaba:', sorted(os.listdir(PRE)) == before, '| favoritos intactos:', (open(fav, encoding='utf-8').read() if os.path.exists(fav) else None) == fav_before)
+    print('ajustes restaurados, idénticos (%d ficheros):' % len(bak), all(filecmp.cmp(b, fl, shallow=False) for fl, b in bak.items()))
+    print('carpeta de presets como estaba:', sorted(os.listdir(PRE)) == before)
     print('%d/%d comprobaciones' % (sum(results), len(results)))
 sys.exit(0 if results and all(results) else 1)

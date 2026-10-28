@@ -51,7 +51,7 @@ target_compile_options(mt32emu PRIVATE "$<$<CXX_COMPILER_ID:MSVC>:/w>")
 set_target_properties(mt32emu PROPERTIES POSITION_INDEPENDENT_CODE ON)
 target_link_libraries(KoniSynth PRIVATE mt32emu)
 # Motores, DSP, efectos, MIDI, parámetros, presets e interfaz: cabeceras incluidas desde KoniSynth.cpp (listadas para el IDE)
-file(GLOB KONI_HEADERS CONFIGURE_DEPENDS Source/Engines/*.h Source/Dsp/*.h Source/Effects/*.h Source/Midi/*.h Source/Params/*.h Source/Presets/*.h Source/UI/*.h Source/Midi/Controllers/*.h Source/Import/*.h)
+file(GLOB KONI_HEADERS CONFIGURE_DEPENDS Source/Engines/*.h Source/Dsp/*.h Source/Effects/*.h Source/Midi/*.h Source/Params/*.h Source/Presets/*.h Source/UI/*.h Source/Midi/Controllers/*.h Source/Import/*.h Source/Settings/*.h)
 target_sources(KoniSynth PRIVATE ${KONI_HEADERS})
 
 # CLAP (experimental): JUCE 9.0.4 no lo trae de serie (tampoco la rama develop, 2026-10-20); clap-juce-extensions

@@ -451,12 +451,13 @@ private:
     std::set<juce::String> favorites; // búsqueda (isFavorite se llama por fila y por recuento de filtro)
     juce::StringArray favoriteOrder;  // las mismas claves, en el orden del usuario
     static inline const juce::String favoritesOrderedMark { "#ordered" };
-    static juce::File favoritesFile() { return userDirectory().getParentDirectory().getChildFile ("favorites.txt"); }
     static juce::String favoriteKey (const Preset& p) { return (p.factory ? "F:" : "U:") + p.name; }
+    // En config.settings (clave favorites), con el mismo texto que el favorites.txt de versiones anteriores (marca de orden y
+    // una clave por línea), que se migra y se borra
     void loadFavorites()
     {
         juce::StringArray lines;
-        lines.addLines (favoritesFile().loadFileAsString());
+        lines.addLines (configText ("favorites", "favorites.txt"));
         const auto ordered = lines.size() > 0 && lines[0].trim() == favoritesOrderedMark;
         for (const auto& l : lines)
             if (const auto k = l.trim(); k.isNotEmpty() && ! k.startsWithChar ('#') && favorites.insert (k).second)
@@ -468,8 +469,7 @@ private:
     }
     void saveFavorites() const
     {
-        favoritesFile().getParentDirectory().createDirectory();
-        favoritesFile().replaceWithText (favoritesOrderedMark + "\n" + favoriteOrder.joinIntoString ("\n") + "\n");
+        setConfigText ("favorites", favoritesOrderedMark + "\n" + favoriteOrder.joinIntoString ("\n"));
     }
     // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, wtPathProp, osc2WtPathProp)
     static constexpr const char* sampleAttribute = "samplePath";
