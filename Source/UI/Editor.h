@@ -352,7 +352,10 @@ public:
                     .withKnob (s, "fmLfoSpeed", "Speed").withKnob (s, "fmLfoDelay", "Delay").withKnob (s, "fmLfoPmd", "PMD")
                     .withKnob (s, "fmLfoAmd", "AMD").withKnob (s, "fmLfoPms", "PMS");
         // Datos de cada chip: NESdev (CPU, 2A03, APU Mixer), Pan Docs (Specifications, Audio details), AtariAge (ports PAL)
-        chipSection.withPickCombo (s, "chipModel", [this] (int model) { loadRepresentative (7, model); })
+        chipSection.withHeaderButton ("Sample...", "This engine's own user sample for DPCM = User Sample: load a sound (WAV, AIFF, FLAC, OGG, "
+                                      ".sf2) to convert to 1-bit DPCM, or a .dmc file to play as it is.",
+                                      [this] { openSamplePanel (KoniSynthProcessor::dpcmSample); })
+                   .withPickCombo (s, "chipModel", [this] (int model) { loadRepresentative (7, model); })
                    .withItemTooltips ({
                        "Ricoh RP2A03, US NES. CPU 1.789773 MHz. 2 pulse channels (12.5/25/50/75 % duty), triangle, noise (long "
                        "32767-step or metallic 93-step mode) and 1-bit DPCM. Output filters: high-pass 90 Hz + 440 Hz, low-pass 14 kHz "
@@ -393,7 +396,10 @@ public:
                  .withKnob (s, "mdAlgorithm", "Algorithm").withKnob (s, "mdFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             mdSection.withKnob (s, "md" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");
-        snesSection.withHeaderButton ("Frame Macros...", "Experimental per-frame macros (60.10 Hz): volume, arpeggio, pitch and noise per voice. "
+        snesSection.withHeaderButton ("Sample...", "This engine's own user sample for Source = User Sample: load a sound (WAV, AIFF, FLAC, "
+                                      "OGG, .sf2) to encode to BRR, or a .brr / .spc file to play as it is.",
+                                      [this] { openSamplePanel (KoniSynthProcessor::snesSample); })
+                   .withHeaderButton ("Frame Macros...", "Experimental per-frame macros (60.10 Hz): volume, arpeggio, pitch and noise per voice. "
                                       "Nintendo's N-SPC driver stepped by tempo ticks, not video frames.", [this] { openSnesMacros(); })
                    .withCombo (s, "snesSource").withExtraToggle (s, "snesNoise", "Noise")
                    .withKnob (s, "snesNoiseRate", "Noise Rate").withKnob (s, "snesInterp", "Interp").withKnob (s, "snesUserRate", "User Rate")
@@ -405,7 +411,9 @@ public:
                        .withKnob (s, "snesEdl", "EDL").withKnob (s, "snesEfb", "EFB").withKnob (s, "snesEvol", "EVOL").withKnob (s, "snesMainVolume", "Main")
                        .withKnob (s, "snesPan", "Pan").withKnob (s, "snesSpread", "Spread").withKnob (s, "snesOutput", "Output")
                        .withKnob (s, "snesDac", "DAC");
-        n64Section.withCombo (s, "n64Source").withExtraToggle (s, "n64Adpcm", "VADPCM")
+        n64Section.withHeaderButton ("Sample...", "This engine's own user sample for Source = User Sample: load a sound (WAV, AIFF, FLAC, "
+                                     "OGG, .sf2) to encode to VADPCM.", [this] { openSamplePanel (KoniSynthProcessor::n64Sample); })
+                  .withCombo (s, "n64Source").withExtraToggle (s, "n64Adpcm", "VADPCM")
                   .withKnob (s, "n64SourceRate", "Src Rate").withKnob (s, "n64OutputRate", "Out Rate").withKnob (s, "n64Volume", "Volume")
                   .withKnob (s, "n64Pan", "Pan").withKnob (s, "n64Spread", "Spread");
         n64EnvSection.withExtraToggle (s, "n64Velocity", "Velocity")
@@ -426,7 +434,9 @@ public:
         mdLfoSection.withCombo (s, "mdLfo").withExtraToggle (s, "mdVelocity", "Velocity")
                     .withKnob (s, "mdPms", "PMS").withKnob (s, "mdAms", "AMS").withKnob (s, "mdPan", "Pan")
                     .withKnob (s, "mdOutput", "Output");
-        mdVoiceSection.withHeaderButton ("Frame Macros...", "Per-frame macros of the sound driver (59.92 Hz): volume, arpeggio and pitch "
+        mdVoiceSection.withHeaderButton ("Sample...", "This engine's own sample for Voice = DAC: load a sound (WAV, AIFF, FLAC, OGG, .sf2); "
+                                         "it is converted to the 8-bit DAC at the DAC Rate.", [this] { openSamplePanel (KoniSynthProcessor::mdSample); })
+                      .withHeaderButton ("Frame Macros...", "Per-frame macros of the sound driver (59.92 Hz): volume, arpeggio and pitch "
                                          "for FM and PSG, and the PSG noise type.", [this] { openMdMacros(); })
                       .withCombo (s, "mdVoice")
                       .withKnob (s, "mdDacRate", "DAC Rate").withKnob (s, "mdCh3Op1", "Ch3 OP1").withKnob (s, "mdCh3Op2", "Ch3 OP2")
@@ -1270,7 +1280,7 @@ private:
     // which: KoniSynthProcessor::sourceSample (pestaña Sample) u osc2Sample (Osc 2 en modo Sample)
     void chooseSample (int which)
     {
-        fileChooser = std::make_unique<juce::FileChooser> ("Load sample, SoundFont (.sf2), SNES BRR or SPC", juce::File(), SampleImport::fileFilter);
+        fileChooser = std::make_unique<juce::FileChooser> ("Load sample, SoundFont (.sf2), SNES BRR or SPC, NES DMC", juce::File(), SampleImport::fileFilter);
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
             [safe = SafePointer<KoniSynthEditor> (this), which] (const juce::FileChooser& fc)
             {
@@ -1645,7 +1655,8 @@ private:
     void showMissing (const KoniSynthProcessor::MissingFile& m)
     {
         using Kind = KoniSynthProcessor::MissingFile::Kind;
-        const juce::String what = m.kind == Kind::sample ? "Sample" : m.kind == Kind::osc2Sample ? "Osc 2 sample"
+        const auto sampleWhich = KoniSynthProcessor::sampleWhichFor (m.kind);
+        const juce::String what = sampleWhich >= 0 ? juce::String (SampleIds::of (sampleWhich).title)
                                 : m.kind == Kind::cabIr ? "Cabinet IR" : m.kind == Kind::osc2Wavetable ? "Osc 2 wavetable" : "Wavetable";
         const auto heading = what + (m.unreadable ? " file can't be read" : " file not found");
         const auto message = "\"" + m.file.getFileName() + "\" was expected at:\n" + m.file.getParentDirectory().getFullPathName()
@@ -1666,8 +1677,8 @@ private:
             chooseCabIr (m.file.getParentDirectory());
             return;
         }
-        const auto isSample = m.kind == KoniSynthProcessor::MissingFile::Kind::sample || m.kind == KoniSynthProcessor::MissingFile::Kind::osc2Sample;
-        const auto which = m.kind == KoniSynthProcessor::MissingFile::Kind::osc2Sample ? KoniSynthProcessor::osc2Sample : KoniSynthProcessor::sourceSample;
+        const auto isSample = KoniSynthProcessor::sampleWhichFor (m.kind) >= 0;
+        const auto which = juce::jmax (0, KoniSynthProcessor::sampleWhichFor (m.kind));
         const auto table = m.kind == KoniSynthProcessor::MissingFile::Kind::osc2Wavetable ? KoniSynthProcessor::wtOsc2 : KoniSynthProcessor::wtMain;
         const auto start = m.file.getParentDirectory().isDirectory() ? m.file.getParentDirectory()
                                                                      : juce::File::getSpecialLocation (juce::File::userHomeDirectory);

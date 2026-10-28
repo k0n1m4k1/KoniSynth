@@ -8,7 +8,8 @@ echo. Everything follows fullsnes (problemkaputt.de, "SNES APU DSP"). Use it for
 ## What you need
 
 Nothing extra. The six built-in sources are KoniSynth's own samples, BRR-encoded at start-up. To play your own sound,
-load it in the Sample panel (WAV, AIFF, FLAC, OGG, SoundFont .sf2, SNES .brr or .spc); KoniSynth includes no game samples.
+load it with the **Sample...** button of the SNES section (WAV, AIFF, FLAC, OGG, SoundFont .sf2, SNES .brr or .spc); it is the
+SNES engine's own sample, separate from the Synth's. KoniSynth includes no game samples.
 
 ## Controls
 
@@ -18,7 +19,7 @@ Three sections on one row: **SNES** (source) -> **SNES Envelope** -> **SNES Echo
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Source (header menu) | BRR sample. Square, Saw, Sine: 32-sample loops; Strings, Choir: 4400-sample loops (3 detuned voices); Bass: 64-sample loop. User Sample: the Sample panel's file, re-encoded to BRR. | Square / Saw / Sine / Strings / Choir / Bass / User Sample; Square |
+| Source (header menu) | BRR sample. Square, Saw, Sine: 32-sample loops; Strings, Choir: 4400-sample loops (3 detuned voices); Bass: 64-sample loop. User Sample: this engine's own file (Sample... button), re-encoded to BRR; a .brr or .spc plays as it is. | Square / Saw / Sine / Strings / Choir / Bass / User Sample; Square |
 | Noise | Replace the sample with the S-DSP noise generator (15-bit LFSR, not interpolated). | off |
 | Frame Macros... (header button) | Experimental per-frame macros (60.10 Hz). See "Playing it". | |
 | Noise Rate | Noise clock: 1 = 16 Hz ... 30 = 16 kHz, 31 = 32 kHz. | 0-31; 28 |
@@ -61,10 +62,10 @@ Default envelope: A15 D7 SL7 SR0 (organ-like).
 
 - 8 voices. Key-on resets the envelope and starts the sample from the beginning, after 5 empty samples, as on the chip.
 - **Your own sample:**
-  1. Switch to the Synth engine, open the Sample tab, press Edit Sample... and Load a file. For .sf2 and .spc files a menu
-     lets you pick the preset/zone or the sample inside.
-  2. Set Start, Length, Loop and Root in the Sample panel.
-  3. Switch back to SNES and set Source = User Sample. Choose User Rate (32, 16 or 8 kHz).
+  1. Press **Sample...** in the SNES section and Load a file. For .sf2 and .spc files a menu lets you pick the preset/zone
+     or the sample inside.
+  2. Set Start, Length, Loop and Root in the same window.
+  3. Set Source = User Sample. Choose User Rate (32, 16 or 8 kHz).
   - Audio files are resampled to the User Rate and BRR-encoded, up to 64 KB (7281 blocks). The Root note plays at that rate.
   - Original BRR data (.brr, or a sample taken from an .spc) is played as it is, at 32 kHz, with its own End/Loop flags;
     Start, Length and Loop do not apply. A .brr file of size 9·n + 2 starts with a 2-byte loop offset; size 9·n loops

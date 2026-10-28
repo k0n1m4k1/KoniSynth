@@ -168,13 +168,16 @@ public:
         startTimer (100); // libera datos retirados (DataSlot::collect) y genera la wavetable incluida elegida
         presetManager.onPresetFiles = [this] (std::optional<juce::String> sample, std::optional<juce::String> wavetable,
                                               std::optional<juce::String> cabIr, juce::String osc2SamplePath,
-                                              std::optional<juce::String> osc2Wavetable)
+                                              std::optional<juce::String> osc2Wavetable, PresetManager::EngineSamplePaths engineSamples)
         {
             if (sample.has_value())    restoreSample (*sample);
             if (wavetable.has_value()) restoreWavetable (*wavetable);
             if (osc2Wavetable.has_value()) restoreWavetable (*osc2Wavetable, wtOsc2);
             if (cabIr.has_value())     restoreCabIr (*cabIr);
             restoreSample (osc2SamplePath, osc2Sample);
+            for (int k = 0; k < 4; ++k)
+                if (engineSamples[(size_t) k].has_value())
+                    restoreSample (*engineSamples[(size_t) k], dpcmSample + k);
         };
         tuning.setMtsEnabled (true); // MTS-ESP por defecto: sin maestro (o sin LIBMTS instalada) no cambia nada
         actionPoll.tick = [this] { pollActions(); };
@@ -183,9 +186,10 @@ public:
 
     ~KoniSynthProcessor() override { stopTimer(); }
 
-    // Los dos samples del motor Synth (which): 0 = la fuente Sample (también la "User Sample" de los motores de consola y el
-    // DPCM), 1 = Osc 2 en modo Sample. Mismo código para los dos; cada uno con su DataSlot, su ruta en el estado y su aviso
-    static constexpr int sourceSample = 0, osc2Sample = 1;
+    // Samples (which), mismo código para todos; cada uno con su DataSlot, su ruta en el estado y su aviso: 0 = la fuente Sample
+    // del Synth, 1 = Osc 2 en modo Sample, y el propio de cada motor de consola (su "User Sample"): 2 = 8-Bit/DPCM, 3 = Mega
+    // Drive (DAC), 4 = SNES, 5 = N64. Hasta la 1.0.0 los de consola usaban el 0 (se migra: PresetManager::engineSamples)
+    static constexpr int sourceSample = 0, osc2Sample = 1, dpcmSample = 2, mdSample = 3, snesSample = 4, n64Sample = 5, numSampleSlots = 6;
 
     // Las dos wavetables del motor Synth (which): 0 = la fuente Wavetable, 1 = Osc 2 en modo Wavetable. Mismo código para las
     // dos; cada una con su DataSlot, su parámetro de tabla, su ruta en el estado y su aviso
@@ -597,7 +601,7 @@ public:
                 allVoicesOff();
                 chipEngine.reset();
             }
-            chipEngine.render (buffer, midi, params, sampleSlot.current.load (std::memory_order_acquire), chipMacroSlot.current.load (std::memory_order_acquire));
+            chipEngine.render (buffer, midi, params, dpcmSampleSlot.current.load (std::memory_order_acquire), chipMacroSlot.current.load (std::memory_order_acquire));
         }
         else if (pvOn)
         {
@@ -633,7 +637,7 @@ public:
                 allVoicesOff();
                 n64Engine.reset();
             }
-            n64Engine.render (buffer, midi, params, sampleSlot.current.load (std::memory_order_acquire), (int) params.sampleRoot->load());
+            n64Engine.render (buffer, midi, params, n64SampleSlot.current.load (std::memory_order_acquire), (int) params.n64SampleRoot->load());
         }
         else if (snesOn)
         {
@@ -642,7 +646,7 @@ public:
                 allVoicesOff();
                 snesEngine.reset();
             }
-            snesEngine.render (buffer, midi, params, sampleSlot.current.load (std::memory_order_acquire), (int) params.sampleRoot->load(),
+            snesEngine.render (buffer, midi, params, snesSampleSlot.current.load (std::memory_order_acquire), (int) params.snesSampleRoot->load(),
                                snesMacroSlot.current.load (std::memory_order_acquire));
         }
         else if (mdOn)
@@ -652,7 +656,7 @@ public:
                 allVoicesOff();
                 mdEngine.reset();
             }
-            mdEngine.render (buffer, midi, params, sampleSlot.current.load (std::memory_order_acquire), (int) params.sampleRoot->load(),
+            mdEngine.render (buffer, midi, params, mdSampleSlot.current.load (std::memory_order_acquire), (int) params.mdSampleRoot->load(),
                              mdMacroSlot.current.load (std::memory_order_acquire));
         }
         else if (ansOn)
@@ -1057,6 +1061,8 @@ public:
         sampleSlot.blocksDone.fetch_add (1, std::memory_order_release); // ver DataSlot
         for (auto& b : rhythmBanks) b.slot.blocksDone.fetch_add (1, std::memory_order_release);
         osc2SampleSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        for (auto* slot : { &dpcmSampleSlot, &mdSampleSlot, &snesSampleSlot, &n64SampleSlot })
+            slot->blocksDone.fetch_add (1, std::memory_order_release);
         ansSlot.blocksDone.fetch_add (1, std::memory_order_release);
         chipMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
         mdMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
@@ -1138,12 +1144,15 @@ public:
                     map->setAttribute ("param", juce::String ("action:") + MidiLearn::actionId (index - MidiLearn::actionBase));
                 }
             }
-            // KSL de los operadores OPL en dB/oct (PresetManager::swapOplKsl): un estado sin esta marca es anterior
+            // KSL de los operadores OPL en dB/oct (PresetManager::swapOplKsl) y sample propio de los motores de consola
+            // (PresetManager::engineSamples): un estado sin estas marcas es anterior
             xml->setAttribute (kslDbAttribute, 1);
+            xml->setAttribute (engineSamplesAttribute, 1);
             copyXmlToBinary (*xml, dest);
         }
     }
     static constexpr const char* kslDbAttribute = "kslDb";
+    static constexpr const char* engineSamplesAttribute = "engineSamples";
 
     // Grupos de la cadena de efectos (bloques COLOR..SPACE del editor), en su orden de siempre
     enum FxGroup { fxColor = 0, fxAmp, fxDynamics, fxModFx, fxEnsemble, fxSpace, numFxGroups };
@@ -1214,6 +1223,32 @@ public:
                 }
                 xml->removeAttribute (kslDbAttribute);
 
+                // Estados anteriores al sample propio de los motores de consola (sin la marca engineSamples="1"): el motor de
+                // consola del proyecto usaba el de la fuente Sample; se le copian fichero y región para que suene igual
+                if (xml->getIntAttribute (engineSamplesAttribute, 0) != 1)
+                {
+                    const auto param = [&xml] (const juce::String& id) { return xml->getChildByAttribute ("id", id); };
+                    const auto get = [&param] (const juce::String& id, float def)
+                                     { const auto* e = param (id); return e != nullptr ? (float) e->getDoubleAttribute ("value") : def; };
+                    const auto engine = juce::roundToInt (get ("engine", 0.0f));
+                    if (const auto k = PresetManager::engineSampleFor (engine);
+                        k >= 0 && xml->getStringAttribute (samplePathProp.toString()).isNotEmpty())
+                    {
+                        xml->setAttribute (PresetManager::engineSamples()[(size_t) k].attribute, xml->getStringAttribute (samplePathProp.toString()));
+                        PresetManager::copySampleRegionToEngine (get, [&xml, &param] (const juce::String& id, float v)
+                        {
+                            auto* e = param (id);
+                            if (e == nullptr)
+                            {
+                                e = xml->createNewChildElement ("PARAM");
+                                e->setAttribute ("id", id);
+                            }
+                            e->setAttribute ("value", (double) v);
+                        });
+                    }
+                }
+                xml->removeAttribute (engineSamplesAttribute);
+
                 // Estados guardados antes de "engine": <PARAM id="thereminOn" value="1"/> -> engine = Theremin
                 if (auto* legacy = xml->getChildByAttribute ("id", "thereminOn"); legacy != nullptr && xml->getChildByAttribute ("id", "engine") == nullptr)
                 {
@@ -1247,6 +1282,8 @@ public:
 
                 restoreFiles (apvts.state.getProperty (samplePathProp).toString(), apvts.state.getProperty (wtPathProp).toString());
                 restoreSample (apvts.state.getProperty (osc2SamplePathProp).toString(), osc2Sample); // sin la propiedad (proyectos anteriores): sin fichero
+                for (int which = dpcmSample; which < numSampleSlots; ++which)
+                    restoreSample (apvts.state.getProperty (pathPropFor (which)).toString(), which);
                 restoreWavetable (apvts.state.getProperty (osc2WtPathProp).toString(), wtOsc2);
                 restoreCabIr (apvts.state.getProperty (cabIrPathProp).toString());
                 restoreTuning();
@@ -1317,7 +1354,7 @@ public:
                     const juce::ScopedLock sl (sampleInfoLock);
                     sampleInfos[(size_t) which].text = (file.existsAsFile() ? "(unreadable) " : "(missing) ") + file.getFileName();
                 }
-                reportMissing (which == osc2Sample ? MissingFile::Kind::osc2Sample : MissingFile::Kind::sample, file, file.existsAsFile());
+                reportMissing (missingKindFor (which), file, file.existsAsFile());
             }
         }
     }
@@ -1394,11 +1431,24 @@ public:
     // y los consume el editor, uno a uno
     struct MissingFile
     {
-        enum class Kind { sample, wavetable, cabIr, osc2Sample, osc2Wavetable };
+        enum class Kind { sample, wavetable, cabIr, osc2Sample, osc2Wavetable, dpcmSample, mdSample, snesSample, n64Sample };
         Kind kind;
         juce::File file;
         bool unreadable = false;
     };
+    static MissingFile::Kind missingKindFor (int which)
+    {
+        using K = MissingFile::Kind;
+        static constexpr K kinds[numSampleSlots] = { K::sample, K::osc2Sample, K::dpcmSample, K::mdSample, K::snesSample, K::n64Sample };
+        return kinds[juce::jlimit (0, numSampleSlots - 1, which)];
+    }
+    static int sampleWhichFor (MissingFile::Kind kind) // -1 si no es un sample
+    {
+        for (int w = 0; w < numSampleSlots; ++w)
+            if (missingKindFor (w) == kind)
+                return w;
+        return -1;
+    }
 
     void reportMissing (MissingFile::Kind kind, const juce::File& file, bool unreadable)
     {
@@ -1831,6 +1881,7 @@ private:
     std::vector<float> inputMono;
     float lastInputGain = 1.0f;
     SampleSlot sampleSlot, osc2SampleSlot;
+    SampleSlot dpcmSampleSlot, mdSampleSlot, snesSampleSlot, n64SampleSlot; // sample propio de cada motor de consola
     WavetableSlot wavetableSlot, osc2WavetableSlot;
     juce::CriticalSection missingLock;
     std::vector<MissingFile> missing;
@@ -1843,11 +1894,19 @@ private:
     juce::CriticalSection sampleInfoLock;
     // Por sample (sourceSample, osc2Sample): texto para la UI, nota raíz del formato (-1 = desconocida) y bucle propio
     struct SampleInfo { juce::String text; int rootKey = -1; bool hasLoop = false; };
-    std::array<SampleInfo, 2> sampleInfos;
-    static inline const juce::Identifier samplePathProp { "samplePath" }, osc2SamplePathProp { "osc2SamplePath" };
-    SampleSlot& slotFor (int which) { return which == osc2Sample ? osc2SampleSlot : sampleSlot; }
-    const SampleSlot& slotFor (int which) const { return which == osc2Sample ? osc2SampleSlot : sampleSlot; }
-    static const juce::Identifier& pathPropFor (int which) { return which == osc2Sample ? osc2SamplePathProp : samplePathProp; }
+    std::array<SampleInfo, numSampleSlots> sampleInfos;
+    static inline const juce::Identifier samplePathProp { "samplePath" }, osc2SamplePathProp { "osc2SamplePath" },
+                                         dpcmSamplePathProp { "dpcmSamplePath" }, mdSamplePathProp { "mdSamplePath" },
+                                         snesSamplePathProp { "snesSamplePath" }, n64SamplePathProp { "n64SamplePath" };
+    SampleSlot& slotFor (int which) { return *sampleSlots()[(size_t) juce::jlimit (0, numSampleSlots - 1, which)]; }
+    const SampleSlot& slotFor (int which) const { return *const_cast<KoniSynthProcessor*> (this)->sampleSlots()[(size_t) juce::jlimit (0, numSampleSlots - 1, which)]; }
+    std::array<SampleSlot*, numSampleSlots> sampleSlots() { return { &sampleSlot, &osc2SampleSlot, &dpcmSampleSlot, &mdSampleSlot, &snesSampleSlot, &n64SampleSlot }; }
+    static const juce::Identifier& pathPropFor (int which)
+    {
+        static const std::array<const juce::Identifier*, numSampleSlots> props { &samplePathProp, &osc2SamplePathProp, &dpcmSamplePathProp,
+                                                                                 &mdSamplePathProp, &snesSamplePathProp, &n64SamplePathProp };
+        return *props[(size_t) juce::jlimit (0, numSampleSlots - 1, which)];
+    }
     static inline const juce::Identifier cabIrPathProp { "cabIrPath" }; // mismo nombre que el atributo del preset
     // Orden de la cadena de efectos (propiedad de texto "fxOrder", también en los presets: los 6 grupos separados por comas;
     // vacía o no válida = el orden de siempre). El audio lee la copia empaquetada: 4 bits por posición
@@ -1894,8 +1953,8 @@ private:
     // (64 fotogramas × 11 niveles: 704 FFT de 2048 puntos, fuera del hilo de audio)
     void timerCallback() override
     {
-        sampleSlot.collect();
-        osc2SampleSlot.collect();
+        for (auto* slot : sampleSlots())
+            slot->collect();
         wavetableSlot.collect();
         osc2WavetableSlot.collect();
         ansSlot.collect();

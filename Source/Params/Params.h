@@ -188,6 +188,10 @@ struct Params
         amDepth = get ("amDepth"); timbre = get ("timbre"); symmetry = get ("symmetry"); timbreMod = get ("timbreMod"); modLp = get ("modLp");
         modSync = get ("modSync"); complexModSource = get ("complexModSource");
         osc2SampleRoot = get ("osc2SampleRoot"); osc2SampleStart = get ("osc2SampleStart"); osc2SampleLoop = get ("osc2SampleLoop"); osc2SampleLength = get ("osc2SampleLength");
+        dpcmSampleStart = get ("dpcmSampleStart"); dpcmSampleLength = get ("dpcmSampleLength");
+        mdSampleRoot = get ("mdSampleRoot"); mdSampleStart = get ("mdSampleStart"); mdSampleLoop = get ("mdSampleLoop"); mdSampleLength = get ("mdSampleLength");
+        snesSampleRoot = get ("snesSampleRoot"); snesSampleStart = get ("snesSampleStart"); snesSampleLoop = get ("snesSampleLoop"); snesSampleLength = get ("snesSampleLength");
+        n64SampleRoot = get ("n64SampleRoot"); n64SampleStart = get ("n64SampleStart"); n64SampleLoop = get ("n64SampleLoop"); n64SampleLength = get ("n64SampleLength");
     }
 
     // Interpretación (no son parámetros): los escribe processBlock desde el MIDI entrante (pitch bend en semitonos ya
@@ -311,5 +315,8 @@ struct Params
                        *reverbDecay {}, *reverbPredelay {}, *reverbDiffusion {}, *reverbDamp {}, *reverbTone {},
                        *reverbMod {}, *reverbWidth {}, *reverbFreeze {},
                        *complexOn {}, *modWave {}, *modRatio {}, *fmIndex {}, *amDepth {}, *timbre {}, *symmetry {},
-                       *timbreMod {}, *modLp {}, *modSync {}, *complexModSource {}, *osc2SampleRoot {}, *osc2SampleStart {}, *osc2SampleLoop {}, *osc2SampleLength {};
+                       *timbreMod {}, *modLp {}, *modSync {}, *complexModSource {}, *osc2SampleRoot {}, *osc2SampleStart {}, *osc2SampleLoop {}, *osc2SampleLength {},
+                       *dpcmSampleStart {}, *dpcmSampleLength {}, *mdSampleRoot {}, *mdSampleStart {}, *mdSampleLoop {}, *mdSampleLength {},
+                       *snesSampleRoot {}, *snesSampleStart {}, *snesSampleLoop {}, *snesSampleLength {},
+                       *n64SampleRoot {}, *n64SampleStart {}, *n64SampleLoop {}, *n64SampleLength {};
 };

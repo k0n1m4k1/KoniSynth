@@ -359,8 +359,8 @@ private:
     // Sample del usuario: región del panel Sample a la tasa de fuente elegida; máximo 5 s
     void prepareUserSource (const SampleData* sample, const Params& p)
     {
-        const auto start = p.sampleStart->load(), lengthMs = p.sampleLength->load();
-        const auto loop = p.sampleLoop->load() > 0.5f;
+        const auto start = p.n64SampleStart->load(), lengthMs = p.n64SampleLength->load();
+        const auto loop = p.n64SampleLoop->load() > 0.5f;
         const auto length = sample != nullptr ? sample->length() : 0;
         if (sample == userSource && length == userSourceLength && start == userStart && lengthMs == userLengthMs && loop == userLoop
             && sourceRateIndex == userRateIndex && adpcmOn == userAdpcm)

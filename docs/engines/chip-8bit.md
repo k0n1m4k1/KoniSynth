@@ -10,8 +10,9 @@ As with every emulated engine in KoniSynth, the defaults reproduce the original 
 
 ## What you need
 
-Nothing extra. Optional: for **DPCM = User Sample**, a sound file loaded in the Sample panel (the **Edit Sample...** button of
-the Sample tab, in the Synth engine's sources). It is converted to 1-bit DPCM.
+Nothing extra. Optional: for **DPCM = User Sample**, this engine's own sample, loaded with the **Sample...** button of the
+8-Bit/DPCM section (separate from the Synth's): a sound file (WAV, AIFF, FLAC, OGG, .sf2) is converted to 1-bit DPCM (Start and
+Length choose the part, up to 4081 bytes, about 1 s); a .dmc file (raw NES DPCM bytes) plays as it is.
 
 ## Controls
 

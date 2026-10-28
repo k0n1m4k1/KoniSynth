@@ -73,7 +73,7 @@ struct ChipEngine
     {
         static const MacroSet none;
         macros = macroSet != nullptr ? macroSet : &none;
-        prepareUserDpcm (userSample);
+        prepareUserDpcm (userSample, p);
         const auto model = juce::jlimit (0, 5, (int) p.chipModel->load());
         if (model != lastModel)
         {
@@ -394,23 +394,40 @@ private:
         return set;
     }
 
-    // User Sample: se recodifica cuando cambia el fichero (buffer fijo de 4081 bytes: sin reservar memoria en audio)
-    void prepareUserDpcm (const SampleData* sample)
+    // User Sample (su propio fichero): se recodifica cuando cambia el fichero o su región Start/Length (buffer fijo de 4081
+    // bytes: sin reservar memoria en audio). Un .dmc se toca tal cual, sin recodificar (Start y Length no aplican)
+    void prepareUserDpcm (const SampleData* sample, const Params& p)
     {
         const auto length = sample != nullptr ? sample->length() : 0;
-        if (sample == userSource && length == userSourceLength)
+        const auto start = p.dpcmSampleStart->load(), lengthMs = p.dpcmSampleLength->load();
+        if (sample == userSource && length == userSourceLength && start == userStart && lengthMs == userLengthMs)
             return;
         userSource = sample;
         userSourceLength = length;
+        userStart = start;
+        userLengthMs = lengthMs;
         userDpcm.length = 0;
-        if (sample == nullptr || sample->length() < 2)
+        if (sample == nullptr)
+            return;
+        if (! sample->dpcm.empty())
+        {
+            userDpcm.length = (int) std::min (sample->dpcm.size(), userDpcm.bytes.size());
+            std::copy_n (sample->dpcm.begin(), userDpcm.length, userDpcm.bytes.begin());
+            return;
+        }
+        if (sample->length() < 2)
             return;
         // Remuestreo a 33 144 Hz: nivel de mipmap (media banda) más alto que no baje de esa tasa, leído con Hermite
-        const auto ratio = sample->sampleRate / (1789772.73 / 54.0);
+        constexpr auto bitRate = 1789772.73 / 54.0;
+        const auto ratio = sample->sampleRate / bitRate;
         const auto level = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::floor (std::log2 (std::max (1.0, ratio))));
         const auto scale = ratio / std::exp2 ((double) level);
-        encodeDpcm ([sample, level, scale] (int i) { return sample->read (level, i * scale); },
-                    (int) std::min<double> (4081 * 8, length / ratio), userDpcm);
+        const auto first = (double) start * length / std::exp2 ((double) level);
+        auto bits = (int) ((1.0 - start) * length / ratio);
+        if (lengthMs > 0.0f)
+            bits = std::min (bits, (int) (lengthMs / 1000.0 * bitRate));
+        encodeDpcm ([sample, level, scale, first] (int i) { return sample->read (level, first + i * scale); },
+                    std::min (4081 * 8, bits), userDpcm);
     }
 
     void dmcNoteOn (int note)
@@ -1119,6 +1136,7 @@ private:
     DpcmSample userDpcm;
     const SampleData* userSource = nullptr;
     int userSourceLength = 0, dpcmSource = 0;
+    float userStart = -1.0f, userLengthMs = -1.0f;
     bool dpcmLoop = false;
     int lastModel = -1, nextVoice = 0;
     // Parámetros del bloque

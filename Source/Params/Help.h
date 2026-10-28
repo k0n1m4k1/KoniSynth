@@ -7,7 +7,7 @@ static juce::String paramHelp (const juce::String& id)
 {
     static const std::map<juce::String, const char*> help {
         { "gain", "Master output volume, at the very end of the chain." },
-        { "n64Source", "Sound source: KoniSynth's own samples (Square, Saw, Sine: 32-sample loops; Strings, Choir: 3-voice loops; Bass) made at the chosen sample rate, or User Sample (Sample panel: Start, Length, Loop, Root)." },
+        { "n64Source", "Sound source: KoniSynth's own samples (Square, Saw, Sine: 32-sample loops; Strings, Choir: 3-voice loops; Bass) made at the chosen sample rate, or User Sample (its own file: Sample... button in this section)." },
         { "n64SourceRate", "Rate of the sample (8 to 32 kHz). N64 games stored most samples at low rates to save cartridge space: the dull, fuzzy N64 sound." },
         { "n64OutputRate", "Output rate of the console's audio interface (games used 22.05, 32 or 44.1 kHz). Notes can go at most one octave above the sample rate, as on the console (libultra MAX_RATIO 1.99996)." },
         { "n64Dac", "How the AI output samples become sound. Hold (default, as a non-oversampling DAC): each sample is held until "
@@ -86,7 +86,7 @@ static juce::String paramHelp (const juce::String& id)
         { "springMix", "Spring reverb amount." },
         { "chipModel", "Sound chip: NES NTSC (2A03), NES PAL (2A07), Famicom (2A03, different output filter), Game Boy (DMG), Game Boy Color (CGB, same sound channels) or PAL Unadapted (NTSC game on a PAL NES: ~1.3 semitones lower, slower driver). Choosing one loads its most representative preset." },
         { "chipVoice", "Which chip channel your keys play: one pulse, the triangle (NES) or wave channel (Game Boy), the noise, Poly (2 pulses + triangle/wave, 3 notes), MIDI Channels (1-4 = pulse 1, pulse 2, triangle/wave, noise; 5 = DPCM) or DPCM (NES sample channel). VRC6 Pulse / VRC6 Saw / Poly + VRC6: the VRC6 expansion channels (Famicom with Expansion = VRC6)." },
-        { "chipDpcm", "NES DPCM sample: Kit plays kick, snare, toms, timpani and slap bass from the drum keys (C2 kick, D2 snare...); the others play one sample, with the key choosing one of the 16 hardware playback rates (C4 = fastest). User Sample converts the file loaded in the Sample panel to 1-bit DPCM." },
+        { "chipDpcm", "NES DPCM sample: Kit plays kick, snare, toms, timpani and slap bass from the drum keys (C2 kick, D2 snare...); the others play one sample, with the key choosing one of the 16 hardware playback rates (C4 = fastest). User Sample converts its own file (Sample... button in this section) to 1-bit DPCM; a .dmc file plays as it is." },
         { "chipDpcmLoop", "Loop the DPCM sample while the key is held (hardware loop flag)." },
         { "chipDuty", "Pulse width of the pulse channels. 25 % and 75 % sound the same." },
         { "chipVolume", "Channel volume (0-15, 4 bits like the hardware)." },
@@ -247,6 +247,20 @@ static juce::String paramHelp (const juce::String& id)
         { "osc2SampleLength", "Osc 2 Sample: cuts the file after this time with a short fade (Full = the whole file). Default: Full." },
         { "osc2SampleLoop", "Osc 2 Sample: loops the file from Start to the end (or its own loop, if the file has one) while "
                             "the note is held. Default: Off." },
+        { "mdSampleRoot", "Mega Drive DAC sample: the note at which its file plays at the stored rate (its original pitch). Default: C4." },
+        { "mdSampleStart", "Mega Drive DAC sample: playback start point within its file. Default: 0 %." },
+        { "mdSampleLength", "Mega Drive DAC sample: cuts the file after this time (Full = the whole file). Default: Full." },
+        { "mdSampleLoop", "Mega Drive DAC sample: loops it from Start while the note is held. Default: Off." },
+        { "snesSampleRoot", "SNES sample: the note at which its file plays at the stored rate (its original pitch). Default: C4." },
+        { "snesSampleStart", "SNES sample: playback start point within its file. Default: 0 %." },
+        { "snesSampleLength", "SNES sample: cuts the file after this time (Full = the whole file). Default: Full." },
+        { "snesSampleLoop", "SNES sample: loops it from Start while the note is held. Default: Off." },
+        { "n64SampleRoot", "N64 sample: the note at which its file plays at the stored rate (its original pitch). Default: C4." },
+        { "n64SampleStart", "N64 sample: playback start point within its file. Default: 0 %." },
+        { "n64SampleLength", "N64 sample: cuts the file after this time (Full = the whole file). Default: Full." },
+        { "n64SampleLoop", "N64 sample: loops it from Start while the note is held. Default: Off." },
+        { "dpcmSampleStart", "8-Bit/DPCM user sample: start point within its file before converting it to DPCM (not used with a .dmc file, which plays as it is). Default: 0 %." },
+        { "dpcmSampleLength", "8-Bit/DPCM user sample: part of the file converted to DPCM (Full = up to the 4081-byte limit, about 1 s). Default: Full." },
         { "inputGain", "Audio input gain (mic or line). Raise it if your mic is quiet." },
         { "inputMonitor", "Sends the input into the effects chain: your voice or instrument with echo, reverb, tape..." },
         { "vocoderOn", "Turns the vocoder on: your voice (input) shapes the synth sound. Play notes while you speak." },
@@ -521,7 +535,7 @@ static juce::String paramHelp (const juce::String& id)
         { "timbreMod", "The modulator moves the wavefolder." },
         { "modLp", "Low-pass filter on the Complex modulator (internal, Osc 2 or Osc 3) before the FM and the AM: a saw or square "
                    "modulator becomes rounder, for softer FM. One pole (6 dB/oct). Default: Off (fully up)." },
-        { "snesSource", "Sound source (BRR sample). Square, Saw, Sine: 32-sample loops; Strings, Choir: 4400-sample loops (3 detuned voices); Bass: 64-sample loop. All are KoniSynth's own samples, BRR-encoded. User Sample: the file in the Sample panel (Start, Length, Loop, Root), re-encoded to BRR." },
+        { "snesSource", "Sound source (BRR sample). Square, Saw, Sine: 32-sample loops; Strings, Choir: 4400-sample loops (3 detuned voices); Bass: 64-sample loop. All are KoniSynth's own samples, BRR-encoded. User Sample: its own file (Sample... button in this section), re-encoded to BRR; a .brr or .spc file plays as it is." },
         { "snesUserRate", "Rate at which the user sample is stored in BRR (32, 16 or 8 kHz). Lower = more of the classic muffled SNES sound and longer samples within the 64 KB of audio RAM." },
         { "snesInterp", "Sample interpolation. Gaussian: the S-DSP's own 4-point filter with its 512-entry table (the muffled SNES sound). Linear and None are only for comparison: the console can't do them." },
         { "snesEnvMode", "Envelope: ADSR (hardware attack/decay/sustain, release -8 per sample) or one of the GAIN modes: direct level, linear down, exponential down, linear up, bent up." },

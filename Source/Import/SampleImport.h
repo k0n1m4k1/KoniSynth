@@ -8,7 +8,7 @@
 // presets y el estado del plugin no cambian de formato.
 struct SampleImport
 {
-    static constexpr const char* fileFilter = "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.sf2;*.brr;*.spc";
+    static constexpr const char* fileFilter = "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.sf2;*.brr;*.spc;*.dmc";
 
     static juce::File fileOf (const juce::String& path) { return juce::File (path.containsChar ('|') ? path.upToLastOccurrenceOf ("|", false, false) : path); }
     static juce::String itemOf (const juce::String& path) { return path.containsChar ('|') ? path.fromLastOccurrenceOf ("|", false, false) : juce::String(); }
@@ -28,9 +28,38 @@ struct SampleImport
     static std::unique_ptr<SampleData> load (const juce::File& file, const juce::String& item, juce::String& error)
     {
         if (file.hasFileExtension ("brr")) return loadBrrFile (file, error);
+        if (file.hasFileExtension ("dmc")) return loadDmcFile (file, error);
         if (file.hasFileExtension ("spc")) return loadSpc (file, item, error);
         if (file.hasFileExtension ("sf2")) return loadSf2 (file, item, error);
         return SampleData::fromFile (file, error);
+    }
+
+    // .dmc (DPCM de la NES, bytes en bruto): cada bit, del menos significativo al más, sube (1) o baja (0) 2 un nivel de 7 bits
+    // (0-127) que parte de 64, como el canal DMC (Engines/ChipEngine.h, encodeDpcm y el paso del DMC). Se decodifica a la tasa 15
+    // NTSC (1 789 773 / 54 = 33 144 Hz) para los demás motores y se guardan los bytes para el 8-Bit/DPCM
+    static std::unique_ptr<SampleData> loadDmcFile (const juce::File& file, juce::String& error)
+    {
+        juce::MemoryBlock block;
+        if (! file.loadFileAsData (block) || block.getSize() == 0)
+        {
+            error = "Empty or unreadable DPCM file: " + file.getFileName();
+            return nullptr;
+        }
+        auto data = std::make_unique<SampleData>();
+        data->sampleRate = 1789772.73 / 54.0;
+        data->name = file.getFileName();
+        const auto* b = static_cast<const uint8_t*> (block.getData());
+        data->dpcm.assign (b, b + block.getSize());
+        data->levels[0].resize (block.getSize() * 8);
+        int level = 64;
+        for (size_t i = 0; i < block.getSize() * 8; ++i)
+        {
+            if ((b[i >> 3] >> (i & 7)) & 1) { if (level <= 125) level += 2; }
+            else if (level >= 2) level -= 2;
+            data->levels[0][i] = (float) (level - 64) / 64.0f;
+        }
+        data->buildLevels();
+        return data;
     }
 
     // BRR: bloques decodificados a 32 kHz (1:1 en el S-DSP) para los demás motores, y los originales para el motor SNES

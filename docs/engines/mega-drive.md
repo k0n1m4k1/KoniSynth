@@ -64,7 +64,7 @@ written out (for example `(1 -> 2) + (3 -> 4)`). Per operator:
 |---|---|---|
 | Voice (header menu) | What the keys play: FM (6 ch); FM + PSG (each note also on a PSG square channel); PSG Tone (3 ch, lowest note ~109 Hz); PSG Noise (mono); DAC Sample (ch 6) (mono); FM Ch3 Special (mono). | default FM (6 ch) |
 | Frame Macros... (header button) | Per-frame macros of the sound driver (59.92 Hz). See "Playing it". | |
-| DAC Rate | Rate at which the driver writes the sample into channel 6's DAC (register 2Ah). The Sample panel's Root note plays at this rate; the DAC holds each 8-bit value until the next write. | 6.5 / 8 / 11 / 16 / 22 kHz; 8 kHz |
+| DAC Rate | Rate at which the driver writes the sample into channel 6's DAC (register 2Ah). The Root note of its own sample (Sample... button) plays at this rate; the DAC holds each 8-bit value until the next write. | 6.5 / 8 / 11 / 16 / 22 kHz; 8 kHz |
 | Ch3 OP1, Ch3 OP2, Ch3 OP3 | Channel 3 Special mode: frequency of OP1-OP3 in semitones from the played note. OP4 always plays the note. | -24..+24; 0 |
 
 ### MD PSG (SN76489)
@@ -88,10 +88,11 @@ The PSG has no envelope of its own; A/D/S/R are a sound-driver envelope.
   Retrigger works like a driver: key off one sample before key on.
 - **FM + PSG:** the FM channels plus 3 PSG square channels, allocated separately.
 - **PSG Noise, DAC Sample, FM Ch3 Special:** monophonic, last-note priority with a stack of held notes.
-- **DAC Sample:** plays the sample loaded in the Sample panel through channel 6, quantized to 8 bits. With Loop off the
+- **DAC Sample:** plays this engine's own sample (**Sample...** button of the MD Voice section, separate from the Synth's)
+  through channel 6, quantized to 8 bits. An 8-bit WAV at the DAC Rate is the chip's own format and is not altered. With Loop off the
   sample plays to the end, like drum samples in games.
-  1. Switch to the Synth engine, open the Sample tab, press Edit Sample... and Load a file (Start, Length, Loop, Root apply).
-  2. Switch back to Mega Drive and set Voice = DAC Sample (ch 6).
+  1. Press **Sample...** in the MD Voice section and Load a file (Start, Length, Loop, Root apply).
+  2. Set Voice = DAC Sample (ch 6).
   3. Set DAC Rate; the Root note plays at that rate.
 - **Frame Macros...:** one line of text per macro, Furnace syntax: values separated by spaces, one per frame; `|` = loop
   start, `/` = release point; in the arpeggio `@n` = absolute note from C-0 (48 = C-4 = MIDI 60). Max 256 steps.

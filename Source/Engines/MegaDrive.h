@@ -476,15 +476,15 @@ private:
         }
     }
 
-    // DAC: tasa de lectura para la nota (la Root del panel Sample suena a la tasa del driver)
+    // DAC: tasa de lectura para la nota (la Root de su panel Sample suena a la tasa del driver)
     double dacStepFor (int note) const { return dacRate * std::exp2 ((note - dacRoot) / 12.0 + tuneCents / 1200.0) / kChipRate; }
 
-    // Sample del usuario (región Start/Length del panel Sample) remuestreado a la tasa del driver y cuantizado a 8 bits sin
+    // Sample propio del motor (región Start/Length de su panel Sample) remuestreado a la tasa del driver y cuantizado a 8 bits sin
     // signo, como los datos del registro $2A. Solo se recalcula si cambia algo.
     void prepareDac (const SampleData* sample, const Params& p)
     {
-        const auto start = p.sampleStart->load(), lengthMs = p.sampleLength->load();
-        dacLoop = p.sampleLoop->load() > 0.5f;
+        const auto start = p.mdSampleStart->load(), lengthMs = p.mdSampleLength->load();
+        dacLoop = p.mdSampleLoop->load() > 0.5f;
         const auto length = sample != nullptr ? sample->length() : 0;
         if (sample == dacSource && length == dacSourceLength && dacRateIndex == dacPreparedRate && start == dacStart && lengthMs == dacLengthMs)
             return;
@@ -503,7 +503,9 @@ private:
             count = std::min (count, (int) (lengthMs / 1000.0 * dacRate));
         dacPcm.resize ((size_t) std::max (0, count));
         for (int i = 0; i < count; ++i)
-            dacPcm[(size_t) i] = (uint8_t) juce::jlimit (0, 255, (int) std::lround (128.0 + 127.0 * sample->read (level, first + i * scale)));
+            // 8 bits sin signo como el byte alto de una muestra de 16 bits (x 128, recortado a 0-255): un WAV de 8 bits a la DAC Rate
+            // llega tal cual (remuestreo 1:1, Hermite en posiciones enteras = la muestra, 128 + 128 (b - 128) / 128 = b). Antes x 127
+            dacPcm[(size_t) i] = (uint8_t) juce::jlimit (0, 255, (int) std::lround (128.0 + 128.0 * sample->read (level, first + i * scale)));
     }
 
     // Voces monofónicas (ruido del PSG, DAC, canal 3 especial): prioridad a la última nota, con pila de notas pulsadas

@@ -100,6 +100,7 @@ struct SampleData
     int loopStart = -1, loopEnd = -1, rootKey = -1;
     std::vector<uint8_t> brr;
     int brrLoopBlock = -1;
+    std::vector<uint8_t> dpcm; // .dmc: los bytes originales, para que el motor 8-Bit/DPCM los toque sin recodificar
 
     static std::unique_ptr<SampleData> fromFile (const juce::File& file, juce::String& error)
     {

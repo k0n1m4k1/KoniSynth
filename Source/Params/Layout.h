@@ -910,5 +910,30 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2SampleLength", 1 }, "Osc2 Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
         parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
             { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
+
+    // Sample propio de cada motor de consola, con su fichero (dpcmSamplePath, mdSamplePath, snesSamplePath, n64SamplePath): hasta
+    // la 1.0.0 usaban el de la fuente Sample del Synth. El DPCM no tiene Root (la tecla elige la tasa) y su bucle es chipDpcmLoop
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "dpcmSampleStart", 1 }, "8-Bit/DPCM User Sample Start", NormalisableRange<float> (0.0f, 0.99f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "dpcmSampleLength", 1 }, "8-Bit/DPCM User Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
+        parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "mdSampleRoot", 1 }, "MD Sample Root", 0, 127, 60, noteName));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "mdSampleStart", 1 }, "MD Sample Start", NormalisableRange<float> (0.0f, 0.99f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "mdSampleLoop", 1 }, "MD Sample Loop", false));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "mdSampleLength", 1 }, "MD Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
+        parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "snesSampleRoot", 1 }, "SNES Sample Root", 0, 127, 60, noteName));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "snesSampleStart", 1 }, "SNES Sample Start", NormalisableRange<float> (0.0f, 0.99f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "snesSampleLoop", 1 }, "SNES Sample Loop", false));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "snesSampleLength", 1 }, "SNES Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
+        parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "n64SampleRoot", 1 }, "N64 Sample Root", 0, 127, 60, noteName));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "n64SampleStart", 1 }, "N64 Sample Start", NormalisableRange<float> (0.0f, 0.99f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "n64SampleLoop", 1 }, "N64 Sample Loop", false));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "n64SampleLength", 1 }, "N64 Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
+        parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
     return l;
 }

@@ -258,13 +258,13 @@ private:
         }
     }
 
-    // Sample del usuario: región del panel Sample (Start, Length, Loop), remuestreada a 32/16/8 kHz y codificada en BRR con un
+    // Sample propio del motor: región de su panel Sample (Start, Length, Loop), remuestreada a 32/16/8 kHz y codificada en BRR con un
     // máximo de 64 KB (7281 bloques). Solo se recodifica si cambia algo. Raíz: la nota Root del panel a esa tasa.
     void prepareUserSource (const SampleData* sample, const Params& p)
     {
         const auto rateIndex = juce::jlimit (0, 2, (int) p.snesUserRate->load());
-        const auto start = p.sampleStart->load(), lengthMs = p.sampleLength->load();
-        const auto loop = p.sampleLoop->load() > 0.5f;
+        const auto start = p.snesSampleStart->load(), lengthMs = p.snesSampleLength->load();
+        const auto loop = p.snesSampleLoop->load() > 0.5f;
         const auto length = sample != nullptr ? sample->length() : 0;
         if (sample == userSource && length == userSourceLength && rateIndex == userRateIndex && start == userStart
             && lengthMs == userLengthMs && loop == userLoop)

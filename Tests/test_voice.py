@@ -518,4 +518,30 @@ for args, want, what in ((OPL + ['--param=oplModel=0', '--prop=kslDb=0'], (2, 1)
     got = (state_value(args, 'opl2Ksl'), state_value(args, 'opl3Ksl'))
     c.check(got == want, 'KSL de un proyecto, %s: opl2/opl3 1, 2 -> %d, %d' % (what, got[0], got[1]))
 c.check(b'kslDb="1"' in juce_base64(open(os.path.join(RENDERS, 'rt60_state.txt')).read()), 'el estado guardado lleva la marca kslDb="1"')
+
+# --- Sample propio de cada motor de consola (hasta la 1.0.0 usaban el de la fuente Sample del Synth) ---
+import wave as _wave
+SIN = os.path.join(RENDERS, 'sine440_32k.wav')  # seno de 440 Hz, 0,5 s, 32 kHz, 16 bits
+with _wave.open(SIN, 'wb') as w:
+    w.setnchannels(1); w.setsampwidth(2); w.setframerate(32000)
+    w.writeframes((np.sin(2 * np.pi * 440 * np.arange(16000) / 32000) * 16000).astype('<i2').tobytes())
+CONSOLES = (('8-Bit/DPCM', 'dpcmSamplePath', ['--param=engine=7', '--param=chipVoice=5', '--param=chipDpcm=6']),
+            ('Mega Drive', 'mdSamplePath', ['--param=engine=10', '--param=mdVoice=4']),
+            ('SNES', 'snesSamplePath', ['--param=engine=11', '--param=snesSource=6']),
+            ('N64', 'n64SamplePath', ['--param=engine=12', '--param=n64Source=6']))
+for name, prop, args in CONSOLES:
+    own, _ = render(args + ['--prop=%s=%s' % (prop, SIN)], 0.6, ['60:0.05:0.4:100'], 'es_own.wav', engine='')
+    synth_only, _ = render(args + ['--sample=' + SIN], 0.6, ['60:0.05:0.4:100'], 'es_synth.wav', engine='')
+    # Proyecto anterior (sin la marca engineSamples): el motor usaba la fuente Sample; se migra a su sample propio
+    migrated, _ = render(args + ['--sample=' + SIN, '--prop=engineSamples=0'], 0.6, ['60:0.05:0.4:100'], 'es_mig.wav', engine='')
+    # Sin ningún sample (referencia: Mega Drive da en reposo un transitorio de continua al arrancar, -33 dBFS)
+    none, _ = render(args, 0.6, ['60:0.05:0.4:100'], 'es_none.wav', engine='')
+    c.check(np.abs(own - none).max() > 0.01 and np.abs(synth_only - none).max() < 1e-6 and np.abs(migrated - own).max() < 1e-6,
+            '%s: su sample cambia la salida (%.1f dBFS); el del Synth no cambia nada (diferencia %.1e); proyecto anterior migrado: '
+            'igual que con su sample (diferencia %.1e)' % (name, db(np.abs(own - none).max()), np.abs(synth_only - none).max(), np.abs(migrated - own).max()))
+# .dmc: los bytes tal cual en el 8-Bit/DPCM (sube 64 bits y baja 64: triángulo de 2 x 128 pasos de 2 = nivel 0..127)
+DMC = os.path.join(RENDERS, 'tri.dmc')
+open(DMC, 'wb').write(bytes([0xFF] * 8 + [0x00] * 8) * 16)
+x, _ = render(CONSOLES[0][2] + ['--prop=dpcmSamplePath=' + DMC], 0.4, ['60:0.02:0.3:100'], 'es_dmc.wav', engine='')
+c.check(np.abs(x).max() > 0.01, '8-Bit/DPCM con un .dmc: suena (pico %.1f dBFS)' % db(np.abs(x).max()))
 sys.exit(c.summary())

@@ -9,17 +9,25 @@ static void setParameterReal (APVTS& s, const juce::String& id, float value)
         p->setValueNotifyingHost (p->convertTo0to1 (value));
 }
 
-// Parámetros de cada sample del motor Synth: el mismo panel para la fuente Sample y para Osc 2 en modo Sample
+// Parámetros de cada sample: el mismo panel para la fuente Sample y Osc 2 del Synth y para el sample propio de cada motor de
+// consola. level y root pueden faltar (nullptr): los de consola no tienen nivel propio y el DPCM no tiene Root
 struct SampleIds
 {
-    int which; // KoniSynthProcessor::sourceSample u osc2Sample
+    int which; // KoniSynthProcessor::sourceSample, osc2Sample, dpcmSample, mdSample, snesSample o n64Sample
     const char *level, *root, *start, *length, *loop, *title;
 
     static SampleIds of (int which)
     {
-        if (which == KoniSynthProcessor::osc2Sample)
-            return { which, "osc2Level", "osc2SampleRoot", "osc2SampleStart", "osc2SampleLength", "osc2SampleLoop", "Osc 2 Sample" };
-        return { which, "sampleLevel", "sampleRoot", "sampleStart", "sampleLength", "sampleLoop", "Sample" };
+        using K = KoniSynthProcessor;
+        switch (which)
+        {
+            case K::osc2Sample: return { which, "osc2Level", "osc2SampleRoot", "osc2SampleStart", "osc2SampleLength", "osc2SampleLoop", "Osc 2 Sample" };
+            case K::dpcmSample: return { which, nullptr, nullptr, "dpcmSampleStart", "dpcmSampleLength", "chipDpcmLoop", "8-Bit/DPCM Sample" };
+            case K::mdSample:   return { which, nullptr, "mdSampleRoot", "mdSampleStart", "mdSampleLength", "mdSampleLoop", "Mega Drive Sample" };
+            case K::snesSample: return { which, nullptr, "snesSampleRoot", "snesSampleStart", "snesSampleLength", "snesSampleLoop", "SNES Sample" };
+            case K::n64Sample:  return { which, nullptr, "n64SampleRoot", "n64SampleStart", "n64SampleLength", "n64SampleLoop", "N64 Sample" };
+            default:            return { which, "sampleLevel", "sampleRoot", "sampleStart", "sampleLength", "sampleLoop", "Sample" };
+        }
     }
 };
 
@@ -128,14 +136,30 @@ private:
 class SamplePanel : public juce::Component, private juce::Timer
 {
 public:
+    // Formatos que acepta cada sample: audio común (se recodifica al formato del chip) y, en SNES y 8-Bit/DPCM, el suyo tal cual
+    static juce::String loadTooltip (int which)
+    {
+        using K = KoniSynthProcessor;
+        const juce::String common = "Load an audio file (WAV, AIFF, FLAC, OGG) or a SoundFont (.sf2) sample";
+        switch (which)
+        {
+            case K::dpcmSample: return common + ", converted to 1-bit DPCM; or a .dmc file, played as it is.";
+            case K::mdSample:   return common + ", converted to the 8-bit DAC at the DAC Rate (an 8-bit WAV at that rate is the chip's own format).";
+            case K::snesSample: return common + ", encoded to BRR; or a .brr / .spc file, played as it is.";
+            case K::n64Sample:  return common + ", encoded to VADPCM.";
+            default:            return common + " as a sound source.";
+        }
+    }
+
     SamplePanel (KoniSynthProcessor& p, SampleIds i, std::function<void()> chooseFile) : koni (p), ids (i), wave (p, i), controls { i.title }
     {
         auto& s = p.apvts;
         controls.withExtraToggle (s, ids.loop, "Loop")
-                .withHeaderButton ("Load", "Load an audio file (WAV, AIFF, FLAC, OGG) as a sound source.", std::move (chooseFile))
-                .withHeaderButton ("Clear", "Remove the loaded sample.", [this] { koni.clearSample (ids.which); })
-                .withKnob (s, ids.level, "Level").withKnob (s, ids.root, "Root")
-                .withKnob (s, ids.start, "Start").withKnob (s, ids.length, "Length");
+                .withHeaderButton ("Load", loadTooltip (ids.which), std::move (chooseFile))
+                .withHeaderButton ("Clear", "Remove the loaded sample.", [this] { koni.clearSample (ids.which); });
+        if (ids.level != nullptr) controls.withKnob (s, ids.level, "Level");
+        if (ids.root != nullptr)  controls.withKnob (s, ids.root, "Root");
+        controls.withKnob (s, ids.start, "Start").withKnob (s, ids.length, "Length");
         addAndMakeVisible (wave);
         addAndMakeVisible (controls);
         timerCallback();
