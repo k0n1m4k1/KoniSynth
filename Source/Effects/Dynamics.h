@@ -81,8 +81,9 @@ private:
 //   Opto - detector cuadrático (RMS, 5 ms), rodilla mínima de 12 dB y liberación dependiente del programa: la constante
 //          crece hasta ×10 con la compresión sostenida (memoria de 2 s al cargar, 5 s al descargar), como la célula T4 del
 //          LA-2A (liberación rápida tras picos cortos, lenta tras compresión larga).
-//   FET  - realimentado: el detector mira la salida ya comprimida (topología del 1176), así la relación efectiva es más
-//          suave y el ataque puede bajar a 20 µs. Con la llave externa (Audio In) pasa a alimentación hacia delante.
+//   FET  - realimentado: el detector mira la salida ya comprimida (topología del 1176). El lazo se resuelve sin retardo
+//          (fetStep): el ratio estático es el del mando y el ataque efectivo se acorta al subir el ratio; el ataque puede
+//          bajar a 20 µs. Con la llave externa (Audio In) pasa a alimentación hacia delante.
 // Detector con suavizado de ramas en el dominio logarítmico (Giannoulis 2012, "smooth branching"): ataque y liberación
 // independientes. Filtro paso alto Butterworth de 12 dB/oct en la cadena lateral (SC HPF; 20 Hz = apagado): los graves no
 // bombean. Llave externa: la entrada de audio (ducking: la voz o un bombo agachan el sintetizador). Mix = compresión
@@ -138,7 +139,6 @@ struct Compressor
                 }
                 level = std::max (level, (float) std::abs (v));
             }
-            if (feedback) level *= lastGain;
             if (s.mode == opto)
             {
                 rms = cRms * rms + (1.0f - cRms) * level * level;
@@ -148,8 +148,13 @@ struct Compressor
                 cR = Dyn::coefFor (s.releaseMs * (1.0f + 9.0f * memory), fs);
             }
             const auto xDb = Dyn::dbOf (level);
-            const auto target = Dyn::gainReductionDb (xDb, s.thresholdDb, s.ratio, knee);
-            env = target > env ? cA * env + (1.0f - cA) * target : cR * env + (1.0f - cR) * target;
+            if (feedback)
+                env = fetStep (xDb, s.thresholdDb, s.ratio, knee, cA, cR, env);
+            else
+            {
+                const auto target = Dyn::gainReductionDb (xDb, s.thresholdDb, s.ratio, knee);
+                env = target > env ? cA * env + (1.0f - cA) * target : cR * env + (1.0f - cR) * target;
+            }
             lastGain = Dyn::gainOf (-env);
             const auto g = (1.0f - s.mix) + s.mix * lastGain * makeup;
             for (int ch = 0; ch < chans; ++ch) b.setSample (ch, i, b.getSample (ch, i) * g);
@@ -163,6 +168,46 @@ struct Compressor
     std::atomic<float> meterGr { 0.0f }, meterLevel { -120.0f }; // para la UI: reducción máxima y nivel del detector del bloque
 
 private:
+    // FET: detector sobre la salida y = x - e (dB) que pide e = G(y), con G de pendiente R - 1 sobre el umbral y la misma
+    // rodilla cuadrática. En régimen e = (R - 1)(x - e - T), es decir y - T = (x - T)/R: el ratio del mando (antes, con la
+    // pendiente 1 - 1/R del modo hacia delante, el ratio real era 2 - 1/R: 1,75:1 con el mando en 4:1, 1,95:1 en 20:1).
+    // Paso del detector e = c·e0 + (1 - c)·G(x - e), resuelto en la misma muestra por Newton (f' = 1 + (1 - c)·G' >= 1:
+    // converge en pocas iteraciones). Polo c / (1 + (1 - c)(R - 1)) en (0, 1): estable con cualquier ratio y ataque. Con una
+    // muestra de retardo en el lazo el polo sería c - (1 - c)(R - 1): con 20 µs a 48 kHz (c = 0,353) oscila desde R > 3,1.
+    // Rama de ataque si la solución sube, de liberación si baja (Giannoulis, Massberg y Reiss, JAES 2012: detector
+    // realimentado; resolución sin retardo del lazo como en Zavalishin, "The Art of VA Filter Design", cap. 3)
+    static float fetStep (float x, float thr, float ratio, float knee, float cA, float cR, float e0)
+    {
+        const auto slope = ratio - 1.0f;
+        const auto solve = [&] (float c)
+        {
+            auto e = e0;
+            for (int k = 0; k < 8; ++k)
+            {
+                const auto d = x - e - thr;
+                float g = 0.0f, dg = 0.0f;
+                if (knee > 0.0f && 2.0f * std::abs (d) < knee)
+                {
+                    const auto t = d + 0.5f * knee;
+                    g = slope * t * t / (2.0f * knee);
+                    dg = slope * t / knee;
+                }
+                else if (d > 0.0f)
+                {
+                    g = slope * d;
+                    dg = slope;
+                }
+                const auto step = (e - c * e0 - (1.0f - c) * g) / (1.0f + (1.0f - c) * dg);
+                e -= step;
+                if (std::abs (step) < 1.0e-4f)
+                    break;
+            }
+            return std::max (0.0f, e);
+        };
+        const auto up = solve (cA);
+        return up > e0 ? up : solve (cR);
+    }
+
     double fs = 48000.0;
     float env = 0.0f, rms = 0.0f, memory = 0.0f, lastGain = 1.0f;
     std::array<std::pair<double, double>, 2> hp {};

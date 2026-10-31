@@ -96,6 +96,12 @@ struct Arpeggiator
                 }
                 else
                 {
+                    if (m.isAllNotesOff() || m.isAllSoundOff()) // CC 123 / 120: vacía lo pulsado y lo retenido (Latch)
+                    {
+                        track (m);
+                        stepIndex = 0;
+                        stopSounding (i);
+                    }
                     out.addEvent (m, i);
                 }
             }
@@ -163,6 +169,11 @@ private:
             remove (held, numHeld, m.getNoteNumber());
             if (! latch)
                 remove (latched, numLatched, m.getNoteNumber());
+        }
+        else if (m.isAllNotesOff() || m.isAllSoundOff())
+        {
+            numHeld = 0;
+            numLatched = 0;
         }
     }
 

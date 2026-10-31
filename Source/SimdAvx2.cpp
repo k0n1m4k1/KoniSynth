@@ -129,7 +129,6 @@ inline __m256 sin2piPs (__m256 t)
 void unisonStepAvx2 (UnisonLanes& lanes, int wave, double dt, double pw, float& left, float& right, double triA, double triR, double triM)
 {
     auto accL = _mm256_setzero_pd(), accR = _mm256_setzero_pd();
-    const auto one = set1 (1.0);
     const auto shaped = wave == kTriangle && (triA != 0.0 || triR != 0.0);
 
     for (int h = 0; h < kLanes; h += 4)
@@ -147,8 +146,7 @@ void unisonStepAvx2 (UnisonLanes& lanes, int wave, double dt, double pw, float& 
         accR = _mm256_add_pd (accR, _mm256_mul_pd (s, _mm256_cvtps_pd (_mm_load_ps (lanes.gainR + h))));
 
         // Avance después de leer (como la ruta escalar): phase += inc; si phase >= 1, phase -= 1
-        phase = _mm256_add_pd (phase, inc);
-        phase = _mm256_sub_pd (phase, _mm256_and_pd (_mm256_cmp_pd (phase, one, _CMP_GE_OQ), one));
+        phase = frac (_mm256_add_pd (phase, inc)); // [0, 1) aunque el paso supere un ciclo (igual que la ruta escalar)
         _mm256_store_pd (lanes.phase + h, phase);
     }
 
@@ -196,12 +194,12 @@ void complexStepAvx2 (UnisonLanes& lanes, const ComplexArgs& args, double dtP, f
         {
             modPhase = _mm256_add_pd (modPhase, dtM);
             wrapped = _mm256_cmp_pd (modPhase, one, _CMP_GE_OQ);
-            modPhase = _mm256_sub_pd (modPhase, _mm256_and_pd (wrapped, one));
+            modPhase = frac (modPhase);
             _mm256_store_pd (lanes.modPhase + h, modPhase);
         }
         phase = frac (_mm256_add_pd (phase, dtInst));
         if (args.sync)
-            phase = _mm256_blendv_pd (phase, _mm256_mul_pd (_mm256_div_pd (modPhase, dtM), absInst), wrapped);
+            phase = _mm256_blendv_pd (phase, frac (_mm256_mul_pd (_mm256_div_pd (modPhase, dtM), absInst)), wrapped);
 
         _mm256_store_pd (lanes.phase + h, phase);
     }

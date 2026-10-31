@@ -166,6 +166,9 @@ inline float naive (int wave, double t, double pw)
 inline void segment (Ring& ring, int wave, double t0, double inc, double f0, double f1, double pw, float gL, float gR)
 {
     if ((wave != saw && wave != square && ! isMixWave (wave)) || inc == 0.0) return;
+    // Un ciclo o más por muestra (por encima de fs): ningún BLEP evita el aliasing y cada ciclo costaría una corrección;
+    // sin tope, Pitch Env +48 st en notas altas pide decenas por muestra
+    if (std::abs (inc) >= 1.0) return;
     const auto t1 = t0 + inc * (f1 - f0);
     auto edge = [&] (double c, float deltaUp)
     {

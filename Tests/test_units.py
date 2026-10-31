@@ -4,7 +4,7 @@ import subprocess, sys, re
 from common import EXE, Checker
 
 c = Checker('unitarias')
-for name in ('undotest', 'transporttest', 'tuningtest', 'sattest', 'rhythmtest', 'schedtest', 'monotest', 'taptest'):
+for name in ('undotest', 'transporttest', 'tuningtest', 'sattest', 'rhythmtest', 'schedtest', 'monotest', 'taptest', 'eqtest', 'comptest'):
     r = subprocess.run([EXE, name], capture_output=True, text=True, timeout=300)
     m = re.search(r'(\d+) fallos', r.stdout)
     lines = [l for l in r.stdout.splitlines() if l.strip()]

@@ -73,6 +73,13 @@ struct StepSequencer
                 }
                 else
                 {
+                    if (m.isAllNotesOff() || m.isAllSoundOff()) // CC 123 / 120: suelta la raíz, también la retenida (Latch)
+                    {
+                        numHeld = 0;
+                        root = -1;
+                        uiStep = -1;
+                        stopSounding (i);
+                    }
                     out.addEvent (m, i);
                 }
             }

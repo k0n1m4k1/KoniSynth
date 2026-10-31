@@ -137,8 +137,7 @@ static void unisonStepScalar (konisimd::UnisonLanes& l, int wave, double dt, flo
         left  += s * l.gainL[u];
         right += s * l.gainR[u];
         l.phase[u] += dt * l.ratio[u];
-        if (l.phase[u] >= 1.0)
-            l.phase[u] -= 1.0;
+        l.phase[u] -= std::floor (l.phase[u]); // [0, 1) aunque el paso supere un ciclo (notas altas con Pitch Env)
     }
 }
 
@@ -167,14 +166,16 @@ static void complexStepScalar (konisimd::UnisonLanes& l, const konisimd::Complex
         {
             l.modPhase[u] += dtM;
             wrapped = l.modPhase[u] >= 1.0;
-            if (wrapped)
-                l.modPhase[u] -= 1.0;
+            l.modPhase[u] -= std::floor (l.modPhase[u]); // Ratio 16 en notas altas: más de un ciclo por muestra
             modEnd = l.modPhase[u];
         }
         l.phase[u] += dtInst;
         l.phase[u] -= std::floor (l.phase[u]);
         if (a.sync && wrapped)
-            l.phase[u] = modEnd / dtM * std::abs (dtInst);
+        {
+            l.phase[u] = modEnd / dtM * std::abs (dtInst); // > 1 si la portadora da más de un ciclo por muestra
+            l.phase[u] -= std::floor (l.phase[u]);
+        }
     }
 }
 

@@ -147,16 +147,17 @@ struct Equalizer
         const auto chans = juce::jmin (2, buffer.getNumChannels());
         const auto n = buffer.getNumSamples();
         constexpr int chunk = 32;
-        const auto k = 1.0 - std::exp (-(double) chunk / (0.020 * fs)); // constante de 20 ms por tramo de 32 muestras
         for (int start = 0; start < n; start += chunk)
         {
-            smooth (target, k);
+            // Constante de 20 ms con la longitud real del tramo: con bloques de menos de 32 muestras (o el último trozo) un
+            // k fijo de 32 aceleraba la transición (τ = 10 ms con bloques de 16)
+            const auto len = juce::jmin (chunk, n - start);
+            smooth (target, 1.0 - std::exp (-(double) len / (0.020 * fs)));
             std::array<Eq::Coeffs, 12> c;
             const auto ns = Eq::sections (current, fs, c);
             std::array<bool, 12> active {};
             for (int sct = 0; sct < ns; ++sct) active[(size_t) sct] = ! Eq::identity (c[(size_t) sct]);
             const auto gain = std::pow (10.0, current.outputDb / 20.0);
-            const auto len = juce::jmin (chunk, n - start);
             for (int ch = 0; ch < chans; ++ch)
             {
                 auto* x = buffer.getWritePointer (ch, start);
