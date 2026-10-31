@@ -1235,8 +1235,91 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         else          g.fillRect (juce::Rectangle<float> (1.0f, inner.getHeight() - 2.0f).withCentre (cap.getCentre()));
     }
 
+    // Interruptor de palanca de los diálogos de opciones (Section::switchToggles): placa con ON arriba y OFF abajo grabados,
+    // casquillo roscado con tuerca y palanca cromada cónica (bat handle) que apunta a la posición elegida, con su sombra hacia
+    // abajo; lámpara piloto roja junto a ON (rojo fijo, como los LED). Medidas en función del ancho w de la caja (64 px máx.)
+    static void drawLeverSwitch (juce::Graphics& g, juce::ToggleButton& b, bool highlighted)
+    {
+        const auto r = b.getLocalBounds().toFloat().reduced (2.0f);
+        const auto on = b.getToggleState();
+        const auto enabled = b.isEnabled();
+        const auto w = r.getWidth();
+        const auto c = r.getCentre();
+        // Rótulos grabados
+        g.setFont (juce::Font (juce::FontOptions (juce::jmax (9.0f, w * 0.17f), juce::Font::bold)).withExtraKerningFactor (0.1f));
+        const auto label = [&] (const char* t, float y, bool lit)
+        {
+            const juce::Rectangle<float> box (r.getX(), y, w, w * 0.22f);
+            g.setColour (juce::Colours::black.withAlpha (0.5f));
+            g.drawText (t, box.translated (0.0f, 1.0f), juce::Justification::centred);
+            g.setColour (Skin::white().withAlpha (lit ? 0.95f : 0.45f));
+            g.drawText (t, box, juce::Justification::centred);
+        };
+        label ("ON", r.getY(), on);
+        label ("OFF", r.getBottom() - w * 0.22f, ! on);
+        // Lámpara piloto junto a ON
+        const auto lamp = juce::Rectangle<float> (w * 0.12f, w * 0.12f).withCentre ({ r.getRight() - w * 0.08f, r.getY() + w * 0.11f });
+        if (on) { g.setColour (juce::Colour (0xffff3030).withAlpha (0.35f)); g.fillEllipse (lamp.expanded (2.5f)); }
+        g.setColour (on ? juce::Colour (0xffff5a4a) : juce::Colour (0xff3a1414));
+        g.fillEllipse (lamp);
+        // Tuerca hexagonal y casquillo
+        const auto nutR = w * 0.26f;
+        juce::Path nut;
+        for (int k = 0; k < 6; ++k)
+        {
+            const auto a = juce::MathConstants<float>::pi / 6.0f + (float) k * juce::MathConstants<float>::pi / 3.0f;
+            const juce::Point<float> p { c.x + nutR * std::cos (a), c.y + nutR * std::sin (a) };
+            if (k == 0) nut.startNewSubPath (p); else nut.lineTo (p);
+        }
+        nut.closeSubPath();
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillPath (nut, juce::AffineTransform::translation (0.0f, 1.5f));
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd8dde2), c.x - nutR, c.y - nutR, juce::Colour (0xff6d747c), c.x + nutR, c.y + nutR, false));
+        g.fillPath (nut);
+        g.setColour (juce::Colours::black.withAlpha (0.55f));
+        g.strokePath (nut, juce::PathStrokeType (0.8f));
+        const auto bushing = juce::Rectangle<float> (nutR * 1.15f, nutR * 1.15f).withCentre (c);
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff9aa1a8), bushing.getX(), bushing.getY(), juce::Colour (0xff3c4248), bushing.getRight(), bushing.getBottom(), false));
+        g.fillEllipse (bushing);
+        g.setColour (juce::Colours::black.withAlpha (0.7f));
+        g.fillEllipse (bushing.reduced (nutR * 0.28f)); // orificio
+        // Palanca: cono de la base (0,1·w) a la punta redondeada (0,17·w), hacia ON (arriba) o OFF (abajo)
+        const auto dir = on ? -1.0f : 1.0f;
+        const auto len = r.getHeight() * 0.36f;
+        const juce::Point<float> tip { c.x, c.y + dir * len };
+        const auto baseW = w * 0.10f, tipW = w * 0.17f;
+        juce::Path lever;
+        lever.startNewSubPath (c.x - baseW * 0.5f, c.y);
+        lever.lineTo (tip.x - tipW * 0.5f, tip.y);
+        lever.lineTo (tip.x + tipW * 0.5f, tip.y);
+        lever.lineTo (c.x + baseW * 0.5f, c.y);
+        lever.closeSubPath();
+        lever.addEllipse (juce::Rectangle<float> (tipW, tipW).withCentre (tip));
+        g.setColour (juce::Colours::black.withAlpha (0.4f)); // sombra hacia abajo
+        g.fillPath (lever, juce::AffineTransform::translation (1.5f, 3.0f));
+        juce::ColourGradient chrome (juce::Colour (0xff5b6168), tip.x - tipW * 0.5f, 0.0f, juce::Colour (0xff4a5056), tip.x + tipW * 0.5f, 0.0f, false);
+        chrome.addColour (0.35, juce::Colour (0xfff4f6f8)); // brillo especular a la izquierda (luz arriba a la izquierda)
+        chrome.addColour (0.6, juce::Colour (0xffa3aab1));
+        g.setGradientFill (chrome);
+        g.fillPath (lever);
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.strokePath (lever, juce::PathStrokeType (0.7f));
+        if (highlighted && enabled)
+        {
+            g.setColour (Skin::accent().withAlpha (0.5f));
+            g.drawEllipse (juce::Rectangle<float> (tipW, tipW).withCentre (tip).expanded (2.0f), 1.2f);
+        }
+        if (! enabled)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.35f));
+            g.fillRect (r);
+        }
+    }
+
     void drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool highlighted, bool down) override
     {
+        if (b.getProperties()["classicSwitch"])
+            return drawLeverSwitch (g, b, highlighted || down);
         const auto r = b.getLocalBounds().toFloat();
         const auto d = juce::jmin (12.0f, r.getHeight() - 6.0f);
         const auto led = juce::Rectangle<float> (d, d).withCentre ({ r.getX() + 4.0f + d * 0.5f, r.getCentreY() });
@@ -1808,6 +1891,15 @@ struct Section : juce::Component
             sideBody->setBounds (getLocalBounds().withTrimmedTop (20).withTrimmedBottom (5).withTrimmedLeft (5).withWidth (sideBodyWidth));
             r.setLeft (sideBody->getRight() + 8);
         }
+        // Diálogo de opciones con un on/off como único control: interruptor de palanca en todo el cuerpo (classicSwitch, lo
+        // dibuja KoniLookAndFeel::drawToggleButton), no el LED de cabecera
+        const auto lever = soloSwitch();
+        toggle.getProperties().set ("classicSwitch", lever);
+        if (lever)
+        {
+            toggle.setBounds (r.withSizeKeepingCentre (juce::jmin (r.getWidth(), 64), juce::jmin (r.getHeight(), 96)));
+            return;
+        }
         // Cabecera solo si tiene controles: sin ella, perillas y sliders ganan 28 px de alto
         if (toggle.isVisible() || combo.isVisible() || extraToggle.isVisible() || ! headerButtons.empty() || headerControl != nullptr)
         {
@@ -2119,6 +2211,15 @@ private:
         paramState = &s;
     }
 
+public:
+    bool switchToggles = false; // ParamPanel: un on/off solo en su sección se dibuja como interruptor de palanca
+private:
+    bool soloSwitch() const
+    {
+        return switchToggles && toggle.isVisible() && ! combo.isVisible() && ! extraToggle.isVisible() && headerButtons.empty()
+            && headerControl == nullptr && row.empty() && body == nullptr && sideBody == nullptr;
+    }
+
     // Destrucción en orden inverso: los menús primero; cada attachment muere antes que su control.
     juce::GroupComponent group;
     juce::ToggleButton toggle;
@@ -2161,6 +2262,7 @@ struct ParamPanel : juce::Component
     {
         sections.push_back (std::make_unique<Section> (title));
         sections.back()->dryRun = dryRun;
+        sections.back()->switchToggles = true; // on/off de opciones: interruptor clásico
         addAndMakeVisible (*sections.back());
         return *sections.back();
     }

@@ -19,6 +19,19 @@ public:
         close.setTooltip ("Close this panel (Esc).");
         addAndMakeVisible (close);
         addAndMakeVisible (*body);
+        detach.setTooltip ("Open this panel in its own floating window: the rest of KoniSynth stays usable.");
+        detach.onClick = [this] { requestDetach(); };
+        addChildComponent (detach);
+    }
+
+    // Desacoplar: con onDetach, botón junto a la X que entrega el cuerpo a una ventana flotante y cierra el panel. El
+    // dueño decide si se ofrece (no dentro de una ventana flotante, que ya lo es)
+    std::function<void (std::unique_ptr<juce::Component> body)> onDetach;
+    void allowDetach (std::function<void (std::unique_ptr<juce::Component> body)> fn)
+    {
+        onDetach = std::move (fn);
+        detach.setVisible (onDetach != nullptr);
+        resized();
     }
 
     void paint (juce::Graphics& g) override
@@ -38,8 +51,10 @@ public:
         auto r = panel().reduced (16, 10);
         auto top = r.removeFromTop (28);
         close.setBounds (top.removeFromRight (28).translated (6, 0)); // 28 × 28 px, a 10 px de los cantos del panel
+        detach.setBounds (top.removeFromRight (32).withTrimmedRight (4).translated (6, 0));
         r.removeFromTop (8);
-        body->setBounds (r);
+        if (body != nullptr)
+            body->setBounds (r);
     }
 
     bool keyPressed (const juce::KeyPress& k) override
@@ -69,10 +84,54 @@ private:
         });
     }
 
+    // Diferido como el cierre: el cuerpo sale del panel (removeChildComponent) y pasa a onDetach; después se cierra el panel
+    void requestDetach()
+    {
+        juce::MessageManager::callAsync ([safe = SafePointer<PanelDialog> (this)]
+        {
+            if (auto* d = safe.getComponent(); d != nullptr && d->body != nullptr && d->onDetach)
+            {
+                auto fn = d->onDetach;
+                auto closeFn = d->closeFn;
+                d->removeChildComponent (d->body.get());
+                fn (std::move (d->body));
+                if (closeFn) closeFn(); // destruye el panel
+            }
+        });
+    }
+
     juce::String title;
     std::unique_ptr<juce::Component> body;
     int panelW, panelH;
     std::function<void()> closeFn;
+    // Desacoplar: cuadrado con una flecha que sale por su esquina superior derecha
+    struct DetachIcon : juce::Button
+    {
+        DetachIcon() : juce::Button ("Float") {}
+        void paintButton (juce::Graphics& g, bool over, bool down) override
+        {
+            const auto r = getLocalBounds().toFloat().reduced (1.0f);
+            if (over || down)
+            {
+                g.setColour (Skin::white().withAlpha (down ? 0.25f : 0.15f));
+                g.fillRoundedRectangle (r, 5.0f);
+            }
+            const auto box = r.withSizeKeepingCentre (12.0f, 12.0f).translated (-1.0f, 1.0f);
+            g.setColour (Skin::white().withAlpha (over || down ? 1.0f : 0.7f));
+            juce::Path p; // caja abierta por la esquina de la flecha
+            p.startNewSubPath (box.getX() + 7.0f, box.getY());
+            p.lineTo (box.getX(), box.getY());
+            p.lineTo (box.getX(), box.getBottom());
+            p.lineTo (box.getRight(), box.getBottom());
+            p.lineTo (box.getRight(), box.getY() + 7.0f);
+            g.strokePath (p, juce::PathStrokeType (1.6f));
+            const juce::Point<float> tip { box.getRight() + 2.0f, box.getY() - 2.0f };
+            g.drawLine ({ tip, { box.getCentreX(), box.getCentreY() } }, 1.6f);
+            g.drawLine ({ tip, tip.translated (-5.0f, 0.0f) }, 1.6f);
+            g.drawLine ({ tip, tip.translated (0.0f, 5.0f) }, 1.6f);
+        }
+    };
+    DetachIcon detach;
     // X de cierre: aspa de 2 px en un cuadrado de 10 px; al pasar el ratón, fondo rojo tenue y aspa blanca
     struct CloseCross : juce::Button
     {
@@ -181,25 +240,26 @@ public:
                 g.setFont (juce::FontOptions (60.0f, juce::Font::bold));
                 g.drawText ("K", card, juce::Justification::centred);
             }
+            // El logo y sus reflejos no se tiñen con el skin (colores fijos, sin Skin::c / map / white): es la imagen de la app.
             // Barrido holográfico diagonal: se desplaza con la inclinación
             const auto sweep = card.getWidth() * (0.5f + 0.6f * tiltX + 0.3f * tiltY);
             juce::ColourGradient sheen (juce::Colours::transparentWhite, card.getX() + sweep - 90.0f, card.getY(),
                                         juce::Colours::transparentWhite, card.getX() + sweep + 90.0f, card.getBottom(), false);
-            sheen.addColour (0.42, Skin::c (0xff6fd6ff).withAlpha (0.10f));
-            sheen.addColour (0.50, Skin::white().withAlpha (0.22f));
-            sheen.addColour (0.58, Skin::c (0xffff7adf).withAlpha (0.10f));
+            sheen.addColour (0.42, juce::Colour (0xff6fd6ff).withAlpha (0.10f));
+            sheen.addColour (0.50, juce::Colours::white.withAlpha (0.22f));
+            sheen.addColour (0.58, juce::Colour (0xffff7adf).withAlpha (0.10f));
             g.setGradientFill (sheen);
             g.fillRect (card);
             // Brillo especular radial en el punto "más cercano" a la luz (sigue al ratón)
             const juce::Point<float> spot (c.x + tiltX * card.getWidth() * 0.45f, c.y + tiltY * card.getHeight() * 0.45f);
-            juce::ColourGradient spec (Skin::white().withAlpha (0.18f + 0.22f * lift), spot,
+            juce::ColourGradient spec (juce::Colours::white.withAlpha (0.18f + 0.22f * lift), spot,
                                        juce::Colours::transparentWhite, spot.translated (card.getWidth() * 0.6f, 0.0f), true);
             g.setGradientFill (spec);
             g.fillRect (card);
             if (beat >= 0.0) // destello de color en cada golpe, el tono rota cada compás
             {
                 const auto hue = (float) std::fmod (beat / 4.0, 1.0);
-                g.setColour (Skin::map (juce::Colour::fromHSV (hue, 0.9f, 1.0f, 0.35f * pulse)));
+                g.setColour (juce::Colour::fromHSV (hue, 0.9f, 1.0f, 0.35f * pulse));
                 g.fillRect (card);
             }
         }
@@ -254,15 +314,16 @@ private:
        #endif
     }
 
-    // Bandera de España: franjas roja-amarilla-roja 1:2:1 (proporción 3:2), #AA151B y #F1BF00
+    // Bandera de España: franjas roja-amarilla-roja 1:2:1 (proporción 3:2), #AA151B y #F1BF00. Colores fijos: no se tiñe
+    // con el skin
     static void drawSpanishFlag (juce::Graphics& g, juce::Rectangle<float> f)
     {
         const auto band = f.getHeight() / 4.0f;
-        g.setColour (Skin::c (0xffaa151b));
+        g.setColour (juce::Colour (0xffaa151b));
         g.fillRect (f);
-        g.setColour (Skin::c (0xfff1bf00));
+        g.setColour (juce::Colour (0xfff1bf00));
         g.fillRect (f.withTrimmedTop (band).withTrimmedBottom (band));
-        g.setColour (Skin::black().withAlpha (0.35f));
+        g.setColour (juce::Colours::black.withAlpha (0.35f));
         g.drawRect (f, 1.0f);
     }
 

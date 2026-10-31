@@ -1002,5 +1002,11 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc3SampleLength", 1 }, "Osc3 Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
         parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
             { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
+
+    // MT-32: tamaño de la cola de eventos MIDI de Munt (Engines/Mt32.h). 1024 es el de Munt (globals.h,
+    // DEFAULT_MIDI_EVENT_QUEUE_SIZE); 4096 da margen a flujos muy densos (ráfagas de CC o aftertouch por encima de unos
+    // 1300 mensajes/s, el ritmo del cable MIDI emulado). Con la cola llena, el evento se ejecuta sin cola y una nota que
+    // necesite cortar otra puede perderse. Cambiarlo reconstruye la máquina (los patches cargados por SysEx se pierden)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Queue", 1 }, "MT-32 MIDI Queue", StringArray { "1024", "4096" }, 0));
     return l;
 }

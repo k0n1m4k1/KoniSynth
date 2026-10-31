@@ -74,6 +74,9 @@ How to work with it:
   parameters that matter for its engine and the effects, applies the style rules and keeps only candidates that pass a
   listening check; with a reference WAV they are ranked by similarity. `use_candidate` loads one of them, `save_preset`
   keeps it. `mutate` varies the current sound (small amount = subtle). Every step can be undone by the user.
+- To record (for example the parts of a composition): `request_control` with the task (the user allows a session
+  once), then per part `record`, `play_notes`, wait until it ends, `stop_record`; finally `release_control`. If the
+  user plays meanwhile, KoniSynth asks them whether to take control back: check `control_status` before each part.
 - For requests like "the synth from <film/song>": recall or look up what is documented about that sound, say what is
   known and what is guessed, pick the closest engine and preset, set parameters, audition and iterate with the
   measurements; ask the user for a reference recording they own if available (`compare`).
@@ -370,6 +373,75 @@ def panic(port: int | None = None) -> bool:
     engine and effect tail (echo, reverb), pauses the transport, stops self-running rhythms (Drum Machine, Omnichord)
     and discards scheduled notes. Use stop_notes to only release notes."""
     return link.call("panic", port=port)
+
+
+# Sesión de control (Source/Agent/AgentSession.h): mientras el agente tiene el control, KoniSynth se lo retira si pasa 10 s
+# sin recibir nada; este hilo manda control_status cada 3 s y termina en cuanto deja de tenerlo
+_keepalive_on = threading.Event()
+
+
+def _keep_alive(port: int | None) -> None:
+    try:
+        while _keepalive_on.is_set():
+            if not link.call("control_status", port=port).get("inControl"):
+                break
+            time.sleep(3.0)
+    except ToolError:
+        pass
+    _keepalive_on.clear()
+
+
+def _start_keepalive(port: int | None) -> None:
+    if not _keepalive_on.is_set():
+        _keepalive_on.set()
+        threading.Thread(target=_keep_alive, args=(port,), daemon=True).start()
+
+
+@mcp.tool(annotations=PLAY)
+def request_control(task: str, port: int | None = None) -> dict[str, Any]:
+    """Ask the user for control of KoniSynth's transport (record, stop, play) to do `task` (what you will do, e.g.
+    "record the parts of a composition"). If an agent session is already open you get control at once; otherwise
+    KoniSynth asks the user once, and they choose how long the session lasts (15 min to 2 h): during it you take control
+    for any task without asking again. Waits up to 60 s for the answer. Returns `request` (granted, denied or still
+    pending), `inControl`, `sessionOpen`, `secondsLeft`. While you have control, the user can still play: KoniSynth then
+    asks them whether to take it back. Call release_control when the task is done."""
+    status = link.call("request_control", port=port, task=task)
+    deadline = time.monotonic() + 60.0
+    while status.get("request") == "pending" and time.monotonic() < deadline:
+        time.sleep(1.0)
+        status = link.call("control_status", port=port)
+    if status.get("inControl"):
+        _start_keepalive(port)
+    return status
+
+
+@mcp.tool(annotations=READ)
+def control_status(port: int | None = None) -> dict[str, Any]:
+    """Agent session and control state: request (none, pending, granted, denied), sessionOpen, secondsLeft, inControl,
+    recording, task. inControl becomes false if the user takes control back or the session ends."""
+    return link.call("control_status", port=port)
+
+
+@mcp.tool(annotations=STOP)
+def release_control(summary: str = "", port: int | None = None) -> dict[str, Any]:
+    """Give control back when the task is finished (stops your take if one is running). `summary` is shown to the user
+    (e.g. "4 parts recorded"). The session stays open: the next request_control is granted without asking."""
+    _keepalive_on.clear()
+    return link.call("release_control", port=port, summary=summary)
+
+
+@mcp.tool(annotations=PLAY)
+def record(port: int | None = None) -> str:
+    """Start recording (needs control: request_control). Records the final output to WAV and the MIDI that enters the
+    engine to a .mid next to it, in Documents/KoniSynth/Recordings. Returns the WAV path. Play the part with play_notes,
+    then stop_record."""
+    return link.call("record", port=port)
+
+
+@mcp.tool(annotations=STOP)
+def stop_record(port: int | None = None) -> dict[str, Any]:
+    """Stop the recording started with record. Returns {wav, mid} (mid is null if no MIDI was played)."""
+    return link.call("stop_record", port=port)
 
 
 @mcp.tool(annotations=PLAY)

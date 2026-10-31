@@ -10,16 +10,19 @@
 //   Medidor: pico en dBFS de la señal de la fuente en la voz (tras su nivel, antes del filtro y la saturación; la voz más
 //   fuerte), no la ganancia del fader. Bajar una fuente cambia cuánto excita el filtro y la saturación (el timbre);
 //   Master (Gain, al final de la cadena) solo cambia el volumen de salida, y su medidor es el pico de la salida.
+//   Dos grupos, como la tira SIGNAL: las fuentes de Osc 1 (Osc 1, Wavetable, Sample, Math) y Osc 2 / Osc 3 / Noise. Bajo el
+//   nombre, lo que toca cada tira: la tabla de la fuente Wavetable, el fichero de la fuente Sample y, en Osc 2 y Osc 3, su
+//   forma o, en modo Wavetable / Sample, su tabla o su fichero propios (resaltado: no son las fuentes del grupo de Osc 1)
 class MixerPanel : public juce::Component, private juce::Timer
 {
 public:
     explicit MixerPanel (KoniSynthProcessor& p) : processor (p)
     {
         struct Def { const char* name; const char* levelId; const char* muteId; int source; };
-        static const Def defs[] = { { "Osc 1", "osc1Level", "osc1Mute", Params::srcOsc1 }, { "Osc 2", "osc2Level", "osc2Mute", Params::srcOsc2 },
-                                    { "Osc 3", "subLevel", "osc3Mute", Params::srcOsc3 }, { "Noise", "noiseLevel", "noiseMute", Params::srcNoise },
-                                    { "Wavetable", "wtLevel", "wtMute", Params::srcWavetable }, { "Sample", "sampleLevel", "sampleMute", Params::srcSample },
-                                    { "Math", "stringLevel", "stringMute", Params::srcString } };
+        static const Def defs[] = { { "Osc 1", "osc1Level", "osc1Mute", Params::srcOsc1 }, { "Wavetable", "wtLevel", "wtMute", Params::srcWavetable },
+                                    { "Sample", "sampleLevel", "sampleMute", Params::srcSample }, { "Math", "stringLevel", "stringMute", Params::srcString },
+                                    { "Osc 2", "osc2Level", "osc2Mute", Params::srcOsc2 }, { "Osc 3", "subLevel", "osc3Mute", Params::srcOsc3 },
+                                    { "Noise", "noiseLevel", "noiseMute", Params::srcNoise } };
         for (const auto& d : defs)
             strips.push_back (std::make_unique<Strip> (*this, d.name, d.levelId, d.muteId, d.source));
         strips.push_back (std::make_unique<Strip> (*this, "Master", "gain", nullptr, -1));
@@ -35,21 +38,44 @@ public:
     {
         auto r = getLocalBounds().reduced (8);
         hint.setBounds (r.removeFromBottom (22));
-        const auto w = r.getWidth() / ((int) strips.size() + 1); // Master con el ancho de dos tiras de separación
+        r.removeFromTop (groupH); // rótulos de grupo
+        const auto w = (r.getWidth() - groupGap) / ((int) strips.size() + 1); // Master con el ancho de dos tiras de separación
         for (size_t k = 0; k + 1 < strips.size(); ++k)
+        {
+            if (k == firstOfGroupB)
+                r.removeFromLeft (groupGap);
             strips[k]->setBounds (r.removeFromLeft (w).reduced (3, 0));
+        }
         r.removeFromLeft (w / 2);
         strips.back()->setBounds (r.removeFromLeft (w).reduced (3, 0));
     }
 
     void paint (juce::Graphics& g) override
     {
-        // Separador antes de Master
-        if (strips.size() > 1)
+        if (strips.size() < 2)
+            return;
+        // Rótulos de grupo con su línea, y separadores entre grupos y antes de Master
+        const auto caption = [&] (size_t from, size_t to, const juce::String& text)
         {
-            const auto x = (float) (strips[strips.size() - 2]->getRight() + strips.back()->getX()) * 0.5f;
-            g.setColour (Skin::white().withAlpha (0.15f));
-            g.drawVerticalLine (juce::roundToInt (x), 8.0f, (float) getHeight() - 30.0f);
+            const auto x0 = (float) strips[from]->getX(), x1 = (float) strips[to]->getRight();
+            const auto y = 8.0f + (float) groupH * 0.5f;
+            g.setColour (Skin::white().withAlpha (0.55f));
+            g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)).withExtraKerningFactor (0.12f));
+            const auto tw = juce::GlyphArrangement::getStringWidth (g.getCurrentFont(), text) + 12.0f;
+            const auto cx = (x0 + x1) * 0.5f;
+            g.drawText (text, juce::Rectangle<float> (cx - tw * 0.5f, 8.0f, tw, (float) groupH), juce::Justification::centred);
+            g.setColour (Skin::white().withAlpha (0.18f));
+            g.drawHorizontalLine (juce::roundToInt (y), x0, cx - tw * 0.5f);
+            g.drawHorizontalLine (juce::roundToInt (y), cx + tw * 0.5f, x1);
+        };
+        caption (0, firstOfGroupB - 1, "OSC 1 SOURCES");
+        caption (firstOfGroupB, strips.size() - 2, juce::String::fromUTF8 ("OSC 2 Â· OSC 3 Â· NOISE"));
+        caption (strips.size() - 1, strips.size() - 1, "OUT");
+        g.setColour (Skin::white().withAlpha (0.15f));
+        for (const auto k : { firstOfGroupB, strips.size() - 1 })
+        {
+            const auto x = (float) (strips[k - 1]->getRight() + strips[k]->getX()) * 0.5f;
+            g.drawVerticalLine (juce::roundToInt (x), 8.0f + (float) groupH, (float) getHeight() - 30.0f);
         }
     }
 
@@ -106,6 +132,10 @@ private:
             title.setJustificationType (juce::Justification::centred);
             title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
             addAndMakeVisible (title);
+            playing.setJustificationType (juce::Justification::centred);
+            playing.setFont (juce::FontOptions (11.0f));
+            playing.setMinimumHorizontalScale (0.7f);
+            addAndMakeVisible (playing);
             value.setJustificationType (juce::Justification::centred);
             value.setFont (juce::FontOptions (12.0f));
             addAndMakeVisible (value);
@@ -139,6 +169,7 @@ private:
         {
             auto r = getLocalBounds();
             title.setBounds (r.removeFromTop (20));
+            playing.setBounds (r.removeFromTop (16));
             value.setBounds (r.removeFromBottom (18));
             if (mute.isVisible() || solo.isVisible())
             {
@@ -157,7 +188,7 @@ private:
         bool dragging = false;
         juce::Slider fader;
         std::unique_ptr<juce::ParameterAttachment> attachment;
-        juce::Label title, value;
+        juce::Label title, value, playing; // playing: lo que toca la tira (MixerPanel::describe)
         Meter meter;
         juce::TextButton mute, solo;
         std::unique_ptr<APVTS::ButtonAttachment> muteAttachment;
@@ -167,6 +198,12 @@ private:
     {
         auto& prm = processor.getParams();
         const auto soloed = prm.soloSource.load();
+        if (++describeTick >= 6) // 5 Hz: nombres de tabla y de fichero
+        {
+            describeTick = 0;
+            for (auto& s : strips)
+                describe (*s);
+        }
         for (auto& s : strips)
         {
             if (s->source >= 0)
@@ -192,6 +229,43 @@ private:
         }
     }
 
+    // Lo que toca cada tira. Osc 2 / Osc 3 en modo Wavetable o Sample: su tabla o fichero propios, en el acento y con la
+    // marca "own" (no son las fuentes Wavetable / Sample del grupo de Osc 1); si no, su forma
+    void describe (Strip& s)
+    {
+        auto& apvts = processor.apvts;
+        const auto text = [&apvts] (const char* id) { auto* p = apvts.getParameter (id); return p != nullptr ? p->getCurrentValueAsText() : juce::String(); };
+        const auto fileName = [] (const juce::String& info) { return info.isNotEmpty() ? info : juce::String ("no file"); };
+        juce::String what;
+        auto own = false;
+        if (s.source == Params::srcWavetable)
+            what = processor.getWavetableName (KoniSynthProcessor::wtMain);
+        else if (s.source == Params::srcSample)
+            what = fileName (processor.getSampleInfo (KoniSynthProcessor::sourceSample));
+        else if (s.source == Params::srcOsc2 || s.source == Params::srcOsc3)
+        {
+            const auto osc2 = s.source == Params::srcOsc2;
+            const auto wave = osc2WaveFromChoice ((int) apvts.getRawParameterValue (osc2 ? "osc2Wave" : "osc3Wave")->load());
+            own = wave == 4 || wave == 5; // códigos del motor: 4 Wavetable, 5 Sample
+            what = wave == 4 ? "own WT: " + processor.getWavetableName (osc2 ? KoniSynthProcessor::wtOsc2 : KoniSynthProcessor::wtOsc3)
+                 : wave == 5 ? "own sample: " + fileName (processor.getSampleInfo (osc2 ? KoniSynthProcessor::osc2Sample : KoniSynthProcessor::osc3Sample))
+                             : text (osc2 ? "osc2Wave" : "osc3Wave");
+        }
+        else if (s.source == Params::srcOsc1)
+            what = text ("wave");
+        else if (s.source == Params::srcNoise)
+            what = text ("noiseColor");
+        if (s.playing.getText() != what)
+        {
+            s.playing.setText (what, juce::dontSendNotification);
+            s.playing.setTooltip (what);
+        }
+        s.playing.setColour (juce::Label::textColourId, own ? Skin::accent() : Skin::white().withAlpha (0.6f));
+    }
+
+    static constexpr int groupH = 18, groupGap = 14;
+    static constexpr size_t firstOfGroupB = 4; // Osc 2: primera tira del segundo grupo (defs)
+    int describeTick = 6;
     KoniSynthProcessor& processor;
     std::vector<std::unique_ptr<Strip>> strips;
     juce::Label hint;

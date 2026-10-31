@@ -32,8 +32,10 @@ struct Mt32Machine
     }
 
     // Busca y abre una pareja control + PCM. model: 0 = MT-32 (1.ª generación primero), 1 = CM-32L. Si falta el modelo pedido
-    // y hay el otro, abre el otro y lo dice en 'report'. nullptr si no hay pareja válida
-    static std::unique_ptr<Mt32Machine> open (const juce::File& folder, int model, double hostRate, juce::String& report)
+    // y hay el otro, abre el otro y lo dice en 'report'. nullptr si no hay pareja válida. queueSize: eventos de la cola MIDI de
+    // Munt (parámetro mt32Queue; solo aquí: redimensionarla reserva memoria y la vacía, no se puede en el hilo de audio)
+    static std::unique_ptr<Mt32Machine> open (const juce::File& folder, int model, double hostRate, juce::String& report,
+                                              MT32Emu::Bit32u queueSize = 1024)
     {
         using namespace MT32Emu;
         auto m = std::make_unique<Mt32Machine>();
@@ -124,6 +126,7 @@ struct Mt32Machine
         // Los mensajes pasan por la cola de Munt (render): búfer de SysEx preasignado para no reservar memoria en el hilo de
         // audio (sin él, Munt hace new por cada SysEx encolado). 32 KB: varios volcados completos de parches
         m->synth.configureMIDIEventQueueSysexStorage (32768);
+        m->synth.setMIDIEventQueueSize (queueSize); // potencia de 2: 1024 (la de Munt) o 4096
         m->converter = std::make_unique<SampleRateConverter> (m->synth, hostRate, SamplerateConversionQuality_GOOD);
         m->description = juce::String (control->info->description) + " + " + pcm->info->description;
         report = (model == 1) != m->cm32l ? m->description + juce::String (" (the other model was not found)") : m->description;
@@ -241,7 +244,7 @@ struct Mt32Engine
                 continue; // en Part 1 el programa lo fija el panel (Program)
             const auto d1 = size > 1 ? (juce::uint32) raw[1] : 0u, d2 = size > 2 ? (juce::uint32) raw[2] : 0u;
             if (! synth.playMsg (status | (d1 << 8) | (d2 << 16)))
-                synth.playMsgNow (status | (d1 << 8) | (d2 << 16)); // cola llena (1024 eventos)
+                synth.playMsgNow (status | (d1 << 8) | (d2 << 16)); // cola llena (1024 o 4096 eventos, mt32Queue)
         }
         renderTo (n);
 

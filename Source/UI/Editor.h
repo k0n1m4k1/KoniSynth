@@ -504,15 +504,16 @@ public:
                                       "here. They are recognised by size and SHA-1 (MT-32 v1.04-2.07, CM-32L, LAPC-I; halves are merged).",
                                       [this] { mt32RomMenu(); })
                    .withHeaderButton ("Options...", "Optional Munt beautifications, all off by default (the real unit as it is): "
-                                      "nice amp ramp, nice panning, nice partial mixing; the unit's reverb and the DAC mode.", paramDialog ("MT-32 Options", [] (ParamPanel& p, APVTS& st)
+                                      "nice amp ramp, nice panning, nice partial mixing; and the size of the MIDI queue.", paramDialog ("MT-32 Options", [] (ParamPanel& p, APVTS& st)
                        {
-                           p.add ("Reverb").withToggle (st, "mt32Reverb");
-                           p.add ("DAC").withCombo (st, "mt32Dac");
+                           // Reverb y DAC están en el panel (perillas)
                            p.add ("Amp Ramp").withToggle (st, "mt32NiceAmp");
                            p.add ("Panning").withToggle (st, "mt32NicePan");
                            p.add ("Partial Mixing").withToggle (st, "mt32NiceMix");
+                           p.add ("MIDI Queue").withCombo (st, "mt32Queue");
                        }))
-                   .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb");
+                   .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb")
+                   .withKnob (s, "mt32Dac", "DAC"); // 5 posiciones: conmutador por pasos (Knob con detents)
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
         fmDisplaySection.withBody (dx7Display, 0, 560); // 16 × 2 caracteres y el LED de 2 dígitos a ~4,6 px por punto
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")
@@ -550,11 +551,10 @@ public:
            .withKnob (s, "lfoRate", "Rate").withKnob (s, "lfoDepth", "Depth").withKnob (s, "lfoShape", "Shape").withKnob (s, "lfoSync", "Sync")
            .withSideBody (lfoView, 170, true); // forma, alcance en el destino, Depth y Rate arrastrables (UI/ModViews.h)
         lfoPatchSection.withBody (lfoBay, 0, 40 + 52 * 6); // 6 entradas a 52 px (PatchBay::preferredWidth con LFO 2)
+        // El botón Matrix... está en la barra MOD (con las fuentes de la matriz y Random Fade), no en LFO 2
+        modBar.onMatrix = [this] { openPanel ("Modulation Matrix", std::make_unique<MatrixPanel> (koni), 1100, 520); };
+        modBar.matrixIds = panelParams ([this] { return std::make_unique<MatrixPanel> (koni); });
         lfo2Section.withToggle (s, "lfo2On")
-                   .withHeaderButton ("Matrix...", "Modulation matrix of the Synth engine: 8 slots, each a source (LFOs, envelopes, velocity, "
-                                      "key, wheel, aftertouch, MPE timbre, random, bend) moving a destination per voice. The number in "
-                                      "brackets is the count of active routes; amber rings on the knobs show their range.",
-                                      [this] { openPanel ("Modulation Matrix", std::make_unique<MatrixPanel> (koni), 1100, 520); }).withResetSource (panelParams ([this] { return std::make_unique<MatrixPanel> (koni); }))
                    .withKnob (s, "lfo2Rate", "Rate").withKnob (s, "lfo2Depth", "Depth").withKnob (s, "lfo2Shape", "Shape").withKnob (s, "lfo2Sync", "Sync")
                    .withSideBody (lfo2View, 170, true);
         formantSection.withToggle (s, "formantOn").withCombo (s, "formantVoice")
@@ -714,6 +714,23 @@ public:
 
         content.setSize (kWidth, kHeight);
         addAndMakeVisible (content);
+        // Sesión del agente (Agent/AgentSession.h): tarjeta central flotante y la única pregunta, la que abre la sesión
+        addChildComponent (agentCard);
+        koni.agentSession.askUser = [this] (const juce::String& task)
+        {
+            juce::StringArray lengths;
+            for (const auto m : AgentSession::durations)
+                lengths.add (m < 60 ? juce::String (m) + " min" : juce::String (m / 60) + " h");
+            agentAsk = Overlay::create (*this, "The AI agent asks for control",
+                "Task: " + task + "\nDuring the session it may record, stop and play the transport for any task without asking "
+                "again. If you play, KoniSynth asks whether you want control back.", std::nullopt, "Allow", "Deny",
+                [this] (bool accepted, const juce::String&, int choice)
+                {
+                    agentAsk.reset();
+                    koni.agentSession.answer (accepted ? AgentSession::durations[juce::jlimit (0, 3, choice)] : 0);
+                });
+            agentAsk->setChoices ("Allow for:", lengths, 1); // 30 min por defecto
+        };
         engineAttachment.sendInitialUpdate(); // decide qué se ve con cada motor (y maqueta)
 
         setResizable (true, true);
@@ -727,7 +744,11 @@ public:
     ~KoniSynthEditor() override
     {
         koni.undoHistory.onChange = nullptr;
+        koni.agentSession.askUser = nullptr;
+        if (agentAsk != nullptr)
+            koni.agentSession.answer (0); // ventana cerrada con la pregunta abierta: se deniega
         blockWindows.clear();
+        panelWindows.clear();
         bpmWindow.reset();
         engineWindow.reset();
         displayWindow.reset();
@@ -1015,6 +1036,7 @@ public:
             return;
         const auto scale = (float) getWidth() / (float) kWidth;
         content.setTransform (juce::AffineTransform::scale (scale));
+        agentCard.place();
         const auto logicalHeight = juce::roundToInt ((float) getHeight() / scale);
         if (content.getHeight() != logicalHeight)
         {
@@ -1092,9 +1114,60 @@ private:
             return;
         }
         panel = std::make_unique<PanelDialog> (panelTitle, std::move (body), w, h, [this] { panel.reset(); });
+        panel->allowDetach ([this, panelTitle, w, h] (std::unique_ptr<juce::Component> b) { floatPanel (panelTitle, std::move (b), w, h); });
         content.addAndMakeVisible (*panel);
         panel->setBounds (content.getLocalBounds());
         panel->grabKeyboardFocus();
+    }
+
+    // Diálogo desacoplado (botón de su cabecera, PanelDialog::allowDetach): el mismo cuerpo en una ventana propia, con la
+    // chincheta de PinnableWindow, a su tamaño y redimensionable; el editor sigue usable. Varias a la vez; se cierran con su
+    // X o con el editor. Si es el diálogo de parámetros, paramPanel (SafePointer) lo sigue atenuando mientras viva
+    struct PanelWindow : PinnableWindow
+    {
+        struct Holder : juce::Component
+        {
+            std::unique_ptr<juce::Component> body;
+            void paint (juce::Graphics& g) override { Skin::paintBackground (g, getLocalBounds(), juce::Colour (0xff22272e)); }
+            void resized() override { if (body != nullptr) body->setBounds (getLocalBounds().reduced (12)); }
+        };
+        PanelWindow (const juce::String& name, std::unique_ptr<juce::Component> body, int w, int h, juce::LookAndFeel& laf,
+                     std::function<void()> onClose)
+            : PinnableWindow ("KoniSynth " + name, Skin::c (0xff1b1f24), juce::DocumentWindow::closeButton), closed (std::move (onClose))
+        {
+            auto* holder = new Holder();
+            holder->setLookAndFeel (&laf); // fuera del editor no hereda su LookAndFeel
+            holder->body = std::move (body);
+            holder->addAndMakeVisible (*holder->body);
+            holder->setSize (w, h);
+            setContentOwned (holder, true);
+            setResizable (true, true);
+            setResizeLimits (240, 160, 3000, 2000);
+            centreWithSize (getWidth(), getHeight());
+            setVisible (true);
+        }
+        ~PanelWindow() override
+        {
+            if (auto* c = getContentComponent())
+                c->setLookAndFeel (nullptr);
+        }
+        void closeButtonPressed() override { if (closed) closed(); }
+        std::function<void()> closed;
+    };
+
+    void floatPanel (const juce::String& panelTitle, std::unique_ptr<juce::Component> body, int w, int h)
+    {
+        auto* raw = new PanelWindow (panelTitle, std::move (body), w - 8, h - 30, lookAndFeel, nullptr); // sin la cabecera del panel
+        raw->closed = [this, raw]
+        {
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<KoniSynthEditor> (this), raw]
+            {
+                if (auto* e = safe.getComponent())
+                    e->panelWindows.erase (std::remove_if (e->panelWindows.begin(), e->panelWindows.end(),
+                                                           [raw] (const auto& p) { return p.get() == raw; }), e->panelWindows.end());
+            });
+        };
+        panelWindows.emplace_back (raw);
     }
 
     void openSamplePanel (int which)
@@ -1641,12 +1714,10 @@ private:
             else { lo[(size_t) dst] += juce::jmin (0.0f, a); hi[(size_t) dst] += juce::jmax (0.0f, a); }
         }
         signalStrip.setRoutes (routes); // la tira de señal las lista entre las modulaciones
-        if (routes != shownRoutes) // botón Matrix de LFO 2 con el número de rutas activas (su ancho cambia: se rehace la fila)
+        if (routes != shownRoutes) // botón Matrix de la barra MOD con el número de rutas activas (ancho fijo: sin rehacer filas)
         {
             shownRoutes = routes;
-            if (auto* b = lfo2Section.headerButton (0))
-                b->setButtonText (routes == 0 ? juce::String ("Matrix...") : "Matrix (" + juce::String (routes) + ")...");
-            layoutContent();
+            modBar.setRoutes (routes);
         }
         for (auto& sp : ringKnobs)
         {
@@ -3283,6 +3354,7 @@ private:
     DrumStepLeds drumLeds { koni }; // ídem con drumPatternSection
     juce::uint32 shownMt32Names = ~0u; // versión de los nombres de programa mostrados en la lista
     std::vector<std::unique_ptr<FloatWindow>> blockWindows; // tras las secciones y el LED: se destruyen antes que ellos
+    std::vector<std::unique_ptr<PanelWindow>> panelWindows; // diálogos desacoplados (floatPanel); se cierran con el editor
     std::unique_ptr<FloatWindow> bpmWindow, engineWindow;
     std::vector<Section*> engineWindowSecs; // secciones que tiene la ventana del motor (para detectar cambio de motor)
     juce::Point<int> engineWindowPos;
@@ -3308,6 +3380,8 @@ private:
     juce::Component::SafePointer<ParamPanel> paramPanel; // el último diálogo de parámetros abierto (nulo al cerrarse)
     std::unique_ptr<juce::FileChooser> fileChooser;
     std::unique_ptr<Overlay> overlay;
+    std::unique_ptr<Overlay> agentAsk;                              // pregunta que abre la sesión del agente
+    AgentCard agentCard { koni.agentSession, koni.midiLearn };      // tarjeta central de la sesión (UI/AgentCard.h)
     NoteKeyboard keyboard;
     ScaleBar scaleBar { koni.apvts }; // pie del teclado: Transpose y escala (UI/ScaleBar.h)
     ThereminPad pad;

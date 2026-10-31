@@ -72,9 +72,10 @@ struct MidiLearn
     // Acciones sin parámetro (PANIC y transporte): ocupan los índices actionBase + k de ccToParam (los parámetros nunca
     // llegan ahí). El hilo de audio marca actionPending; PANIC lo consume el propio processBlock y el transporte, el hilo
     // de mensajes (KoniSynthProcessor::pollActions, 50 Hz)
-    enum Action { actionPanic = 0, actionRecord, actionStop, actionPlay, numActions };
+    // actionRevoke: Take back control de la sesión del agente (Agent/AgentSession.h). Se guardan por su id: solo al final
+    enum Action { actionPanic = 0, actionRecord, actionStop, actionPlay, actionRevoke, numActions };
     static constexpr int actionBase = 1 << 20;
-    static const char* actionId (int k) { static const char* ids[numActions] { "panic", "record", "stop", "play" }; return ids[k]; }
+    static const char* actionId (int k) { static const char* ids[numActions] { "panic", "record", "stop", "play", "revoke" }; return ids[k]; }
     bool takeAction (int k) { return actionPending[(size_t) k].exchange (false); }
     std::array<std::atomic<bool>, numActions> actionPending {};
     std::array<int, numActions> actionLast {}; // último valor del CC (solo hilo de audio)

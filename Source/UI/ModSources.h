@@ -95,17 +95,24 @@ private:
     std::vector<std::unique_ptr<Chip>> chips;
 };
 
-// Barra MOD bajo la tira SIGNAL: rótulo MOD, las fichas y Rnd Fade (Random Fade de la matriz) como perilla pequeña con su
-// valor. Mismo fondo que SignalStrip. Con ENGINE acoplado va fija sobre el scroll; en su ventana flotante, como una fila más
-// (por eso es una Section sin marco, como SignalStrip)
+// Barra MOD bajo la tira SIGNAL: rótulo MOD, las fichas, el botón Matrix (n)... (diálogo de la matriz, con el número de rutas
+// activas) y Random Fade como perilla pequeña con su valor. Clic derecho en un hueco: Reset matrix to defaults (las 8 ranuras
+// y Random Fade). Mismo fondo que SignalStrip. Con ENGINE acoplado va fija sobre el scroll; en su ventana flotante, como una
+// fila más (por eso es una Section sin marco, como SignalStrip)
 class ModSourceBar : public Section
 {
 public:
-    explicit ModSourceBar (APVTS& s) : Section ({}), fadeAttachment (s, "mtxRandomFade", fade), fadeMenu (s, "mtxRandomFade", fade)
+    explicit ModSourceBar (APVTS& s) : Section ({}), apvts (s), fadeAttachment (s, "mtxRandomFade", fade), fadeMenu (s, "mtxRandomFade", fade)
     {
         hideFrame();
         stretchToFill = true;
         addAndMakeVisible (chips);
+        matrix.setTooltip ("Modulation matrix of the Synth engine: 8 slots, each a source (LFOs, envelopes, velocity, key, wheel, "
+                           "aftertouch, MPE timbre, random, bend) moving a destination per voice. The number in brackets is the "
+                           "count of active routes; the pilot lamps under the knobs show them.");
+        matrix.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        matrix.onClick = [this] { if (onMatrix) onMatrix(); };
+        addAndMakeVisible (matrix);
         fade.setSliderStyle (juce::Slider::RotaryVerticalDrag);
         fade.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
         fade.setTooltip (paramTooltip (s, "mtxRandomFade"));
@@ -119,11 +126,24 @@ public:
             l->setInterceptsMouseClicks (false, false);
             addAndMakeVisible (*l);
         }
-        fadeLabel.setText ("Rnd Fade", juce::dontSendNotification);
+        fadeLabel.setText ("Random Fade", juce::dontSendNotification);
+    }
+
+    std::function<void()> onMatrix;                  // abre el diálogo de la matriz (el editor)
+    std::function<juce::StringArray()> matrixIds;    // parámetros del diálogo, para Reset matrix to defaults
+    void setRoutes (int routes)
+    {
+        matrix.setButtonText (routes == 0 ? juce::String ("Matrix...") : "Matrix (" + juce::String (routes) + ")...");
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && e.originalComponent == this && matrixIds)
+            showResetMenu (apvts, *this, "matrix", matrixIds);
     }
 
     float layoutWeight() const override { return 1.3f; }
-    float naturalWidth() const override { return 300.0f; }
+    float naturalWidth() const override { return 420.0f; }
 
     void paint (juce::Graphics& g) override
     {
@@ -141,15 +161,18 @@ public:
     {
         auto r = getLocalBounds().reduced (0, 1);
         r.removeFromLeft (52); // rótulo MOD (como SIGNAL en la tira de señal)
-        auto right = r.removeFromRight (150);
-        fadeLabel.setBounds (right.removeFromLeft (66));
+        auto right = r.removeFromRight (124 + 92 + 28 + 46);
+        matrix.setBounds (right.removeFromLeft (124).reduced (4, 3));
+        fadeLabel.setBounds (right.removeFromLeft (92).withTrimmedLeft (6));
         fade.setBounds (right.removeFromLeft (28).withSizeKeepingCentre (26, 26));
         fadeValue.setBounds (right.withTrimmedLeft (4));
         chips.setBounds (r);
     }
 
 private:
+    APVTS& apvts;
     ModSourceChips chips;
+    juce::TextButton matrix { "Matrix..." };
     juce::Slider fade;
     juce::Label fadeLabel, fadeValue;
     APVTS::SliderAttachment fadeAttachment; // tras fade: orden de construcción

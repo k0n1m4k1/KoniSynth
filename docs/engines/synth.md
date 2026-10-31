@@ -39,8 +39,10 @@ or pick sources in the strip; double-click it again, or click another view label
 The four sources sound summed; each tab has its own level and LED. Right-click a tab for **Mute / Solo** (Mute
 silences the source without changing its level; mutes are off by default and presets do not change them).
 
-**Mixer** (click the Mixer step of the signal strip): one strip per source (Osc 1, Osc 2, Osc 3,
-Noise, Wavetable, Sample, Math) and Master. Each fader is the source's Level shown in dB (20·log10 of the level: 100 % =
+**Mixer** (click the Mixer step of the signal strip): one strip per source in two groups, as in the signal strip (OSC 1
+SOURCES: Osc 1, Wavetable, Sample, Math; then Osc 2, Osc 3, Noise) and Master. Under each name, what it plays: the wave,
+the table or the file. When Osc 2 or Osc 3 plays its own wavetable or sample, the line says "own WT" / "own sample" in
+the accent colour: it is not the Wavetable or Sample source of the first group. Each fader is the source's Level shown in dB (20·log10 of the level: 100 % =
 0 dB, 50 % = -6.0 dB, bottom = silent; fader law linear in dB from -60 to 0 dB), with M (Mute) and S (Solo, the same as
 the tabs). The meter is the peak of that source inside the voice in dBFS (after its level, before the filter and the
 saturation; the loudest voice), not the fader's gain: lowering a source changes how hard it drives the filter and the
@@ -367,11 +369,12 @@ Both LFOs run per voice and restart at each note.
 Reach at Depth 100 %: vibrato +/-2 st, tremolo full depth, filter +/-2 octaves; LFO 2 also PWM +/-45 % of width and
 Osc 2 Pitch +/-2 st. LFO 1 also drives the PWM knob of Osc 1.
 
-### Modulation Matrix (Matrix... in the LFO 2 header)
+### Modulation Matrix (Matrix... in the MOD bar)
 
 8 slots, each a **source** moving a **destination** for each voice separately, by an **amount** of -100 to +100 %
-(negative inverts). The number in brackets on the button counts the active routes; amber rings on the knobs show
-their modulation range.
+(negative inverts). The **Matrix...** button sits in the MOD bar, with the source chips and Random Fade; the number in
+brackets counts the active routes. Right-click an empty spot of the MOD bar: Reset matrix to defaults (the 8 slots and
+Random Fade).
 
 **Drag a source onto a knob.** The **MOD** bar (fixed under the SIGNAL strip; a Mod Sources row when the engine is in
 its own window) has one chip per source: drag it onto a knob that is a destination and a new route appears in the first
@@ -385,14 +388,14 @@ knob:
   for the **attenuators**: one vertical fader per source (its amount, -100 to +100 %) and Remove;
 - right-click the knob: Remove modulation (one or all).
 
-**Rnd Fade** (next to the chips) is the Random Fade of the matrix: how much the Random source fades with the filter
+**Random Fade** (next to the Matrix... button) is the Random Fade of the matrix: how much the Random source fades with the filter
 envelope.
 
 | Sources | Destinations (reach at 100 %) |
 |---|---|
-| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note; fixed during the note, or fading with Rnd Fade), Pitch Bend | Pitch, Osc 2 Pitch and Osc 3 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Osc 3 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position, Osc 3 WT Position |
+| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note; fixed during the note, or fading with Random Fade), Pitch Bend | Pitch, Osc 2 Pitch and Osc 3 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Osc 3 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position, Osc 3 WT Position |
 
-**Rnd Fade** (bottom of the dialog, default 0 %) makes the Random source fade with the filter envelope: the slot gets
+**Random Fade** (bottom of the dialog, default 0 %) makes the Random source fade with the filter envelope: the slot gets
 random × (1 − fade + fade × filter envelope). At 100 % with filter sustain 0, each note starts off target and settles
 on it during the filter decay. Uses: Random → Pitch at 2-5 % for a scoop into every note (leads, brass), at 30-50 % for
 a chord that converges from random pitches (Convergence Swell); Random → Cutoff or Pan for plucks whose attacks vary

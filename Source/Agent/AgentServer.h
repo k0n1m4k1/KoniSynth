@@ -55,6 +55,11 @@
 //            "point": "output" (por defecto: salida final, tras efectos, Gain y limitador, más el audio del transporte) o
 //            "engine" (salida del motor con sus efectos propios, antes de vocoder, monitor de entrada, cadena de efectos,
 //            Gain y limitador; mismas posiciones que output)
+//   request_control {"task": "..."}         pide el transporte (Agent/AgentSession.h). Con una sesión abierta se concede ya;
+//            si no, la ventana pregunta y la respuesta queda en "request" (pending -> granted | denied). Devuelve el estado
+//   control_status {}                       request, sessionOpen, secondsLeft, inControl, recording, task
+//   release_control {"summary": "..."}      suelta el control al terminar la tarea (la sesión sigue abierta)
+//   record {} / stop_record {}              REC y su parada con el control; record devuelve el WAV, stop_record {wav, mid}
 class AgentServer : private juce::Thread
 {
 public:
@@ -68,6 +73,7 @@ public:
         AudioTap& tap;                     // F3: salida reciente (Agent/AudioTap.h)
         AgentScheduler& scheduler;         // S2: notas de play con el reloj de audio (Agent/AgentScheduler.h)
         std::function<void()> panic;       // el del botón PANIC (KoniSynthProcessor::requestPanic)
+        AgentSession& session;             // cesión del transporte al agente (Agent/AgentSession.h)
     };
 
     static constexpr int firstPort = 47800, lastPort = 47899;
@@ -234,6 +240,7 @@ private:
             return reply (id, false, "invalid JSON");
         if (req.getProperty ("token", juce::var()).toString() != token)
             return reply (id, false, "invalid token");
+        host.session.heard(); // señal de vida del puente (su keepalive manda ping mientras tiene el control)
         const auto cmd = req.getProperty ("cmd", juce::var()).toString();
         juce::String error;
         auto result = onMessageThread ([this, cmd, req] (juce::String& err) { return dispatch (cmd, req, err); }, error);
@@ -279,6 +286,13 @@ private:
         if (cmd == "panic")       { host.panic(); return true; } // el panic del audio también vacía el planificador
         if (cmd == "listen")      return listen (req.getProperty ("seconds", 2.0), (bool) req.getProperty ("fromPlay", false),
                                                  req.getProperty ("point", "output").toString(), error);
+        // Cesión del transporte (Agent/AgentSession.h): la respuesta del usuario llega después; el puente consulta
+        // control_status hasta que deja de estar pendiente
+        if (cmd == "request_control") return host.session.request (req.getProperty ("task", juce::var()).toString(), error);
+        if (cmd == "control_status")  return host.session.status();
+        if (cmd == "release_control") return host.session.release (req.getProperty ("summary", juce::var()).toString());
+        if (cmd == "record")          return host.session.record (error);
+        if (cmd == "stop_record")     return host.session.stopRecord (error);
         error = "unknown cmd: " + cmd;
         return {};
     }

@@ -25,10 +25,10 @@ public:
                 addAndMakeVisible (c);
             rows.push_back (std::move (row));
         }
-        randomFade = std::make_unique<Knob> (apvts, "mtxRandomFade", "Rnd Fade");
+        randomFade = std::make_unique<Knob> (apvts, "mtxRandomFade", "Random Fade");
         addAndMakeVisible (*randomFade);
         hint.setText ("Each slot moves one destination per voice. Amber rings on the knobs show the range; the dot, the live value. "
-                      "Rnd Fade: the Random source fades with the filter envelope.",
+                      "Random Fade: the Random source fades with the filter envelope.",
                       juce::dontSendNotification);
         hint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         addAndMakeVisible (hint);

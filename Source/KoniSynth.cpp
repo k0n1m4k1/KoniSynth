@@ -30,6 +30,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Presets/PresetManager.h"
 #include "Agent/AudioTap.h"
 #include "Agent/AgentScheduler.h"
+#include "Agent/AgentSession.h"
 #include "Transport/SessionTransport.h"
 #include "Agent/AgentServer.h" // control por agente: inerte si está desactivado
 
@@ -182,6 +183,14 @@ public:
                 if (engineSamples[(size_t) k].has_value())
                     restoreSample (*engineSamples[(size_t) k], dpcmSample + k);
         };
+        // Sesión del agente: graba con el transporte de siempre (mismo fichero y carpeta que REC) y corta sus notas
+        agentSession.startRecording = [this] (juce::File& file)
+        {
+            file = SessionTransport::newRecordingFile();
+            return sessionTransport.startRecording (file, getDisplayBpm());
+        };
+        agentSession.stopRecording = [this] { return sessionTransport.stopRecording(); };
+        agentSession.cancelAgentNotes = [this] { if (agentScheduler != nullptr) agentScheduler->cancel(); };
         tuning.setMtsEnabled (true); // MTS-ESP por defecto: sin maestro (o sin LIBMTS instalada) no cambia nada
         actionPoll.tick = [this] { pollActions(); };
         actionPoll.startTimerHz (50);
@@ -250,9 +259,10 @@ public:
     void rebuildMt32()
     {
         mt32BuiltModel = (int) params.mt32Model->load();
+        mt32BuiltQueue = (int) params.mt32Queue->load();
         mt32Rate = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
         juce::String report;
-        auto machine = Mt32Machine::open (mt32RomFolder(), mt32BuiltModel, mt32Rate, report);
+        auto machine = Mt32Machine::open (mt32RomFolder(), mt32BuiltModel, mt32Rate, report, mt32BuiltQueue == 1 ? 4096u : 1024u);
         mt32Engine.slot.replace (std::move (machine));
         const juce::ScopedLock sl (sampleInfoLock);
         mt32Status = report;
@@ -445,8 +455,15 @@ public:
             }
         }
 
+        // Origen de las notas con el agente al control (Agent/AgentSession.h): las del usuario son las del controlador (aquí,
+        // antes del .mid del transporte) y las del teclado en pantalla (diferencia tras mezclarlo, más abajo); las del agente
+        // entran después, por su planificador. Sin el control, no se cuenta nada
+        const auto agentInControl = agentSession.inControl.load (std::memory_order_relaxed);
+        const auto noteOns = [&midi] { int n = 0; for (const auto m : midi) n += m.getMessage().isNoteOn() ? 1 : 0; return n; };
+        int userNoteOns = agentInControl ? noteOns() : 0;
         // Transporte: eventos del .mid en reproducción (antes de leer bend, rueda y CC) y notas que deja al parar
         sessionTransport.injectMidi (midi, numSamples);
+        const auto beforeKeyboard = agentInControl ? noteOns() : 0;
         tuning.beginBlock (midi); // MTS-ESP: ¿hay maestro? y SysEx MTS del controlador
 
         // MIDI learn y All Sound Off (CC 120): JUCE lo trata como All Notes Off con release (juce_Synthesiser.cpp:278),
@@ -477,6 +494,12 @@ public:
             params.ladderQuality.store (q);
 
         keyboardState.processNextMidiBuffer (midi, 0, numSamples, true); // mezcla las notas del teclado en pantalla
+        if (agentInControl)
+        {
+            userNoteOns += noteOns() - beforeKeyboard; // teclado en pantalla
+            if (userNoteOns > 0)
+                agentSession.userNotes.fetch_add (userNoteOns, std::memory_order_relaxed);
+        }
         // Notas de play del agente, en su muestra exacta (Agent/AgentScheduler.h); sin agente, nulo. La posición en la captura
         // es la del inicio de este bloque (el tap lo recibe al final)
         if (auto* scheduler = agentSchedulerActive.load (std::memory_order_acquire))
@@ -1656,6 +1679,9 @@ public:
             if (sessionTransport.isPlaying()) sessionTransport.pause();
             else sessionTransport.play();
         }
+        if (midiLearn.takeAction (MidiLearn::actionRevoke))
+            agentSession.revoke ("Control taken back (MIDI), agent session closed.");
+        agentSession.tick(); // caducidad, señal de vida y notas del usuario mientras el agente tiene el control
     }
     struct ActionPoll : juce::Timer { std::function<void()> tick; void timerCallback() override { tick(); } };
     ActionPoll actionPoll;
@@ -1681,7 +1707,7 @@ public:
                 agentScheduler = std::make_unique<AgentScheduler>();
             agentServer = std::make_unique<AgentServer> (AgentServer::Host { apvts, presetManager, undoHistory, JucePlugin_VersionString,
                                                                               keyboardState, *agentTap, *agentScheduler,
-                                                                              [this] { requestPanic(); } });
+                                                                              [this] { requestPanic(); }, agentSession });
             if (agentServer->start())
             {
                 agentTapActive.store (agentTap.get(), std::memory_order_release);
@@ -1692,6 +1718,7 @@ public:
         }
         else if (! on)
         {
+            agentSession.revoke ("Agent control turned off, agent session closed.");
             agentTapActive.store (nullptr, std::memory_order_release);
             agentServer.reset();
         }
@@ -1710,7 +1737,10 @@ public:
     // ocioso (comprobar su cola vacía por bloque: dos cargas atómicas)
     std::unique_ptr<AgentScheduler> agentScheduler;
     std::atomic<AgentScheduler*> agentSchedulerActive { nullptr };
-    // Tras tap y planificador: se destruye antes que ellos (su stop manda cancelar al planificador)
+    // Cesión del transporte al agente (Agent/AgentSession.h). Existe siempre (sin agente, inactiva); antes que el servidor:
+    // se destruye después que él
+    AgentSession agentSession;
+    // Tras tap, planificador y sesión: se destruye antes que ellos (su stop manda cancelar al planificador)
     std::unique_ptr<AgentServer> agentServer;
 
 private:
@@ -1724,6 +1754,7 @@ private:
     {
         allVoicesOff();
         keyboardState.allNotesOff (0); // suelta también las teclas pulsadas en pantalla
+        agentSession.revokeRequested.store (true); // PANIC también cierra la sesión del agente (AgentSession::tick)
         theremin.reset();
         vl1.reset();
         stylophone.reset();
@@ -1880,7 +1911,7 @@ private:
     bool n64WasOn = false, oplWasOn = false, mt32WasOn = false;
     Mt32Engine mt32Engine;
     double mt32Rate = 0.0;
-    int mt32BuiltModel = -1;
+    int mt32BuiltModel = -1, mt32BuiltQueue = 0; // con qué se construyó la máquina: si cambian, se reconstruye
     juce::String mt32Status; // protegido por sampleInfoLock
     AnsSlot ansSlot;
     MacroSlot chipMacroSlot, mdMacroSlot, snesMacroSlot;
@@ -2065,7 +2096,8 @@ private:
             rhythmPollTicks = 0;
             updateUserRhythms();
         }
-        if ((int) params.engine->load() == 14 && ((int) params.mt32Model->load() != mt32BuiltModel || getSampleRate() != mt32Rate))
+        if ((int) params.engine->load() == 14 && ((int) params.mt32Model->load() != mt32BuiltModel || (int) params.mt32Queue->load() != mt32BuiltQueue
+                                                  || getSampleRate() != mt32Rate))
             rebuildMt32(); // solo con el motor elegido: desactivado no carga ROM ni ocupa memoria
         updateMacros();
         perfMacros.update();
@@ -2378,6 +2410,7 @@ private:
 #include "UI/ControllerSetupPanel.h"
 #include "UI/ScaleBar.h"
 
+#include "UI/AgentCard.h"
 #include "UI/Editor.h"
 
 juce::AudioProcessorEditor* KoniSynthProcessor::createEditor() { return new KoniSynthEditor (*this); }
