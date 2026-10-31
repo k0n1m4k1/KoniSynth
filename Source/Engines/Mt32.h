@@ -164,6 +164,10 @@ struct Mt32Engine
                 synth.playMsgNow (0xB0 | ch | (123u << 8)); // All Notes Off
                 synth.playMsgNow (0xB0 | ch | (64u << 8));  // pedal arriba
             }
+            // All Notes Off deja las notas en su release y la reverb sigue (el MT-32 no atiende All Sound Off, CC 120, y el
+            // reset de Munt borraría los patches cargados por SysEx): la salida queda cerrada hasta la siguiente nota, mientras
+            // la máquina agota sus colas. Antes, con ROM reales, quedaban -37 dBFS tras el panic
+            gated = true;
         }
         const auto reverb = p.mt32Reverb->load() > 0.5f ? 1 : 0;
         if (reverb != lastReverb) { lastReverb = reverb; synth.setReverbEnabled (reverb != 0); }
@@ -202,7 +206,8 @@ struct Mt32Engine
                 m->converter->getOutputSamples (interleaved.data(), (unsigned int) chunk);
                 for (int i = 0; i < chunk; ++i)
                 {
-                    const auto l = interleaved[(size_t) (2 * i)], r = interleaved[(size_t) (2 * i + 1)];
+                    const auto g = gated ? 0.0f : 1.0f; // corte seco, como el panic del resto de motores
+                    const auto l = g * interleaved[(size_t) (2 * i)], r = g * interleaved[(size_t) (2 * i + 1)];
                     if (out.getNumChannels() >= 2) { out.addSample (0, done + i, l); out.addSample (1, done + i, r); }
                     else if (out.getNumChannels() == 1) out.addSample (0, done + i, 0.5f * (l + r));
                 }
@@ -228,6 +233,8 @@ struct Mt32Engine
             if (size < 1 || raw[0] < 0x80 || raw[0] >= 0xF0)
                 continue;
             auto status = (juce::uint32) raw[0];
+            if ((status & 0xF0) == 0x90 && size > 2 && raw[2] > 0)
+                gated = false; // tras un panic, la primera nota vuelve a abrir la salida
             if (mode == 0)      status = (status & 0xF0) | 1u; // canal 2: parte 1
             else if (mode == 1) status = (status & 0xF0) | 9u; // canal 10: ritmo
             if (mode == 0 && (status & 0xF0) == 0xC0)
@@ -321,6 +328,7 @@ private:
     const Mt32Machine* lastMachine = nullptr;
     int lastReverb = -1, lastDac = -1, lastProgram = -1, lastNice = -1, lcdCountdown = 0;
     bool silencePending = false;
+    bool gated = false;    // salida cerrada tras un panic, hasta la siguiente nota
     int namesRefreshes = 0; // lecturas pendientes de los nombres de programa (máquina nueva o SysEx)
     std::atomic<juce::uint32> lcdSeq { 0 };
     std::array<std::atomic<char>, lcdSize + 1> lcd {};
