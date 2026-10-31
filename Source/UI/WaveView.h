@@ -1,6 +1,6 @@
 // Display de onda del Synth, a la izquierda de las pestañas de fuentes. Dibuja la fuente de la pestaña elegida con las
 // funciones del propio motor (oscillator y TriShape de Dsp/OscillatorCore.h, el resumen de la wavetable y del sample del
-// procesador) y lleva asas sobre la traza que mueven parámetros: PW, Tri Sym, Tri Rnd, WT Position, Sample Start / Length /
+// procesador) y lleva asas sobre la traza que mueven parámetros: PW, Tri Sym, Tri Round, WT Position, Sample Start / Length /
 // Loop, String Pick / Pickup. Cada asa es un componente con tooltip, menú de parámetro (MIDI Learn, Set value, Reset),
 // doble clic = valor por defecto y gesto de automatización. Las perillas siguen en sus secciones: el display no sustituye
 // ningún control (Tests/test_ui_reach.py). Vistas: una por fuente, en el orden de las pestañas, y MIX
@@ -1023,7 +1023,7 @@ private:
                 lines.add ("VOICES " + juce::String ((int) value ("unisonVoices")) + " | DETUNE " + text ("unisonDetune") + " | SPREAD " + pct ("unisonSpread"));
                 lines.add ((waveUsesPw (spec (osc1).wave) ? "PW " + pct ("pulseWidth") + " +/- " + pct ("pwmDepth") + " | " : juce::String())
                            + "DRIFT " + pct ("drift") + " | LEVEL " + pct ("osc1Level"));
-                if (spec (osc1).wave == triangle) lines.add ("TRI SYM " + pct ("osc1TriSym") + " | RND " + pct ("osc1TriRound"));
+                if (spec (osc1).wave == triangle) lines.add ("TRI SYM " + pct ("osc1TriSym") + " | ROUND " + pct ("osc1TriRound"));
                 info = text ("wave");
                 break;
             case osc2:

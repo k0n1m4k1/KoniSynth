@@ -62,7 +62,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   same level knobs: 100 % = 0 dB, 50 % = -6 dB), Mute, Solo and a peak meter in dBFS, with Master apart; Osc 2 and Osc 3 can play their own wavetable or their own sample file, and Osc 2, Osc 3 or the noise can be the modulator of the
   complex oscillator, through a low-pass filter if you want softer FM. Wavetables in the Serum format (2048 samples per
   frame, or the frame size its `clm` chunk declares). Waveforms include the Minimoog Tri-Saw and the mixed waves of a Prophet-5 oscillator
-  and of the Juno-106 (Saw+Pulse), and every triangle can be made lopsided and rounded like an analog one (Tri Sym, Tri Rnd).
+  and of the Juno-106 (Saw+Pulse), and every triangle can be made lopsided and rounded like an analog one (Tri Sym, Tri Round).
   The ladder filter has three qualities against aliasing with drive (Classic, Balanced 2x, High Quality 4x), and the
   per-voice saturation can sit after or before it. A strip above the sources shows the current signal path, and its
   displays are editable: the wave display (each source, the mix and the result after the filter, with handles for pulse
@@ -95,7 +95,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 - **Audio input and vocoder:** a microphone or line input can go through the effects chain, or be the modulator of a channel
   vocoder (VP-330 with 10 bands, 16 or 32 bands) with any engine as the carrier.
 - **Transport:** record the session to WAV, play audio files, import (also SysEx) and export MIDI.
-- **Presets:** 432 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
+- **Presets:** 445 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
   favorites in your own order (keys 1-9 load the first nine) and a searchable browser with filters by category and engine.
   Presets say how to play them (on the display and in the browser) and grey out the keys outside their recommended range.
   Presets that use your own files tell you when one is missing. User presets can be exported (one as `.xml`, all as a

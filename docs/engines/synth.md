@@ -69,7 +69,7 @@ peak.
 | P.Env | Pitch drop or rise at the start of each note: kicks, toms, laser zaps. | -48 to +48 st / 0 st |
 | P.Decay | How fast the pitch envelope returns to the note's pitch. | 1-2000 ms / 50 ms |
 | Tri Sym | Triangle waveform only: makes the triangle slightly lopsided like an analog one (even harmonics; see Analog triangle below). | 0-100 % / 0 % |
-| Tri Rnd | Triangle waveform only: rounds its tips (weaker odd harmonics); 100 % is a sine. | 0-100 % / 0 % |
+| Tri Round | Triangle waveform only: rounds its tips (weaker odd harmonics); 100 % is a sine. | 0-100 % / 0 % |
 
 The small display at the left of the Osc 1 knobs draws the pitch envelope (scale ±48 st, drawn to -40 dB of its decay):
 drag the first point up or down for P.Env and the end point left or right for P.Decay.
@@ -122,13 +122,13 @@ mixed passively at the waveform switch, 10/57 saw and 47/57 triangle (47 kΩ and
 Model D: harmonics 2 to 10 within 1.05 dB RMS. Softer than Saw, with a little more edge than Triangle; it aliases like the
 triangle (its saw jump is corrected, its corners are not).
 
-**Analog triangle** (Tri Sym and Tri Rnd, one pair per oscillator, Triangle waveform only). Measured on two Minimoog Model D
+**Analog triangle** (Tri Sym and Tri Round, one pair per oscillator, Triangle waveform only). Measured on two Minimoog Model D
 (raw waveforms at C3): their triangles carry even harmonics (h2 -24/-27 dB, h4 -41/-42 dB) that an ideal triangle lacks,
-and their odd harmonics sit 3 to 7 dB lower (h3 -22/-26 dB against -19.1 dB). Tri Rnd blends the triangle with a sine
+and their odd harmonics sit 3 to 7 dB lower (h3 -22/-26 dB against -19.1 dB). Tri Round blends the triangle with a sine
 (rounded tips); Tri Sym adds a squared term (lopsided shape) with no DC offset. The filter input stage already rounds the
-tips a little (h3 -22 dB with the ideal triangle), so through the filter Tri Sym 50-60 % and Tri Rnd 0-20 % match harmonics
+tips a little (h3 -22 dB with the ideal triangle), so through the filter Tri Sym 50-60 % and Tri Round 0-20 % match harmonics
 2 to 8 of the two instruments within 1.4 to 3.0 dB RMS (Sym 60 % / Rnd 0 %: 1.4 dB against one of them). With Filter off,
-Tri Rnd 30-50 % does that job. At 0 % both, the triangle is the ideal one.
+Tri Round 30-50 % does that job. At 0 % both, the triangle is the ideal one.
 
 **Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse** (all four menus) are the waveforms a Prophet-5 oscillator plays when
 several of its waveform switches are on, in the proportions of its circuit (rev 1/2 service manual, voice schematic):
@@ -225,7 +225,7 @@ another source's solo).
 | WT Lvl | Level of the wavetable of Osc 2: its own table (Osc 2 Table...), independent of the Wavetable tab, played with the tuning, drift, phase and Sync of Osc 2, together with the oscillator. With bright positions Sync aliases more than Saw or Square (the reset leaves a corner that is not corrected, as with Sine and Triangle). | 0-100 % / 0 % |
 | WT Pos | Position in the wavetable of Osc 2. | 0-100 % / 0 % |
 | Smp Lvl | Level of the sample of Osc 2: see **Osc 2 Sample** below. | 0-100 % / 0 % |
-| Tri Sym / Tri Rnd | Analog triangle of Osc 2 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
+| Tri Sym / Tri Round | Analog triangle of Osc 2 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
 
 Osc 2, its wavetable and its sample are one **family**: they share the tuning (Oct, Semi, Fine), drift, phase and Sync of
 Osc 2 and sound together, each at its own level, with its own Mute and Solo in the Mixer, its own meter and its own step in
@@ -281,7 +281,7 @@ Oct -1, it is the classic sub-oscillator)
 | WT Lvl | Level of the wavetable of Osc 3 (its own table, independent of the Wavetable tab and of Osc 2), with the tuning, phase and Sync of Osc 3. | 0-100 % / 0 % |
 | WT Pos | Position in the wavetable of Osc 3. Matrix destination: Osc 3 WT Position. | 0-100 % / 0 % |
 | Smp Lvl | Level of the sample of Osc 3 (its own file, Osc 3 Sample...), as **Osc 2 Sample**, with the tuning of Osc 3. | 0-100 % / 0 % |
-| Tri Sym / Tri Rnd | Analog triangle of Osc 3 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
+| Tri Sym / Tri Round | Analog triangle of Osc 3 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
 
 Osc 3 has no drift of its own (it follows the drift of Osc 1) and its Sample root sounds at its octave: with Oct -1,
 Semi 0 and Root C4, C4 plays the file one octave down. Up to 1.0.0-beta, Osc 3 had a base octave of -1 or -2 and
@@ -532,21 +532,21 @@ another white key. By category:
 | Init | Init |
 | Bass | Saw Bass, Wobble, Acid Squelch, Studio Reel, Phasing Saw Bass, Picked Electric Bass, Analog Thump Bass, Model D Bass, Model D Air Bass, Model D Saw Stack Bass, Model D Robot Bass, Model D Bubble Bass, Model D Bounce Bass, Model D Sub Bass, Model D Soft Rez Bass, Model D Twin Square Bass, Model D The Jump, Taurus Pedal Bass, Mono Bass 101, Detuned Reese Bass, Juno Saw+Pulse Bass, 808 Sub Bass, House Organ Bass, Children Sub Bass, Children Offbeat Bass, Bleep & Bass Sub, Hardbass Donk, Electric Donk Bass, Blue Monday 88 Bass, Everything Counts Bass, The Model Bass, Europe Endless Bass, Around The World Bass, Acid 303 Bass, FM Solid Bass, Funk Filter Bass, Electro Hybrid Bass, Fingerstyle Bass, Fretless Bass, Hardcore Grind Bass, Pick Drive Bass, Slap Pop Bass, Hardcore Fold Impact, Wrong Pulse Drive |
 | Lead | Retro Lead, Supersaw Lab, Ladder Whistle, MS-20 Acid Scream, Wavefold Lead, Valve Clavioline, Modular Lead 1968, Model D Lead, Model D Midnight Funk, Model D 70s Violin Lead, Model D Bright & Rude, Model D Fuzz Lead, Model D 3-Square Lead, Model D Octave Ouroboros, Model D Fusion Lead, Model D Sync Strike, Model D Nothin' Lead, Model D Looking Glass Lead, Model D Level 3, Model D Ghost Lead, Model D Outlaw, Odyssey Sync Lead, Eight-Voice Sync Lead, Phase Distortion Reso Lead, Gabber Screech, Fat Mono Lead, Hoover 90s, Numbers Lead, Just Cant Get Enough Lead, New Life Lead, Never Let Me Down Lead, Oxygene IV Lead, Da Funk Lead, Shine On Lead, Digital Sync Lead, Cloud Swell Lead, Cloud Swell Wah Lead, Octave Sync Solo, Reload Prism Lead |
-| Pad | Soft Pad, Space Tape, Cassette Memories, Worn Reel 9.5, PWM Analog Pad, Endless Plate Pad, Barber Pole Drone, PWM Sweep Pad, Notch Sweep Pad, Model D Destitution, Model D Haunting, Wavetable Pad PPG, Digital Bell Pad, Gated Supersaw Pad, Vector Wave Pad, Mistress Pad, Voyager Chords, Short Circuit Swell, In The Air Tonight Pad, Fade To Grey Pad, Stranger Things Pad, Harmonic Sweep Pad, Trance Supersaw Pad, Evolving Filter Drone, Evolving Wavetable Drone, Airy Vibrato Pad, Vowel Aurora, Crystal Hybrid 1987, Dusk Chamber |
-| Keys | Glass Bell, French Chords, Dusty Vinyl, Funky Clav, Pianet Reed Keys, Reed EP 200A, Model D Smooth EP, Suitcase Tine EP, Clavinet D6 Strings, Dub Techno Chord, Detroit Chord Stab, Spring Dub Stab, Baroque Harpsichord, Neon Lights Keys, Formant Sweep Keys, House Piano Stab, House Piano Stab Pluck, Deep House Chord, Berlin Time Resonance, Metal Memory, Soft Chord Memory, Synth Soft Piano, Why Heart Gospel Keys |
+| Pad | Soft Pad, Space Tape, Cassette Memories, Worn Reel 9.5, PWM Analog Pad, Endless Plate Pad, Barber Pole Drone, PWM Sweep Pad, Notch Sweep Pad, Model D Destitution, Model D Haunting, Wavetable Pad PPG, Digital Bell Pad, Gated Supersaw Pad, Vector Wave Pad, Mistress Pad, Voyager Chords, Short Circuit Swell, In The Air Tonight Pad, Fade To Grey Pad, Stranger Things Pad, Harmonic Sweep Pad, Trance Supersaw Pad, Evolving Filter Drone, Evolving Wavetable Drone, Airy Vibrato Pad, Vowel Aurora, Crystal Hybrid 1987, Dusk Chamber, Triple Vector 1984 |
+| Keys | Glass Bell, French Chords, Dusty Vinyl, Funky Clav, Pianet Reed Keys, Reed EP 200A, Model D Smooth EP, Suitcase Tine EP, Clavinet D6 Strings, Dub Techno Chord, Detroit Chord Stab, Spring Dub Stab, Baroque Harpsichord, Neon Lights Keys, Formant Sweep Keys, House Piano Stab, House Piano Stab Pluck, Deep House Chord, Berlin Time Resonance, Metal Memory, Soft Chord Memory, Synth Soft Piano, Why Heart Gospel Keys, Felt Wire Keys |
 | Organ | Continental Combo Organ, Compact Combo Organ, Breath Rotor Organ, Stellar Air Organ, Tonewheel Soul Organ, Concert Accordion, Chapel Pipes, Chapel Pipes Full |
 | Mallets | Celesta, Kalimba, Tubular Bells, Velvet Vibraphone, Synth Harmonic Marimba |
 | Brass | Neon Brass, Model D Brass Drone, Five-Voice Poly Brass, Poly Brass Stab, Blade Runner Brass, Replicant Brass Swell, Africa Brass, Jump Brass, Muted Trumpet Noir, Warm Trombone |
-| Woodwind | Tape Flute, Forest Ocarina, Blues Harmonica, Smoky Tenor Sax, Synth Chamber Clarinet, Synth Concert Flute, Synth Lyric Oboe |
-| Strings | String Machine, Synth Pizzicato, Comb Bowed Metal, Children Strings, Shine On Intro Strings, Tears in Rain Strings, Oxygene Phased Strings, Incantations Ensemble, Space Oddity Tape Strings, Warszawa Tape Cello, Oxygene Ensemble Strings, Solo Cello Legato, Solo Viola Warm, Solo Violin Cantabile, Violin Cantabile Poly, Venetian Chamber Synth |
-| Guitar | Nylon Guitar, Children Acoustic Guitar, Clean Electric Guitar, Ambient Spells Guitar, Darkwave Razor Guitar, Disco Mute Guitar, French Filter Guitar, Glass Chorus Guitar, Industrial Drive Guitar, New Age Harmonics Guitar, Personal Twang Guitar |
+| Woodwind | Tape Flute, Forest Ocarina, Blues Harmonica, Smoky Tenor Sax, Synth Chamber Clarinet, Synth Concert Flute, Synth Lyric Oboe, Breathwood Reed |
+| Strings | String Machine, Synth Pizzicato, Comb Bowed Metal, Children Strings, Shine On Intro Strings, Tears in Rain Strings, Oxygene Phased Strings, Incantations Ensemble, Space Oddity Tape Strings, Warszawa Tape Cello, Oxygene Ensemble Strings, Solo Cello Legato, Solo Viola Warm, Solo Violin Cantabile, Violin Cantabile Poly, Venetian Chamber Synth, Amber String Ensemble, Low Velvet Strings, Silk PWM Strings |
+| Guitar | Nylon Guitar, Children Acoustic Guitar, Clean Electric Guitar, Ambient Spells Guitar, Darkwave Razor Guitar, Disco Mute Guitar, French Filter Guitar, Glass Chorus Guitar, Industrial Drive Guitar, New Age Harmonics Guitar, Personal Twang Guitar, E-Bow Horizon |
 | Pluck | Echo Pluck, Concert Harp, Model D Steel Wound Pluck, Trance Supersaw Pluck, Children Pluck, Ambient Echo Arp, Ambient Echo Arp Glass, Ambient Echo Arp Dark, Soft Echo Pluck, Enjoy Bell Pluck |
-| World | Banjo Pick, Hammered Dulcimer, Koto Silk, Sitar Resonance |
+| World | Banjo Pick, Hammered Dulcimer, Koto Silk, Sitar Resonance, Jawari Resonance, Tibetan Bronze |
 | Sequence | Berlin Sequence, Hardbass Donk Bounce, Robot Arp, On the Run Sequence, Acid Step Line, Irregular 7-Step, Equinox Orbit Sequence, EBM Drive Sequence, Pocket Computer Sequence, Progressive Prism Pluck, Binary Resonator, Bode Conveyor, Comb Machine, Cross Sync Orbit, Odd Ring Laboratory, Phase Transmission, Sample Hold Workshop |
-| Drums | Model D Dark Toms, Model D Room Snare, Model D Hi-Hat, Model D Tri Kick, Model D Rez Hit, Gabber Kick, Children Boom Kick, Minimal Techno Click Perc, Hex Pad Tom, 808-Style Kick, 808-Style Long Boom, 909-Style Kick, 808-Style Snare, 808-Style Tom, 808-Style Conga, 808-Style Rimshot, 808-Style Claves, 808-Style Cowbell, 808-Style Closed Hat, 808-Style Open Hat, FM Ride Cymbal, Analog Hand Clap, Numbers Metal Perc |
+| Drums | Model D Dark Toms, Model D Room Snare, Model D Hi-Hat, Model D Tri Kick, Model D Rez Hit, Gabber Kick, Children Boom Kick, Minimal Techno Click Perc, Hex Pad Tom, 808-Style Kick, 808-Style Long Boom, 909-Style Kick, 808-Style Snare, 808-Style Tom, 808-Style Conga, 808-Style Rimshot, 808-Style Claves, 808-Style Cowbell, 808-Style Closed Hat, 808-Style Open Hat, FM Ride Cymbal, Analog Hand Clap, Numbers Metal Perc, Bamboo Rain |
 | FX | Model D Vocal Bot, Model D Very Bad Place, Model D Abandoned Planet, Model D Freqy, Model D Jurassic Love, Model D Whirlwind, Model D Light Cycle, Model D 70s Sci-Fi Wobble, Model D 60s Space, Model D Singing Wind, Model D Square Meow, Model D Broken Radio, Orchestra Hit 8-Bit, Noise Riser, Sub Drop, Underwater Pad, Bode Bells, Sci-Fi Laser Zap, Resonant Whistle Swell, Bode Drift |
-| Cinematic | Monolith Cluster |
-| Hybrid | Bowed Reed, Bowed Resonator |
+| Cinematic | Monolith Cluster, Analog Orchestra Hit, Bowed Glass Horizon |
+| Hybrid | Bowed Reed, Bowed Resonator, Spectral Ring Atlas |
 | 8-Bit | 8-Bit Power-Up, 8-Bit Hit, 8-Bit Menu Blip, Chip Square Bass, SID-Style Sync Lead, SID-Style PWM Bass, SID-Style Ring Bell |
 | Nature | Field Cricket, Dolbear Cricket 25C, Cicada Buzz, Spring Peeper, Bullfrog Croak, Chickadee Fee-Bee, Syrinx Tweet, Tawny Owl Hoot, Wolf Howl, Cat Meow, Cat Purr, Humpback Moan, Gull Long Call, Rain Drops, Campfire Crackle, Wind Whistle, Thunder Strike, Ocean Surf, Gusting Wind, Distant Thunder |
 | Vocal | Dual Formant Ah, Poly Vox Humana, Choir Aah, Choir Ooh, Vowel Morph Pad, Talk Box Lead, Formant Circuit Robot |

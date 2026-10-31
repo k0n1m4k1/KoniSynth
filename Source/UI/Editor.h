@@ -181,7 +181,7 @@ public:
            .withKnob (s, "unisonVoices", "Voices").withKnob (s, "unisonDetune", "Detune").withKnob (s, "unisonSpread", "Spread")
            .withKnob (s, "pwmDepth", "PWM").withKnob (s, "drift", "Drift")
            .withKnob (s, "pitchEnvAmount", "P.Env").withKnob (s, "pitchEnvDecay", "P.Decay")
-           .withKnob (s, "osc1TriSym", "Tri Sym").withKnob (s, "osc1TriRound", "Tri Rnd")
+           .withKnob (s, "osc1TriSym", "Tri Sym").withKnob (s, "osc1TriRound", "Tri Round")
            .withSideBody (pitchEnvView, 120, true)
            .withControlRows (2); // 6 + 5 perillas: la fila del display es alta y así el display gana ancho
         // Mod Src y Sync no son perillas: son conexiones del panel PATCH (PatchBay, a la derecha de la sección)
@@ -206,7 +206,7 @@ public:
                    .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Semi", "Semi").withKnob (s, "osc2WtPosition", "WT Pos")
                    .withKnob (s, "osc2WtLevel", "WT Lvl")
                    .withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Fine", "Fine")
-                   .withKnob (s, "osc2TriSym", "Tri Sym").withKnob (s, "osc2TriRound", "Tri Rnd")
+                   .withKnob (s, "osc2TriSym", "Tri Sym").withKnob (s, "osc2TriRound", "Tri Round")
                    .withKnob (s, "osc2SampleLevel", "Smp Lvl")
                    .withControlRows (2); // 5 + 4 perillas
         osc3Section.withCombo (s, "osc3Wave")
@@ -219,7 +219,7 @@ public:
                    .withKnob (s, "subLevel", "Level").withKnob (s, "osc3Semi", "Semi").withKnob (s, "osc3WtPosition", "WT Pos")
                    .withKnob (s, "osc3WtLevel", "WT Lvl")
                    .withKnob (s, "osc3Octave", "Oct").withKnob (s, "osc3Fine", "Fine")
-                   .withKnob (s, "osc3TriSym", "Tri Sym").withKnob (s, "osc3TriRound", "Tri Rnd")
+                   .withKnob (s, "osc3TriSym", "Tri Sym").withKnob (s, "osc3TriRound", "Tri Round")
                    .withKnob (s, "osc3SampleLevel", "Smp Lvl")
                    .withControlRows (2); // 5 + 4 perillas
         // Noise: bloque propio junto a las pestañas Osc 2 / Osc 3 (su Mute y su Solo, en el Mixer)

@@ -58,7 +58,7 @@ public:
         hint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         hint.setMinimumHorizontalScale (0.7f);
         addAndMakeVisible (hint);
-        startTimerHz (30);
+        startTimerHz (60);
     }
 
     void resized() override
@@ -125,14 +125,15 @@ private:
     static constexpr int numGroups = 4, numLinkable = 3; // Osc 1, Osc 2, Osc 3 (con LINK) y Noise; Master aparte (grupo 4)
     static inline const juce::Identifier linksProp { "mixerLinks" };
 
-    // Medidor vertical: -60..0 dBFS, verde hasta -12, ámbar hasta -3, rojo arriba; pico con caída de 20 dB/s
+    // Medidor vertical: -60..0 dBFS, verde hasta -12, ámbar hasta -3, rojo arriba. Refresco de 60 Hz; sube al instante y cae
+    // a 60 dB/s (de 0 a -60 dB en 1 s)
     struct Meter : juce::Component
     {
         float db = -100.0f;
         void set (float peak)
         {
             const auto now = peak > 0.0f ? 20.0f * std::log10 (peak) : -100.0f;
-            const auto next = std::max (now, db - 20.0f / 30.0f); // 30 Hz
+            const auto next = std::max (now, db - 60.0f / 60.0f); // 60 dB/s a 60 Hz
             if (std::abs (next - db) > 0.05f) { db = next; repaint(); }
         }
         void paint (juce::Graphics& g) override
@@ -280,7 +281,7 @@ private:
     {
         auto& prm = processor.getParams();
         const auto soloed = prm.soloSource.load();
-        if (++describeTick >= 6) // 5 Hz: nombres de tabla y de fichero
+        if (++describeTick >= 12) // 5 Hz: nombres de tabla y de fichero
         {
             describeTick = 0;
             for (auto& s : strips)
@@ -296,13 +297,13 @@ private:
             }
             else
             {
-                // Salida: pico de los últimos 1600 valores del búfer del display (33 ms a 48 kHz)
+                // Salida: pico de los últimos 960 valores del búfer del display (20 ms a 48 kHz: algo más que un refresco)
                 const auto end = processor.scopeWritePos.load (std::memory_order_acquire);
                 constexpr auto mask = KoniSynthProcessor::scopeSize - 1;
                 float peak = 0.0f;
-                for (int i = 0; i < 1600; ++i)
+                for (int i = 0; i < 960; ++i)
                 {
-                    const auto idx = (size_t) ((end - 1600 + i) & mask);
+                    const auto idx = (size_t) ((end - 960 + i) & mask);
                     peak = std::max ({ peak, std::abs (processor.scopeLeft[idx].load (std::memory_order_relaxed)),
                                        std::abs (processor.scopeRight[idx].load (std::memory_order_relaxed)) });
                 }
@@ -343,7 +344,7 @@ private:
     }
 
     static constexpr int groupH = 18, groupGap = 14;
-    int describeTick = 6;
+    int describeTick = 12;
     bool following = false;
     KoniSynthProcessor& processor;
     std::vector<std::unique_ptr<Strip>> strips;

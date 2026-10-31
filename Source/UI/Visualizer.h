@@ -16,7 +16,16 @@ public:
         startTimerHz (30);
     }
 
-    void setMode (int m) { mode = juce::jlimit (0, numModes - 1, m); spectroImage = {}; repaint(); if (onModeChange) onModeChange (mode, style); }
+    // El espectro se refresca a 60 Hz (más cerca del tiempo real); el resto de vistas, a 30 Hz (el juego y el modo demo cuentan
+    // con ese paso de 1/30 s, y el espectrograma avanza una columna por refresco)
+    void setMode (int m)
+    {
+        mode = juce::jlimit (0, numModes - 1, m);
+        spectroImage = {};
+        startTimerHz (mode == spectrum ? 60 : 30);
+        repaint();
+        if (onModeChange) onModeChange (mode, style);
+    }
     int getMode() const { return mode; }
     // Estilo: 0 Modern, 1 fósforo verde (monitor monocromo P1), 2 fósforo ámbar (P3): monocromo con barrido, halo y viñeta
     void setStyle (int st) { style = juce::jlimit (0, 2, st); spectroImage = {}; repaint(); if (onModeChange) onModeChange (mode, style); }
@@ -559,16 +568,24 @@ private:
         fft.performFrequencyOnlyForwardTransform (buf.data());
         for (int k = 0; k < fftSize / 2; ++k)
             magDb[(size_t) k] = juce::Decibels::gainToDecibels (buf[(size_t) k] / (fftSize * 0.25f), -120.0f); // Hann: ganancia 0,5
-        // Barras logarítmicas 20 Hz - 20 kHz con caída de 24 dB/s y marca de pico que cae a 12 dB/s
+        // Barras logarítmicas 20 Hz - 20 kHz. Vista Spectrum (60 Hz): caída de 60 dB/s (de 0 a -72 dB en 1,2 s) y marca de pico
+        // que se retiene 0,4 s y luego cae a 24 dB/s. Juego y demo (30 Hz, usan las barras): caída de 24 dB/s, como antes
         const auto sr = processor.getSampleRate() > 0.0 ? processor.getSampleRate() : 48000.0;
+        const auto fast = mode == spectrum;
+        const auto fps = fast ? 60.0f : 30.0f;
+        const auto barFall = (fast ? 60.0f : 24.0f) / fps, peakFall = (fast ? 24.0f : 12.0f) / fps;
+        const auto holdFrames = fast ? juce::roundToInt (0.4f * fps) : 0;
         for (int b = 0; b < numBars; ++b)
         {
             const auto f0 = 20.0 * std::pow (1000.0, (double) b / numBars), f1 = 20.0 * std::pow (1000.0, (double) (b + 1) / numBars);
             const auto k0 = juce::jlimit (1, fftSize / 2 - 1, (int) (f0 / sr * fftSize)), k1 = juce::jlimit (k0, fftSize / 2 - 1, (int) (f1 / sr * fftSize));
             float v = -120.0f;
             for (int k = k0; k <= k1; ++k) v = juce::jmax (v, magDb[(size_t) k]);
-            bars[(size_t) b] = juce::jmax (v, bars[(size_t) b] - 24.0f / 30.0f);
-            peaks[(size_t) b] = juce::jmax (bars[(size_t) b], peaks[(size_t) b] - 12.0f / 30.0f);
+            bars[(size_t) b] = juce::jmax (v, bars[(size_t) b] - barFall);
+            auto& hold = peakHoldFrames[(size_t) b];
+            if (bars[(size_t) b] >= peaks[(size_t) b]) { peaks[(size_t) b] = bars[(size_t) b]; hold = holdFrames; } // pico nuevo: se retiene
+            else if (hold > 0) --hold;
+            else peaks[(size_t) b] = juce::jmax (bars[(size_t) b], peaks[(size_t) b] - peakFall);
         }
     }
 
@@ -711,6 +728,7 @@ private:
     juce::dsp::FFT fft { fftOrder };
     std::array<float, fftSize / 2> magDb {};
     std::array<float, numBars> bars {}, peaks {};
+    std::array<int, numBars> peakHoldFrames {}; // refrescos que la marca de pico queda quieta antes de caer
     juce::Image spectroImage;
     std::array<float, 2> vu { -20.0f, -20.0f };
     std::array<int, 2> peakHold {};
