@@ -284,7 +284,26 @@ private:
                                                                           : std::nullopt);
             }
         }
+        snapshotFiles(); // tras onPresetFiles (síncrono): las rutas que deja el preset, también las de ficheros que faltan
         return juce::Result::ok();
+    }
+
+    // Rutas de los ficheros del preset (propiedades de estado con el mismo nombre que su atributo en el .xml): samples de la
+    // fuente Sample, Osc 2, Osc 3 y los motores de consola, wavetables de la fuente, Osc 2 y Osc 3, e IR de pantalla. No son
+    // parámetros: isDirty las compara aparte para que cargar, cambiar o quitar un fichero marque el "*" y permita Save
+    std::vector<juce::String> filePathProperties() const
+    {
+        std::vector<juce::String> ids { sampleAttribute, osc2SampleAttribute, osc3SampleAttribute, wavetableAttribute,
+                                        osc2WavetableAttribute, osc3WavetableAttribute, cabIrAttribute };
+        for (const auto& e : engineSamples())
+            ids.push_back (e.attribute);
+        return ids;
+    }
+    void snapshotFiles()
+    {
+        fileSnapshot.clear();
+        for (const auto& id : filePathProperties())
+            fileSnapshot[id] = apvts.state.getProperty (juce::Identifier (id)).toString();
     }
 
 public:
@@ -512,6 +531,7 @@ public:
                 return false;
             snapshot = std::move (*target);
             textSnapshot.clear();
+            snapshotFiles(); // sin referencia del preset para los ficheros: los del estado restaurado
             snapshotValid = true;
         }
 
@@ -520,6 +540,9 @@ public:
                 return true;
         for (const auto& [prop, text] : textSnapshot) // macros editadas (sin referencia tras restaurar el host: no se comparan)
             if (apvts.state.getProperty (prop).toString() != text)
+                return true;
+        for (const auto& [prop, path] : fileSnapshot) // sample, wavetable o IR cargado, cambiado o quitado
+            if (apvts.state.getProperty (juce::Identifier (prop)).toString() != path)
                 return true;
         return false;
     }
@@ -596,6 +619,7 @@ private:
             textSnapshot[prop] = apvts.state.getProperty (prop).toString();
         for (const auto& prop : { playHintProp, playLowProp, playHighProp }) // editar cómo tocarlo también marca el "*"
             textSnapshot[prop.toString()] = apvts.state.getProperty (prop).toString();
+        snapshotFiles(); // Save / Save As: los ficheros guardados. En una carga, loadInternal la repite tras restaurarlos
         snapshotValid = true;
     }
 
@@ -795,4 +819,5 @@ private:
     Values snapshot;
     std::atomic<bool> snapshotValid { false };
     std::map<juce::String, juce::String> textSnapshot;
+    std::map<juce::String, juce::String> fileSnapshot; // rutas de los ficheros del preset (filePathProperties)
 };
