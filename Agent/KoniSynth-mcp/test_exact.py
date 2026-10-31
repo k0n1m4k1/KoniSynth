@@ -101,7 +101,14 @@ async def run():
                 ({"cutoff": "1 kHz", "resonance": "40 dB"}, "dB en un parámetro en %"),
                 ({"cutoff": "1 kHz", "eqMid1Q": "2 unidad_inventada"}, "unidad desconocida en un formato propio"),
                 ({"cutoff": "1 kHz", "sampleRoot": "900 unidad_inventada"}, "unidad desconocida en una nota"),
+                ({"cutoff": "1 kHz", "resonance": "0.5.6"}, "número con dos puntos"),
+                ({"cutoff": "1 kHz", "attack": "0.5.6 ms"}, "número con dos puntos y unidad"),
+                ({"cutoff": "1 kHz", "eqMid1Q": "Q 1..5"}, "dos puntos seguidos en un formato propio"),
+                ({"cutoff": "1 kHz", "resonance": "5-5"}, "texto solo numérico que no es un número"),
             ]
+            for values, what in [({"eqMid1Q": "Q 1.50"}, "formato propio con cifras"), ({"sampleRoot": "C#4"}, "nota con sostenido")]:
+                e = await error("set_parameters", {"values": values})
+                check(e is None, "aceptado (%s): %s" % (what, e or "ok"))
             for values, what in bad:
                 e = await error("set_parameters", {"values": values})
                 check(e is not None, "rechazado (%s): %s" % (what, (e or "ACEPTADO").replace("\n", " ")[:110]))

@@ -14,8 +14,8 @@
 // control desactivado ese puntero es nulo y processBlock no hace más que leerlo (una carga atómica por bloque). El objeto,
 // una vez creado, no se destruye hasta destruir el procesador.
 // Un escritor (hilo de audio) sin bloqueos; lectores en el hilo de mensajes. Capacidad: 12 s a la frecuencia de trabajo
-// (mínimo 48 kHz), dos señales estéreo: 9,2 MB a 48 kHz. Leer N s (máximo 10) mientras el audio avanza es seguro mientras
-// la lectura tarde menos que (12 s - N s), porque el escritor solo pisa lo que tiene delante.
+// (mínimo 48 kHz), dos señales estéreo: 9,2 MB a 48 kHz. Se puede leer hasta 11 s atrás (1 s de guarda frente al bloque que
+// el escritor esté copiando); range comprueba al terminar que el escritor no ha llegado a lo leído (ver range).
 // Dos puntos de captura con las mismas posiciones: "output", la salida final (canales 0-1, push), y "engine", la salida del
 // motor con sus efectos propios (eco del SNES, reverb del MT-32...) antes de vocoder, monitor de entrada, cadena de efectos,
 // Gain y limitador (canales 2-3, pushEngine, en la posición del bloque que push cierra después).
@@ -137,11 +137,18 @@ public:
     // Hilo de mensajes: 'frames' fotogramas desde la posición absoluta 'start', de la salida final o (engine) de la del motor.
     // Devuelve lo ya escrito (puede ser menos: el resto aún no ha sonado); vacío si 'start' no se ha escrito todavía o ya se
     // ha pisado (más de 12 s atrás)
+    // Propiedad de las posiciones (sin mutex en push): push copia su bloque en [write, write + n) y después avanza write; esas
+    // posiciones del anillo son las de [write - capacity, write - capacity + n), lo más antiguo. Antes, un lector aceptaba
+    // start hasta write - capacity y podía leer audio nuevo en una posición histórica. Ahora el lector deja una guarda de 1 s
+    // (mayor que cualquier bloque) detrás de lo que el escritor puede estar tocando, y tras copiar relee write: si el
+    // escritor avanzó tanto que pudo pisar lo leído, devuelve vacío (como "ya pisado"). Leer como mucho 10 s de 12 cabe
     juce::AudioBuffer<float> range (juce::uint64 start, int frames, bool engine = false) const
     {
         const juce::ScopedLock sl (lock);
         const auto end = write.load (std::memory_order_acquire);
-        if (frames <= 0 || start >= end || end - start > (juce::uint64) capacity)
+        const auto guard = (juce::uint64) juce::jmax (1, juce::roundToInt (rate.load()));
+        const auto usable = (juce::uint64) capacity > guard ? (juce::uint64) capacity - guard : 0;
+        if (frames <= 0 || start >= end || end - start > usable)
             return {};
         const auto n = (int) std::min ((juce::uint64) frames, end - start);
         juce::AudioBuffer<float> out (2, n);
@@ -155,6 +162,10 @@ public:
             pos += (juce::uint64) chunk;
             i += chunk;
         }
+        // Mientras se copiaba, el escritor pudo avanzar: lo leído sigue siendo válido si start queda a más de 'usable' de la
+        // posición que el escritor puede estar escribiendo ahora
+        if (write.load (std::memory_order_acquire) - start > usable)
+            return {};
         return out;
     }
 

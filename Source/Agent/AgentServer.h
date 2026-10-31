@@ -432,6 +432,29 @@ private:
         return std::isfinite (number);
     }
 
+    // Cada tramo de cifras y puntos del texto es un número válido: al menos una cifra y como mucho un punto ("Q 1.50", "x2",
+    // "C#4" sí; "0.5.6", "1..2", "." no)
+    static bool wellFormedNumbers (const juce::String& t)
+    {
+        for (int i = 0; i < t.length();)
+        {
+            if (! juce::CharacterFunctions::isDigit (t[i]) && t[i] != '.') { ++i; continue; }
+            int digits = 0, dots = 0;
+            for (; i < t.length() && (juce::CharacterFunctions::isDigit (t[i]) || t[i] == '.'); ++i)
+                (t[i] == '.' ? dots : digits)++;
+            if (digits == 0 || dots > 1)
+                return false;
+        }
+        return true;
+    }
+
+    // Texto que es solo un número completo, con signo opcional ("0.5", "-6", "+.5")
+    static bool plainNumber (const juce::String& t)
+    {
+        const auto body = t.startsWithChar ('-') || t.startsWithChar ('+') ? t.substring (1) : t;
+        return body.isNotEmpty() && body.containsOnly ("0123456789.") && wellFormedNumbers (body);
+    }
+
     // Primer número del texto, con su signo: "Q 1.50" -> 1,5; "C-1" -> -1; "x2.00" -> 2. 0 si no hay
     static double leadingNumber (const juce::String& s)
     {
@@ -547,7 +570,14 @@ private:
             //  - el texto tal como se muestra ("Off", la vocal "E", "C4"), sin distinguir mayúsculas;
             //  - con cifras, el mismo formato que el mostrado quitando las cifras ("Q 1.5" frente a "Q 1.50"), o solo la cifra;
             //  - un nombre de nota que el parámetro muestra con otra grafía ("Db4" se muestra "C#4").
-            // Lo demás es un error: el formato de JUCE leería solo la cifra y descartaría el resto sin avisar
+            // Lo demás es un error: el formato de JUCE leería solo la cifra y descartaría el resto sin avisar. Antes, una
+            // sintaxis numérica inválida: "0.5.6" llegaba aquí, JUCE leía 0,5 y, sin letras que comparar, se aceptaba
+            const auto shape = [] (const juce::String& s) { return s.removeCharacters ("0123456789.+- ").toLowerCase(); };
+            if (! wellFormedNumbers (t) || (shape (t).isEmpty() && t.containsAnyOf ("0123456789") && ! plainNumber (t)))
+            {
+                why = "invalid number in \"" + t + "\" (format like \"" + p.getCurrentValueAsText() + "\")";
+                return false;
+            }
             norm = p.getValueForText (t);
             if (! std::isfinite (norm))
             {
@@ -556,7 +586,6 @@ private:
             }
             norm = juce::jlimit (0.0f, 1.0f, norm);
             const auto shown = p.getText (norm, 64).trim();
-            const auto shape = [] (const juce::String& s) { return s.removeCharacters ("0123456789.+- ").toLowerCase(); };
             const auto hasDigits = t.containsAnyOf ("0123456789");
             const auto note = strictMidiNote (t);
             const auto ok = shown.equalsIgnoreCase (t)

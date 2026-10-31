@@ -57,9 +57,22 @@ public:
             return false;
         reserved.fetch_add (2 * (int) notes.size(), std::memory_order_acq_rel); // antes de publicar: el consumidor los devuelve
         const auto gen = generation.load (std::memory_order_acquire);
-        push ({ Command::kStart, seq, gen, 0, 0, 0.0, 0.0 });
+        // El play entero (inicio y notas) en una sola escritura: AbstractFifo lo publica al cerrar el ámbito, todo a la vez.
+        // Con una escritura por comando, el hilo de audio podía leer el inicio en un bloque (origen = ese bloque) y las notas
+        // en el siguiente: llegaban con offset negativo (-tamaño de bloque) y juce::Synthesiser las descartaba
+        const auto total = 1 + (int) notes.size();
+        const auto scope = fifo.write (total);
+        jassert (scope.blockSize1 + scope.blockSize2 == total); // canSchedule comprobó el hueco y solo este hilo escribe
+        int k = 0;
+        const auto put = [&] (const Command& c)
+        {
+            const auto index = k < scope.blockSize1 ? scope.startIndex1 + k : scope.startIndex2 + (k - scope.blockSize1);
+            commands[(size_t) index] = c;
+            ++k;
+        };
+        put ({ Command::kStart, seq, gen, 0, 0, 0.0, 0.0 });
         for (const auto& n : notes)
-            push ({ Command::kNote, seq, gen, n.note, n.velocity, n.start, n.duration });
+            put ({ Command::kNote, seq, gen, n.note, n.velocity, n.start, n.duration });
         return true;
     }
 
@@ -91,7 +104,11 @@ public:
         for (; i < count && pending[(size_t) i].at < end; ++i)
         {
             const auto& e = pending[(size_t) i];
-            const auto offset = (int) (e.at - now);
+            // Un evento anterior al bloque (no debe ocurrir: el play se publica entero) se entrega al principio en vez de
+            // con offset negativo, que juce::Synthesiser descartaría; se cuenta para las pruebas
+            if (e.at < now)
+                lateEvents.fetch_add (1, std::memory_order_relaxed);
+            const auto offset = (int) juce::jmax ((juce::int64) 0, e.at - now);
             auto& a = active[(size_t) e.note];
             if (e.on)
             {
@@ -115,6 +132,7 @@ public:
 
     bool idle() const { return count == 0 && fifo.getNumReady() == 0; } // sin nada que entregar (hilo de audio)
     int reservedEvents() const { return reserved.load(); }             // créditos en uso (pruebas)
+    int lateEventCount() const { return lateEvents.load(); }           // eventos que llegaron tarde a su bloque (pruebas)
 
 private:
     struct Command
@@ -131,13 +149,6 @@ private:
         juce::uint8 note, velocity;
         bool on;
     };
-
-    void push (const Command& c)
-    {
-        const auto scope = fifo.write (1);
-        if (scope.blockSize1 > 0)      commands[(size_t) scope.startIndex1] = c;
-        else if (scope.blockSize2 > 0) commands[(size_t) scope.startIndex2] = c;
-    }
 
     void drain (juce::MidiBuffer& midi, double fs, juce::uint64 captureFrame)
     {
@@ -233,6 +244,7 @@ private:
     // Compartido entre los dos hilos
     std::atomic<int> reserved { 0 };            // eventos aceptados aún no entregados ni descartados (cola + pendientes)
     std::atomic<juce::uint32> generation { 0 }; // sube con cada corte (cancel, reset)
+    std::atomic<int> lateEvents { 0 };          // eventos con su muestra ya pasada al entregarlos (debe quedar en 0)
     // Último play recibido: número (24 bits) y origen (40 bits: 2^40 muestras = 132 días a 96 kHz)
     static constexpr int frameBits = 40;
     static constexpr juce::uint64 frameMask = (juce::uint64 (1) << frameBits) - 1, seqMask = (1u << 24) - 1, noOrigin = ~juce::uint64 (0);
