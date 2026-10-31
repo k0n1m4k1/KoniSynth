@@ -1009,7 +1009,7 @@ static APVTS::ParameterLayout createLayout()
     // DEFAULT_MIDI_EVENT_QUEUE_SIZE); 4096 da margen a flujos muy densos (ráfagas de CC o aftertouch por encima de unos
     // 1300 mensajes/s, el ritmo del cable MIDI emulado). Con la cola llena, el evento se ejecuta sin cola y una nota que
     // necesite cortar otra puede perderse. Cambiarlo reconstruye la máquina (los patches cargados por SysEx se pierden)
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Queue", 1 }, "MT-32 MIDI Queue", StringArray { "1024", "4096" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Queue", 1 }, "MT-32 MIDI Queue", StringArray { "512", "1024", "2048", "4096" }, 1)); // hasta el formato 8: { 1024, 4096 } (PresetManager::mt32QueueFromFormat8)
 
     // Bloque Noise del Synth (Engines/Synth.h, prepareNoise / shapeNoise). Por defecto, todo neutro: suena como antes
     // Tone: -100 % oscuro (pasa-bajos de 1 polo hasta 50 Hz) .. +100 % brillante (pasa-altos de 1 polo hasta 5 kHz), con el nivel

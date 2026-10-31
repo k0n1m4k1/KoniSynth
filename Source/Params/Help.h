@@ -698,9 +698,10 @@ static juce::String paramHelp (const juce::String& id)
                       "the drum kit. Not used with Multi on." },
         { "mt32Multi", "MIDI channels as they come instead of the keyboard routing, for MT-32 .mid files (parts on channels 2-9, "
                        "rhythm on 10; import them with the transport). SysEx always passes (custom patches and LCD messages)." },
-        { "mt32Queue", "Size of the MIDI event queue of the emulation. 1024 (default, the emulator's own) is enough for playing "
-                       "and for .mid files; 4096 leaves room for very dense streams (bursts of controllers or aftertouch), where a "
-                       "full queue could drop notes. Changing it restarts the MT-32 (patches loaded by SysEx are lost). Default: 1024." },
+        { "mt32Queue", "Size of the MIDI event queue of the emulation, in events: 512, 1024, 2048 or 4096 (the emulator only "
+                       "takes powers of 2). 1024 (default, the emulator's own) is enough for playing and for .mid files; 2048 and "
+                       "4096 leave room for very dense streams (bursts of controllers or aftertouch), where a full queue could drop "
+                       "notes; 512 uses less memory. Changing it restarts the MT-32 (patches loaded by SysEx are lost). Default: 1024." },
         { "mt32NiceAmp", "Munt beautification, off = as the real unit: amp ramps may jump to their target (small clicks). On: "
                          "always gradual." },
         { "mt32NicePan", "Munt beautification, off = as the real unit: the LA32 only gets 3-bit panning (no exact centre for a "

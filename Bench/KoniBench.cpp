@@ -566,6 +566,187 @@ int transportTest()
     return fails;
 }
 
+// practicetest: práctica sobre un .mid (Transport/PlayAlong.h). Fichero de tipo 1 a 120 BPM y 4/4 (por defecto): melodía en el
+// canal 1 (do5 en 2,0 / 2,5 / 3,0 s) y bajo en el canal 2 (do3 en 2,0 / 2,5 / 3,0 / 3,5 s). Comprueba el análisis, la pista
+// silenciada, la cuenta previa (un compás, 2 s), el canal de tus notas, aciertos y fallos en Play, la espera de Wait y el salto
+// de Follow
+int practiceTest()
+{
+    int fails = 0;
+    const auto check = [&fails] (bool ok, const juce::String& what)
+    {
+        std::printf ("%s %s\n", ok ? "OK   " : "FALLO", what.toRawUTF8());
+        if (! ok) ++fails;
+    };
+    const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory).getChildFile ("KoniPracticeTest");
+    dir.deleteRecursively();
+    dir.createDirectory();
+    constexpr double fs = 48000.0;
+    constexpr int bs = 512;
+    const auto file = dir.getChildFile ("song.mid");
+    {
+        juce::MidiFile mf;
+        mf.setTicksPerQuarterNote (960); // 120 BPM: 960 ticks = 0,5 s
+        juce::MidiMessageSequence melody, bass;
+        melody.addEvent (juce::MidiMessage::textMetaEvent (3, "Melody"), 0.0);
+        bass.addEvent (juce::MidiMessage::textMetaEvent (3, "Bass"), 0.0);
+        bass.addEvent (juce::MidiMessage::controllerEvent (2, 7, 90), 0.0); // volumen: lo persigue el salto
+        for (int k = 0; k < 3; ++k)
+        {
+            melody.addEvent (juce::MidiMessage::noteOn (1, 72, (juce::uint8) 100), 3840.0 + 960.0 * k);
+            melody.addEvent (juce::MidiMessage::noteOff (1, 72), 3840.0 + 960.0 * k + 480.0);
+        }
+        for (int k = 0; k < 4; ++k)
+        {
+            bass.addEvent (juce::MidiMessage::noteOn (2, 48, (juce::uint8) 100), 3840.0 + 960.0 * k);
+            bass.addEvent (juce::MidiMessage::noteOff (2, 48), 3840.0 + 960.0 * k + 480.0);
+        }
+        mf.addTrack (melody);
+        mf.addTrack (bass);
+        juce::FileOutputStream os (file);
+        mf.writeTo (os, 1);
+    }
+    SessionTransport t;
+    t.prepare (fs);
+    check (t.loadMidi (file).isEmpty(), "carga del .mid");
+    const auto song = t.getSong();
+    int mel = -1;
+    for (int k = 0; song != nullptr && k < (int) song->tracks.size(); ++k)
+        if (song->tracks[(size_t) k].channel == 1) mel = k;
+    check (song != nullptr && song->tracks.size() == 2 && mel >= 0 && song->suggested == mel && song->numNotes (mel) == 3
+               && std::abs (song->firstBarSeconds - 2.0) < 1.0e-9,
+           "análisis: " + juce::String (song != nullptr ? (int) song->tracks.size() : 0) + " pistas, melodía sugerida, 3 notas, compás de "
+               + juce::String (song != nullptr ? song->firstBarSeconds : 0.0, 3) + " s");
+
+    // Bloques: tus notas (canal 7) en los instantes de userAt (s del .mid); devuelve las notas que salen hacia el motor
+    struct Out { double seconds; int channel, pitch; };
+    const auto run = [&t] (int blocks, std::vector<double> userAt)
+    {
+        std::vector<Out> out;
+        for (int b = 0; b < blocks; ++b)
+        {
+            juce::MidiBuffer midi;
+            const auto pos = t.practicePosition();
+            if (! userAt.empty() && pos + bs / fs > userAt.front())
+            {
+                midi.addEvent (juce::MidiMessage::noteOn (7, 72, (juce::uint8) 100), 0);
+                midi.addEvent (juce::MidiMessage::noteOff (7, 72), bs - 1);
+                userAt.erase (userAt.begin());
+            }
+            t.routeUserMidi (midi);
+            t.injectMidi (midi, bs);
+            for (const auto m : midi)
+                if (m.getMessage().isNoteOn())
+                    out.push_back ({ pos + m.samplePosition / fs, m.getMessage().getChannel(), m.getMessage().getNoteNumber() });
+        }
+        return out;
+    };
+    const auto statuses = [&] { juce::String s; for (int i = 0; i < song->numNotes (mel); ++i) s << "phm"[song->statusOf (mel, i)]; return s; };
+
+    // Play: la melodía no suena; el bajo sí, desplazado por la cuenta previa; tu nota sale por el canal 1
+    t.selectTrack (mel);
+    t.setPracticeMode (SessionTransport::practicePlay);
+    t.play();
+    {
+        const auto first = t.practicePosition();
+        const auto out = run (600, { 2.0 }); // 6,4 s
+        int bass = 0, mine = 0, melodyFromFile = 0;
+        double worst = 0.0;
+        for (const auto& o : out)
+        {
+            if (o.channel == 2) { worst = juce::jmax (worst, std::abs (o.seconds - (2.0 + 0.5 * bass))); ++bass; }
+            if (o.channel == 1) ++mine;
+            if (o.channel == 7) ++melodyFromFile; // canal sin remapear: no debería salir
+        }
+        check (std::abs (first) < 1.0e-9 && bass == 4 && worst < 1.0 / fs + 1.0e-9,
+               "Play: " + juce::String (bass) + " notas de bajo (4), error de tiempo " + juce::String (worst * fs, 2) + " muestras");
+        check (mine == 1 && melodyFromFile == 0, "Play: la melodía del .mid no suena; tu nota sale por el canal 1 (" + juce::String (mine) + " nota)");
+        check (statuses() == "hmm", "Play: estado de tus notas " + statuses() + " (hmm: acertada, fallada, fallada)");
+    }
+    // Cuenta previa: tras STOP, la posición vuelve a -2 s (un compás)
+    t.stop();
+    {
+        juce::MidiBuffer midi;
+        t.injectMidi (midi, bs);
+        check (std::abs (t.practicePosition() + 2.0) < 1.0e-9, "STOP con pista elegida: cuenta previa desde " + juce::String (t.practicePosition(), 3) + " s (-2)");
+    }
+    // Wait: sin tocar, se para en la primera nota tuya (2,0 s) y el bajo de ese instante espera contigo
+    t.setPracticeMode (SessionTransport::practiceWait);
+    t.play();
+    {
+        const auto out = run (500, {});
+        check (std::abs (t.practicePosition() - 2.0) < 1.0e-9 && t.isWaiting() && out.empty(),
+               "Wait: parado en " + juce::String (t.practicePosition(), 4) + " s esperando; " + juce::String ((int) out.size()) + " notas del .mid (0)");
+        const auto after = run (60, { 0.0 }); // tocas el do5: sigue hasta la siguiente (2,5 s; 60 bloques = 0,64 s)
+        check (std::abs (t.practicePosition() - 2.5) < 1.0e-9 && after.size() == 2 && statuses() == "hpp",
+               "Wait: tras tu nota, parado en " + juce::String (t.practicePosition(), 4) + " s; " + juce::String ((int) after.size())
+                   + " notas (la tuya y el bajo); estado " + statuses());
+    }
+    // Follow: si tocas la siguiente antes de su hora, el .mid salta hasta ella
+    t.stop();
+    t.setPracticeMode (SessionTransport::practiceFollow);
+    t.play();
+    {
+        run (500, {});
+        run (2, { 0.0 });               // aciertas la de 2,0 s
+        const auto before = t.practicePosition();
+        run (1, { 0.0 });               // y la de 2,5 s en cuanto puedes, unos ms después
+        const auto after = t.practicePosition();
+        check (before < 2.1 && after >= 2.5 && after <= 2.5 + 2.0 * bs / fs && statuses() == "hhp",
+               "Follow: de " + juce::String (before, 4) + " s salta a " + juce::String (after, 4) + " s; estado " + statuses());
+    }
+    // Salto (seekMidi) en pausa: posición exacta y estado perseguido (el CC 7 = 90 del canal 2, puesto en 0 s)
+    t.pause();
+    t.seekMidi (2.25);
+    {
+        juce::MidiBuffer midi;
+        t.injectMidi (midi, bs);
+        bool cc = false;
+        for (const auto m : midi)
+            cc |= m.getMessage().isControllerOfType (7) && m.getMessage().getChannel() == 2 && m.getMessage().getControllerValue() == 90;
+        check (std::abs (t.practicePosition() - 2.25) < 1.0e-9 && cc,
+               "Salto en pausa: posición " + juce::String (t.practicePosition(), 4) + " s (2,25); CC 7 del canal 2 perseguido: " + (cc ? "sí" : "no"));
+    }
+    t.stop();
+    // Mute y solo (sin parte elegida): con el bajo en mute no suena; con la melodía en solo, solo ella. Tempo del fichero: 120
+    check (std::abs (song->bpmAt (1.0) - 120.0) < 1.0e-9, "BPM del mapa de tempo: " + juce::String (song->bpmAt (1.0), 2) + " (120)");
+    const auto countByChannel = [&run] (int blocks)
+    {
+        std::array<int, 17> n {};
+        for (const auto& o : run (blocks, {})) ++n[(size_t) juce::jlimit (0, 16, o.channel)];
+        return n;
+    };
+    int bassTrack = -1;
+    for (int k = 0; k < (int) song->tracks.size(); ++k)
+        if (song->tracks[(size_t) k].channel == 2) bassTrack = k;
+    t.selectTrack (-1);
+    t.stop();
+    t.setTrackMute (bassTrack, true);
+    t.play();
+    {
+        const auto n = countByChannel (400);
+        check (n[1] == 3 && n[2] == 0, "Mute del bajo: " + juce::String (n[1]) + " notas de melodía (3), " + juce::String (n[2]) + " de bajo (0)");
+    }
+    t.stop();
+    t.setTrackMute (bassTrack, false);
+    t.setTrackSolo (mel, true);
+    t.play();
+    {
+        const auto n = countByChannel (400);
+        check (n[1] == 3 && n[2] == 0, "Solo de la melodía: " + juce::String (n[1]) + " notas de melodía (3), " + juce::String (n[2]) + " de bajo (0)");
+    }
+    t.stop();
+    t.setTrackSolo (mel, false);
+    t.play();
+    {
+        const auto n = countByChannel (400);
+        check (n[1] == 3 && n[2] == 4, "Sin mute ni solo: " + juce::String (n[1]) + " de melodía (3), " + juce::String (n[2]) + " de bajo (4)");
+    }
+    t.stop();
+    std::printf ("%d fallos\n", fails);
+    return fails;
+}
+
 // rhythmtest: ritmos de usuario en MIDI (Engines/UserRhythms.h). Ida y vuelta de los patrones de fábrica, compases de vals,
 // tresillo y 32 pasos, e importación de un MIDI como lo exporta un DAW (tempo en otra pista, notas desplazadas, alias GM)
 int rhythmTest()
@@ -1430,6 +1611,11 @@ int main (int argc, char** argv)
     {
         juce::ScopedJuceInitialiser_GUI init;
         return transportTest();
+    }
+    if (argc >= 2 && juce::String (argv[1]) == "practicetest")
+    {
+        juce::ScopedJuceInitialiser_GUI init;
+        return practiceTest();
     }
     if (argc >= 2 && juce::String (argv[1]) == "rhythmtest")
     {

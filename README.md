@@ -95,6 +95,16 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 - **Audio input and vocoder:** a microphone or line input can go through the effects chain, or be the modulator of a channel
   vocoder (VP-330 with 10 bands, 16 or 32 bands) with any engine as the carrier.
 - **Transport:** record the session to WAV, play audio files, import (also SysEx) and export MIDI.
+- **MIDI Music Player (play along):** the "..." button next to PLAY in the transport (right of the BPM display) opens a
+  small 90s-style player window in the colours of the skin. It stays on top while KoniSynth is in front, docks to the main
+  window when dragged next to its edge (and then moves with it), and shrinks to one line with a double-click on its title.
+  It shows time, title, the current BPM of the file and a mini spectrum, with output volume, tempo (25-150 %, sticks at
+  100 %), a seek bar (jumping keeps each channel's program and controllers), an A-B loop (SET A, SET B, CLEAR) and the
+  last 8 files. Its parts list has mute (M) and solo (S) for each track. Pick one track in the list as your part: it is muted, your notes go to its channel, and the display shows it as
+  a staff scrolling from right to left (diatonic lines, the view follows the melody up and down), with the next note
+  to play in large letters on the right. Modes: Play (the file keeps its tempo), Wait (it stops at each of your notes
+  until you play it) and Follow (if you play ahead, the file jumps with you). One-bar count-in. Only the MT-32 engine
+  with Multi on plays the other tracks with their own instruments.
 - **Presets:** 445 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
   favorites in your own order (keys 1-9 load the first nine) and a searchable browser with filters by category and engine.
   Presets say how to play them (on the display and in the browser) and grey out the keys outside their recommended range.
@@ -107,7 +117,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 - **MIDI controllers:** setup profiles for the M-Audio Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425 and Yamaha reface YC;
   a Controller Setup assistant learns the knobs of your unit one by one and suggests the settings for it.
 - **Display:** oscilloscope, spectrum, spectrogram, goniometer, VU meters, **Arcade** (a pixel-art shooter played by the
-  music) and **Demo** (the brand loop of a 90s car stereo dot-matrix display: 3D logo, demoscene effects, a racer and a
+  music), **Play along** (your part in the MIDI Music Player) and **Demo** (the brand loop of a 90s car stereo dot-matrix display: 3D logo, demoscene effects, a racer and a
   cockpit shooter; it runs on its own in silence and follows the music and the highest held note while playing), in
   modern, green or amber phosphor style. Its bezel follows the skin and style (graphite, terminal casing or
   brushed steel), or is brass, or none; with a bezel the screen has CRT-style glass. BPM display and transport next to it. The VL-1, DX7 and MT-32
@@ -218,7 +228,7 @@ Windows, Linux and macOS: [docs/BUILDING.md](docs/BUILDING.md).
 
 | Suite | What it checks |
 |---|---|
-| `test_units.py` | Undo/redo, transport (WAV bit-exact, MIDI timing), Scala tuning, saturation |
+| `test_units.py` | Undo/redo, transport (WAV bit-exact, MIDI timing), play along (muted part, count-in, Play/Wait/Follow), Scala tuning, saturation |
 | `test_regression.py` | Bit-exact renders of 12 engines with a fixed seed against stored hashes |
 | `test_filters.py` | Filter responses and slopes (ladder, SVF, MS-20, comb, dual), ladder self-oscillation, stability and quality modes, Clean Drive |
 | `test_voice.py` | Per-voice saturation (intermodulation, aliasing, level, position), analog VCA, microtuning, plucked string, Osc 2 wavetable and sample, Complex Mod LP, effects order, Serum `clm` frame size |

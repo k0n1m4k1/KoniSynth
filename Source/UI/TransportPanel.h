@@ -10,6 +10,7 @@ class TransportPanel : public juce::Component, private juce::Timer
 {
 public:
     std::function<void (const juce::String& title, const juce::String& message)> onError;
+    std::function<void()> onMidiPlayer; // abre el diálogo MIDI Player (UI/MidiPlayerPanel.h)
 
     explicit TransportPanel (KoniSynthProcessor& p) : processor (p), transport (p.sessionTransport)
     {
@@ -19,7 +20,7 @@ public:
         stop.setTooltip ("Stop: ends recording and playback and goes back to the start. Right-click: MIDI Learn.");
         play.setTooltip ("Play / Pause: plays the loaded source. An audio file is mixed into the output; a MIDI file plays the "
                          "current sound as if it came from your controller (record it to render it to WAV). Right-click: MIDI Learn.");
-        more.setTooltip ("Load an audio file, import or export MIDI, open the recordings folder.");
+        more.setTooltip ("Load an audio file, import or export MIDI, open the MIDI Music Player (pick a track and play along), open the recordings folder.");
         rec.onClick = [this] { toggleRecord(); };
         stop.onClick = [this] { transport.stop(); refresh(); };
         play.onClick = [this] { if (transport.isPlaying()) transport.pause(); else transport.play(); refresh(); };
@@ -161,9 +162,10 @@ private:
     void showMenu()
     {
         juce::PopupMenu m;
-        m.addItem ("Load Audio File...", [this] { choose (false); });
-        m.addItem ("Import MIDI File...", [this] { choose (true); });
-        m.addItem ("Export Take MIDI...", transport.hasTakeMidi(), false, [this] { exportMidi(); });
+        m.addItem ("Load Audio File", [this] { choose (false); });
+        m.addItem ("Import MIDI File", [this] { choose (true); });
+        m.addItem ("Export Take MIDI", transport.hasTakeMidi(), false, [this] { exportMidi(); });
+        m.addItem ("MIDI Music Player", onMidiPlayer != nullptr, false, [this] { if (onMidiPlayer) onMidiPlayer(); });
         m.addSeparator();
         const auto last = transport.lastRecording();
         m.addItem ("Show Last Recording", last.existsAsFile(), false, [last] { last.revealToUser(); });

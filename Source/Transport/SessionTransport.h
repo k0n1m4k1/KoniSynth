@@ -1,6 +1,7 @@
 // Se incluye desde KoniSynth.cpp (y desde Bench/KoniBench.cpp para su prueba unitaria). Solo usa JUCE.
 #pragma once
 #include <bitset>
+#include "PlayAlong.h"
 
 //==============================================================================
 // Transporte de sesión: REC / STOP / PLAY-PAUSE.
@@ -9,6 +10,12 @@
 //   MIDI se guarda como .mid junto al WAV (960 PPQ, tempo del momento de empezar).
 // - PLAY reproduce la fuente cargada: un fichero de audio (se suma a la salida) o un .mid (sus eventos entran al motor
 //   como si llegaran del controlador). Tras grabar, la fuente pasa a ser la toma recién grabada.
+// - Práctica sobre un .mid (play-along, Transport/PlayAlong.h): eliges una pista ("tu parte"); sus notas no suenan, tus
+//   mensajes de canal van a su canal (suenas con su instrumento) y tus notas se comparan con las suyas. Modos: Play (el
+//   .mid sigue a su tempo; acierto si tocas el tono a ±150 ms), Wait (se para en cada nota o acorde tuyo hasta que lo tocas)
+//   y Follow (como Wait y, si te adelantas, la banda salta a tu nota: tu ritmo la acelera). Tempo del .mid de 25 a 150 %,
+//   bucle A-B y, practicando, cuenta previa de un compás. Sin pista elegida y al 100 %, el reloj es el de siempre: las
+//   mismas muestras enteras (bit a bit)
 //
 // Hilos: el de audio no asigna memoria propia, no bloquea ni toca el disco. El WAV lo escribe un TimeSliceThread propio
 // (ThreadedWriter, FIFO de 4 s); la lectura del audio va por delante en ese mismo hilo hacia una FIFO de 1 s, y el MIDI
@@ -159,6 +166,8 @@ public:
         juce::MidiFile mf;
         if (! in.openedOk() || ! mf.readFrom (in, true))
             return "not a valid MIDI file: " + file.getFileName();
+        auto analysed = PlayAlongSong::analyse (mf); // en ticks: compases y tempo
+        analysed->prepareStatus();
         mf.convertTimestampTicksToSeconds();
         std::vector<PlayEvent> events;
         for (int t = 0; t < mf.getNumTracks(); ++t)
@@ -166,7 +175,7 @@ public:
                 if (const auto& m = e->message; m.isNoteOnOrOff() || m.isController() || m.isPitchWheel() || m.isAftertouch()
                                                  || m.isChannelPressure() || m.isProgramChange()
                                                  || m.isSysEx()) // SysEx: patches propios y textos del LCD de los .mid del MT-32
-                    events.push_back ({ m.getTimeStamp(), m });
+                    events.push_back ({ m.getTimeStamp(), m, analysed->trackOf (t, m) });
         // Por tiempo; a igualdad, las notas apagadas primero (una nota repetida no se corta a sí misma)
         std::stable_sort (events.begin(), events.end(), [] (const PlayEvent& a, const PlayEvent& b)
                           { return a.seconds != b.seconds ? a.seconds < b.seconds : (a.message.isNoteOff() && ! b.message.isNoteOff()); });
@@ -174,6 +183,7 @@ public:
             return "the MIDI file has no notes or controllers: " + file.getFileName();
         const juce::ScopedLock cl (controlLock);
         stopPlaybackLocked();
+        std::shared_ptr<PlayAlongSong> old;
         {
             const juce::ScopedLock rl (readerLock);
             reader.reset();
@@ -181,11 +191,84 @@ public:
             midiEvents = std::move (events);
             midiCursor = 0;
             lengthSeconds.store (midiEvents.back().seconds);
+            old = std::exchange (song, analysed); // el anterior se libera fuera del SpinLock
+            selectedTrack.store (-1);
+            for (auto& m : muted) m.store (false);
+            for (auto& s : soloed) s.store (false);
+            soloCount.store (0);
+            loopA.store (-1.0);
+            loopB.store (-1.0);
+            leadIn.store (analysed->firstBarSeconds);
             source.store (Source::midi);
         }
         sourceName = file.getFileName();
         return {};
     }
+
+    //==========================================================================
+    // Práctica sobre el .mid (hilo de mensajes)
+
+    // Análisis del .mid cargado (pistas, notas, compases, estado de cada nota); nullptr sin .mid
+    std::shared_ptr<const PlayAlongSong> getSong() const
+    {
+        const juce::SpinLock::ScopedLockType sl (playLock);
+        return source.load() == Source::midi ? song : nullptr;
+    }
+
+    // Tu parte: índice de pista lógica, o -1 (suenan todas). Sueltan las notas del .mid y el estado empieza aquí
+    void selectTrack (int t)
+    {
+        const juce::ScopedLock cl (controlLock);
+        if (selectedTrack.exchange (t) == t)
+            return;
+        flushNotes.store (true);
+        reseek.store (true);
+        if (! playing.load() && midiPos.load() <= 0.0)
+            rewind.store (true); // aún en el principio: con la pista elegida, empieza con la cuenta previa
+    }
+    int getSelectedTrack() const { return selectedTrack.load(); }
+
+    // Mute y solo por pista lógica (máximo maxTracks). Con algún solo, solo suenan las pistas en solo. Solo se descartan los
+    // note-on de las silenciadas (los note-off pasan: ninguna nota se queda colgada; la que sonaba acaba a su hora)
+    static constexpr int maxTracks = 256;
+    void setTrackMute (int t, bool m) { if (juce::isPositiveAndBelow (t, maxTracks)) muted[(size_t) t].store (m); }
+    void setTrackSolo (int t, bool s)
+    {
+        if (juce::isPositiveAndBelow (t, maxTracks) && soloed[(size_t) t].exchange (s) != s)
+            soloCount.fetch_add (s ? 1 : -1);
+    }
+    bool isTrackMuted (int t) const  { return juce::isPositiveAndBelow (t, maxTracks) && muted[(size_t) t].load(); }
+    bool isTrackSoloed (int t) const { return juce::isPositiveAndBelow (t, maxTracks) && soloed[(size_t) t].load(); }
+    bool isTrackSilenced (int t) const
+    {
+        return juce::isPositiveAndBelow (t, maxTracks) && (muted[(size_t) t].load() || (soloCount.load() > 0 && ! soloed[(size_t) t].load()));
+    }
+
+    enum PracticeMode { practicePlay = 0, practiceWait, practiceFollow };
+    void setPracticeMode (int m) { practiceMode.store (juce::jlimit (0, 2, m)); reseek.store (true); }
+    int getPracticeMode() const { return practiceMode.load(); }
+
+    // Tempo del .mid (1 = el del fichero), de 0,25 a 1,5
+    void setTempoScale (float s) { tempoScale.store (juce::jlimit (0.25f, 1.5f, s)); }
+    float getTempoScale() const { return tempoScale.load(); }
+
+    // Bucle A-B en segundos del fichero (b <= a: sin bucle)
+    void setLoop (double a, double b) { loopA.store (juce::jmax (0.0, a)); loopB.store (b); }
+    void clearLoop() { loopA.store (-1.0); loopB.store (-1.0); }
+    double getLoopA() const { return loopA.load(); }
+    double getLoopB() const { return loopB.load(); }
+
+    // Salto a un instante del .mid (s, sin cuenta previa), reproduciendo o en pausa; se aplica en el siguiente bloque de audio
+    void seekMidi (double seconds) { seekTarget.store (juce::jmax (0.0, seconds)); }
+
+    // Posición en el .mid en segundos (negativa durante la cuenta previa) y si espera tu nota (Wait / Follow)
+    double practicePosition() const { return midiPos.load() / deviceRate.load(); }
+    bool isWaiting() const { return waiting.load(); }
+
+    // Tus notas recientes para la vista (tiempos en segundos del .mid; off < on: aún pulsada; ok: acertó una nota de tu parte)
+    struct UserNote { std::atomic<double> on { -1.0e9 }, off { -1.0e9 }; std::atomic<int> pitch { -1 }; std::atomic<bool> ok { false }; };
+    static constexpr int numUserNotes = 64;
+    const std::array<UserNote, numUserNotes>& getUserNotes() const { return userNotes; }
 
     // Exporta el MIDI de la última toma (grabada o en curso)
     juce::String exportMidi (const juce::File& file)
@@ -201,12 +284,17 @@ public:
     // Estado para la UI (hilo de mensajes)
     bool isRecording() const    { return recording.load(); }
     bool isPlaying() const      { return playing.load(); }
+    bool isPracticing() const   { return source.load() == Source::midi && selectedTrack.load() >= 0; }
     Source getSource() const    { return source.load(); }
     juce::String getSourceName() const { const juce::ScopedLock cl (controlLock); return sourceName; }
     juce::File lastRecording() const   { const juce::ScopedLock cl (controlLock); return lastTake; }
     bool hasTakeMidi() const    { const juce::ScopedLock tl (takeLock); return take.getNumEvents() > 0 || midiFifo.getNumReady() > 0; }
     double recordedSeconds() const { return (double) recFrames.load() / deviceRate.load(); }
-    double positionSeconds() const { return rewind.load() ? 0.0 : (double) playPos.load() / deviceRate.load(); }
+    double positionSeconds() const
+    {
+        if (rewind.load()) return 0.0;
+        return source.load() == Source::midi ? juce::jmax (0.0, midiPos.load() / deviceRate.load()) : (double) playPos.load() / deviceRate.load();
+    }
     double getLengthSeconds() const { return lengthSeconds.load(); }
     juce::int64 getDrops() const { return droppedAudio.load() + droppedMidi.load() + underruns.load(); }
 
@@ -214,40 +302,152 @@ public:
     // Hilo de audio
 
     // Al principio del bloque, antes de leer el MIDI (pitch bend, CC): añade los eventos del .mid que caen en este bloque
-    // y, tras PAUSE / STOP / fin, apaga las notas que dejó sonando
+    // y, tras PAUSE / STOP / fin, apaga las notas que dejó sonando. Reloj: midiPos, en muestras del fichero a la frecuencia
+    // del dispositivo (double: entero mientras el tempo sea el 100 %, como el contador entero de antes); avanza
+    // numSamples · tempo por bloque, menos en Wait / Follow si llega a una nota tuya sin tocar
     void injectMidi (juce::MidiBuffer& midi, int numSamples)
     {
+        const auto fs = deviceRate.load();
         if (rewind.exchange (false))
         {
             playPos.store (0);
             midiCursor = 0;
+            midiPos.store (selectedTrack.load() >= 0 ? -std::round (leadIn.load() * fs) : 0.0); // practicando: cuenta previa
+            reseek.store (true);
         }
         if (flushNotes.exchange (false))
             releaseHeldNotes (midi, 0);
+        if (source.load() == Source::midi && seekTarget.load() >= 0.0)
+            applySeek (midi, fs);
         if (! playing.load (std::memory_order_acquire) || source.load() != Source::midi)
             return;
         const juce::SpinLock::ScopedTryLockType tl (playLock);
         if (! tl.isLocked())
             return; // el hilo de mensajes cambia la fuente ahora mismo: los eventos salen en el bloque siguiente
-        const auto fs = deviceRate.load();
-        const auto start = playPos.load();
-        const auto end = start + numSamples;
+        const auto* s = song.get();
+        const auto sel = selectedTrack.load();
+        const auto practice = s != nullptr && sel >= 0 && sel < (int) s->tracks.size();
+        const auto mode = practice ? practiceMode.load() : (int) practicePlay;
+        const auto rate = (double) tempoScale.load();
+        auto start = midiPos.load();
+        if (practice && reseek.exchange (false))
+            seekPractice (*s, sel, start / fs);
+
+        // Wait / Follow: los grupos (nota o acorde) ya tocados quedan atrás; en Follow, si los tocaste antes de su hora, el
+        // .mid salta hasta ellos (sin las notas que habría tocado entre medias)
+        if (practice && mode != practicePlay)
+        {
+            const auto& notes = s->notes[(size_t) sel];
+            auto jumpTo = start;
+            while (nextNote < notes.size() && groupDone (*s, sel, nextNote))
+            {
+                const auto g = std::round (notes[nextNote].start * fs);
+                if (mode == practiceFollow && g > jumpTo) jumpTo = g;
+                nextNote = groupEnd (notes, nextNote);
+            }
+            if (jumpTo > start)
+            {
+                skipTo (midi, jumpTo, fs, sel);
+                start = jumpTo;
+            }
+        }
+        auto end = start + numSamples * rate;
+        auto waitingNow = false;
+        if (practice && mode != practicePlay && nextNote < s->notes[(size_t) sel].size())
+        {
+            const auto g = std::round (s->notes[(size_t) sel][nextNote].start * fs);
+            if (end > g) { end = juce::jmax (start, g); waitingNow = true; }
+        }
+        waiting.store (waitingNow);
+        // Bucle A-B: el bloque acaba en B y el siguiente empieza en A
+        const auto a = std::round (loopA.load() * fs), b = std::round (loopB.load() * fs);
+        const auto wrap = loopB.load() > loopA.load() && loopA.load() >= 0.0 && start < b && end >= b;
+        if (wrap) end = b;
+
         for (; midiCursor < midiEvents.size(); ++midiCursor)
         {
             const auto& e = midiEvents[midiCursor];
-            const auto t = (juce::int64) std::llround (e.seconds * fs);
+            const auto t = (double) std::llround (e.seconds * fs);
             if (t >= end)
                 break;
-            const auto offset = (int) juce::jlimit<juce::int64> (0, numSamples - 1, t - start);
+            if (practice && e.track == sel && e.message.isNoteOnOrOff())
+                continue; // tu parte: la tocas tú (sus CC y Program Change sí entran: tu instrumento y tu volumen)
+            if (e.message.isNoteOn() && isTrackSilenced (e.track))
+                continue; // pista en mute (o fuera del solo)
+            const auto offset = (int) juce::jlimit (0.0, (double) (numSamples - 1), std::floor ((t - start) / rate));
             midi.addEvent (e.message, offset);
             track (e.message);
         }
-        if (midiCursor >= midiEvents.size()) // fin del fichero: para, apaga lo que quede y vuelve al principio
+        // Play: las notas tuyas que pasan de ±hitWindow sin tocar, falladas
+        if (practice && mode == practicePlay)
+        {
+            const auto& notes = s->notes[(size_t) sel];
+            while (missNote < notes.size() && (notes[missNote].start + hitWindow) * fs < end)
+            {
+                if (s->statusOf (sel, (int) missNote) == PlayAlongSong::pending)
+                    s->setStatus (sel, (int) missNote, PlayAlongSong::missed);
+                ++missNote;
+            }
+        }
+        if (wrap)
+        {
+            releaseHeldNotes (midi, numSamples - 1);
+            midiPos.store (a);
+            midiCursor = 0;
+            while (midiCursor < midiEvents.size() && (double) std::llround (midiEvents[midiCursor].seconds * fs) < a)
+                ++midiCursor;
+            if (practice)
+                seekPractice (*s, sel, a / fs);
+            return;
+        }
+        midiPos.store (end);
+        const auto practiceDone = ! practice || mode == practicePlay || nextNote >= s->notes[(size_t) sel].size();
+        if (midiCursor >= midiEvents.size() && practiceDone) // fin del fichero: para, apaga lo que quede y vuelve al principio
         {
             playing.store (false);
             releaseHeldNotes (midi, numSamples - 1);
             rewind.store (true);
         }
+    }
+
+    // Hilo de audio, antes de injectMidi (el controlador) y con el teclado en pantalla aparte: practicando, tus mensajes de
+    // canal pasan al canal de tu pista y tus notas se comparan con las suyas. Sin pista elegida, no toca nada
+    void routeUserMidi (juce::MidiBuffer& midi)
+    {
+        const auto sel = selectedTrack.load();
+        if (sel < 0 || source.load() != Source::midi || midi.isEmpty())
+            return;
+        const juce::SpinLock::ScopedTryLockType tl (playLock);
+        if (! tl.isLocked())
+            return;
+        const auto* s = song.get();
+        if (s == nullptr || sel >= (int) s->tracks.size())
+            return;
+        const auto channel = s->tracks[(size_t) sel].channel;
+        const auto fs = deviceRate.load();
+        const auto running = playing.load();
+        const auto rate = (double) tempoScale.load();
+        userScratch.clear();
+        for (const auto metadata : midi)
+        {
+            if (metadata.numBytes < 1 || metadata.numBytes > 3 || metadata.data[0] < 0x80 || metadata.data[0] >= 0xF0)
+            {
+                userScratch.addEvent (metadata.data, metadata.numBytes, metadata.samplePosition);
+                continue;
+            }
+            juce::uint8 bytes[3] {};
+            std::copy (metadata.data, metadata.data + metadata.numBytes, bytes);
+            bytes[0] = (juce::uint8) ((bytes[0] & 0xF0) | (channel - 1));
+            userScratch.addEvent (bytes, metadata.numBytes, metadata.samplePosition);
+            const auto kind = bytes[0] & 0xF0;
+            const auto when = (midiPos.load() + metadata.samplePosition * rate) / fs;
+            if (metadata.numBytes == 3 && kind == 0x90 && bytes[2] > 0)
+                userNoteOn (*s, sel, bytes[1], when, running);
+            else if (metadata.numBytes == 3 && (kind == 0x80 || kind == 0x90))
+                userNoteOff (bytes[1], when);
+        }
+        midi.clear(); // misma cantidad de datos: cabe sin reservar memoria
+        midi.addEvents (userScratch, 0, -1, 0);
     }
 
     // Tras mezclar el teclado en pantalla: copia a la toma todo lo que entra al motor
@@ -276,9 +476,7 @@ public:
         const auto chans = buffer.getNumChannels();
         if (playing.load (std::memory_order_acquire))
         {
-            if (source.load() == Source::midi)
-                playPos.fetch_add (n);
-            else if (source.load() == Source::audio && seekGen.load() == appliedSeekGen.load())
+            if (source.load() == Source::audio && seekGen.load() == appliedSeekGen.load()) // el .mid avanza en injectMidi
             {
                 const juce::SpinLock::ScopedTryLockType tl (playLock);
                 int got = 0;
@@ -353,7 +551,123 @@ public:
     }
 
 private:
-    struct PlayEvent { double seconds; juce::MidiMessage message; };
+    struct PlayEvent { double seconds; juce::MidiMessage message; int track = -1; }; // track: pista lógica (PlayAlongSong)
+
+    // Práctica: margen de acierto en Play (s) y de acorde (notas que empiezan a la vez, s)
+    static constexpr double hitWindow = 0.15, chordWindow = 0.08;
+
+    static size_t groupEnd (const std::vector<PlayAlongSong::Note>& notes, size_t i)
+    {
+        auto j = i;
+        while (j < notes.size() && notes[j].start <= notes[i].start + chordWindow) ++j;
+        return j;
+    }
+
+    static bool groupDone (const PlayAlongSong& s, int t, size_t i)
+    {
+        for (auto j = i; j < groupEnd (s.notes[(size_t) t], i); ++j)
+            if (s.statusOf (t, (int) j) != PlayAlongSong::hit) return false;
+        return true;
+    }
+
+    // Nueva posición (inicio, pista elegida, bucle, cambio de modo): las notas tuyas desde ahí vuelven a pendientes
+    void seekPractice (const PlayAlongSong& s, int t, double seconds)
+    {
+        const auto& notes = s.notes[(size_t) t];
+        nextNote = 0;
+        while (nextNote < notes.size() && notes[nextNote].start < seconds - hitWindow) ++nextNote;
+        missNote = nextNote;
+        for (auto i = nextNote; i < notes.size(); ++i)
+            s.setStatus (t, (int) i, PlayAlongSong::pending);
+    }
+
+    // Follow: salto hacia delante. Entran los eventos que no son notas (programas, CC, pitch bend) y las notas apagadas
+    // de lo que sonaba; las que habrían empezado entre medias, no
+    void skipTo (juce::MidiBuffer& midi, double target, double fs, int sel)
+    {
+        for (; midiCursor < midiEvents.size(); ++midiCursor)
+        {
+            const auto& e = midiEvents[midiCursor];
+            if ((double) std::llround (e.seconds * fs) >= target) break;
+            const auto& m = e.message;
+            if (m.isNoteOn() || (e.track == sel && m.isNoteOnOrOff())) continue;
+            if (m.isNoteOff() && ! held[(size_t) juce::jlimit (1, 16, m.getChannel()) - 1].test ((size_t) m.getNoteNumber())) continue;
+            midi.addEvent (m, 0);
+            track (m);
+        }
+    }
+
+    // Salto pedido con seekMidi: suelta lo que suena, coloca el reloj y el cursor, y persigue el estado de cada canal hasta
+    // ese instante (último Program Change, controladores 0-119 y pitch bend), para que cada parte suene con su instrumento,
+    // volumen y paneo. Coste: un recorrido de los eventos anteriores (≈ 10^4 en un .mid de juego, del orden de 0,1 ms)
+    void applySeek (juce::MidiBuffer& midi, double fs)
+    {
+        const juce::SpinLock::ScopedTryLockType tl (playLock);
+        if (! tl.isLocked())
+            return; // se reintenta en el bloque siguiente
+        const auto target = seekTarget.exchange (-1.0);
+        releaseHeldNotes (midi, 0);
+        chaseProgram.fill (-1);
+        chaseBend.fill (-1);
+        for (auto& c : chaseCc) c.fill (-1);
+        const auto at = std::round (target * fs);
+        midiCursor = 0;
+        for (; midiCursor < midiEvents.size() && (double) std::llround (midiEvents[midiCursor].seconds * fs) < at; ++midiCursor)
+        {
+            const auto& m = midiEvents[midiCursor].message;
+            const auto ch = (size_t) juce::jlimit (1, 16, m.getChannel()) - 1;
+            if (m.isProgramChange()) chaseProgram[ch] = m.getProgramChangeNumber();
+            else if (m.isController() && m.getControllerNumber() < 120) chaseCc[ch][(size_t) m.getControllerNumber()] = (juce::int16) m.getControllerValue();
+            else if (m.isPitchWheel()) chaseBend[ch] = m.getPitchWheelValue();
+        }
+        for (int ch = 0; ch < 16; ++ch)
+        {
+            if (chaseProgram[(size_t) ch] >= 0) midi.addEvent (juce::MidiMessage::programChange (ch + 1, chaseProgram[(size_t) ch]), 0);
+            for (int cc = 0; cc < 120; ++cc)
+                if (cc != 64 && chaseCc[(size_t) ch][(size_t) cc] >= 0) // el pedal no: soltaría o sostendría notas que no suenan
+                    midi.addEvent (juce::MidiMessage::controllerEvent (ch + 1, cc, chaseCc[(size_t) ch][(size_t) cc]), 0);
+            if (chaseBend[(size_t) ch] >= 0) midi.addEvent (juce::MidiMessage::pitchWheel (ch + 1, chaseBend[(size_t) ch]), 0);
+        }
+        midiPos.store (at);
+        playPos.store ((juce::int64) at);
+        reseek.store (true);
+    }
+
+    void userNoteOn (const PlayAlongSong& s, int t, int pitch, double when, bool running)
+    {
+        auto match = -1;
+        if (running)
+        {
+            const auto& notes = s.notes[(size_t) t];
+            if (practiceMode.load() == practicePlay) // la pendiente de ese tono a ±hitWindow de tu instante
+            {
+                for (auto i = missNote; i < notes.size() && notes[i].start <= when + hitWindow; ++i)
+                    if (notes[i].pitch == pitch && s.statusOf (t, (int) i) == PlayAlongSong::pending && std::abs (notes[i].start - when) <= hitWindow)
+                    { match = (int) i; break; }
+            }
+            else // Wait / Follow: una nota del grupo que toca ahora
+                for (auto i = nextNote; i < groupEnd (notes, nextNote); ++i)
+                    if (notes[i].pitch == pitch && s.statusOf (t, (int) i) == PlayAlongSong::pending)
+                    { match = (int) i; break; }
+            if (match >= 0)
+                s.setStatus (t, match, PlayAlongSong::hit);
+        }
+        auto& u = userNotes[(size_t) (userHead.fetch_add (1) % numUserNotes)];
+        u.off.store (-1.0e9);
+        u.on.store (when);
+        u.pitch.store (pitch);
+        u.ok.store (match >= 0);
+    }
+
+    void userNoteOff (int pitch, double when)
+    {
+        const auto head = userHead.load();
+        for (int k = 1; k <= numUserNotes; ++k)
+        {
+            auto& u = userNotes[(size_t) ((head - k + numUserNotes * 4) % numUserNotes)];
+            if (u.pitch.load() == pitch && u.off.load() < u.on.load()) { u.off.store (when); return; }
+        }
+    }
     struct CapturedEvent { juce::int64 time = 0; juce::uint8 bytes[3] {}; juce::uint8 size = 0; };
 
     void ensureThread()
@@ -540,7 +854,7 @@ private:
     juce::File recFile, lastTake;
 
     // Reproducción
-    juce::SpinLock playLock; // fuente y FIFO de audio frente al hilo de audio
+    mutable juce::SpinLock playLock; // fuente y FIFO de audio frente al hilo de audio
     std::atomic<Source> source { Source::none };
     std::atomic<bool> playing { false }, rewind { false }, flushNotes { false }, fileEnded { false };
     std::atomic<juce::int64> playPos { 0 }, underruns { 0 };
@@ -548,7 +862,21 @@ private:
     std::atomic<juce::uint32> seekGen { 0 }, appliedSeekGen { 0 };
     std::vector<PlayEvent> midiEvents;
     size_t midiCursor = 0;
+    // Práctica: análisis del .mid (se cambia bajo playLock), tu pista, modo, tempo, bucle y reloj del .mid
+    std::shared_ptr<PlayAlongSong> song;
+    std::atomic<int> selectedTrack { -1 }, practiceMode { practicePlay }, userHead { 0 };
+    std::atomic<float> tempoScale { 1.0f };
+    std::atomic<double> midiPos { 0.0 }, loopA { -1.0 }, loopB { -1.0 }, leadIn { 2.0 };
+    std::atomic<bool> waiting { false }, reseek { false };
+    size_t nextNote = 0, missNote = 0; // hilo de audio: siguiente grupo tuyo (Wait / Follow) y siguiente a dar por fallado (Play)
+    std::array<UserNote, numUserNotes> userNotes;
+    juce::MidiBuffer userScratch = [] { juce::MidiBuffer b; b.ensureSize (16384); return b; }();
     std::array<std::bitset<128>, 16> held {};
+    std::atomic<double> seekTarget { -1.0 };                 // seekMidi: instante pedido (s), o < 0
+    std::array<std::atomic<bool>, maxTracks> muted {}, soloed {}; // mute y solo por pista lógica
+    std::atomic<int> soloCount { 0 };
+    std::array<int, 16> chaseProgram {}, chaseBend {};       // applySeek: estado perseguido por canal (-1: sin dato)
+    std::array<std::array<juce::int16, 120>, 16> chaseCc {};
     std::array<bool, 16> sustained {};
     juce::String sourceName;
 

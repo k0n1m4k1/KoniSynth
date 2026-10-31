@@ -262,7 +262,7 @@ public:
         mt32BuiltQueue = (int) params.mt32Queue->load();
         mt32Rate = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
         juce::String report;
-        auto machine = Mt32Machine::open (mt32RomFolder(), mt32BuiltModel, mt32Rate, report, mt32BuiltQueue == 1 ? 4096u : 1024u);
+        auto machine = Mt32Machine::open (mt32RomFolder(), mt32BuiltModel, mt32Rate, report, 512u << juce::jlimit (0, 3, mt32BuiltQueue));
         mt32Engine.slot.replace (std::move (machine));
         const juce::ScopedLock sl (sampleInfoLock);
         mt32Status = report;
@@ -461,6 +461,9 @@ public:
         const auto agentInControl = agentSession.inControl.load (std::memory_order_relaxed);
         const auto noteOns = [&midi] { int n = 0; for (const auto m : midi) n += m.getMessage().isNoteOn() ? 1 : 0; return n; };
         int userNoteOns = agentInControl ? noteOns() : 0;
+        // Práctica sobre un .mid (Transport/PlayAlong.h): lo que hay ahora en midi es tuyo (controlador); va al canal de tu pista
+        // y se compara con sus notas. Sin pista elegida, no cambia nada
+        sessionTransport.routeUserMidi (midi);
         // Transporte: eventos del .mid en reproducción (antes de leer bend, rueda y CC) y notas que deja al parar
         sessionTransport.injectMidi (midi, numSamples);
         const auto beforeKeyboard = agentInControl ? noteOns() : 0;
@@ -493,7 +496,20 @@ public:
         if (const auto q = filterQualityRequested.load(); q != params.ladderQuality.load() && ! anySynthVoiceActive())
             params.ladderQuality.store (q);
 
-        keyboardState.processNextMidiBuffer (midi, 0, numSamples, true); // mezcla las notas del teclado en pantalla
+        if (sessionTransport.isPracticing())
+        {
+            // Practicando: el teclado en pantalla aparte, para llevar sus notas a tu pista como las del controlador. Las del
+            // controlador y del .mid ya están en midi: el teclado las muestra igual (sin SysEx: no se copian mensajes largos)
+            for (const auto metadata : midi)
+                if (metadata.numBytes <= 3)
+                    keyboardState.processNextMidiEvent (metadata.getMessage());
+            keyboardScratch.clear();
+            keyboardState.processNextMidiBuffer (keyboardScratch, 0, numSamples, true);
+            sessionTransport.routeUserMidi (keyboardScratch);
+            midi.addEvents (keyboardScratch, 0, -1, 0);
+        }
+        else
+            keyboardState.processNextMidiBuffer (midi, 0, numSamples, true); // mezcla las notas del teclado en pantalla
         if (agentInControl)
         {
             userNoteOns += noteOns() - beforeKeyboard; // teclado en pantalla
@@ -1095,6 +1111,13 @@ public:
         limWasOn = limOn;
 
         easterEgg.render (buffer); // huevo de pascua del About: se suma al final, fuera de la cadena (solo con el About abierto)
+        // Volumen del MIDI Music Player: ganancia de toda la salida, como el volumen de un reproductor; antes de REC y del display
+        // (se graba y se ve lo que se oye). Al 100 % no toca el búfer (bit a bit igual)
+        if (const auto v = playerVolume.load (std::memory_order_relaxed); v != 1.0f || lastPlayerVolume != 1.0f)
+        {
+            buffer.applyGainRamp (0, numSamples, lastPlayerVolume, v); // rampa por bloque: sin zipper noise
+            lastPlayerVolume = v;
+        }
         sessionTransport.processAudio (buffer); // PLAY de un fichero de audio (se suma) y REC de lo que sale
         pushToScope (buffer);
         if (auto* tap = agentTapActive.load (std::memory_order_acquire)) // control por agente (F3); desactivado: nulo
@@ -1199,11 +1222,13 @@ public:
             // (PresetManager::engineSamples): un estado sin estas marcas es anterior
             xml->setAttribute (kslDbAttribute, 1);
             xml->setAttribute (engineSamplesAttribute, 1);
+            xml->setAttribute (mt32QueueAttribute, 1); // mt32Queue con 4 tamaños (512..4096); sin la marca: { 1024, 4096 }
             copyXmlToBinary (*xml, dest);
         }
     }
     static constexpr const char* kslDbAttribute = "kslDb";
     static constexpr const char* engineSamplesAttribute = "engineSamples";
+    static constexpr const char* mt32QueueAttribute = "mt32Queue4";
 
     // Grupos de la cadena de efectos (bloques COLOR..SPACE del editor), en su orden de siempre
     enum FxGroup { fxColor = 0, fxAmp, fxDynamics, fxModFx, fxEnsemble, fxSpace, numFxGroups };
@@ -1340,6 +1365,12 @@ public:
                     if (sub != nullptr)
                         xml->removeChildElement (sub, true);
                 }
+
+                // Estados anteriores a los 4 tamaños de la cola del MT-32 (sin la marca mt32Queue4): { 1024, 4096 } -> { 512, 1024,
+                // 2048, 4096 }, mismo tamaño (PresetManager::mt32QueueFromFormat8)
+                if (! xml->hasAttribute (mt32QueueAttribute))
+                    if (auto* q = xml->getChildByAttribute ("id", "mt32Queue"))
+                        q->setAttribute ("value", PresetManager::mt32QueueFromFormat8 (juce::roundToInt (q->getDoubleAttribute ("value"))));
 
                 // Estados anteriores al formato 8 (sin osc2WtLevel): Wavetable / Sample de Osc 2 y Osc 3 eran formas de onda
                 // (osc2Wave / osc3Wave 10 y 11); pasan a fuentes con su nivel (PresetManager::splitOscFamilies)
@@ -1681,6 +1712,10 @@ public:
 
     juce::MidiKeyboardState keyboardState;
     SessionTransport sessionTransport; // REC / STOP / PLAY (Transport/SessionTransport.h); inactivo hasta pulsar
+    juce::MidiBuffer keyboardScratch = [] { juce::MidiBuffer b; b.ensureSize (4096); return b; }(); // teclado en pantalla al practicar
+    // Volumen del MIDI Music Player (ganancia lineal, 0-1): lo fija la UI y se guarda en config.settings (midiPlayerVolume)
+    std::atomic<float> playerVolume { [] { auto c = openConfig(); return c != nullptr ? (float) juce::jlimit (0.0, 1.0, c->getDoubleValue ("midiPlayerVolume", 1.0)) : 1.0f; }() };
+    float lastPlayerVolume = 1.0f; // hilo de audio
 
     // Botones de transporte por MIDI learn (MidiLearn::actionRecord/Stop/Play): el hilo de audio los marca y aquí se
     // ejecutan en el hilo de mensajes (crean y cierran ficheros). 50 Hz: hasta 20 ms desde el CC. Tras sessionTransport:
@@ -2387,9 +2422,11 @@ private:
 
 #include "UI/Displays.h"
 #include "UI/TransportPanel.h"
+#include "UI/MidiMusicPlayer.h"
 #include "UI/AgentPanel.h"
 #include "UI/Arcade.h"
 #include "UI/BrandDemo.h"
+#include "UI/PlayAlongView.h"
 #include "UI/Visualizer.h"
 
 #include "UI/PresetBar.h"

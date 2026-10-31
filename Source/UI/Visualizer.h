@@ -7,22 +7,23 @@
 class Visualizer : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
-    enum Mode { scope, spectrum, spectrogram, goniometer, meters, arcade, demo, numModes }; // solo al final: el proyecto guarda el índice
+    enum Mode { scope, spectrum, spectrogram, goniometer, meters, arcade, demo, playAlong, numModes }; // solo al final: el proyecto guarda el índice
 
     Visualizer (KoniSynthProcessor& p, std::function<void()> onDetach = {}) : processor (p), detach (std::move (onDetach))
     {
         setTooltip ("Display: click for the next view (scope, spectrum, spectrogram, stereo goniometer, VU meters, arcade: a pixel-art "
-                    "shooter played by the music, demo: the brand loop of a 90s car stereo display, driven by the music). Right-click: choose a view, the style and the bezel, or open it in its own window.");
+                    "shooter played by the music, demo: the brand loop of a 90s car stereo display, driven by the music, play along: your part of the MIDI file as a scrolling staff). Right-click: choose a view, the style and the bezel, or open it in its own window.");
         startTimerHz (30);
     }
 
-    // El espectro se refresca a 60 Hz (más cerca del tiempo real); el resto de vistas, a 30 Hz (el juego y el modo demo cuentan
+    // El espectro y Play Along se refrescan a 60 Hz (más cerca del tiempo real; las notas se desplazan sin saltos); el resto, a 30 Hz (el juego y el modo demo cuentan
     // con ese paso de 1/30 s, y el espectrograma avanza una columna por refresco)
     void setMode (int m)
     {
         mode = juce::jlimit (0, numModes - 1, m);
         spectroImage = {};
-        startTimerHz (mode == spectrum ? 60 : 30);
+        startTimerHz (mode == spectrum || mode == playAlong ? 60 : 30);
+        playAlongView.reset();
         repaint();
         if (onModeChange) onModeChange (mode, style);
     }
@@ -54,7 +55,7 @@ public:
         {
             juce::PopupMenu m;
             static const char* names[numModes] = { "Oscilloscope", "Spectrum analyzer", "Spectrogram", "Stereo goniometer", "VU meters",
-                                                   "Arcade (pixel shooter)", "Demo (brand loop)" };
+                                                   "Arcade (pixel shooter)", "Demo (brand loop)", "Play along (MIDI player)" };
             for (int k = 0; k < numModes; ++k)
                 m.addItem (k + 1, names[k], true, k == mode);
             m.addSeparator();
@@ -115,9 +116,10 @@ public:
             case goniometer:  paintGoniometer (g, r); break;
             case arcade:      g.setOpacity (1.0f); game.paint (g, r, style, ink()); break;
             case demo:        brandDemo.paint (g, r, ink()); break;
+            case playAlong:   playAlongView.paint (g, r, processor.sessionTransport, ink(), inkHot()); break;
             default:          paintMeters (g, r); break;
         }
-        static const char* labels[numModes] = { "SCOPE", "SPECTRUM", "SPECTROGRAM", "GONIOMETER", "VU", "", "" };
+        static const char* labels[numModes] = { "SCOPE", "SPECTRUM", "SPECTROGRAM", "GONIOMETER", "VU", "", "", "" };
         g.setColour (juce::Colours::white.withAlpha (0.35f));
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText (labels[mode], r.removeFromTop (14.0f).removeFromLeft (120.0f), juce::Justification::topLeft);
@@ -724,6 +726,7 @@ private:
     int mode = scope, style = 0, bezel = bezelAuto;
     ArcadeGame game;
     BrandDemo brandDemo;
+    PlayAlongView playAlongView; // UI/PlayAlongView.h
     std::array<float, historySize> left {}, right {};
     juce::dsp::FFT fft { fftOrder };
     std::array<float, fftSize / 2> magDb {};

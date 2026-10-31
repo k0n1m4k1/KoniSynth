@@ -538,7 +538,7 @@ public:
                            p.add ("Amp Ramp").withToggle (st, "mt32NiceAmp");
                            p.add ("Panning").withToggle (st, "mt32NicePan");
                            p.add ("Partial Mixing").withToggle (st, "mt32NiceMix");
-                           p.add ("MIDI Queue").withCombo (st, "mt32Queue");
+                           p.add ("MIDI Queue").withKnob (st, "mt32Queue", "Events"); // 4 posiciones: conmutador por pasos
                        }))
                    .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb")
                    .withKnob (s, "mt32Dac", "DAC"); // 5 posiciones: conmutador por pasos (Knob con detents)
@@ -738,6 +738,7 @@ public:
         {
             overlay = Overlay::create (*this, title, message, std::nullopt, "OK", {}, [this] (bool, const juce::String&, int) { overlay.reset(); });
         };
+        transportPanel.onMidiPlayer = [this] { showMidiPlayer(); };
         content.addAndMakeVisible (transportPanel);
 
         content.setSize (kWidth, kHeight);
@@ -771,6 +772,8 @@ public:
 
     ~KoniSynthEditor() override
     {
+        if (midiPlayer != nullptr) midiPlayer->setLookAndFeel (nullptr);
+        midiPlayer.reset();
         koni.undoHistory.onChange = nullptr;
         koni.agentSession.askUser = nullptr;
         if (agentAsk != nullptr)
@@ -1182,6 +1185,38 @@ private:
         void closeButtonPressed() override { if (closed) closed(); }
         std::function<void()> closed;
     };
+
+    // MIDI Music Player (menú del transporte): ventana propia, imantada a esta; si ya está abierta, al frente
+    void showMidiPlayer()
+    {
+        if (midiPlayer != nullptr)
+        {
+            midiPlayer->toFront (false);
+            return;
+        }
+        midiPlayer = std::make_unique<MidiMusicPlayer> (koni);
+        midiPlayer->setLookAndFeel (&lookAndFeel); // selector de ficheros y menú de recientes
+        midiPlayer->mainBounds = [safe = juce::Component::SafePointer<KoniSynthEditor> (this)]
+        {
+            auto* top = safe != nullptr ? safe->getTopLevelComponent() : nullptr;
+            return top != nullptr ? top->getScreenBounds() : juce::Rectangle<int>();
+        };
+        midiPlayer->onPartSelected = [this] { scope.setMode (Visualizer::playAlong); }; // tu parte, en el display
+        midiPlayer->onClose = [this]
+        {
+            juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<KoniSynthEditor> (this)]
+            {
+                if (auto* e = safe.getComponent(); e != nullptr && e->midiPlayer != nullptr)
+                {
+                    e->midiPlayer->setLookAndFeel (nullptr);
+                    e->midiPlayer.reset();
+                }
+            });
+        };
+        midiPlayer->addToDesktop (juce::ComponentPeer::windowIsTemporary);
+        midiPlayer->restorePlacement();
+        midiPlayer->setVisible (true);
+    }
 
     void floatPanel (const juce::String& panelTitle, std::unique_ptr<juce::Component> body, int w, int h)
     {
@@ -3426,6 +3461,7 @@ private:
     juce::uint32 shownMt32Names = ~0u; // versión de los nombres de programa mostrados en la lista
     std::vector<std::unique_ptr<FloatWindow>> blockWindows; // tras las secciones y el LED: se destruyen antes que ellos
     std::vector<std::unique_ptr<PanelWindow>> panelWindows; // diálogos desacoplados (floatPanel); se cierran con el editor
+    std::unique_ptr<MidiMusicPlayer> midiPlayer;               // reproductor flotante (UI/MidiMusicPlayer.h); se cierra con el editor
     std::unique_ptr<FloatWindow> bpmWindow, engineWindow;
     std::vector<Section*> engineWindowSecs; // secciones que tiene la ventana del motor (para detectar cambio de motor)
     juce::Point<int> engineWindowPos;

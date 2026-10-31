@@ -68,8 +68,13 @@ public:
     // osc3Sync / osc3WtPosition / osc3WtTable / osc3Sample* (ausentes: su valor por defecto) y los ficheros osc3SamplePath y
     // osc3WtPath (ausentes: sin fichero); complexModSource con Noise al final. 7 (1.0.1): Osc 3 con Oct -2..+2 (osc3Octave) en vez
     // de subOctave ("-1 oct" / "-2 oct") y Semi ±12 en vez de ±24 (osc3FromSub). 8 (1.0.1): Wavetable y Sample de Osc 2 / Osc 3
-    // dejan de ser formas de onda y pasan a fuentes con su nivel (splitOscFamilies)
-    static constexpr int formatVersion = 8;
+    // dejan de ser formas de onda y pasan a fuentes con su nivel (splitOscFamilies). 9 (1.0.1): cola MIDI del MT-32 con 4 tamaños
+    // (mt32QueueFromFormat8)
+    static constexpr int formatVersion = 9;
+
+    // mt32Queue hasta el formato 8: { 1024, 4096 }; desde el 9: { 512, 1024, 2048, 4096 }. Mismo tamaño de cola.
+    // También lo usa KoniSynthProcessor::setStateInformation con los proyectos anteriores
+    static int mt32QueueFromFormat8 (int index) { return index == 1 ? 3 : 1; }
 
     explicit PresetManager (APVTS& s) : apvts (s)
     {
@@ -659,6 +664,9 @@ private:
         if (from < 8) // 7 -> 8: Wavetable / Sample de Osc 2 y Osc 3, de forma de onda a fuente con su nivel
             splitOscFamilies ([&real] (const char* id, float def) { const auto it = real.find (id); return it != real.end() ? it->second : def; },
                               [&real] (const char* id, float v) { real[id] = v; });
+        if (from < 9) // 8 -> 9: cola del MT-32 de { 1024, 4096 } a { 512, 1024, 2048, 4096 }
+            if (const auto it = real.find ("mt32Queue"); it != real.end())
+                it->second = (float) mt32QueueFromFormat8 (juce::roundToInt (it->second));
     }
 
 public:
