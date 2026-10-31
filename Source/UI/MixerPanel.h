@@ -12,9 +12,9 @@
 //   Master (Gain, al final de la cadena) solo cambia el volumen de salida, y su medidor es el pico de la salida.
 //   Grupos por familia: Osc 1 (Osc 1, Wavetable, Sample, Math Model), Osc 2 (Osc 2, su WT y su Sample), Osc 3 (igual) y Noise.
 //   Bajo el nombre, lo que toca cada tira: forma, tabla o fichero (los de Osc 2 y Osc 3, propios: en el acento).
-//   LINK (por familia de oscilador): mover un fader mueve los demás de su grupo lo mismo en dB (en posición del fader), al
-//   unísono; los que están en -inf no se mueven. Se guarda con el proyecto (propiedad mixerLinks del estado, bits 0..2), no
-//   en los presets ni como parámetro
+//   LINK (por familia de oscilador): mover un fader deja los demás de su grupo en la misma posición (el mismo nivel), también
+//   los que estaban en -inf. Se guarda con el proyecto (propiedad mixerLinks del estado, bits 0..2), no en los presets ni
+//   como parámetro
 class MixerPanel : public juce::Component, private juce::Timer
 {
 public:
@@ -42,8 +42,7 @@ public:
             b.setClickingTogglesState (true);
             b.setToggleState ((links >> g) & 1, juce::dontSendNotification);
             b.setColour (juce::TextButton::buttonOnColourId, Skin::accent().withAlpha (0.8f));
-            b.setTooltip ("Link: moving any fader of this group moves the others by the same amount in dB (faders at -inf stay). "
-                          "Saved with the project.");
+            b.setTooltip ("Link: moving any fader of this group sets the others to the same level. Saved with the project.");
             b.onClick = [this]
             {
                 auto mask = 0;
@@ -55,7 +54,7 @@ public:
         }
 
         hint.setText ("Faders in dB (gain of each source before the filter; Master = output volume). Meters: peak in dBFS. "
-                      "M = mute, S = solo (not saved). LINK: the group moves together. Double-click a fader: default.", juce::dontSendNotification);
+                      "M = mute, S = solo (not saved). LINK: the group moves as one fader. Double-click a fader: default.", juce::dontSendNotification);
         hint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         hint.setMinimumHorizontalScale (0.7f);
         addAndMakeVisible (hint);
@@ -200,16 +199,13 @@ private:
         void sliderValueChanged (juce::Slider*) override
         {
             // Arrastre: dentro del gesto; doble clic o rueda: un paso de deshacer completo. Con LINK, el grupo le sigue
-            const auto before = posFromGain (param->convertFrom0to1 (param->getValue()));
             if (dragging) attachment->setValueAsPartOfGesture (gainFromPos (fader.getValue()));
             else attachment->setValueAsCompleteGesture (gainFromPos (fader.getValue()));
-            owner.followLinked (*this, fader.getValue(), before);
+            owner.followLinked (*this, fader.getValue());
             update();
         }
 
         void update() { value.setText (dbText (param->convertFrom0to1 (param->getValue())), juce::dontSendNotification); }
-
-        double position() const { return posFromGain (param->convertFrom0to1 (param->getValue())); }
 
         void resized() override
         {
@@ -232,7 +228,6 @@ private:
         juce::String name;
         juce::RangedAudioParameter* param = nullptr;
         bool dragging = false;
-        double linkStart = 0.0; // posición al empezar el arrastre de otra tira del grupo enlazado (-1: no la sigue, en -inf)
         juce::Slider fader;
         std::unique_ptr<juce::ParameterAttachment> attachment;
         juce::Label title, value, playing; // playing: lo que toca la tira (MixerPanel::describe)
@@ -252,40 +247,32 @@ private:
 
     bool linked (int grp) const { return grp < numLinkable && linkButtons[(size_t) grp].getToggleState(); }
 
-    // LINK: al empezar un arrastre, las demás tiras del grupo guardan su posición y abren su gesto (un solo paso de deshacer por
-    // parámetro); durante el arrastre se mueven lo mismo que la arrastrada desde el comienzo (sin acumular el recorte en 0..1)
+    // LINK: al empezar un arrastre, las demás tiras del grupo abren su gesto (un paso de deshacer por parámetro) y, mientras dura,
+    // toman la posición de la arrastrada; doble clic o rueda, igual, como un cambio completo
     void beginLinked (Strip& dragged)
     {
-        dragStart = dragged.fader.getValue();
         if (! linked (dragged.group)) return;
         for (auto& s : strips)
             if (s.get() != &dragged && s->group == dragged.group)
-            {
-                s->linkStart = s->position() > 0.0 ? s->position() : -1.0;
-                if (s->linkStart >= 0.0) s->attachment->beginGesture();
-            }
+                s->attachment->beginGesture();
     }
     void endLinked (Strip& dragged)
     {
         if (! linked (dragged.group)) return;
         for (auto& s : strips)
-            if (s.get() != &dragged && s->group == dragged.group && s->linkStart >= 0.0)
+            if (s.get() != &dragged && s->group == dragged.group)
                 s->attachment->endGesture();
     }
-    void followLinked (Strip& moved, double now, double before)
+    void followLinked (Strip& moved, double position)
     {
         if (! linked (moved.group) || following) return;
         const juce::ScopedValueSetter<bool> guard (following, true); // los cambios de las demás no rebotan
+        const auto gain = gainFromPos (position);
         for (auto& s : strips)
         {
             if (s.get() == &moved || s->group != moved.group) continue;
-            if (moved.dragging)
-            {
-                if (s->linkStart < 0.0) continue;
-                s->attachment->setValueAsPartOfGesture (gainFromPos (juce::jlimit (0.0, 1.0, s->linkStart + now - dragStart)));
-            }
-            else if (const auto p = s->position(); p > 0.0) // doble clic o rueda: el mismo paso, como un cambio completo
-                s->attachment->setValueAsCompleteGesture (gainFromPos (juce::jlimit (0.0, 1.0, p + now - before)));
+            if (moved.dragging) s->attachment->setValueAsPartOfGesture (gain);
+            else                s->attachment->setValueAsCompleteGesture (gain);
         }
     }
 
@@ -357,7 +344,6 @@ private:
 
     static constexpr int groupH = 18, groupGap = 14;
     int describeTick = 6;
-    double dragStart = 0.0;
     bool following = false;
     KoniSynthProcessor& processor;
     std::vector<std::unique_ptr<Strip>> strips;

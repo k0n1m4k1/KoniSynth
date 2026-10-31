@@ -46,8 +46,8 @@ silences the source without changing its level; mutes are off by default and pre
 **Mixer** (click the Mixer step of the signal strip): one strip per source, grouped by family (OSC 1: Osc 1, Wavetable,
 Sample, Math Model; OSC 2: Osc 2, its WT and its Sample; OSC 3: the same; NOISE) and Master. Under each name, what it plays:
 the wave, the table or the file (the own table and file of Osc 2 and Osc 3 in the accent colour). **LINK** (one per
-oscillator family, next to its caption) moves the whole group together: dragging one fader moves the others by the same
-amount in dB; faders at -inf stay. LINK is saved with the project, not in presets. Each fader is the source's Level shown in dB (20·log10 of the level: 100 % =
+oscillator family, next to its caption) makes the group one fader: moving any of them sets the others to the same level.
+LINK is saved with the project, not in presets. Each fader is the source's Level shown in dB (20·log10 of the level: 100 % =
 0 dB, 50 % = -6.0 dB, bottom = silent; fader law linear in dB from -60 to 0 dB), with M (Mute) and S (Solo, the same as
 the tabs). The meter is the peak of that source inside the voice in dBFS (after its level, before the filter and the
 saturation; the loudest voice), not the fader's gain: lowering a source changes how hard it drives the filter and the
