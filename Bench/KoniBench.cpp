@@ -16,6 +16,8 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "../Source/Dsp/Tuning.h" // tuningtest: Scala y MTS-ESP (sin el plugin)
 #include <complex>
 #include "../Source/Dsp/VoiceSaturator.h" // sattest: media banda 2x de la saturación por voz
+#include "../Source/Effects/Equalizer.h" // eqtest: suavizado de 20 ms independiente del tamaño de bloque
+#include "../Source/Effects/Dynamics.h" // comptest: ratio estático y estabilidad del compresor (usa Eq)
 #include "../Source/Engines/RhythmPatterns.h" // rhythmtest: ritmos de usuario en MIDI (sin el plugin)
 #include "../Source/Engines/UserRhythms.h"
 #include <functional>
@@ -132,10 +134,10 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
             rate = arg.fromFirstOccurrenceOf ("=", false, false).getDoubleValue();
         else if (arg.startsWith ("--sample=") || arg.startsWith ("--osc2-sample="))
         {
-            // "factory:<fichero>" (sample incrustado) pasa tal cual; lo demás es una ruta relativa a la carpeta actual
+            // Ruta relativa a la carpeta actual
             const auto path = arg.fromFirstOccurrenceOf ("=", false, false);
             props.push_back ({ arg.startsWith ("--sample=") ? "samplePath" : "osc2SamplePath",
-                               path.startsWith ("factory:") ? path : juce::File::getCurrentWorkingDirectory().getChildFile (path).getFullPathName() });
+                               juce::File::getCurrentWorkingDirectory().getChildFile (path).getFullPathName() });
         }
         else if (arg.startsWith ("--dump-state="))
             dumpState = juce::File::getCurrentWorkingDirectory().getChildFile (arg.fromFirstOccurrenceOf ("=", false, false));
@@ -810,6 +812,94 @@ int tuningTest()
 }
 
 // sattest: media banda 2x de la saturación por voz (sin la curva): ganancia, retardo, rechazo de imágenes y de aliasing
+// eqtest: EQ plano, salida de 0 a +6 dB; tras 960 muestras (20 ms a 48 kHz) la ganancia debe ser 6·(1 - e^-1) = 3,7927 dB
+// con cualquier tamaño de bloque (antes, con bloques de 16 se aplicaba el coeficiente de 32: 5,19 dB, τ = 10 ms)
+int eqTest()
+{
+    int fails = 0;
+    const auto expected = 6.0 * (1.0 - std::exp (-1.0));
+    for (const int block : { 7, 16, 32, 128 })
+    {
+        Equalizer eq;
+        eq.prepare (48000.0);
+        Eq::Settings flat, loud;
+        loud.outputDb = 6.0;
+        juce::AudioBuffer<float> buf (2, block);
+        buf.clear();
+        eq.process (buf, flat); // fija el estado inicial (0 dB)
+        float last = 0.0f;
+        for (int done = 0; done < 960; done += block)
+        {
+            const auto n = juce::jmin (block, 960 - done);
+            juce::AudioBuffer<float> b (2, n);
+            for (int ch = 0; ch < 2; ++ch) juce::FloatVectorOperations::fill (b.getWritePointer (ch), 1.0f, n);
+            eq.process (b, loud);
+            last = b.getSample (0, n - 1);
+        }
+        // La ganancia del último tramo es la del suavizado tras 960 muestras (se actualiza al empezar cada tramo)
+        const auto db = 20.0 * std::log10 ((double) last);
+        const auto ok = std::abs (db - expected) < 0.15;
+        std::printf ("%s bloques de %3d: %.3f dB a los 20 ms (esperado %.3f)\n", ok ? "OK   " : "FALLO", block, db, expected);
+        if (! ok) ++fails;
+    }
+    std::printf ("%d fallos\n", fails);
+    return fails;
+}
+
+// comptest: entrada continua (estímulo del detector) a -12 y -6 dB, umbral -30 dB, rodilla 0, ataque 1 ms, liberación 100 ms,
+// 1 s por nivel a 48 kHz: ratio medido = 6 dB / (salida(-6) - salida(-12)) frente al del mando, en VCA y FET (realimentado;
+// antes daba 2 - 1/R). Estabilidad: FET con ataque de 20 µs y ratio 20, la salida en régimen no oscila
+int compTest()
+{
+    int fails = 0;
+    const auto check = [&fails] (bool ok, const juce::String& what)
+    {
+        std::printf ("%s %s\n", ok ? "OK   " : "FALLO", what.toRawUTF8());
+        if (! ok) ++fails;
+    };
+    constexpr double fs = 48000.0;
+    const auto run = [] (Compressor& c, const Compressor::Settings& st, float levelDb, int samples)
+    {
+        juce::AudioBuffer<float> b (2, 256);
+        float last = 0.0f, lo = 1.0e9f, hi = -1.0e9f;
+        const auto x = std::pow (10.0f, levelDb / 20.0f);
+        for (int done = 0; done < samples; done += 256)
+        {
+            for (int ch = 0; ch < 2; ++ch) juce::FloatVectorOperations::fill (b.getWritePointer (ch), x, 256);
+            c.process (b, nullptr, st);
+            for (int i = 0; i < 256; ++i)
+                if (done + i >= samples - 4800) { lo = std::min (lo, b.getSample (0, i)); hi = std::max (hi, b.getSample (0, i)); }
+            last = b.getSample (0, 255);
+        }
+        return std::array<float, 3> { 20.0f * std::log10 (last), lo, hi };
+    };
+    for (const int mode : { (int) Compressor::vca, (int) Compressor::fet })
+        for (const float ratio : { 4.0f, 10.0f, 20.0f })
+        {
+            Compressor c;
+            c.prepare (fs);
+            Compressor::Settings st;
+            st.mode = mode; st.thresholdDb = -30.0f; st.ratio = ratio; st.kneeDb = 0.0f; st.attackMs = 1.0f; st.releaseMs = 100.0f;
+            const auto a = run (c, st, -12.0f, 48000)[0];
+            const auto b = run (c, st, -6.0f, 48000)[0];
+            const auto measured = 6.0f / (b - a);
+            check (std::abs (measured / ratio - 1.0f) < 0.01f, juce::String (mode == Compressor::fet ? "FET" : "VCA") + " mando "
+                   + juce::String (ratio, 0) + ":1, medido " + juce::String (measured, 3) + ":1");
+        }
+    {
+        Compressor c;
+        c.prepare (fs);
+        Compressor::Settings st;
+        st.mode = Compressor::fet; st.thresholdDb = -30.0f; st.ratio = 20.0f; st.kneeDb = 0.0f; st.attackMs = 0.02f; st.releaseMs = 50.0f;
+        const auto r = run (c, st, -6.0f, 24000);
+        const auto ripple = 20.0f * std::log10 (r[2] / juce::jmax (1.0e-9f, r[1]));
+        check (std::isfinite (r[0]) && ripple < 0.01f, "FET 20:1, ataque 20 µs: salida " + juce::String (r[0], 2) + " dB, rizado en régimen "
+               + juce::String (ripple, 4) + " dB");
+    }
+    std::printf ("%d fallos\n", fails);
+    return fails;
+}
+
 int satTest()
 {
     int fails = 0;
@@ -1087,10 +1177,42 @@ int schedTest()
         }
         producer.join();
         const auto balanced = std::all_of (balance.begin(), balance.end(), [] (int b) { return b == 0; });
-        check (rejected > 0 && onCount == acceptedNotes && balanced && s.reservedEvents() == 0,
+        // Tardíos: un play leído a medias (inicio en un bloque, notas en el siguiente) entregaría sus notas antes del bloque
+        check (rejected > 0 && onCount == acceptedNotes && balanced && s.reservedEvents() == 0 && s.lateEventCount() == 0,
                "concurrente, " + juce::String (attempts) + " lotes: " + juce::String (acceptedNotes) + " notas aceptadas, "
                + juce::String (onCount) + " note-on, " + juce::String (rejected) + " lotes rechazados; on/off equilibrados: "
-               + (balanced ? "sí" : "no") + "; créditos " + juce::String (s.reservedEvents()));
+               + (balanced ? "sí" : "no") + "; créditos " + juce::String (s.reservedEvents()) + "; tardíos "
+               + juce::String (s.lateEventCount()));
+    }
+    // 11) Play entero o nada: lotes de 64 notas que empiezan en 0 s (en la primera muestra del bloque que recibe el inicio)
+    //     contra bloques de 16 muestras. Si el hilo de audio leyera el inicio sin sus notas, estas llegarían en un bloque
+    //     posterior con su muestra ya pasada (tardías)
+    {
+        AgentScheduler s;
+        std::atomic<bool> done { false };
+        int accepted = 0;
+        std::thread producer ([&]
+        {
+            std::vector<AgentScheduler::Note> batch;
+            for (int k = 0; k < 64; ++k)
+                batch.push_back ({ 36 + k, 100, 0.0, 0.0005 });
+            for (juce::uint32 a = 1; accepted < 2000; ++a) // espera hueco (créditos) en vez de rechazar
+                if (s.schedule (a, batch))
+                    ++accepted;
+                else
+                    std::this_thread::yield();
+            done = true;
+        });
+        juce::MidiBuffer midi;
+        for (juce::int64 pos = 0; ! (done && s.idle() && s.reservedEvents() == 0); pos += 16)
+        {
+            midi.clear();
+            s.process (midi, 16, 48000.0, (juce::uint64) pos);
+        }
+        producer.join();
+        check (accepted == 2000 && s.lateEventCount() == 0,
+               "plays de 64 notas en 0 s contra bloques de 16: " + juce::String (accepted) + " aceptados, "
+               + juce::String (s.lateEventCount()) + " eventos tardíos (debe ser 0)");
     }
     std::printf ("%d fallos\n", fails);
     return fails;
@@ -1189,18 +1311,112 @@ int tapTest()
     check (copies > 1000 && bad == 0 && backwards == 0 && lastClock.bpm == (double) (blocks - 1),
            juce::String (blocks) + " bloques escritos, " + juce::String (copies) + " copias leídas a la vez: " + juce::String (bad)
            + " incoherentes, " + juce::String (backwards) + " hacia atrás, " + juce::String (invalid) + " sin copia estable");
+
+    // Datos frente al escritor: cada muestra vale su posición (módulo 2^20, exacto en float). Se lee a la vez en el borde más
+    // antiguo (start = escrito - capacidad, lo que antes se aceptaba, y el borde nuevo, escrito - capacidad + 1 s): todo lo
+    // devuelto debe ser la muestra de su posición, nunca audio nuevo en una posición antigua
+    {
+        AudioTap data (48000.0);
+        const auto cap = (juce::uint64) data.capacityFrames(), guard = (juce::uint64) 48000;
+        std::atomic<bool> stop { false };
+        std::thread w ([&]
+        {
+            juce::AudioBuffer<float> b (2, 512);
+            juce::uint64 frame = 0;
+            for (int k = 0; k < 40000; ++k)
+            {
+                for (int i = 0; i < 512; ++i)
+                {
+                    const auto v = (float) ((frame + (juce::uint64) i) & 0xFFFFF);
+                    b.setSample (0, i, v);
+                    b.setSample (1, i, v);
+                }
+                data.pushEngine (b);
+                data.push (b, {});
+                frame += 512;
+            }
+            stop = true;
+        });
+        juce::int64 reads = 0, accepted = 0, wrong = 0, oldEdgeAccepted = 0;
+        while (! stop)
+        {
+            const auto end = data.framesWritten();
+            if (end < cap + guard)
+                continue;
+            for (const auto start : { end - cap, end - cap + guard + 1 })
+            {
+                const auto got = data.range (start, 4096);
+                ++reads;
+                if (got.getNumSamples() == 0)
+                    continue;
+                ++accepted;
+                oldEdgeAccepted += start == end - cap ? 1 : 0;
+                for (int i = 0; i < got.getNumSamples(); ++i)
+                    wrong += got.getSample (0, i) == (float) ((start + (juce::uint64) i) & 0xFFFFF) ? 0 : 1;
+            }
+        }
+        w.join();
+        check (accepted > 100 && wrong == 0 && oldEdgeAccepted == 0,
+               "lecturas en el borde antiguo a la vez que se escribe: " + juce::String (reads) + " pedidas, " + juce::String (accepted)
+               + " devueltas, " + juce::String (wrong) + " muestras de otra posición; en escrito - capacidad: "
+               + juce::String (oldEdgeAccepted) + " devueltas (debe ser 0: el escritor puede estar ahí)");
+    }
     std::printf ("%d fallos\n", fails);
     return fails;
+}
+
+// Fórmulas de Math Models (Resources/formulas): el analizador SVG de JUCE debe leer lo que escribe matplotlib (glifos como
+// <use> de trazados). Cada SVG se pinta a PNG en outDir (escala 2) y se comprueba que tiene tamaño y píxeles pintados
+int formulaTest (const juce::File& dir, const juce::File& outDir)
+{
+    juce::ScopedJuceInitialiser_GUI init;
+    outDir.createDirectory();
+    auto failures = 0, count = 0;
+    for (const auto& f : dir.findChildFiles (juce::File::findFiles, false, "*.svg"))
+    {
+        ++count;
+        auto d = juce::Drawable::createFromImageFile (f);
+        const auto b = d != nullptr ? d->getDrawableBounds() : juce::Rectangle<float>();
+        auto painted = 0;
+        if (! b.isEmpty())
+        {
+            juce::Image img (juce::Image::ARGB, (int) std::ceil (b.getWidth() * 2.0f), (int) std::ceil (b.getHeight() * 2.0f), true);
+            {
+                juce::Graphics g (img);
+                d->drawWithin (g, img.getBounds().toFloat(), juce::RectanglePlacement::stretchToFit, 1.0f);
+            }
+            for (int y = 0; y < img.getHeight(); ++y)
+                for (int x = 0; x < img.getWidth(); ++x)
+                    painted += img.getPixelAt (x, y).getAlpha() > 128 ? 1 : 0;
+            juce::FileOutputStream out (outDir.getChildFile (f.getFileNameWithoutExtension() + ".png"));
+            out.setPosition (0);
+            out.truncate();
+            juce::PNGImageFormat().writeImageToStream (img, out);
+        }
+        const auto ok = painted > 200;
+        failures += ok ? 0 : 1;
+        std::printf ("%-16s %7.1f x %5.1f  pintados %6d px  %s\n", f.getFileName().toRawUTF8(), b.getWidth(), b.getHeight(), painted,
+                     ok ? "OK" : "FALLO");
+    }
+    std::printf ("%d SVG, %d fallos\n", count, failures);
+    return count > 0 && failures == 0 ? 0 : 1;
 }
 
 } // namespace
 
 int main (int argc, char** argv)
 {
+    if (argc >= 4 && juce::String (argv[1]) == "formulatest")
+        return formulaTest (juce::File::getCurrentWorkingDirectory().getChildFile (argv[2]),
+                            juce::File::getCurrentWorkingDirectory().getChildFile (argv[3]));
     if (argc >= 2 && juce::String (argv[1]) == "taptest")
         return tapTest();
     if (argc >= 2 && juce::String (argv[1]) == "sattest")
         return satTest();
+    if (argc >= 2 && juce::String (argv[1]) == "eqtest")
+        return eqTest();
+    if (argc >= 2 && juce::String (argv[1]) == "comptest")
+        return compTest();
     if (argc >= 2 && juce::String (argv[1]) == "schedtest")
         return schedTest();
     if (argc >= 2 && juce::String (argv[1]) == "monotest")
@@ -1345,6 +1561,25 @@ int main (int argc, char** argv)
         { "22b. Init, 8 notas + pitch bend cada 8 muestras", {}, 8, 8 },
         { "22c. Init, 8 notas + pitch bend cada muestra", {}, 8, 1 },
         { "23. Unisono 7 + filtro, 8 notas + pitch bend cada 8 muestras", { { "Unison Voices", 1.0f }, { "Resonance", 0.5f }, { "Filter Drive", 0.5f } }, 8, 8 },
+        // Math Models (String Excite normalizado, 12 opciones: índice / 11), solo esa fuente: Osc 1 a 0 y String Level al 100 %
+        { "24a. Math Models Noise Burst, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 0.0f } }, 8 },
+        { "24b. Math Models Pick, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 1.0f / 11.0f } }, 8 },
+        { "24c. Math Models Pick + Buzz 50 %, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 1.0f / 11.0f },
+                                                         { "String Buzz", 0.5f } }, 8 },
+        { "24d. Math Models Bow, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 2.0f / 11.0f } }, 8 },
+        { "24e. Math Models Hammer, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 3.0f / 11.0f } }, 8 },
+        { "24f. Math Models E-Bow, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 4.0f / 11.0f } }, 8 },
+        { "24g. Math Models Modal (Soft Key, 4 modos), 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 5.0f / 11.0f } }, 8 },
+        { "24i. Math Models Reed, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 6.0f / 11.0f } }, 8 },
+        { "24j. Math Models Flute, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 7.0f / 11.0f } }, 8 },
+        { "24k. Math Models Brass, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 8.0f / 11.0f } }, 8 },
+        { "24l. Math Models Banded (Tuned Bar), 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 9.0f / 11.0f } }, 8 },
+        { "24m. Math Models Shaker (Maraca), 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 10.0f / 11.0f } }, 8 },
+        { "24o. Math Models Pick + Stiff 50 % + Tension 50 %, 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f },
+                                                                         { "String Excite", 1.0f / 11.0f }, { "String Stiffness", 0.5f },
+                                                                         { "String Tension Modulation", 0.5f } }, 8 },
+        { "24n. Math Models Mallet (Soft Key), 8 notas", { { "Osc1 Level", 0.0f }, { "String Level", 1.0f }, { "String Excite", 1.0f } }, 8 },
+        { "24h. Init sin Osc 1 (referencia de los 24)", { { "Osc1 Level", 0.0f } }, 8 },
     };
 
     for (const auto& s : scenarios)

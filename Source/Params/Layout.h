@@ -142,9 +142,47 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringPickup", 1 }, "String Pickup", NormalisableRange<float> (0.0f, 0.5f), 0.0f,
         parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
             { return v < 0.005f ? String ("Off") : String (roundToInt (v * 100.0f)) + " %"; }))));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "stringExcite", 1 }, "String Excite", StringArray { "Noise", "Pick" }, 0));
+    // Modelo de Math Models: las dos primeras de la 1.0; Bow, Hammer, E-Bow, Modal, Reed, Flute, Brass, Banded, Shaker y Mallet al final (1.0.2).
+    // Ampliar la lista cambia el significado de una automatización ya grabada de Pick en el DAW (índice / (n - 1)); aceptado por
+    // el autor. Presets y estados guardan el índice
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "stringExcite", 1 }, "String Excite",
+                                                   StringArray { "Noise Burst", "Pick", "Bow", "Hammer", "E-Bow", "Modal", "Reed", "Flute",
+                                                                 "Brass", "Banded", "Shaker", "Mallet" }, 0));
+    // Un mando por modelo (no uno compartido que cambie de significado): presión del arco, dureza del fieltro, fuerza del electroimán
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringBowPressure", 1 }, "String Bow Pressure", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringHammerFelt", 1 }, "String Hammer Felt", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringEbowDrive", 1 }, "String E-Bow Drive", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    // Puente de sitar (0 = sin contacto) y armónico tocando un nodo (Off o el nodo 1/n)
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringBuzz", 1 }, "String Buzz", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "stringHarmonic", 1 }, "String Harmonic", StringArray { "Off", "2", "3", "4", "5" }, 0));
+    // Rigidez (inarmonicidad B de 1e-5 a 1e-3; 0 = cuerda ideal) y modulación de tensión (0 = lineal) de las cuerdas
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringStiff", 1 },  "String Stiffness", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringTension", 1 }, "String Tension Modulation", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringDamping", 1 }, "String Damping", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "stringPick", 1 },   "String Pick Position", NormalisableRange<float> (0.02f, 0.5f), 0.13f, percent));
+    // Viento de Math Models (sus perillas solo se ven con su modelo), normalizados a 0-1: Reed Embouchure = ζ de 0,15 a 0,45 (0,25 por defecto, 1/3);
+    // Noise; Flute Jet = Jet Delay de STK 0,08 + 0,48·x (0,32); Lip Tension en la nota (4^0) y Slide Length x1
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "reedEmbouchure", 1 }, "Reed Embouchure", NormalisableRange<float> (0.0f, 1.0f), 1.0f / 3.0f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "reedNoise", 1 },     "Reed Noise", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "fluteJet", 1 },      "Flute Jet", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "fluteNoise", 1 },    "Flute Noise", NormalisableRange<float> (0.0f, 1.0f), 0.375f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "brassLip", 1 },      "Brass Lip", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "brassSlide", 1 },    "Brass Slide", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    // Banded: preset de STK BandedWG (Tuned Bar por defecto, la barra de vibráfono) y golpe o arco (la presión es Press).
+    // Shaker: instrumento de STK Shakers; Objects = piezas x1/4 a x4, Shake = decaimiento del sistema (STK, 0,5 = el suyo),
+    // Tone = resonancias x4^(x - 0,5)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "bandedShape", 1 },   "Banded Shape",
+                                                   StringArray { "Uniform Bar", "Tuned Bar", "Glass Harmonica", "Tibetan Bowl" }, 1));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "bandedExcite", 1 },  "Banded Excite", StringArray { "Strike", "Bow" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "shakerType", 1 },    "Shaker Type",
+                                                   StringArray { "Maraca", "Cabasa", "Sekere", "Tambourine", "Sleigh Bells", "Bamboo Chimes" }, 0));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "shakerObjects", 1 }, "Shaker Objects", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "shakerShake", 1 },   "Shaker Shake", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    // Mallet: tiempo de contacto de 10 ms a 0,3 ms, masa de 0,01 a 10 (0,1 por defecto, 1/3) y disipación μ de 0 a 1,5 (0,3)
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "malletHardness", 1 }, "Mallet Hardness", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "malletMass", 1 },    "Mallet Mass", NormalisableRange<float> (0.0f, 1.0f), 1.0f / 3.0f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "malletDamp", 1 },    "Mallet Damp", NormalisableRange<float> (0.0f, 1.0f), 0.2f, percent));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "shakerTone", 1 },    "Shaker Tone", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
 
     // Entrada de audio (micro/línea): ganancia, monitor (a la cadena de efectos) y vocoder de canales
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "inputGain", 1 },    "Input Gain", NormalisableRange<float> (-12.0f, 36.0f), 0.0f, decibels));
@@ -812,6 +850,8 @@ static APVTS::ParameterLayout createLayout()
         l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mtxDst" + String (m), 1 }, "Matrix " + String (m) + " Dest", ModMatrix::destinationNames(), 0));
         l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "mtxAmt" + String (m), 1 }, "Matrix " + String (m) + " Amount", NormalisableRange<float> (-1.0f, 1.0f), 0.0f, percent));
     }
+    // Random Fade: el valor aleatorio por nota de la matriz se desvanece con la envolvente de filtro (0 = fijo toda la nota)
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "mtxRandomFade", 1 }, "Matrix Random Fade", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     // Macros de interpretación (Params/PerfMacros.h): 8 mandos que mueven a la vez los parámetros asignados
     for (int m = 1; m <= 8; ++m)
         l.add (std::make_unique<AudioParameterFloat> (ParameterID { "macro" + String (m), 1 }, "Macro " + String (m),

@@ -7,12 +7,12 @@
 class Visualizer : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
-    enum Mode { scope, spectrum, spectrogram, goniometer, meters, arcade, numModes };
+    enum Mode { scope, spectrum, spectrogram, goniometer, meters, arcade, demo, numModes }; // solo al final: el proyecto guarda el índice
 
     Visualizer (KoniSynthProcessor& p, std::function<void()> onDetach = {}) : processor (p), detach (std::move (onDetach))
     {
         setTooltip ("Display: click for the next view (scope, spectrum, spectrogram, stereo goniometer, VU meters, arcade: a pixel-art "
-                    "shooter played by the music). Right-click: choose a view, the style and the bezel, or open it in its own window.");
+                    "shooter played by the music, demo: the brand loop of a 90s car stereo display, driven by the music). Right-click: choose a view, the style and the bezel, or open it in its own window.");
         startTimerHz (30);
     }
 
@@ -27,6 +27,7 @@ public:
     void setBezel (int b) { bezel = juce::jlimit (0, numBezels - 1, b); repaint(); if (onBezelChange) onBezelChange (bezel); }
     int getBezel() const { return bezel; }
     std::function<void (int)> onBezelChange;
+    void setShowAnnunciators (bool show) { showAnnunciators = show; repaint(); }
 
     // Rótulo temporal sobre cualquier vista (p. ej. cómo tocar el preset recién cargado): título y línea, visible
     // captionSeconds y desvanecido en el último segundo. Texto vacío = quitarlo
@@ -44,7 +45,7 @@ public:
         {
             juce::PopupMenu m;
             static const char* names[numModes] = { "Oscilloscope", "Spectrum analyzer", "Spectrogram", "Stereo goniometer", "VU meters",
-                                                   "Arcade (pixel shooter)" };
+                                                   "Arcade (pixel shooter)", "Demo (brand loop)" };
             for (int k = 0; k < numModes; ++k)
                 m.addItem (k + 1, names[k], true, k == mode);
             m.addSeparator();
@@ -70,6 +71,10 @@ public:
                                  else safe->setMode (id - 1);
                              });
         }
+        else if (const auto ann = annunciatorAt (e.position); ann >= 0 || annunciatorArea.contains (e.position))
+        {
+            // Columna de anunciadores: solo informativa (tooltip); un clic en ella no cambia de vista
+        }
         else if (! e.mouseWasDraggedSinceMouseDown() && e.getNumberOfClicks() == 1)
         {
             setMode ((mode + 1) % numModes);
@@ -86,16 +91,24 @@ public:
         g.fillRoundedRectangle (r, framed ? screenRadius : 6.0f);
         const auto full = r;
         r = r.reduced (6.0f);
+        annunciatorArea = {};
+        if (showAnnunciators)
+        {
+            annunciatorArea = r.removeFromLeft (annunciatorWidth);
+            paintAnnunciators (g, annunciatorArea);
+            r.removeFromLeft (6.0f);
+        }
         switch (mode)
         {
             case scope:       paintScope (g, r); break;
             case spectrum:    paintSpectrum (g, r); break;
             case spectrogram: paintSpectrogram (g, r); break;
             case goniometer:  paintGoniometer (g, r); break;
-            case arcade:      game.paint (g, r, style, ink()); break;
+            case arcade:      g.setOpacity (1.0f); game.paint (g, r, style, ink()); break;
+            case demo:        brandDemo.paint (g, r, ink()); break;
             default:          paintMeters (g, r); break;
         }
-        static const char* labels[numModes] = { "SCOPE", "SPECTRUM", "SPECTROGRAM", "GONIOMETER", "VU", "" };
+        static const char* labels[numModes] = { "SCOPE", "SPECTRUM", "SPECTROGRAM", "GONIOMETER", "VU", "", "" };
         g.setColour (juce::Colours::white.withAlpha (0.35f));
         g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
         g.drawText (labels[mode], r.removeFromTop (14.0f).removeFromLeft (120.0f), juce::Justification::topLeft);
@@ -108,7 +121,138 @@ public:
             paintGlass (g, full);
     }
 
+    juce::String getTooltip() override
+    {
+        if (const auto i = annunciatorAt (getMouseXYRelative().toFloat()); i >= 0)
+            return annunciatorTip (i);
+        return juce::SettableTooltipClient::getTooltip();
+    }
+
 private:
+    // Anunciadores: columna a la izquierda de la pantalla con el estado de la instancia, como los de un display de hardware
+    // (acrónimo tenue = apagado, encendido = activo). 16 en 4 columnas x 4 filas; se leen en cada repintado (30 Hz).
+    // Solo en el display superior y su ventana: otras instancias (el espectro del EQ) los ocultan con setShowAnnunciators
+    static constexpr float annunciatorWidth = 140.0f;
+    bool showAnnunciators = true;
+    float annunciatorSpace() const { return showAnnunciators ? annunciatorWidth + 6.0f : 0.0f; }
+    static constexpr int annunciatorCount = 16, annunciatorColumns = 4;
+    juce::Rectangle<float> annunciatorArea;
+    juce::uint32 lastMidiBlocks = 0;
+    double midiFlashUntil = 0.0;
+    // Orden de pantalla, por filas: afinación y voces; juego; salida y entrada; MIDI y transporte
+    enum { annScl, annMts, annMpe, annMono, annArp, annSeq, annHold, annVel, annReverb, annLimiter, annStereo, annInput,
+           annMidi, annLearn, annPlay, annRec };
+
+    // Motores que ignoran la microafinación (Dsp/Tuning.h): Theremin (sin notas), Drum Machine (la tecla elige el
+    // instrumento), ANS y MT-32 (Munt afina por su cuenta)
+    bool engineTunes() const
+    {
+        const auto e = (int) processor.apvts.getRawParameterValue ("engine")->load();
+        return e != 1 && e != 5 && e != 9 && e != 14;
+    }
+    bool param (const char* id) const { return processor.apvts.getRawParameterValue (id)->load() > 0.5f; }
+    bool engineIs (int e) const { return (int) processor.apvts.getRawParameterValue ("engine")->load() == e; }
+
+    // 0 apagado, 1 encendido, 0,5 encendido pero sin efecto en el motor elegido
+    float annunciatorLevel (int i) const
+    {
+        const auto tunes = engineTunes() ? 1.0f : 0.5f;
+        switch (i)
+        {
+            case annScl:    return processor.tuning.hasScala() ? tunes : 0.0f;
+            case annMts:    return processor.tuning.mtsActive() ? tunes : 0.0f;
+            case annArp:    return param ("arpOn") ? 1.0f : 0.0f;
+            case annSeq:    return param ("seqOn") ? 1.0f : 0.0f;
+            case annHold:   return processor.sustainDown.load (std::memory_order_relaxed) ? 1.0f : 0.0f;
+            case annMpe:    return param ("mpeOn") ? 1.0f : 0.0f;
+            case annMono:   return processor.apvts.getRawParameterValue ("voiceMode")->load() > 0.5f ? 1.0f : 0.0f;
+            case annLearn:  return processor.midiLearn.learning.load() >= 0 ? 1.0f : 0.0f;
+            case annVel:    return param ("drumVelocity") ? (engineIs (5) ? 1.0f : 0.5f) : 0.0f;
+            case annReverb: return param ("ambientOn") ? 1.0f : 0.0f;
+            case annLimiter: return param ("limOn") ? 1.0f : 0.0f;
+            case annInput:  return param ("vocoderOn") || processor.apvts.getRawParameterValue ("inputMonitor")->load() > 0.0f ? 1.0f : 0.0f;
+            case annPlay:   return processor.sessionTransport.isPlaying() ? 1.0f : 0.0f;
+            case annStereo: return param ("monoOut") ? 0.0f : 1.0f;
+            case annMidi:   return juce::Time::getMillisecondCounterHiRes() < midiFlashUntil ? 1.0f : 0.0f;
+            default:        return processor.sessionTransport.isRecording() ? 1.0f : 0.0f;
+        }
+    }
+
+    static const char* annunciatorLabel (int i)
+    {
+        static const char* labels[annunciatorCount] = { "SCL", "MTS", "MPE", "MONO", "ARP", "SEQ", "HOLD", "VEL",
+                                                        "REV", "LIM", "ST", "IN", "MIDI", "LRN", "PLAY", "REC" };
+        return labels[i];
+    }
+
+    juce::String annunciatorTip (int i) const
+    {
+        const auto ignored = engineTunes() ? juce::String() : juce::String (" The selected engine ignores microtuning.");
+        switch (i)
+        {
+            case annScl:    return "SCL: a Scala scale is loaded (" + (processor.tuning.hasScala() ? processor.tuning.getScaleName() : juce::String ("none"))
+                                   + "). Saved with the project, not with presets." + ignored;
+            case annMts:    return "MTS: the tuning comes from an MTS-ESP master or MIDI Tuning Standard SysEx"
+                                   + (processor.tuning.mtsActive() ? " (" + processor.tuning.mtsScaleName() + ")." : juce::String (".")) + ignored;
+            case annArp:    return "ARP: arpeggiator on.";
+            case annSeq:    return "SEQ: step sequencer on.";
+            case annHold:   return "HOLD: sustain pedal (CC 64) held down.";
+            case annMpe:    return "MPE: MIDI Polyphonic Expression on.";
+            case annMono:   return "MONO: one voice at a time (Voice Mode Mono or Legato).";
+            case annLearn:  return "LRN: MIDI Learn is waiting for a controller.";
+            case annVel:    return "VEL: Drum Machine continuous velocity (off: normal and accent levels only)."
+                                   + juce::String (engineIs (5) ? "" : " Half lit: only the Drum Machine uses it.");
+            case annReverb: return "REV: reverb on.";
+            case annLimiter: return "LIM: output limiter on.";
+            case annInput:  return "IN: audio input in use (Input Monitor above 0 % or the vocoder on).";
+            case annPlay:   return "PLAY: the session transport is playing.";
+            case annStereo: return "ST: stereo output (off: Mono Output).";
+            case annMidi:   return "MIDI: lights up while MIDI arrives from the host or a controller.";
+            default:        return "REC: the session transport is recording.";
+        }
+    }
+
+    // Celda del anunciador i y el anunciador bajo un punto (-1 si ninguno)
+    juce::Rectangle<float> annunciatorCell (int i) const
+    {
+        const auto rows = (annunciatorCount + annunciatorColumns - 1) / annunciatorColumns;
+        const auto w = annunciatorArea.getWidth() / (float) annunciatorColumns, h = annunciatorArea.getHeight() / (float) rows;
+        return { annunciatorArea.getX() + w * (float) (i % annunciatorColumns), annunciatorArea.getY() + h * (float) (i / annunciatorColumns), w, h };
+    }
+    int annunciatorAt (juce::Point<float> p) const
+    {
+        for (int i = 0; i < annunciatorCount; ++i)
+            if (annunciatorCell (i).contains (p))
+                return i;
+        return -1;
+    }
+
+    void paintAnnunciators (juce::Graphics& g, juce::Rectangle<float> area)
+    {
+        if (const auto n = processor.midiInBlocks.load (std::memory_order_relaxed); n != lastMidiBlocks)
+        {
+            lastMidiBlocks = n;
+            midiFlashUntil = juce::Time::getMillisecondCounterHiRes() + 150.0; // destello de 150 ms por cada llegada
+        }
+        g.setColour (ink().withAlpha (0.18f));
+        g.drawVerticalLine (juce::roundToInt (area.getRight() + 3.0f), area.getY(), area.getBottom());
+        const auto fontH = juce::jlimit (8.0f, 12.0f, annunciatorCell (0).getHeight() * 0.55f); // 12 px con la fila de 100 px
+        g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), fontH, juce::Font::bold));
+        for (int i = 0; i < annunciatorCount; ++i)
+        {
+            const auto cell = annunciatorCell (i).reduced (2.0f, 2.0f);
+            const auto level = annunciatorLevel (i);
+            const auto colour = i == annRec ? inkHot() : ink();
+            if (level > 0.0f)
+            {
+                g.setColour (colour.withAlpha (0.18f * level));
+                g.fillRoundedRectangle (cell, 3.0f);
+            }
+            g.setColour (colour.withAlpha (level > 0.0f ? 0.2f + 0.8f * level : 0.4f)); // apagado: tenue pero legible
+            g.drawText (annunciatorLabel (i), cell, juce::Justification::centred, false);
+        }
+    }
+
     // Color principal según el estilo
     juce::Colour ink() const
     {
@@ -351,11 +495,23 @@ private:
             left[(size_t) i] = processor.scopeLeft[idx].load (std::memory_order_relaxed);
             right[(size_t) i] = processor.scopeRight[idx].load (std::memory_order_relaxed);
         }
-        if (mode == spectrum || mode == spectrogram || mode == arcade)
+        if (mode == spectrum || mode == spectrogram || mode == arcade || mode == demo)
             computeSpectrum();
+        if (mode == demo) // matriz de 24 filas; columnas según el ancho, con puntos cuadrados
+        {
+            const auto screen = (bezel != bezelNone ? bezelScreen (getLocalBounds().toFloat()) : getLocalBounds().toFloat()).reduced (6.0f)
+                                    .withTrimmedLeft (annunciatorSpace());
+            int highest = -1; // nota más aguda pulsada (teclado en pantalla, host o controlador)
+            for (int n = 127; n >= 0 && highest < 0; --n)
+                if (processor.keyboardState.isNoteOnForChannels (0xffff, n))
+                    highest = n;
+            brandDemo.update (bars, highest, 1.0f / 30.0f,
+                              (int) (screen.getWidth() / juce::jmax (1.0f, screen.getHeight() / (float) BrandDemo::rows)));
+        }
         if (mode == arcade) // lienzo de juego: píxel de 2-4 px de pantalla según el alto (unos 35 píxeles de juego de alto)
         {
-            const auto screen = (bezel != bezelNone ? bezelScreen (getLocalBounds().toFloat()) : getLocalBounds().toFloat()).reduced (6.0f);
+            const auto screen = (bezel != bezelNone ? bezelScreen (getLocalBounds().toFloat()) : getLocalBounds().toFloat()).reduced (6.0f)
+                                    .withTrimmedLeft (annunciatorSpace()); // a la derecha de los anunciadores
             const auto px = juce::jmax (2, (int) (screen.getHeight() / 34.0f));
             game.update (bars, 1.0f / 30.0f, juce::jmax (16, (int) (screen.getWidth() / (float) px)), juce::jmax (8, (int) (screen.getHeight() / (float) px)));
         }
@@ -455,7 +611,10 @@ private:
     void paintSpectrogram (juce::Graphics& g, juce::Rectangle<float> r)
     {
         if (! spectroImage.isNull())
+        {
+            g.setOpacity (1.0f); // drawImage usa la opacidad del último color fijado (p. ej. la de un anunciador apagado)
             g.drawImage (spectroImage, r);
+        }
     }
 
     // Goniómetro: M = (L+R)/√2 en vertical, S = (L-R)/√2 en horizontal; barra de correlación (-1 fase invertida, +1 mono)
@@ -546,6 +705,7 @@ private:
     std::function<void()> detach;
     int mode = scope, style = 0, bezel = bezelAuto;
     ArcadeGame game;
+    BrandDemo brandDemo;
     std::array<float, historySize> left {}, right {};
     juce::dsp::FFT fft { fftOrder };
     std::array<float, fftSize / 2> magDb {};

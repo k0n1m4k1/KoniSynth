@@ -81,8 +81,8 @@ async def run():
             for f in files:
                 f.unlink()  # la prueba no deja presets
             check(payload(await s.call_tool("panic", {})) is True, "panic")
-            # Sample incrustado (factory:): el preset de fábrica suena sin ficheros del equipo; uno sin sample lo quita
-            for preset, expect in (("Orbital Bloom", True), ("Init", False)):
+            # Los presets de fábrica no llevan sample: con la fuente Sample al 100 % y Osc 1 a 0 no suena nada
+            for preset, expect in (("Init", False), ("Monolith Cluster", False)):
                 payload(await s.call_tool("load_preset", {"name": preset}))
                 payload(await s.call_tool("set_parameters", {"values": {"sampleLevel": 1.0, "osc1Level": 0.0}}))
                 au = payload(await s.call_tool("audition", {"notes": "C3", "duration": 1.0, "tail": 0.2}))

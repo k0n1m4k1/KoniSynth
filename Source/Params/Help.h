@@ -232,10 +232,26 @@ static juce::String paramHelp (const juce::String& id)
         { "wtLevel", "Wavetable oscillator volume in the mixer: a stack of waveforms you can sweep through (Position)." },
         { "wtTable", "Wavetable: built-in tables or your own file (WAV with 2048 samples per frame, the Serum format, or a single cycle)." },
         { "wtPosition", "Position inside the wavetable: sweeps from the first to the last waveform. LFO 2 can move it." },
-        { "stringLevel", "Plucked string volume in the mixer (Karplus-Strong physical model): harpsichord, guitar, harp." },
-        { "stringDecay", "How long the plucked string rings (seconds to fall by 60 dB)." },
-        { "stringBright", "Pluck brightness: low = soft finger, high = hard plectrum or harpsichord quill." },
-        { "stringPick", "Where the string is plucked: near the end (low %) is bright and thin; the middle (50 %) is hollow and round." },
+        { "stringLevel", "Math Models volume in the mixer: a sound computed in real time from a formula (not a sample): a string "
+                         "plucked, bowed, struck or driven, or a set of fading modes (Modal)." },
+        { "stringDecay", "How long the string rings once it is free (seconds to fall by 60 dB): after a pluck or a hammer, or after "
+                         "you release the key with Bow and E-Bow. With Modal it scales every decay of the recipe (x1 at 3 s)." },
+        { "stringBright", "Brightness: with Noise Burst and Pick, the pluck (soft finger to hard plectrum); with Bow, Hammer and "
+                          "E-Bow, the high-frequency loss of the string at the bridge." },
+        { "stringPick", "Where the string is plucked, bowed, struck or driven: near the end (low %) is bright and thin; the "
+                        "middle (50 %) is hollow and round." },
+        { "stringBowPressure", "Bow pressure (with Bow, and with Banded when bowed): low = airy, high = rough; too little or too much stops the steady tone, "
+                               "as with a real bow. Default: 50 %." },
+        { "stringHammerFelt", "Felt hardness of the hammer (with Hammer): soft piano to hard cimbalom; a harder felt gives a "
+                              "shorter, brighter contact. Default: 50 %." },
+        { "stringEbowDrive", "Drive strength of the electromagnet (with E-Bow): how fast the note swells and how loud it "
+                             "settles. Default: 50 %." },
+        { "stringBuzz", "Sitar bridge (with Noise Burst and Pick): the string grazes a curved bridge and buzzes (jawari), as on "
+                        "the sitar and tanpura; more Buzz = the bridge closer to the string. 0 % = no bridge. Adapted from "
+                        "Siddiq (2012): only the part of the string next to the bridge is computed his way." },
+        { "stringHarmonic", "Harmonic (flageolet): a finger lightly touching the string at 1/2, 1/3, 1/4 or 1/5 of its length, so "
+                            "only the partials with a node there remain: the note sounds 1, 1.58, 2 or 2.32 octaves up with a "
+                            "glassy tone. Off = open string." },
         { "sampleLevel", "Loaded sample volume in the mixer; it goes through the filter and envelopes like an oscillator." },
         { "sampleRoot", "The note at which the sample plays at its original pitch." },
         { "sampleStart", "Sample playback start point." },
@@ -293,9 +309,62 @@ static juce::String paramHelp (const juce::String& id)
         { "stringPickup", "Magnetic pickup position, as a fraction of the string length from the bridge (Off: the string itself). "
                           "Each harmonic k is shaped by 2·|sin(π·k·position)|: at 25 % harmonics 2 and 3 stand out and the 4th "
                           "vanishes, like the bridge pickup of an electric bass." },
-        { "stringExcite", "How the string starts. Noise: a burst of filtered noise (classic Karplus-Strong, a bit grainy). Pick: the "
-                          "real shape of a plucked string, a triangle with its tip at Pick Position (harmonics fall as sin(pi*k*pos)/k^2); "
-                          "Brightness rounds the tip (a wider plectrum or a finger)." },
+        { "stringExcite", "The model. All are published models adapted to KoniSynth (Formula... shows each one). "
+                          "Noise Burst (Karplus 1983): a burst of filtered noise, classic and a bit grainy. Pick (Jaffe 1983): "
+                          "the shape of a plucked string, a triangle with its tip at Pick Position. Bow (McIntyre 1983): a bow "
+                          "rubs the string while the key is held (stick-slip friction). Hammer (Hall 1992): a felt hammer strikes "
+                          "it, as in a piano. E-Bow (Heet 1978): an electromagnet drives the string while the key is held and "
+                          "the note swells (own model of the device). Modal (Adrien 1991): a sum of fading sines with their own "
+                          "ratios and decays, edited in Formula... (Soft Key, Metal or your own). Reed (Guillemain 2005): a "
+                          "clarinet, a reed on a cylindrical bore, blown while the key is held; velocity is the blowing "
+                          "pressure (soft and round to bright). Flute (Karjalainen 1991): an "
+                          "air jet across a tube, breathy, it overblows with Jet. Brass (Cook 1991): buzzing lips on a tube, "
+                          "a trumpet or trombone. Banded (Essl 1999): a bar, a glass or a bowl, struck or bowed, one "
+                          "loop per mode. Shaker (Cook 1997): maracas, tambourine and other shakers, many small random "
+                          "collisions through a few resonances. Mallet (Avanzini 2001): a mallet with a nonlinear felt that strikes the "
+                          "modes of the Modal recipe; the harder and faster the strike, the shorter the contact and the "
+                          "brighter the tone. The panel shows only the controls of the chosen model." },
+        { "malletHardness", "Hardness of the Mallet model's head, as its contact time on a rigid surface: from 10 ms (soft "
+                            "felt, only the low modes) to 0.3 ms (hard plastic, every mode). Faster strikes are shorter and "
+                            "brighter. Default: 50 % (1.7 ms)." },
+        { "malletMass", "Weight of the Mallet model's head, from 0.01 to 10 times the mass of the struck object: light = one "
+                        "clean bounce; heavy = it bounces several times and damps the sound. Default: 33 % (0.1)." },
+        { "malletDamp", "Losses of the Mallet model's felt: low = an elastic, ringing bounce; high = a dull, padded one "
+                        "(less energy goes back into the mallet). Default: 20 %." },
+        { "bandedShape", "Object of the Banded model: Uniform Bar (inharmonic, short), Tuned Bar (a vibraphone bar), Glass "
+                         "Harmonica (a rubbed glass) or Tibetan Bowl (12 measured modes in close pairs that beat). Decay sets "
+                         "how long it rings. Default: Tuned Bar." },
+        { "bandedExcite", "How the Banded model is played: Strike (a mallet, it rings on its own) or Bow (rubbed while the key "
+                          "is held; it builds up in about a second and Press sets the bow pressure: too much chokes it). "
+                          "Default: Strike." },
+        { "shakerType", "Instrument of the Shaker model: Maraca, Cabasa, Sekere, Tambourine, Sleigh Bells or Bamboo Chimes. "
+                        "Each note is one shake, stronger with velocity; releasing the key stops it. At C4 the resonances are "
+                        "those of the instrument; other notes move them. Default: Maraca." },
+        { "shakerObjects", "Number of beans, beads or jingles in the Shaker model, from a quarter to four times the "
+                           "instrument's: few = separate clicks, many = a smooth hiss. Default: 50 % (the instrument's)." },
+        { "shakerShake", "How long one shake of the Shaker model lasts: low = a short flick, high = a long rattle. Default: "
+                         "50 % (the instrument's)." },
+        { "shakerTone", "Pitch of the Shaker model's resonances, from 1 octave down to 1 octave up (smaller or larger "
+                        "shells and jingles), on top of the note. Default: 50 %." },
+        { "reedEmbouchure", "Embouchure of the Reed model (how the lips hold the reed, the maximum airflow): low = a pinched, "
+                            "thinner tone; high = a loose, fuller one that squeaks more easily. Default: 33 %." },
+        { "reedNoise", "Breath noise of the Reed model: small, fast changes of the blowing pressure. Default: 50 %." },
+        { "fluteJet", "Jet length of the Flute model, as a ratio of the tube: short jets overblow to the upper modes (a higher, "
+                      "brighter note), long ones give a soft, unstable tone. At the default the flute is in tune from C4 to "
+                      "C7, its real range. Default: 50 % (the STK flute)." },
+        { "fluteNoise", "Breath noise of the Flute model: the air hiss of the jet. Default: 38 %." },
+        { "brassLip", "Lip tension of the Brass model, from 2 octaves below to 2 octaves above the note: the lips buzz at "
+                      "their own pitch and the tube locks to the nearest harmonic, so turning it jumps between notes like a "
+                      "real player. Default: 50 % (the lips at the played note)." },
+        { "brassSlide", "Tube length of the Brass model, from 0.5 to 1.5 times its length (a trombone slide): with the lips "
+                        "fixed, the pitch bends and jumps. Default: 50 % (x1)." },
+        { "stringStiff", "Stiffness of the string (Noise Burst, Pick, Bow, Hammer, E-Bow): a stiff string pushes its upper "
+                         "partials sharp, f_k = k f0 sqrt(1 + B k^2), as in a piano, a bass string or a bell-like wire. "
+                         "Off at 0; B from 0.00001 to 0.001. Default: Off." },
+        { "stringTension", "Tension modulation of the string (Noise Burst, Pick, Bow, Hammer, E-Bow): a string that vibrates "
+                           "widely is stretched and sounds sharper, then settles to its pitch as it fades, and it creates "
+                           "partials the pluck had left out. Stronger with velocity. Off at 0; at 100 % a strong pluck starts "
+                           "about a semitone sharp. Default: Off." },
         { "stringDamping", "High-frequency loss inside the string: upper partials die out sooner than the fundamental, as in a real "
                            "wound string. The fundamental keeps its Decay time and its tuning (compensated; with long Decay times the damping "
                            "is limited to what can be compensated)." },
@@ -364,9 +433,9 @@ static juce::String paramHelp (const juce::String& id)
         { "transAttack", "Attack: positive = punchier, sharper note starts (up to +12 dB on the onset); negative = softer, rounder starts." },
         { "transSustain", "Sustain: positive = longer tails, more body and room; negative = drier, shorter notes (up to 12 dB)." },
         { "compOn", "Turns the compressor on (after the transient shaper, before the modulation effects). Linked stereo." },
-        { "compMode", "Character. VCA: clean and precise, times as set. Opto: smooth RMS detection and soft knee; release slows down after long compression (LA-2A style). FET: feedback detection, very fast attack possible, aggressive (1176 style)." },
+        { "compMode", "Character. VCA: clean and precise, times as set. Opto: smooth RMS detection and soft knee; release slows down after long compression (LA-2A style). FET: feedback detection (the detector hears the compressed output, 1176 style): very fast attack possible and the attack gets quicker as the ratio rises; aggressive. Same static ratio in the three modes." },
         { "compThreshold", "Level above which the compressor starts reducing gain." },
-        { "compRatio", "How much gain is reduced above the threshold: 2:1 gentle, 4:1 firm, 10:1 and up is limiting." },
+        { "compRatio", "How much the output rises above the threshold: at 4:1, 4 dB more input gives 1 dB more output. 2:1 gentle, 4:1 firm, 10:1 and up is limiting. Default 4:1." },
         { "compAttack", "How fast the compressor reacts. Short = catches the transients (flatter); longer = lets the attack through (punchier)." },
         { "compRelease", "How fast the gain comes back after the level drops. Short = more pumping and loudness; long = smoother." },
         { "compKnee", "Width of the transition around the threshold: 0 dB = hard knee, wider = gradual, more transparent. Opto uses at least 12 dB." },
@@ -429,7 +498,8 @@ static juce::String paramHelp (const juce::String& id)
         { "arpGate", "How long each arpeggio note sounds, as a fraction of the step: low = staccato, high = legato." },
         { "arpLatch", "Keeps the arpeggio running after you release the keys; a new chord replaces it." },
         { "arpOneShot", "Plays the arpeggio pattern once per key press instead of looping (game sound effects such as coins and power-ups)." },
-        { "arpBpm", "Arpeggiator tempo when the host does not provide one (e.g. the standalone app)." },
+        { "arpBpm", "Internal tempo (Master > Tempo for engines without a clock of their own): arpeggiator, sequencer, synced "
+                    "echo and LFOs when the host does not provide one (e.g. the standalone app). Default 120 BPM." },
         { "voiceMode", "Poly: chords. Mono: one note at a time, last key wins (classic monosynth). Legato: like Mono, but overlapping notes slide without restarting the envelopes." },
         { "glide", "Portamento: time to slide from the previous note to the new one (0 = off)." },
         { "pitchEnvAmount", "Pitch drop or rise at the start of each note, in semitones: the key to synthesized kicks, toms and laser zaps." },
@@ -460,6 +530,7 @@ static juce::String paramHelp (const juce::String& id)
         { "mtxSrc8", "Modulation matrix slot 8: the source (LFOs, envelopes, velocity, key, wheel, aftertouch, MPE timbre, a random value per note, pitch bend)." },
         { "mtxDst8", "Modulation matrix slot 8: what the source moves, for each voice separately (pitch, cutoff, resonance, levels, pan...)." },
         { "mtxAmt8", "Modulation matrix slot 8: how much and in which direction (negative inverts). At 100 %: pitch ±24 semitones, cutoff ±5 octaves, full range for the rest." },
+        { "mtxRandomFade", "Random Fade: how much the matrix Random source fades out with the filter envelope. 0 % = each note keeps its random offset; 100 % = the offset follows the filter envelope, so with sustain 0 every note starts off target and settles on it during the decay (random pitch that converges, varied attacks). Default 0 %." },
         { "mpeOn", "MPE (MIDI Polyphonic Expression, lower zone): channel 1 is the master (its bend moves every note); channels 2-16 carry one note each, with its own pitch bend, pressure and CC74 timbre (use them in the modulation matrix: Aftertouch, MPE Timbre). For Roli, Linnstrument, Osmose, Continuum..." },
         { "voiceAssign", "Which voice plays each new note. Lowest Free: the first idle voice (repeated single notes use the same voice). "
                          "Reuse Same Note: a repeated key retriggers its own voice, like the Prophet-5. Round Robin: every note moves on to the "

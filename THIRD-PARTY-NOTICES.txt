@@ -8,8 +8,8 @@ Public License, version 3 (AGPL-3.0-only; see LICENSE). Copyright (C) 2026
 The KoniSynth binaries (VST3, CLAP, standalone) also contain the third-party
 components listed below, each under its own licence, all compatible with the
 AGPLv3: JUCE (used under the AGPLv3), Nuked-OPLL (GPL-2.0 or later), Munt
-mt32emu (LGPL-2.1 or later), formulas from msfa (Apache-2.0) and the MTS-ESP
-client (0BSD). Their licence texts are reproduced verbatim in this file, as
+mt32emu (LGPL-2.1 or later), formulas from msfa (Apache-2.0) and from STK
+(MIT-STK), and the MTS-ESP client (0BSD). Their licence texts are reproduced verbatim in this file, as
 their terms require.
 
 Component                                       Licence
@@ -36,6 +36,7 @@ libopusenc                                      BSD-3-Clause
 Nuked-OPLL 1.0.2 (Nuke.YKT, YM2413 / VRC7)       GPL-2.0-or-later
 MTS-ESP client (ODDSound Ltd)                   0BSD
 Munt mt32emu 2.8.3 (Roland MT-32 / CM-32L)      LGPL-2.1-or-later
+STK (Perry R. Cook, Gary P. Scavone)            MIT-STK
 
 Acknowledgements (reference data, tables and formulas taken from these sources):
 - Casio VL-1 waves, envelope and rhythms: VL1 emulator by PolyValens (github.com/linuxmao-org/VL1-emulator).
@@ -43,6 +44,12 @@ Acknowledgements (reference data, tables and formulas taken from these sources):
 - Omnichord voicing data: Chordian emulator.
 - TR-808 / CR-78 / Mini Pops 7: Roland service notes and published schematics (Tubbutec, DAFx-14).
 - Spring reverb: Välimäki et al.; frequency shifter all-pass coefficients: Olli Niemitalo.
+- Synth > Math Models Bow, Flute, Brass, Banded and Shaker: algorithms and data (mode tables, instrument constants) of the STK
+  Bowed, Flute, Brass, BandedWG and Shakers classes (MIT-STK, licence below; re-implementation with documented adaptations,
+  not verbatim code). Mallet: contact model of Avanzini and Rocchesso, DAFx 2001, with the explicit scheme of the Sound Design
+  Toolkit (SDT, GPL-3.0; re-implemented from the published equations, no SDT code included). Reed: equations of Guillemain, Kergomard and Voinier,
+  JASA 118 (2005). Reference recordings for their calibration (clarinet, flute, trumpet, vibraphone): University of Iowa Musical
+  Instrument Samples (not distributed).
 Reference recordings used only for measurement (Freesound, CC0/CC-BY) are not distributed.
 
 
@@ -2362,3 +2369,34 @@ necessary.  Here is a sample; alter the names:
 That's all there is to it!
 
 
+==============================================================================
+STK, The Synthesis ToolKit in C++ (Perry R. Cook, Gary P. Scavone) - MIT-STK
+==============================================================================
+
+The Synthesis ToolKit in C++ (STK)
+
+Copyright (c) 1995-2023 Perry R. Cook and Gary P. Scavone
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+Any person wishing to distribute modifications to the Software is
+asked to send the modifications to the original developer so that they
+can be incorporated into the canonical version.  This is, however, not
+a binding provision of this license.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
+CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

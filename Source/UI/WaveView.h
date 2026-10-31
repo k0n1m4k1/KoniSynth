@@ -229,12 +229,12 @@ private:
     static constexpr int chipH = 18, chipGap = 3;
     static const char* viewName (int v)
     {
-        static const char* names[] = { "OSC 1", "WT", "SMP", "STR", "OSC 2", "OSC 3", "NOISE", "MIX", "POST FILTER" };
+        static const char* names[] = { "OSC 1", "WT", "SMP", "MATH", "OSC 2", "OSC 3", "NOISE", "MIX", "POST FILTER" };
         return names[v];
     }
     juce::Rectangle<int> chipBounds (int v) const // v = numViews: el interruptor POST FILTER
     {
-        static const int widths[] = { 46, 30, 36, 36, 46, 46, 50, 36, 90 };
+        static const int widths[] = { 46, 30, 36, 42, 46, 46, 50, 36, 90 }; // MATH: Math Models
         int x = 0;
         for (int i = 0; i < v; ++i) x += widths[i] + chipGap + (i == 3 || i == 6 ? 6 : i == 7 ? 14 : 0); // grupos A, B, MIX y POST
         return { x, 0, widths[v], chipH };
@@ -546,15 +546,86 @@ private:
     void paintString (juce::Graphics& g, juce::Rectangle<float>)
     {
         const auto r = inner();
-        // Arriba, la cuerda en el instante del ataque: con Excite = Pick, un triángulo con el vértice en Pick Position (Help.h);
-        // con Noise, una ráfaga de ruido. Abajo, la caída: Decay es el T60 (s), dibujado en una ventana de 1,5·T60
+        // Arriba, la cuerda en el instante del ataque: con Pick, un triángulo con el vértice en Position (Help.h); con Noise
+        // Burst, una ráfaga de ruido; con Bow, Hammer y E-Bow, la cuerda en reposo y una marca en Position (arco, martillo o
+        // bobina). Abajo, la caída: Decay es el T60 (s), dibujado en una ventana de 1,5·T60; con Bow y E-Bow, tras un tramo
+        // sostenido (la tecla pulsada)
         const auto top = r.withHeight (r.getHeight() * 0.4f);
         const auto yRest = top.getBottom() - 6.0f;
         const auto pick = value ("stringPick");
         g.setColour (Skin::trace().withAlpha (0.25f));
         g.drawHorizontalLine (juce::roundToInt (yRest), top.getX(), top.getRight());
         juce::Path str;
-        if (choice ("stringExcite") == 1)
+        const auto excite = choice ("stringExcite");
+        const auto wind = excite >= 6 && excite <= 8;
+        if (wind)
+        {
+            // Viento: el tubo (dos paredes) y, a la izquierda, la boquilla: lengüeta (Reed), bisel del chorro (Flute) o labios (Brass)
+            const auto bore = top.withTrimmedLeft (18.0f).reduced (0.0f, top.getHeight() * 0.25f);
+            str.startNewSubPath (bore.getX(), bore.getY());
+            str.lineTo (bore.getRight(), bore.getY());
+            str.startNewSubPath (bore.getX(), bore.getBottom());
+            str.lineTo (bore.getRight(), bore.getBottom());
+            g.setColour (Skin::trace().withAlpha (0.8f));
+            const auto mx = top.getX() + 4.0f, my = bore.getCentreY();
+            if (excite == 6)      g.drawLine (mx, bore.getY(), bore.getX(), my - 2.0f, 2.0f);           // lengüeta
+            else if (excite == 7) g.drawLine (mx, my, bore.getX() + 10.0f, bore.getY() + 2.0f, 1.5f);   // chorro al bisel
+            else                  g.fillEllipse (mx, my - 5.0f, 10.0f, 10.0f);                        // labios
+        }
+        else if (excite == 9)
+        {
+            // Banded: la barra (Uniform y Tuned Bar) con la baqueta o el arco en el centro, o la copa y el cuenco con el arco
+            // en el borde
+            const auto bowed = choice ("bandedExcite") == 1;
+            g.setColour (Skin::trace().withAlpha (0.8f));
+            if (choice ("bandedShape") <= 1)
+            {
+                str.addRectangle (top.getX() + 6.0f, yRest - 8.0f, top.getWidth() - 12.0f, 8.0f);
+                const auto cx = top.getCentreX();
+                if (bowed) g.fillRect (cx - 1.5f, top.getY() + 4.0f, 3.0f, yRest - top.getY() - 12.0f);
+                else       g.fillEllipse (cx - 5.0f, yRest - 22.0f, 10.0f, 10.0f);
+            }
+            else
+            {
+                const auto x0 = top.getX() + top.getWidth() * 0.25f, x1 = top.getRight() - top.getWidth() * 0.25f;
+                str.startNewSubPath (x0, top.getY() + 8.0f);
+                str.quadraticTo (top.getCentreX(), 2.0f * yRest - top.getY() - 8.0f, x1, top.getY() + 8.0f);
+                if (bowed) g.fillRect (x0 - 9.0f, top.getY() + 2.0f, 3.0f, yRest - top.getY() - 8.0f);
+                else       g.fillEllipse (x0 - 14.0f, top.getY() + 4.0f, 10.0f, 10.0f);
+            }
+        }
+        else if (excite == 11)
+        {
+            // Mallet: la superficie y la baqueta (cabeza y mango) sobre ella
+            str.startNewSubPath (top.getX(), yRest);
+            str.lineTo (top.getRight(), yRest);
+            const auto cx = top.getCentreX(), size = 6.0f + 10.0f * value ("malletMass");
+            g.setColour (Skin::trace().withAlpha (0.8f));
+            g.fillEllipse (cx - size * 0.5f, yRest - size - 2.0f, size, size);
+            g.drawLine (cx + size * 0.3f, yRest - size, cx + 40.0f, top.getY() + 4.0f, 1.5f);
+        }
+        else if (excite == 10)
+        {
+            // Shaker: la carcasa y sus piezas (posiciones fijas)
+            const auto shell = top.withSizeKeepingCentre (top.getWidth() * 0.5f, top.getHeight() * 0.8f);
+            str.addEllipse (shell);
+            juce::Random beads (11);
+            g.setColour (Skin::trace().withAlpha (0.8f));
+            for (int i = 0; i < 14; ++i)
+                g.fillEllipse (shell.getX() + shell.getWidth() * (0.25f + 0.5f * beads.nextFloat()) - 2.0f,
+                               shell.getY() + shell.getHeight() * (0.3f + 0.4f * beads.nextFloat()) - 2.0f, 4.0f, 4.0f);
+        }
+        else if (excite >= 2)
+        {
+            str.startNewSubPath (top.getX(), yRest);
+            str.lineTo (top.getRight(), yRest);
+            const auto x = top.getX() + pick * top.getWidth();
+            g.setColour (Skin::trace().withAlpha (0.8f));
+            if (excite == 2)      g.fillRect (x - 1.5f, top.getY() + 4.0f, 3.0f, yRest - top.getY() - 4.0f); // arco
+            else if (excite == 3) g.fillEllipse (x - 5.0f, yRest - 14.0f, 10.0f, 10.0f);              // martillo
+            else                  g.drawRect (x - 7.0f, yRest - 16.0f, 14.0f, 12.0f, 1.5f);             // bobina
+        }
+        else if (excite == 1)
         {
             str.startNewSubPath (top.getX(), yRest);
             str.lineTo (top.getX() + pick * top.getWidth(), top.getY() + 6.0f);
@@ -573,20 +644,53 @@ private:
         strokeTrace (g, str, value ("stringLevel") > 0.0f ? 1.0f : 0.45f);
 
         const auto bottom = r.withTrimmedTop (r.getHeight() * 0.5f);
+        if (wind)
+        {
+            // Viento: el soplo de la envolvente de STK; sube, se sostiene con la tecla pulsada y se apaga al soltar
+            juce::Path breath;
+            breath.startNewSubPath (bottom.getX(), bottom.getBottom());
+            breath.lineTo (bottom.getX() + bottom.getWidth() * 0.08f, bottom.getY() + bottom.getHeight() * 0.15f);
+            breath.lineTo (bottom.getX() + bottom.getWidth() * 0.8f, bottom.getY() + bottom.getHeight() * 0.15f);
+            breath.lineTo (bottom.getX() + bottom.getWidth() * 0.86f, bottom.getBottom());
+            strokeTrace (g, breath, 0.7f);
+            g.setColour (Skin::trace().withAlpha (0.6f));
+            g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 10.0f, juce::Font::plain));
+            g.drawText ("KEY HELD", bottom.withTrimmedLeft (bottom.getWidth() * 0.1f).withHeight (12.0f), juce::Justification::left);
+            return;
+        }
+        if (excite == 10)
+        {
+            // Shaker: una sacudida; la energía cae (Shake) y los choques al azar la siguen
+            juce::Path shake;
+            juce::Random hits (5);
+            const auto fall = 3.0f + 6.0f * (1.0f - value ("shakerShake"));
+            shake.startNewSubPath (bottom.getX(), bottom.getBottom());
+            for (int i = 0; i <= 160; ++i)
+            {
+                const auto u = (float) i / 160.0f;
+                const auto a = std::exp (-fall * u) * (0.4f + 0.6f * hits.nextFloat());
+                shake.lineTo (bottom.getX() + bottom.getWidth() * u, bottom.getBottom() - a * bottom.getHeight());
+            }
+            strokeTrace (g, shake, 0.7f);
+            return;
+        }
         const auto t60 = value ("stringDecay");
+        // Bow, E-Bow y Banded con arco: fracción del ancho con la tecla pulsada
+        const auto held = excite == 2 || excite == 4 || (excite == 9 && choice ("bandedExcite") == 1) ? 0.3f : 0.0f;
         juce::Path decay;
         for (int i = 0; i <= 160; ++i)
         {
-            const auto t = 1.5f * t60 * (float) i / 160.0f;
+            const auto u = (float) i / 160.0f;
+            const auto t = 1.5f * t60 * juce::jmax (0.0f, (u - held) / (1.0f - held));
             const auto a = std::exp (-6.9078f * t / t60); // -60 dB en T60
-            const auto x = bottom.getX() + bottom.getWidth() * (float) i / 160.0f;
+            const auto x = bottom.getX() + bottom.getWidth() * u;
             if (i == 0) decay.startNewSubPath (x, bottom.getBottom() - a * bottom.getHeight());
             else        decay.lineTo (x, bottom.getBottom() - a * bottom.getHeight());
         }
         strokeTrace (g, decay, 0.7f);
         g.setColour (Skin::trace().withAlpha (0.6f));
         g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 10.0f, juce::Font::plain));
-        const auto xT60 = bottom.getX() + bottom.getWidth() / 1.5f;
+        const auto xT60 = bottom.getX() + bottom.getWidth() * (held + (1.0f - held) / 1.5f);
         g.drawVerticalLine (juce::roundToInt (xT60), bottom.getY(), bottom.getBottom());
         g.drawText ("-60 dB", juce::Rectangle<float> (xT60 + 4.0f, bottom.getY(), 60.0f, 12.0f), juce::Justification::left);
     }
@@ -669,12 +773,50 @@ private:
                                        o[1].level > 0.0f && o[1].wave != 4 && o[1].wave != 5 && audible (Params::srcOsc2, "osc2Mute"),
                                        o[2].level > 0.0f && audible (Params::srcOsc3, "osc3Mute") };
         const auto wtLevel = value ("wtLevel") > 0.0f && audible (Params::srcWavetable, "wtMute") ? value ("wtLevel") : 0.0f;
-        return [o, on, wtLevel, f = frameAt ("wtPosition", KoniSynthProcessor::wtMain), table] (double t)
+        const auto mathLevel = value ("stringLevel") > 0.0f && audible (Params::srcString, "stringMute") ? value ("stringLevel") : 0.0f;
+        return [o, on, wtLevel, f = frameAt ("wtPosition", KoniSynthProcessor::wtMain), table, mathLevel, math = mathModelShape()] (double t)
         {
             float y = 0.0f;
             for (size_t k = 0; k < 3; ++k)
                 if (on[k]) { const auto ph = t * o[k].ratio; y += o[k].level * sampleOsc (o[k], ph - std::floor (ph)); }
-            return y + wtLevel * table (f, t);
+            return y + wtLevel * table (f, t) + (mathLevel > 0.0f ? mathLevel * math (t) : 0.0f);
+        };
+    }
+
+    // Math Models en MIX: no es periódico (cambia nota a nota y se apaga); se dibuja la forma de su primer periodo, como
+    // aproximación: Pick y Hammer, el triángulo con el vértice en Position; Noise Burst, una ráfaga con semilla fija; Bow, el
+    // diente de sierra del movimiento de Helmholtz ideal; E-Bow, un seno; Modal, la suma de sus modos sin caída; Banded, su
+    // primer modo (el que dura); Shaker, ruido como Noise Burst. t en periodos
+    std::function<float (double)> mathModelShape() const
+    {
+        const auto excite = choice ("stringExcite");
+        const auto harm = (double) (1 + choice ("stringHarmonic"));
+        const auto pick = juce::jlimit (0.02f, 0.98f, value ("stringPick"));
+        if (excite == 5 || excite == 11) // Mallet: los modos de la receta, como Modal
+        {
+            juce::String error;
+            std::shared_ptr<ModalRecipe> recipe (ModalRecipe::parse (koni.getModalRecipe(), error).release());
+            if (recipe == nullptr) return [] (double) { return 0.0f; };
+            return [recipe] (double t)
+            {
+                double s = 0.0;
+                for (int k = 0; k < recipe->count; ++k)
+                    s += recipe->amp[(size_t) k] * std::sin (juce::MathConstants<double>::twoPi * recipe->ratio[(size_t) k] * t);
+                return (float) s * recipe->norm;
+            };
+        }
+        return [excite, harm, pick] (double t)
+        {
+            const auto ph = t * harm - std::floor (t * harm);
+            switch (excite)
+            {
+                case 0: case 10: { auto h = (juce::uint32) (ph * 64.0) * 2654435761u; h ^= h >> 13; return 0.8f * ((float) (h & 0xffff) / 32767.5f - 1.0f); }
+                case 2: return 0.8f * (1.0f - 2.0f * (float) ph);
+                case 4: case 7: case 9: return 0.8f * (float) std::sin (juce::MathConstants<double>::twoPi * ph); // E-Bow; Flute, casi un seno; Banded, su modo 1
+                case 6: return ph < 0.5 ? 0.7f : -0.7f;            // Reed: tubo cilíndrico, armónicos impares (casi cuadrada)
+                case 8: return 0.8f * (1.0f - 2.0f * (float) ph); // Brass: rico en armónicos, como una sierra
+                default: return 1.6f * ((float) (ph < pick ? ph / pick : (1.0 - ph) / (1.0 - pick)) - 0.5f);
+            }
         };
     }
 
@@ -760,7 +902,7 @@ private:
 
     void paintMix (juce::Graphics& g, juce::Rectangle<float>)
     {
-        // Sample, String y Noise no son periódicos: no entran (lo dice la lectura)
+        // Sample y Noise no son periódicos: no entran (lo dice la lectura). Math Models entra con la forma de su primer periodo
         const auto r = inner();
         const auto fn = sourceFn (mix);
         juce::Path p;
@@ -822,8 +964,46 @@ private:
                 info = sampleInfo.isEmpty() ? juce::String ("WHOLE FILE, TIME DOMAIN") : sampleInfo;
                 break;
             case string:
+                if (const auto excite = choice ("stringExcite"); excite == 9)
+                {
+                    lines.add ("DECAY " + text ("stringDecay") + " | LEVEL " + pct ("stringLevel"));
+                    lines.add ("SHAPE " + text ("bandedShape") + " | " + text ("bandedExcite")
+                               + (choice ("bandedExcite") == 1 ? " | PRESS " + pct ("stringBowPressure") : juce::String()));
+                    info = "EXCITE " + text ("stringExcite");
+                    break;
+                }
+                else if (excite == 11)
+                {
+                    lines.add ("DECAY " + text ("stringDecay") + " | LEVEL " + pct ("stringLevel"));
+                    lines.add ("HARDNESS " + pct ("malletHardness") + " | MASS " + pct ("malletMass") + " | DAMP " + pct ("malletDamp"));
+                    info = "EXCITE " + text ("stringExcite") + " | MODES: MODAL RECIPE";
+                    break;
+                }
+                else if (excite == 10)
+                {
+                    lines.add ("TYPE " + text ("shakerType") + " | LEVEL " + pct ("stringLevel"));
+                    lines.add ("OBJECTS " + pct ("shakerObjects") + " | SHAKE " + pct ("shakerShake") + " | TONE " + pct ("shakerTone"));
+                    info = "EXCITE " + text ("stringExcite");
+                    break;
+                }
+                else if (excite >= 6 && excite <= 8)
+                {
+                    // Viento: Level y sus dos mandos propios
+                    lines.add ("LEVEL " + pct ("stringLevel") + " | BREATH: VELOCITY");
+                    lines.add (excite == 6 ? "EMBOUCHURE " + pct ("reedEmbouchure") + " | NOISE " + pct ("reedNoise")
+                               : excite == 7 ? "JET " + pct ("fluteJet") + " | NOISE " + pct ("fluteNoise")
+                               : "LIP " + pct ("brassLip") + " | SLIDE " + pct ("brassSlide"));
+                    info = "EXCITE " + text ("stringExcite");
+                    break;
+                }
                 lines.add ("DECAY " + text ("stringDecay") + " (T60) | DAMPING " + pct ("stringDamping") + " | BRIGHT " + pct ("stringBright"));
-                lines.add ("PICK " + pct ("stringPick") + " | PICKUP " + text ("stringPickup") + " | LEVEL " + pct ("stringLevel"));
+                lines.add ("POSITION " + pct ("stringPick") + " | PICKUP " + text ("stringPickup") + " | LEVEL " + pct ("stringLevel")
+                           + (value ("stringStiff") > 0.0f || value ("stringTension") > 0.0f
+                              ? " | STIFF " + pct ("stringStiff") + " | TENSION " + pct ("stringTension") : juce::String()));
+                lines.add ("BUZZ " + pct ("stringBuzz") + " | HARMONIC " + text ("stringHarmonic")
+                           + (choice ("stringExcite") == 2 ? " | PRESS " + pct ("stringBowPressure")
+                              : choice ("stringExcite") == 3 ? " | FELT " + pct ("stringHammerFelt")
+                              : choice ("stringExcite") == 4 ? " | DRIVE " + pct ("stringEbowDrive") : juce::String()));
                 info = "EXCITE " + text ("stringExcite");
                 break;
             case noise:
@@ -831,8 +1011,8 @@ private:
                 info = text ("noiseColor");
                 break;
             default:
-                lines.add ("PEAK " + juce::String (mixPeak, 2) + " (before the filter) | OSC 1-3 + WAVETABLE");
-                info = "SAMPLE, STRING AND NOISE NOT DRAWN";
+                lines.add ("PEAK " + juce::String (mixPeak, 2) + " (before the filter) | OSC 1-3 + WAVETABLE + MATH");
+                info = "MATH: FIRST PERIOD (APPROX.); SAMPLE AND NOISE NOT DRAWN";
                 break;
         }
         if (! post.empty())
@@ -1025,7 +1205,9 @@ private:
         "osc2Wave", "osc2Level", "osc2Octave", "osc2Semi", "osc2Fine", "osc2WtPosition", "osc2WtTable", "osc2TriSym", "osc2TriRound",
         "osc3Wave", "subLevel", "subOctave", "osc3Semi", "osc3Fine", "osc3TriSym", "osc3TriRound", "noiseColor", "noiseLevel",
         "wtTable", "wtLevel", "wtPosition", "sampleLevel", "sampleStart", "sampleLength", "sampleLoop", "sampleRoot",
-        "stringLevel", "stringDecay", "stringBright", "stringPick", "stringPickup", "stringExcite", "stringDamping",
+        "stringLevel", "stringDecay", "stringBright", "stringPick", "stringPickup", "stringExcite", "stringDamping", "stringHarmonic",
+        "stringBowPressure", "stringHammerFelt", "stringEbowDrive", "stringBuzz", "stringStiff", "stringTension", "reedEmbouchure", "reedNoise", "fluteJet", "fluteNoise",
+        "brassLip", "brassSlide", "bandedShape", "bandedExcite", "shakerType", "shakerObjects", "shakerShake", "shakerTone", "malletHardness", "malletMass", "malletDamp",
         "osc1Mute", "wtMute", "sampleMute", "stringMute", "osc2Mute", "osc3Mute", "noiseMute",
         "filterOn", "filterMode", "cutoff", "resonance", "filterDrive", "filterCleanDrive", "filterSpread", "filterKey", "filterEnv",
         "filterSustain", "velToFilter", "lfoOn", "lfoTarget", "lfoDepth", "lfo2On", "lfo2Target", "lfo2Depth",

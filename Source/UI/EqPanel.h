@@ -10,6 +10,8 @@
 class EqCurve : public juce::Component, private juce::Timer
 {
 public:
+    std::function<double()> rate; // frecuencia de muestreo del procesador
+
     explicit EqCurve (APVTS& s) : apvts (s)
     {
         setInterceptsMouseClicks (true, false);
@@ -36,7 +38,7 @@ public:
             g.drawText ((db > 0 ? "+" : "") + juce::String (db, 0), juce::Rectangle<float> (r.getRight() - 28, yFor (db) - 12, 26, 12), juce::Justification::right);
         }
         const auto s = settings();
-        const auto fs = 48000.0;
+        const auto fs = sampleRate(); // la del procesador: la respuesta digital cerca de Nyquist depende de ella
         juce::Path curve;
         for (int px = 0; px <= (int) r.getWidth(); px += 2)
         {
@@ -178,8 +180,12 @@ private:
         for (const auto* id : { "eqOn", "eqLowCut", "eqHighCut", "eqLowFreq", "eqLowGain", "eqMid1Freq", "eqMid1Gain", "eqMid1Q",
                                 "eqMid2Freq", "eqMid2Gain", "eqMid2Q", "eqHighFreq", "eqHighGain", "eqOutput", "eqLowCutSlope", "eqHighCutSlope" })
             h = h * 1.0001 + raw (id);
+        h = h * 1.0001 + sampleRate(); // otra frecuencia de muestreo: otra curva
         if (h != lastHash) { lastHash = h; repaint(); }
     }
+
+    // Frecuencia de muestreo del audio (la pone EqPanel); 48 kHz hasta que el procesador se prepara
+    double sampleRate() const { const auto r = rate ? rate() : 0.0; return r > 0.0 ? r : 48000.0; }
 
     APVTS& apvts;
     int hot = -1, dragging = -1;
@@ -194,6 +200,8 @@ public:
     {
         auto& s = p.apvts;
         spectrum.setMode (Visualizer::spectrum);
+        spectrum.setShowAnnunciators (false); // los anunciadores son del display superior
+        curve.rate = [&p] { return p.getSampleRate(); };
         addAndMakeVisible (spectrum);
         addAndMakeVisible (curve);
         hint.setText ("Drag the nodes (C = cuts, L / 1 / 2 / H = bands); mouse wheel on 1 or 2 = Q; double-click = 0 dB.",

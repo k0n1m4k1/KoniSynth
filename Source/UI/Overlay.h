@@ -59,8 +59,7 @@ public:
     {
         g.fillAll (Skin::black().withAlpha (0.55f));
         const auto p = panel().toFloat();
-        g.setColour (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId).brighter (0.15f));
-        g.fillRoundedRectangle (p, 8.0f);
+        Skin::dialogFace (g, p, 8.0f, getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId).brighter (0.15f));
         g.setColour (Skin::white().withAlpha (0.25f));
         g.drawRoundedRectangle (p, 8.0f, 1.0f);
         auto r = panel().reduced (16);

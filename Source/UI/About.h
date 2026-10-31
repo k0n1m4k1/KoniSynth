@@ -25,8 +25,7 @@ public:
     {
         g.fillAll (Skin::black().withAlpha (0.6f));
         const auto p = panel().toFloat();
-        g.setColour (getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId).brighter (0.08f));
-        g.fillRoundedRectangle (p, 8.0f);
+        Skin::dialogFace (g, p, 8.0f, getLookAndFeel().findColour (juce::ResizableWindow::backgroundColourId).brighter (0.08f));
         g.setColour (Skin::c (0xff42a2c8).withAlpha (0.6f));
         g.drawRoundedRectangle (p, 8.0f, 1.2f);
         g.setColour (Skin::white());
@@ -106,7 +105,7 @@ class AboutBody : public juce::Component, private juce::Timer
 public:
     explicit AboutBody (EasterEgg& e) : egg (e)
     {
-        avatar = juce::ImageCache::getFromMemory (BinaryData::aboutavatar_jpg, BinaryData::aboutavatar_jpgSize);
+        avatar = juce::ImageCache::getFromMemory (BinaryData::KoniSynth512_png, BinaryData::KoniSynth512_pngSize); // el icono de la app
     }
 
     ~AboutBody() override { egg.stop(); }

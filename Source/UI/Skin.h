@@ -319,6 +319,23 @@ inline void paintBackground (juce::Graphics& g, juce::Rectangle<int> area, juce:
     g.fillRect (area);
 }
 
+// Cara de un diálogo (PanelDialog, Overlay): rectángulo redondeado del color plano; en Brushed Metal, el mismo acero cepillado
+// que la ventana (paintBackground recortado al rectángulo). Los monocromos conservan el color plano mapeado
+inline void dialogFace (juce::Graphics& g, juce::Rectangle<float> r, float radius, juce::Colour plain)
+{
+    if (current() != metal)
+    {
+        g.setColour (plain);
+        g.fillRoundedRectangle (r, radius);
+        return;
+    }
+    const juce::Graphics::ScopedSaveState state (g);
+    juce::Path clip;
+    clip.addRoundedRectangle (r, radius);
+    g.reduceClipRegion (clip);
+    paintBackground (g, r.getSmallestIntegerContainer(), plain);
+}
+
 // Esquema de LookAndFeel_V4 (fondos, contornos, texto, rellenos y menús de los componentes de JUCE) en el skin actual
 inline juce::LookAndFeel_V4::ColourScheme scheme()
 {

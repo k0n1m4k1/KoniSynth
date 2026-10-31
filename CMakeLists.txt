@@ -106,13 +106,25 @@ if(KONISYNTH_EMBED_REPO_PATH)
     target_compile_definitions(KoniSynth PUBLIC KONI_REPO_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
-# Recursos incrustados: avatar del diálogo About (https://steamcommunity.com/id/k0n1m4k1, avatarFull, 184 × 184 JPEG) y los
-# tres samples originales de los presets de fábrica (Resources/samples, WAV de 16 bits a 48 kHz, 1,26 MB; "factory:<fichero>")
+# Recursos incrustados: el icono de la aplicación para la tarjeta del diálogo About (Resources/KoniSynth-512.png, 512 × 512
+# RGBA, 503 kB) y las fórmulas de Math Models del diálogo Formula... (Resources/formulas, SVG de tools/make_formula_svgs.py,
+# 280 kB). Ningún sample de audio
 juce_add_binary_data(KoniSynthData HEADER_NAME BinaryData.h NAMESPACE BinaryData
-    SOURCES Resources/about-avatar.jpg
-            Resources/samples/original-metal-C4.wav
-            Resources/samples/original-soft-key-C4.wav
-            Resources/samples/original-orbital-bloom-C3.wav)
+    SOURCES Resources/KoniSynth-512.png
+            Resources/formulas/noise-burst.svg
+            Resources/formulas/pick.svg
+            Resources/formulas/bow.svg
+            Resources/formulas/hammer.svg
+            Resources/formulas/ebow.svg
+            Resources/formulas/modal.svg
+            Resources/formulas/buzz.svg
+            Resources/formulas/reed.svg
+            Resources/formulas/flute.svg
+            Resources/formulas/brass.svg
+            Resources/formulas/banded.svg
+            Resources/formulas/shaker.svg
+            Resources/formulas/mallet.svg
+            Resources/formulas/stiff.svg)
 
 target_link_libraries(KoniSynth
     PRIVATE KoniSynthData

@@ -138,13 +138,13 @@ public:
     {
         for (int i = 0; i < 8; ++i)
         {
-            auto* voice = new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot);
+            auto* voice = new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot, modalSlot);
             voice->cardIndex = i; // tarjeta de voz física (Tolerances: Per Voice Card)
             synth.addVoice (voice);
         }
         synth.addSound (new SynthSound());
         synth.assignMode = params.voiceAssign;
-        monoSynth.addVoice (new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
+        monoSynth.addVoice (new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot, modalSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
         monoSynth.addSound (new SynthSound());
         // Cada evento MIDI en su muestra: por defecto JUCE no parte el bloque si el siguiente evento está a menos de 32
         // muestras y lo adelanta (medido: notas a 1, 7 y 31 muestras de otra sonaban a la vez que ella; juce_Synthesiser.cpp:217).
@@ -205,26 +205,6 @@ public:
             return error;
         publishSample (std::move (data), SampleImport::pathOf (file, item), which);
         return {};
-    }
-
-    // Sample de fábrica incrustado (Resources/samples, BinaryData). path: "factory:<nombre del fichero>", la ruta que guardan
-    // el estado y los presets (no depende de ninguna carpeta del equipo). Devuelve el error o una cadena vacía
-    juce::String loadFactorySample (const juce::String& path, int which = sourceSample)
-    {
-        const auto fileName = path.fromFirstOccurrenceOf (SampleImport::factoryPrefix, false, false);
-        for (int i = 0; i < BinaryData::namedResourceListSize; ++i)
-            if (fileName == BinaryData::originalFilenames[i])
-            {
-                int size = 0;
-                const auto* bytes = BinaryData::getNamedResource (BinaryData::namedResourceList[i], size);
-                juce::String error;
-                auto data = SampleData::fromMemory (bytes, (size_t) size, fileName, error);
-                if (data == nullptr)
-                    return error;
-                publishSample (std::move (data), path, which);
-                return {};
-            }
-        return "Factory sample not found: " + fileName;
     }
 
     // Tira de expresión del Gen X-2 tocada en el pad (UI/StylophonePad.h)
@@ -422,6 +402,14 @@ public:
                     kept.addEvent (m, metadata.samplePosition);
             }
             midi.swapWith (kept);
+        }
+        // Anunciadores MIDI y HOLD: lo que llega del host (ya filtrado por canal), antes del teclado en pantalla
+        if (! midi.isEmpty())
+        {
+            midiInBlocks.fetch_add (1, std::memory_order_relaxed);
+            for (const auto metadata : midi)
+                if (const auto m = metadata.getMessage(); m.isController() && m.getControllerNumber() == 64)
+                    sustainDown.store (m.getControllerValue() >= 64, std::memory_order_relaxed);
         }
 
         // CC 120-127 son mensajes de modo de canal y la especificación MIDI exige valor 0 (salvo Local Control 122 y
@@ -1086,6 +1074,7 @@ public:
         sampleSlot.blocksDone.fetch_add (1, std::memory_order_release); // ver DataSlot
         for (auto& b : rhythmBanks) b.slot.blocksDone.fetch_add (1, std::memory_order_release);
         osc2SampleSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        modalSlot.blocksDone.fetch_add (1, std::memory_order_release);
         for (auto* slot : { &dpcmSampleSlot, &mdSampleSlot, &snesSampleSlot, &n64SampleSlot })
             slot->blocksDone.fetch_add (1, std::memory_order_release);
         ansSlot.blocksDone.fetch_add (1, std::memory_order_release);
@@ -1101,6 +1090,10 @@ public:
     static constexpr int scopeSize = 4096; // potencia de 2: índice = pos & (scopeSize - 1)
     std::array<std::atomic<float>, scopeSize> scopeLeft {}, scopeRight {}; // display (UI/Visualizer.h): L y R
     std::atomic<int> scopeWritePos { 0 };
+    // Anunciadores del display (UI/Visualizer.h): bloques con MIDI de entrada del host (para el destello MIDI) y pedal de
+    // sustain (CC 64 >= 64) según ese MIDI
+    std::atomic<juce::uint32> midiInBlocks { 0 };
+    std::atomic<bool> sustainDown { false };
     // Tempo efectivo para el LED del editor (lo escribe processBlock)
     float getDisplayBpm() const noexcept       { return params.displayBpm.load (std::memory_order_relaxed); }
     bool isDisplayBpmFromHost() const noexcept { return params.displayBpmFromHost.load (std::memory_order_relaxed); }
@@ -1211,6 +1204,7 @@ public:
         const auto isDefault = order == std::array<int, 6> { 0, 1, 2, 3, 4, 5 };
         apvts.state.setProperty (fxOrderProp, isDefault ? juce::String() : parts.joinIntoString (","), nullptr);
         refreshFxOrder();
+        refreshModalRecipe();
     }
 
     void setStateInformation (const void* data, int size) override
@@ -1304,6 +1298,7 @@ public:
                 filterQualityRequested = juce::jlimit (0, 2, (int) apvts.state.getProperty (filterQualityProp, 0)); // sin ella: Classic
                 fxOrderText = "?"; // fuerza la relectura
                 refreshFxOrder();
+                refreshModalRecipe();
 
                 restoreFiles (apvts.state.getProperty (samplePathProp).toString(), apvts.state.getProperty (wtPathProp).toString());
                 restoreSample (apvts.state.getProperty (osc2SamplePathProp).toString(), osc2Sample); // sin la propiedad (proyectos anteriores): sin fichero
@@ -1366,17 +1361,6 @@ public:
         if (samplePath.isEmpty())
         {
             clearSample (which);
-        }
-        else if (SampleImport::isFactory (samplePath))
-        {
-            // Incrustado: solo falta si lo guardó una versión con un sample que esta no trae (no hay fichero que localizar)
-            if (const auto error = loadFactorySample (samplePath, which); error.isNotEmpty())
-            {
-                slotFor (which).replace (nullptr);
-                apvts.state.setProperty (pathPropFor (which), samplePath, nullptr);
-                const juce::ScopedLock sl (sampleInfoLock);
-                sampleInfos[(size_t) which].text = "(missing) " + samplePath;
-            }
         }
         else
         {
@@ -1564,6 +1548,7 @@ private:
         if (rc.locked && (jumped || randomAnchorPending.exchange (false)))
         {
             rc.liveCounter = 0;
+            params.panAlternate = 0; // Voice Pan Alternate: la primera nota del render, siempre al mismo lado
             const auto base = KoniRandom::key (rc.seed, (juce::uint64) pos);
             auto seedFor = [base] (juce::uint64 stream) { return (juce::int64) KoniRandom::key (base, stream); };
             theremin.reseed (seedFor (1)); stylophone.reseed (seedFor (2)); drumMachine.reseed (seedFor (3));
@@ -1945,6 +1930,42 @@ private:
         return *props[(size_t) juce::jlimit (0, numSampleSlots - 1, which)];
     }
     static inline const juce::Identifier cabIrPathProp { "cabIrPath" }; // mismo nombre que el atributo del preset
+    // Receta de Math Models > Modal (propiedad de texto "modalRecipe", también en los presets; Engines/SynthData.h). El audio lee
+    // la última receta válida publicada; una no válida no se publica y su error queda en modalError
+    static inline const juce::Identifier modalRecipeProp { "modalRecipe" };
+    ModalSlot modalSlot;
+    juce::String modalRecipeText { "?" }, modalError; // modalError: protegido por sampleInfoLock
+    void refreshModalRecipe()
+    {
+        const auto text = apvts.state.getProperty (modalRecipeProp).toString();
+        if (text == modalRecipeText)
+            return;
+        modalRecipeText = text;
+        juce::String error;
+        if (auto recipe = ModalRecipe::parse (text, error))
+            modalSlot.replace (std::move (recipe));
+        const juce::ScopedLock sl (sampleInfoLock);
+        modalError = error;
+    }
+public:
+    // Hilo de mensajes (diálogo Formula...): fija la receta; el error (vacío si es válida) se lee con getModalError
+    void setModalRecipe (const juce::String& text) { apvts.state.setProperty (modalRecipeProp, text, nullptr); refreshModalRecipe(); }
+    juce::String getModalRecipe() const { return apvts.state.getProperty (modalRecipeProp).toString(); }
+    juce::String getModalError() const { const juce::ScopedLock sl (sampleInfoLock); return modalError; }
+    // Hilo de mensajes (diálogo Formula...): la onda de Math Models con los parámetros actuales, en una voz propia a 48 kHz
+    // (no toca las del sintetizador). gateSamples: muestra en la que se suelta la tecla (Bow y E-Bow)
+    static constexpr double mathPreviewRate = 48000.0;
+    void renderMathPreview (std::vector<float>& out, double f0, float velocity, int gateSamples)
+    {
+        if (mathPreviewVoice == nullptr)
+        {
+            mathPreviewVoice = std::make_unique<SynthVoice> (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot, modalSlot);
+            mathPreviewVoice->setCurrentPlaybackSampleRate (mathPreviewRate);
+        }
+        mathPreviewVoice->renderMathPreview (out.data(), (int) out.size(), f0, velocity, gateSamples);
+    }
+private:
+    std::unique_ptr<SynthVoice> mathPreviewVoice;
     // Orden de la cadena de efectos (propiedad de texto "fxOrder", también en los presets: los 6 grupos separados por comas;
     // vacía o no válida = el orden de siempre). El audio lee la copia empaquetada: 4 bits por posición
     static inline const juce::Identifier fxOrderProp { "fxOrder" };
@@ -2012,6 +2033,8 @@ private:
         perfMacros.update();
         updateBuiltInWavetable();
         refreshFxOrder(); // un preset cargado puede traer otro orden de la cadena de efectos
+        refreshModalRecipe(); // o otra receta de Modal
+        modalSlot.collect();
     }
 
     // Ritmos de usuario de la caja de ritmos, el Omnichord y el VL-1 (Engines/UserRhythms.h): un banco por motor, se relee
@@ -2273,6 +2296,7 @@ private:
 #include "UI/TransportPanel.h"
 #include "UI/AgentPanel.h"
 #include "UI/Arcade.h"
+#include "UI/BrandDemo.h"
 #include "UI/Visualizer.h"
 
 #include "UI/PresetBar.h"
@@ -2292,6 +2316,7 @@ private:
 #include "UI/WaveView.h"
 
 #include "UI/SequencerPanel.h"
+#include "UI/MathModelPanel.h"
 
 #include "UI/RhythmEditor.h"
 

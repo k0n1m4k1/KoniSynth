@@ -60,6 +60,10 @@ struct MidiActionButton : ButtonType
     }
 };
 
+// Propiedad con el ID del parámetro que ParamMenu pone en su mando: collectParamIds encuentra así los parámetros de un bloque
+// o de un diálogo recorriendo sus componentes
+inline const juce::Identifier paramIdTag { "koniParamId" };
+
 struct ParamMenu : juce::MouseListener
 {
     ParamMenu (APVTS& s, const juce::String& id, juce::Component& target)
@@ -69,6 +73,7 @@ struct ParamMenu : juce::MouseListener
           component (&target)
     {
         target.addMouseListener (this, true);
+        target.getProperties().set (paramIdTag, id);
     }
 
     ~ParamMenu() override
@@ -336,6 +341,65 @@ namespace WaveGlyph
 
 // UI: control de un parámetro continuo con etiqueta: perilla o slider vertical (envolventes). Doble clic = valor por
 // defecto. La etiqueta muestra el CC asignado ("Cutoff [74]") o "Learn..." mientras espera un CC.
+// Parámetros de los mandos de un árbol de componentes (los marca ParamMenu), sin repetir; también los ocultos (pestañas no
+// elegidas)
+inline void collectParamIds (const juce::Component& c, juce::StringArray& ids)
+{
+    if (const auto* id = c.getProperties().getVarPointer (paramIdTag))
+        ids.addIfNotAlreadyThere (id->toString());
+    for (auto* child : c.getChildren())
+        collectParamIds (*child, ids);
+}
+
+// "Reset ... to defaults" (marco de un bloque, pestañas de fuente y de bloque): solo parámetros (no las propiedades del preset:
+// receta de Modal, sample, wavetable...), en un solo paso de deshacer. 'engine' nunca: cambiar de motor no es restablecer un
+// bloque. Devuelve cuántos cambian
+inline juce::StringArray resettableIds (juce::StringArray ids)
+{
+    ids.removeString ("engine");
+    return ids;
+}
+
+inline int paramsOffDefault (APVTS& s, const juce::StringArray& ids)
+{
+    auto n = 0;
+    for (const auto& id : resettableIds (ids))
+        if (auto* p = s.getParameter (id); p != nullptr && std::abs (p->getValue() - p->getDefaultValue()) > 1.0e-6f)
+            ++n;
+    return n;
+}
+
+inline int resetParamsToDefaults (APVTS& s, const juce::StringArray& ids)
+{
+    auto& undo = dynamic_cast<KoniSynthProcessor&> (s.processor).undoHistory;
+    auto n = 0;
+    undo.beginGroup();
+    for (const auto& id : resettableIds (ids))
+        if (auto* p = s.getParameter (id); p != nullptr && std::abs (p->getValue() - p->getDefaultValue()) > 1.0e-6f)
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->getDefaultValue());
+            p->endChangeGesture();
+            ++n;
+        }
+    undo.endGroup();
+    return n;
+}
+
+// Menú de una sola opción "Reset <qué> to defaults" (atenuada si ya están todos en su valor por defecto)
+inline void showResetMenu (APVTS& s, juce::Component& target, const juce::String& what, std::function<juce::StringArray()> ids)
+{
+    const auto list = ids();
+    if (resettableIds (list).isEmpty())
+        return;
+    const auto off = paramsOffDefault (s, list);
+    juce::PopupMenu m;
+    m.addItem (1, "Reset " + what + " to defaults" + (off > 0 ? " (" + juce::String (off) + " changed)" : juce::String()), off > 0);
+    // Junto al puntero (el marco de un bloque puede medir cientos de px); el componente solo fija la escala del menú
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target).withMousePosition(),
+                     [st = &s, list] (int id) { if (id == 1) resetParamsToDefaults (*st, list); });
+}
+
 struct Knob : juce::Component, private juce::Timer
 {
     enum class Style { rotary, vertical };
@@ -1059,6 +1123,7 @@ struct SortableComboBox : juce::ComboBox
 {
     bool alphabetical = false;
     juce::StringArray itemTooltips; // por índice de item; vacío = sin tooltips por opción
+    std::vector<int> displayOrder;  // orden del desplegable (índices de item); vacío = el de los items
 
     juce::String getTooltip() override
     {
@@ -1086,7 +1151,7 @@ struct SortableComboBox : juce::ComboBox
 
     void showPopup() override
     {
-        if (! alphabetical && itemTooltips.isEmpty())
+        if (! alphabetical && itemTooltips.isEmpty() && displayOrder.empty())
         {
             juce::ComboBox::showPopup();
             return;
@@ -1094,6 +1159,15 @@ struct SortableComboBox : juce::ComboBox
         std::vector<int> order;
         for (int i = 0; i < getNumItems(); ++i)
             order.push_back (i);
+        if (! displayOrder.empty()) // orden dado (índices de item); los que falten, al final en su orden
+        {
+            order = displayOrder;
+            for (int i = 0; i < getNumItems(); ++i)
+                if (std::find (order.begin(), order.end(), i) == order.end())
+                    order.push_back (i);
+            order.erase (std::remove_if (order.begin(), order.end(), [this] (int i) { return ! juce::isPositiveAndBelow (i, getNumItems()); }),
+                         order.end());
+        }
         const auto first = getNumItems() > 0 && getItemText (0) == "Off" ? 1 : 0;
         // Las ranuras de usuario ("User N") van al final, en su orden, detrás de las de fábrica ya ordenadas
         const auto isUser = [this] (int i) { return getItemText (i).startsWith ("User "); };
@@ -1160,8 +1234,41 @@ struct Section : juce::Component
     explicit Section (const juce::String& title)
     {
         group.setText (title);
+        group.setInterceptsMouseClicks (false, false); // el clic derecho en el marco llega a la sección (mouseDown)
         addAndMakeVisible (group);
     }
+
+    // Clic derecho en el marco o en un hueco de la sección: "Reset <título> to defaults" con los parámetros de sus mandos y de
+    // sus diálogos (withResetSource)
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        // Solo si el clic es en la propia sección (marco, título, hueco): sobre un mando o una vista con su propio menú
+        // contextual, ese menú tiene prioridad y este no aparece
+        if (e.mods.isPopupMenu() && paramState != nullptr && e.originalComponent == this)
+            showResetMenu (*paramState, *this, group.getText().isNotEmpty() ? group.getText() : juce::String ("block"),
+                           [this] { return resetIds(); });
+    }
+
+    juce::StringArray resetIds() const
+    {
+        juce::StringArray ids;
+        collectParamIds (*this, ids);
+        for (const auto& source : resetSources)
+            for (const auto& id : source())
+                ids.addIfNotAlreadyThere (id);
+        return ids;
+    }
+
+    // Parámetros de un diálogo de la sección (Edit..., Operators...), que no están en el panel: entran en su Reset
+    Section& withResetSource (std::function<juce::StringArray()> ids)
+    {
+        resetSources.push_back (std::move (ids));
+        return *this;
+    }
+
+    // En seco (ParamPanel solo para saber qué parámetros tiene un diálogo): withBody y withSideBody no se apropian de
+    // componentes ajenos
+    bool dryRun = false;
 
     Section& withToggle (APVTS& s, const juce::String& id)
     {
@@ -1205,6 +1312,41 @@ struct Section : juce::Component
         return *this;
     }
 
+    // Texto visible de cada opción del desplegable (el del parámetro, para el host y el agente, no cambia)
+    Section& withItemLabels (const juce::StringArray& labels)
+    {
+        for (int i = 0; i < labels.size(); ++i)
+            combo.changeItemText (i + 1, labels[i]);
+        combo.getProperties().set ("fitText", true); // etiquetas largas: el desplegable se ensancha hasta leer la más larga
+        return *this;
+    }
+
+    // Orden en que el desplegable muestra las opciones (índices del parámetro): solo presentación, el valor no cambia
+    Section& withItemOrder (std::vector<int> order)
+    {
+        combo.displayOrder = std::move (order);
+        return *this;
+    }
+
+    // Ancho del desplegable de la cabecera: 110 px (140 con icono de onda); con withItemLabels, el texto más largo + 34 px de
+    // flecha y márgenes, sin quitar el sitio de los botones y el conmutador de la cabecera. La fuente es la que el LookAndFeel
+    // da a un desplegable de 24 px de alto (LookAndFeel_V4: min(16, 0,85·alto) = 16 px): con getComboBoxFont del propio
+    // desplegable, en la primera maquetación su alto aún es 0 y el texto medía casi nada (se quedaba en 110 px)
+    int comboHeaderWidth (int headerWidth) const
+    {
+        const auto base = combo.getProperties().contains ("waveGlyphs") ? 140 : 110; // +30: icono
+        if (! combo.getProperties().contains ("fitText"))
+            return base;
+        const juce::Font font (juce::FontOptions (juce::jmin (16.0f, 24.0f * 0.85f)));
+        float widest = 0.0f;
+        for (int i = 0; i < combo.getNumItems(); ++i)
+            widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, combo.getItemText (i)));
+        auto reserved = extraToggle.isVisible() ? 80 : 0;
+        for (const auto& b : headerButtons)
+            reserved += buttonWidth (*b);
+        return juce::jlimit (base, juce::jmax (base, headerWidth - reserved), juce::roundToInt (widest) + 34);
+    }
+
     // Tooltip por opción del desplegable de la cabecera (en el orden de sus items)
     Section& withItemTooltips (const juce::StringArray& tips)
     {
@@ -1214,6 +1356,7 @@ struct Section : juce::Component
 
     Section& withKnob (APVTS& s, const juce::String& id, const juce::String& text)
     {
+        paramState = &s;
         knobs.push_back (std::make_unique<Knob> (s, id, text));
         addAndMakeVisible (*knobs.back());
         row.push_back ({ knobs.back().get(), [k = knobs.back().get()] { return k->layoutWeight(); } });
@@ -1223,6 +1366,7 @@ struct Section : juce::Component
     // Slider vertical (envolventes ADSR, como en los paneles de hardware)
     Section& withSlider (APVTS& s, const juce::String& id, const juce::String& text)
     {
+        paramState = &s;
         knobs.push_back (std::make_unique<Knob> (s, id, text, Knob::Style::vertical));
         addAndMakeVisible (*knobs.back());
         row.push_back ({ knobs.back().get(), [k = knobs.back().get()] { return k->layoutWeight(); } });
@@ -1232,6 +1376,7 @@ struct Section : juce::Component
     // Lista con nombres en la fila de controles (ListControl), con el ancho de 'weight' perillas
     Section& withList (APVTS& s, const juce::String& id, const juce::String& text, float weight)
     {
+        paramState = &s;
         lists.push_back (std::make_unique<ListControl> (s, id, text, weight));
         addAndMakeVisible (*lists.back());
         row.push_back ({ lists.back().get(), [l = lists.back().get()] { return l->layoutWeight(); } });
@@ -1242,6 +1387,7 @@ struct Section : juce::Component
     // height 0: ocupa todo el alto disponible. minWidth: el ancho que necesita (cuenta para el ancho y el peso de la sección)
     Section& withBody (juce::Component& c, int height, int minWidth)
     {
+        if (dryRun) return *this;
         body = &c;
         bodyHeight = height;
         bodyMinWidth = minWidth;
@@ -1254,6 +1400,7 @@ struct Section : juce::Component
     // tall: el componente ocupa todo el alto de la caja y la cabecera pasa a su derecha (envolventes, LFO)
     Section& withSideBody (juce::Component& c, int width, bool tall = false)
     {
+        if (dryRun) return *this;
         sideBody = &c;
         sideBodyWidth = width;
         sideBodyTall = tall;
@@ -1269,6 +1416,14 @@ struct Section : juce::Component
         extraToggleAttachment = std::make_unique<APVTS::ButtonAttachment> (s, id, extraToggle);
         decorate (s, id, extraToggle);
         return *this;
+    }
+
+    // Botón de cabecera que abre un diálogo de parámetros: sus parámetros entran además en el Reset de la sección
+    struct Dialog { std::function<void()> open; std::function<juce::StringArray()> ids; };
+    Section& withHeaderButton (const juce::String& text, const juce::String& tooltip, Dialog dialog)
+    {
+        withResetSource (std::move (dialog.ids));
+        return withHeaderButton (text, tooltip, std::move (dialog.open));
     }
 
     // Botones de acción en la cabecera (Load / Clear...) y texto informativo que ocupa el resto
@@ -1332,7 +1487,7 @@ struct Section : juce::Component
         {
             auto header = r.removeFromTop (24);
             if (toggle.isVisible()) toggle.setBounds (header.removeFromLeft (60));
-            if (combo.isVisible())  combo.setBounds (header.removeFromLeft (combo.getProperties().contains ("waveGlyphs") ? 140 : 110)); // +30: icono
+            if (combo.isVisible())  combo.setBounds (header.removeFromLeft (comboHeaderWidth (header.getWidth())));
             if (extraToggle.isVisible()) extraToggle.setBounds (header.removeFromLeft (80).withTrimmedLeft (10));
             for (auto& b : headerButtons)
                 b->setBounds (header.removeFromLeft (buttonWidth (*b)).withTrimmedLeft (6));
@@ -1366,6 +1521,22 @@ struct Section : juce::Component
         const auto unit = juce::jmin (maxControlUnit, (float) r.getWidth() / juce::jmax (0.01f, controlsWeight()));
         const auto perRow = controlsPerRow();
         const auto rowH = r.getHeight() / juce::jmax (1, controlRows);
+        if (slotsPerRow > 0)
+        {
+            // Huecos fijos: solo las visibles, en su orden, perRow por fila; el ancho de la sección no cambia
+            auto line = r.removeFromTop (rowH);
+            size_t placed = 0;
+            for (auto& item : row)
+            {
+                if (! item.component->isVisible())
+                    continue;
+                if (placed > 0 && placed % perRow == 0)
+                    line = r.removeFromTop (rowH);
+                item.component->setBounds (line.removeFromLeft (juce::roundToInt (unit * item.weight())));
+                ++placed;
+            }
+            return;
+        }
         for (size_t i = 0; i < row.size(); i += perRow)
         {
             auto line = controlRows > 1 ? r.removeFromTop (rowH) : r;
@@ -1382,9 +1553,24 @@ struct Section : juce::Component
         return *this;
     }
 
+    // Huecos fijos por fila (withSlotsPerRow): para secciones que muestran u ocultan mandos según un selector (Math Models). Las
+    // visibles se colocan en orden en filas de n; la sección pide siempre el ancho de n mandos
+    Section& withSlotsPerRow (int n)
+    {
+        slotsPerRow = juce::jmax (1, n);
+        return *this;
+    }
+
     // Peso de los controles: el de su fila (o el de la fila más ancha si hay varias)
     float controlsWeight() const
     {
+        if (slotsPerRow > 0)
+        {
+            float widest = 0.0f;
+            for (const auto& item : row)
+                widest = juce::jmax (widest, item.weight());
+            return widest * (float) slotsPerRow;
+        }
         const auto perRow = controlsPerRow();
         float widest = 0.0f;
         for (size_t i = 0; i < row.size(); i += perRow)
@@ -1396,8 +1582,12 @@ struct Section : juce::Component
         }
         return widest;
     }
-    size_t controlsPerRow() const { return juce::jmax ((size_t) 1, (row.size() + (size_t) controlRows - 1) / (size_t) controlRows); }
-    int controlRows = 1;
+    size_t controlsPerRow() const
+    {
+        if (slotsPerRow > 0) return (size_t) slotsPerRow;
+        return juce::jmax ((size_t) 1, (row.size() + (size_t) controlRows - 1) / (size_t) controlRows);
+    }
+    int controlRows = 1, slotsPerRow = 0;
     // Elástica: si su fila cabe a ancho natural, se queda con el sobrante (Editor::layoutRow)
     bool stretchToFill = false;
     // A ras del marco: el cuerpo ocupa la caja entera bajo la línea del título (display de onda; sin cabecera ni controles)
@@ -1500,6 +1690,7 @@ private:
         if (auto* tc = dynamic_cast<juce::SettableTooltipClient*> (&c))
             tc->setTooltip (paramTooltip (s, id));
         menus.push_back (std::make_unique<ParamMenu> (s, id, c));
+        paramState = &s;
     }
 
     // Destrucción en orden inverso: los menús primero; cada attachment muere antes que su control.
@@ -1526,6 +1717,8 @@ private:
     int sideBodyWidth = 0;
     bool sideBodyTall = false;
     std::vector<std::unique_ptr<ParamMenu>> menus;
+    APVTS* paramState = nullptr; // el de sus parámetros (Reset ... to defaults); nulo en una sección sin mandos de parámetro
+    std::vector<std::function<juce::StringArray()>> resetSources;
 };
 
 // Cuerpo de los diálogos "Edit..." de las secciones del panel: los parámetros de escenario (los que se ajustan antes de
@@ -1533,9 +1726,15 @@ private:
 // menú contextual igual que en el panel. Secciones en una fila, cada una con el ancho de su peso
 struct ParamPanel : juce::Component
 {
+    ParamPanel() = default;
+    // En seco: solo para saber qué parámetros tiene el diálogo (Reset ... to defaults de su sección); no se muestra
+    explicit ParamPanel (bool dry) : dryRun (dry) {}
+    const bool dryRun = false;
+
     Section& add (const juce::String& title)
     {
         sections.push_back (std::make_unique<Section> (title));
+        sections.back()->dryRun = dryRun;
         addAndMakeVisible (*sections.back());
         return *sections.back();
     }

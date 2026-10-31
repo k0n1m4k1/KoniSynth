@@ -23,29 +23,32 @@ public:
         // Categoría escrita en el fichero si no es una de presetCategories() (preset de una versión posterior): la lista lo
         // muestra en Init, pero Save la conserva en vez de reescribirla como Init. Vacía si es conocida
         juce::String unknownCategory {};
-        // Fuentes del motor Synth que suenan (nivel > 0): un sample incrustado ("factory:...", fuente Sample u Osc 2 en modo
-        // Sample) y la cuerda String. Las listas lo marcan tras el nombre: "(sa)", "(st)"
-        bool embeddedSample = false, stringSource = false;
+        // Fuentes del motor Synth que suenan (nivel > 0): un sample del usuario (fuente Sample u Osc 2 en modo Sample, con
+        // fichero) y Math Models salvo Modal (las cuerdas). Las listas lo marcan tras el nombre: "(sa)", "(st)". Los de
+        // fábrica no llevan samples: (sa) solo aparece en presets de usuario
+        bool sampleSource = false, stringSource = false;
 
         juce::String displayName() const
         {
-            return name + (embeddedSample ? " (sa)" : "") + (stringSource ? " (st)" : "");
+            return name + (sampleSource ? " (sa)" : "") + (stringSource ? " (st)" : "");
         }
     };
 
-    // get (id, valor por defecto): valor real de un parámetro del preset. samplePath y osc2SamplePath: sus ficheros ("factory:"
-    // = incrustado, SampleImport::factoryPrefix; esa cabecera se incluye después de esta)
+    // get (id, valor por defecto): valor real de un parámetro del preset. samplePath y osc2SamplePath: sus ficheros (vacío =
+    // ninguno)
     template <typename Get>
     static void markSources (Preset& p, Get&& get, const juce::String& samplePath, const juce::String& osc2SamplePath)
     {
         if (juce::roundToInt (get ("engine", 0.0f)) != 0)
             return;
-        p.embeddedSample = (get ("sampleLevel", 0.0f) > 0.0f && samplePath.startsWith ("factory:"))
-                        || (juce::roundToInt (get ("osc2Wave", 2.0f)) == osc2WaveSample && get ("osc2Level", 0.0f) > 0.0f
-                            && osc2SamplePath.startsWith ("factory:"));
-        p.stringSource = get ("stringLevel", 0.0f) > 0.0f;
+        p.sampleSource = (get ("sampleLevel", 0.0f) > 0.0f && samplePath.isNotEmpty())
+                      || (juce::roundToInt (get ("osc2Wave", 2.0f)) == osc2WaveSample && get ("osc2Level", 0.0f) > 0.0f
+                          && osc2SamplePath.isNotEmpty());
+        // Modal no marca: no es una cuerda sino una suma de senos (los presets que antes llevaban sus WAV no cambian de nombre)
+        p.stringSource = get ("stringLevel", 0.0f) > 0.0f && juce::roundToInt (get ("stringExcite", 0.0f)) != stringExciteModal;
     }
     static constexpr int osc2WaveSample = 11; // osc2Wave: Sample, la última opción (formato 4)
+    static constexpr int stringExciteModal = 5; // stringExcite: Modal
 
     // Cómo tocar el preset actual: propiedades del estado (no son parámetros). Las fija la carga de un preset, se pueden
     // editar desde el teclado en pantalla (cuentan como cambio sin guardar, "*") y las escribe Save / Save As
@@ -235,8 +238,8 @@ private:
 
 
         // Ficheros del preset (sample, wavetable, IR). Los presets de usuario anteriores a la 0.3 no tienen estos atributos:
-        // entonces no se tocan los ficheros cargados. Los de fábrica fijan los dos samples del Synth (el suyo incrustado,
-        // "factory:...", o ninguno) y no tocan wavetable ni IR. El de Osc 2 en modo Sample no se hereda nunca: sin el atributo
+        // entonces no se tocan los ficheros cargados. Los de fábrica quitan los dos samples del Synth (no llevan ninguno) y
+        // no tocan wavetable ni IR. El de Osc 2 en modo Sample no se hereda nunca: sin el atributo
         // (formato < 3) se quita, para que un preset no se guarde con el fichero de otro
         if (! preset.factory)
             if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr && xml->hasAttribute ("ansUser"))
@@ -277,10 +280,12 @@ public:
     // asignaciones y nombres de las macros de interpretación (Params/PerfMacros.h) y la voz DX7 cargada de un .syx
     // ("n|NOMBRE", pantalla del FM 6-Op; vacía en los de fábrica)
     // (array estático: un std::initializer_list devuelto por valor apuntaría a un array temporal ya destruido)
-    // y el orden de la cadena de efectos ("fxOrder"; vacío = el de siempre)
-    static const std::array<const char*, 7>& textProperties()
+    // y el orden de la cadena de efectos ("fxOrder"; vacío = el de siempre) y la receta de Math Models > Modal ("modalRecipe";
+    // vacía = Soft Key, Engines/SynthData.h)
+    static const std::array<const char*, 8>& textProperties()
     {
-        static const std::array<const char*, 7> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder" };
+        static const std::array<const char*, 8> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder",
+                                                       "modalRecipe" };
         return list;
     }
 

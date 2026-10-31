@@ -14,12 +14,21 @@ struct Params
         vcaClick = get ("vcaClick"); vcaLeak = get ("vcaLeak");
         voiceSatMode = get ("voiceSatMode"); filterCleanDrive = get ("filterCleanDrive"); voiceSatDrive = get ("voiceSatDrive"); voiceSatPos = get ("voiceSatPos"); filterSpread = get ("filterSpread");
         stringPickup = get ("stringPickup"); stringDamping = get ("stringDamping"); stringExcite = get ("stringExcite");
+        stringBowPressure = get ("stringBowPressure"); stringHammerFelt = get ("stringHammerFelt"); stringEbowDrive = get ("stringEbowDrive");
+        stringBuzz = get ("stringBuzz"); stringHarmonic = get ("stringHarmonic");
+        stringStiff = get ("stringStiff"); stringTension = get ("stringTension");
+        reedEmbouchure = get ("reedEmbouchure"); reedNoise = get ("reedNoise"); fluteJet = get ("fluteJet"); fluteNoise = get ("fluteNoise");
+        brassLip = get ("brassLip"); brassSlide = get ("brassSlide");
+        bandedShape = get ("bandedShape"); bandedExcite = get ("bandedExcite");
+        shakerType = get ("shakerType"); shakerObjects = get ("shakerObjects"); shakerShake = get ("shakerShake"); shakerTone = get ("shakerTone");
+        malletHardness = get ("malletHardness"); malletMass = get ("malletMass"); malletDamp = get ("malletDamp");
         for (int m = 0; m < ModMatrix::numSlots; ++m)
         {
             mtxSrc[(size_t) m] = get ("mtxSrc" + juce::String (m + 1));
             mtxDst[(size_t) m] = get ("mtxDst" + juce::String (m + 1));
             mtxAmt[(size_t) m] = get ("mtxAmt" + juce::String (m + 1));
         }
+        mtxRandomFade = get ("mtxRandomFade");
         osc1Mute = get ("osc1Mute"); wtMute = get ("wtMute"); sampleMute = get ("sampleMute"); stringMute = get ("stringMute");
         osc2Mute = get ("osc2Mute"); osc3Mute = get ("osc3Mute"); noiseMute = get ("noiseMute");
         mdOutput = get ("mdOutput"); snesOutput = get ("snesOutput"); chipOutput = get ("chipOutput");
@@ -204,8 +213,16 @@ struct Params
     // Frecuencia de la última nota pulsada (origen del glide); la escriben las voces en startNote (hilo de audio)
     mutable std::atomic<double> lastNoteHz { 0.0 };
     mutable RandomClock randomClock; // Dsp/RandomClock.h: hilo de audio
+    // Voice Pan Alternate: contador de notas de esta instancia (antes, un static compartido por todas). Hilo de audio; vuelve a
+    // 0 con la reanclada de la aleatoriedad (render reproducible)
+    mutable unsigned panAlternate = 0;
     std::array<std::atomic<float>*, ModMatrix::numSlots> mtxSrc {}, mtxDst {}, mtxAmt {}; // matriz de modulación (Dsp/ModMatrix.h)
+    std::atomic<float>* mtxRandomFade {}; // Random de la matriz × (1 - f + f·envolvente de filtro)
     std::atomic<float>* mpeOn {}, *mpeBendRange {}, *voiceAssign {}, *oscPhase {}, *voiceTolerance {}, *vcaClick {}, *vcaLeak {}, *voiceSatMode {}, *voiceSatDrive {}, *voiceSatPos {}, *filterCleanDrive {}, *filterSpread {}, *stringPickup {}, *stringDamping {}, *stringExcite {};
+    std::atomic<float>* stringBowPressure {}, *stringHammerFelt {}, *stringEbowDrive {}, *stringBuzz {}, *stringHarmonic {}, *stringStiff {}, *stringTension {};
+    std::atomic<float>* reedEmbouchure {}, *reedNoise {}, *fluteJet {}, *fluteNoise {}, *brassLip {}, *brassSlide {};
+    std::atomic<float>* bandedShape {}, *bandedExcite {}, *shakerType {}, *shakerObjects {}, *shakerShake {}, *shakerTone {};
+    std::atomic<float>* malletHardness {}, *malletMass {}, *malletDamp {};
     // Matriz: desplazamiento por destino de la última voz renderizada (para los anillos de la UI) y contador de bloques con voces
     mutable std::array<std::atomic<float>, ModMatrix::numDestinations> liveMod {};
     mutable std::atomic<unsigned> liveModTick { 0 };

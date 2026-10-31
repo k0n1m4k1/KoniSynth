@@ -2,7 +2,7 @@
 #pragma once
 
 //==============================================================================
-// Carga de samples y bancos del usuario (KoniSynth solo incluye tres WAV originales para sus presets de fábrica): audio (WAV/AIFF/FLAC/OGG), SoundFont 2 (.sf2),
+// Carga de samples y bancos del usuario (KoniSynth no incluye ningún sample): audio (WAV/AIFF/FLAC/OGG), SoundFont 2 (.sf2),
 // BRR de la SNES (.brr) e instantáneas del APU de la SNES (.spc). Los bancos guardan el elemento elegido en la ruta, tras
 // '|' (carácter no válido en nombres de fichero de Windows): "banco.sf2|preset=0:24;zone=2", "juego.spc|sample=5". Así los
 // presets y el estado del plugin no cambian de formato.
@@ -13,11 +13,6 @@ struct SampleImport
     static juce::File fileOf (const juce::String& path) { return juce::File (path.containsChar ('|') ? path.upToLastOccurrenceOf ("|", false, false) : path); }
     static juce::String itemOf (const juce::String& path) { return path.containsChar ('|') ? path.fromLastOccurrenceOf ("|", false, false) : juce::String(); }
     static juce::String pathOf (const juce::File& file, const juce::String& item) { return item.isEmpty() ? file.getFullPathName() : file.getFullPathName() + "|" + item; }
-
-    // Samples de fábrica incrustados en el binario: "factory:<fichero>" (KoniSynthProcessor::loadFactorySample). ':' tras
-    // más de una letra no es una ruta de Windows ("C:\...") ni una de macOS/Linux ("/...")
-    static constexpr const char* factoryPrefix = "factory:";
-    static bool isFactory (const juce::String& path) { return path.startsWith (factoryPrefix); }
 
     // Formatos con varios samples dentro: hay que elegir uno (Editor::chooseSampleItem)
     static bool isBank (const juce::File& f) { return f.hasFileExtension ("sf2;spc"); }

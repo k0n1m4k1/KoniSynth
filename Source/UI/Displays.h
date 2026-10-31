@@ -104,15 +104,19 @@ public:
         // 4 dígitos con un decimal: "128.0"; ceros a la izquierda apagados como en un LED real
         const auto tenths = juce::jlimit (0, 9999, juce::roundToInt (bpm * 10.0f));
         const int digits[4] = { tenths / 1000, (tenths / 100) % 10, (tenths / 10) % 10, tenths % 10 };
-        const auto w = r.getWidth() / 4.0f;
+        // Hueco propio para el punto decimal (40 % de un dígito) entre el tercer y el cuarto dígito: el punto no queda pegado
+        // a los segmentos inclinados. Punto cuadrado del grosor de un segmento, como en los LED de 7 segmentos
+        const auto gap = r.getWidth() * 0.4f / 4.4f, w = (r.getWidth() - gap) / 4.0f;
         for (int i = 0; i < 4; ++i)
         {
             const auto leadingZero = (i == 0 && digits[0] == 0) || (i == 1 && digits[0] == 0 && digits[1] == 0);
-            drawDigit (g, r.withX (r.getX() + w * (float) i).withWidth (w).reduced (3.0f, 0.0f), leadingZero ? -1 : digits[i], lit, off);
+            const auto x = r.getX() + w * (float) i + (i == 3 ? gap : 0.0f);
+            drawDigit (g, r.withX (x).withWidth (w).reduced (3.0f, 0.0f), leadingZero ? -1 : digits[i], lit, off);
         }
-        const auto dot = juce::Rectangle<float> (4.0f, 4.0f).withCentre ({ r.getX() + 3.0f * w, r.getBottom() - 2.0f });
+        const auto side = juce::jmax (3.0f, (w - 6.0f) * 0.16f);
+        const auto dot = juce::Rectangle<float> (side, side).withCentre ({ r.getX() + 3.0f * w + gap * 0.5f, r.getBottom() - side * 0.5f });
         g.setColour (lit);
-        g.fillEllipse (dot);
+        g.fillRect (dot);
 
         g.setFont (juce::FontOptions (compact ? 8.5f : 11.0f, juce::Font::bold));
         g.setColour (lit);

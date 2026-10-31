@@ -113,13 +113,6 @@ public:
                                "(M-Audio Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425, Yamaha reface YC).");
         midiButton.onClick = [this] { midiMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&midiButton)); };
         content.addAndMakeVisible (midiButton);
-        tuningLed.setMouseCursor (juce::MouseCursor::PointingHandCursor);
-        tuningLed.onClick = [this]
-        {
-            tuningMenu().showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&tuningLed));
-        };
-        content.addChildComponent (tuningLed);
-        refreshTuningLed();
         // Acciones del teclado en pantalla: barrita a su izquierda (acoplado) o franja inferior (oculto / en ventana)
         // Pestañas laterales de grupo: un clic pliega o despliega (el alto pasa a los grupos abiertos)
         const char* groupNames[5] = { "ENGINE", "PLAY/MOD/IN", "FX", "KEYS", "MACROS" };
@@ -196,10 +189,10 @@ public:
         // Segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), con Mute/Solo como las fuentes de Osc 1
         osc2Section.withCombo (s, "osc2Wave").withExtraToggle (s, "osc2Sync", "Sync")
                    .withHeaderButton ("Osc 2 Sample...", "Open the sample editor of Osc 2 (Sample waveform): load its own file, see its waveform, "
-                                      "set Root, Start, Length and Loop.", [this] { openSamplePanel (KoniSynthProcessor::osc2Sample); })
+                                      "set Root, Start, Length and Loop.", [this] { openSamplePanel (KoniSynthProcessor::osc2Sample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::osc2Sample), [] {}); }))
                    .withHeaderButton ("Osc 2 Table...", "Open the wavetable editor of Osc 2 (Wavetable waveform): its own table, "
                                       "independent of the Wavetable tab; see the frames, load your own file.",
-                                      [this] { openWavetablePanel (KoniSynthProcessor::wtOsc2); })
+                                      [this] { openWavetablePanel (KoniSynthProcessor::wtOsc2); }).withResetSource (panelParams ([this] { return std::make_unique<WavetablePanel> (koni, KoniSynthProcessor::wtOsc2, [] {}); }))
                    .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Semi", "Semi")
                    .withKnob (s, "osc2Fine", "Fine").withKnob (s, "osc2WtPosition", "WT Pos")
                    .withKnob (s, "osc2TriSym", "Tri Sym").withKnob (s, "osc2TriRound", "Tri Rnd");
@@ -212,22 +205,49 @@ public:
             { "Noise", &noiseSection, "noiseLevel", "noiseMute" } }, Params::srcOsc2, koni.getParams().soloSource);
         // Sample, Wavetable y Sequencer: sección compacta + panel de edición propio (Edit Sample..., Edit Table..., Edit Steps...)
         sampleSection.withHeaderButton ("Edit Sample...", "Open the sample editor: load a file, see its waveform, set Start, Length and Loop.",
-                                        [this] { openSamplePanel (KoniSynthProcessor::sourceSample); })
+                                        [this] { openSamplePanel (KoniSynthProcessor::sourceSample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::sourceSample), [] {}); }))
                      .withKnob (s, "sampleLevel", "Level").withKnob (s, "sampleRoot", "Root").withKnob (s, "sampleStart", "Start")
                      .withKnob (s, "sampleLength", "Length").withKnob (s, "sampleLoop", "Loop"); // también en Edit Sample...
         wavetableSection.withCombo (s, "wtTable")
-                        .withHeaderButton ("Edit Table...", "Open the wavetable editor: see the frames, load your own table.", [this] { openWavetablePanel(); })
+                        .withHeaderButton ("Edit Table...", "Open the wavetable editor: see the frames, load your own table.", [this] { openWavetablePanel(); }).withResetSource (panelParams ([this] { return std::make_unique<WavetablePanel> (koni, KoniSynthProcessor::wtMain, [] {}); }))
                         .withKnob (s, "wtLevel", "Level").withKnob (s, "wtPosition", "Position");
         seqSection.withToggle (s, "seqOn")
-                  .withHeaderButton ("Edit Steps...", "Open the step sequencer: pitch, on/off and tie for each of the 16 steps.", [this] { openSequencerPanel(); })
+                  .withHeaderButton ("Edit Steps...", "Open the step sequencer: pitch, on/off and tie for each of the 16 steps.", [this] { openSequencerPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<SequencerPanel> (koni); }))
                   .withKnob (s, "seqRate", "Rate"); // Steps, Gate y BPM: en el diálogo
-        stringSection.withCombo (s, "stringExcite").withKnob (s, "stringLevel", "Level").withKnob (s, "stringDecay", "Decay")
-                     .withKnob (s, "stringBright", "Bright").withKnob (s, "stringPick", "Pick")
-                     .withKnob (s, "stringDamping", "Damping").withKnob (s, "stringPickup", "Pickup");
+        // Math Models: cada modelo con el primer autor y el año del modelo publicado en que se basa (adaptado: Formula... y
+        // docs/engines/synth.md)
+        stringSection.withCombo (s, "stringExcite")
+                     .withItemLabels ({ "Noise Burst (Karplus 1983)", "Pick (Jaffe 1983)", "Bow (McIntyre 1983)", "Hammer (Hall 1992)",
+                                        "E-Bow (Heet 1978)", "Modal (Adrien 1991)", "Reed (Guillemain 2005)", "Flute (Karjalainen 1991)",
+                                        "Brass (Cook 1991)", "Banded (Essl 1999)", "Shaker (Cook 1997)", "Mallet (Avanzini 2001)" })
+                     // El desplegable, por año del modelo publicado (a igual año, en el orden del parámetro): E-Bow 1978; Noise
+                     // Burst, Pick y Bow 1983; Modal, Flute y Brass 1991; Hammer 1992; Shaker 1997; Banded 1999; Mallet 2001;
+                     // Reed 2005. El índice del parámetro (presets, automatización) no cambia
+                     .withItemOrder ({ 4, 0, 1, 2, 5, 7, 8, 3, 10, 9, 11, 6 })
+                     .withHeaderButton ("Formula...", "Show the formula of the selected model, the published model it is based on, "
+                                        "what KoniSynth adapts and the wave it gives with the current settings; with Modal, "
+                                        "edit its modes.",
+                                        [this] { openPanel ("Math Models: formulation", std::make_unique<MathModelPanel> (koni), 1100, 600); })
+                     .withKnob (s, "stringLevel", "Level").withKnob (s, "stringDecay", "Decay")
+                     .withKnob (s, "stringBright", "Bright").withKnob (s, "stringPick", "Position")
+                     .withKnob (s, "stringDamping", "Damping").withKnob (s, "stringPickup", "Pickup")
+                     .withKnob (s, "stringBowPressure", "Press").withKnob (s, "stringHammerFelt", "Felt").withKnob (s, "stringEbowDrive", "Drive")
+                     .withKnob (s, "stringBuzz", "Buzz").withKnob (s, "stringHarmonic", "Harmonic")
+                     .withKnob (s, "stringStiff", "Stiff").withKnob (s, "stringTension", "Tension")
+                     .withKnob (s, "reedEmbouchure", "Embouch.").withKnob (s, "reedNoise", "Noise")
+                     .withKnob (s, "fluteJet", "Jet").withKnob (s, "fluteNoise", "Noise")
+                     .withKnob (s, "brassLip", "Lip").withKnob (s, "brassSlide", "Slide")
+                     .withKnob (s, "bandedShape", "Shape").withKnob (s, "bandedExcite", "Excite")
+                     .withKnob (s, "shakerType", "Type").withKnob (s, "shakerObjects", "Objects")
+                     .withKnob (s, "shakerShake", "Shake").withKnob (s, "shakerTone", "Tone")
+                     .withKnob (s, "malletHardness", "Hardness").withKnob (s, "malletMass", "Mass").withKnob (s, "malletDamp", "Damp")
+                     // Solo las del modelo elegido (updateInert), en este orden fijo; como mucho 10 (Noise Burst y Pick): 2 filas de 5
+                     // huecos, el mismo ancho con cualquier modelo
+                     .withSlotsPerRow (5).withControlRows (2);
         // Fuentes en pestañas: suenan sumadas; cada una con su nivel, LED y Mute/Solo
         sourceTabs = std::make_unique<SourceTabs> (s, std::vector<SourceTabs::Source> {
             { "Osc 1", &osc, "osc1Level", "osc1Mute" }, { "Wavetable", &wavetableSection, "wtLevel", "wtMute" },
-            { "Sample", &sampleSection, "sampleLevel", "sampleMute" }, { "String", &stringSection, "stringLevel", "stringMute" } },
+            { "Sample", &sampleSection, "sampleLevel", "sampleMute" }, { "Math Models", &stringSection, "stringLevel", "stringMute" } },
             Params::srcOsc1, koni.getParams().soloSource);
         // Display de onda: muestra la fuente de la pestaña elegida (vistas en el orden de Params::SourceIndex) y sus etiquetas
         // eligen la pestaña. 420 px de ancho mínimo: dos ciclos legibles y la lectura de una línea
@@ -259,15 +279,12 @@ public:
         qualitySelector.onOpen = [this] { showQualityMenu(); };
         filter.withToggle (s, "filterOn").withCombo (s, "filterMode")
               .withHeaderButton ("Saturation...", "Saturation: clean filter input (Drive 0 % linear) and per-voice saturation after or "
-                                           "before the filter (curve Soft, Diode, Hard, Fold, drive and position).", [this]
-              {
-                  openParamPanel ("Saturation", [this] (ParamPanel& p, APVTS& st)
+                                           "before the filter (curve Soft, Diode, Hard, Fold, drive and position).", paramDialog ("Saturation", [this] (ParamPanel& p, APVTS& st)
                   {
                       p.add ("Filter Input").withToggle (st, "filterCleanDrive").withKnob (st, "filterDrive", "Drive");
                       p.add ("Voice Saturation").withCombo (st, "voiceSatMode").withKnob (st, "voiceSatDrive", "Drive")
                                                 .withKnob (st, "voiceSatPos", "Position").withSideBody (voiceSatView, 150, true);
-                  });
-              })
+                  }))
               .withHeaderControl ("Ladder quality", qualitySelector, 190)
               .withKnob (s, "cutoff", "Cutoff").withKnob (s, "resonance", "Reso").withKnob (s, "filterDrive", "Drive")
               .withKnob (s, "filterEnv", "Env").withKnob (s, "filterKey", "Key").withKnob (s, "velToFilter", "Vel")
@@ -288,13 +305,10 @@ public:
                         .withSlider (s, "filterSustain", "S").withSlider (s, "filterRelease", "R")
                         .withSideBody (filterEnvView, 160, true); // curva con asas A, D/S, R (UI/ModViews.h)
         ampEnvSection.withCombo (s, "envCurve")
-                     .withHeaderButton ("Voice Pan...", "Per-voice panning after the VCA: V.Pan (how far the voices spread) and Pan Mode.", [this]
-                     {
-                         openParamPanel ("Amp Envelope", [] (ParamPanel& p, APVTS& st)
+                     .withHeaderButton ("Voice Pan...", "Per-voice panning after the VCA: V.Pan (how far the voices spread) and Pan Mode.", paramDialog ("Amp Envelope", [] (ParamPanel& p, APVTS& st)
                          {
                              p.add ("Voice Pan").withKnob (st, "voicePan", "V.Pan").withKnob (st, "voicePanMode", "Pan Mode");
-                         });
-                     })
+                         }))
                      .withSlider (s, "attack", "A").withSlider (s, "decay", "D")
                      .withSlider (s, "sustain", "S").withSlider (s, "release", "R")
                      .withSideBody (ampEnvView, 160, true);
@@ -341,7 +355,7 @@ public:
                           .withKnob (s, "drumTempo", "Tempo").withKnob (s, "drumSwing", "Swing")
                           .withBody (drumLeds, 12, 0); // fila de LED de los pasos sobre las perillas
         fmSection.withHeaderButton ("Operators...", "Open the FM editor: ratio, level, envelope and keyboard scaling of the 6 operators.",
-                                    [this] { openFmPanel(); })
+                                    [this] { openFmPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<FmPanel> (koni); }))
                  .withHeaderButton ("Load .syx...", "Load a Yamaha DX7 voice or 32-voice bank (SysEx .syx file): operators, "
                                     "algorithm, LFO, pitch envelope, transpose and key sync, as stored in the voice.",
                                     [this] { chooseDx7Syx(); })
@@ -354,7 +368,7 @@ public:
         // Datos de cada chip: NESdev (CPU, 2A03, APU Mixer), Pan Docs (Specifications, Audio details), AtariAge (ports PAL)
         chipSection.withHeaderButton ("Sample...", "This engine's own user sample for DPCM = User Sample: load a sound (WAV, AIFF, FLAC, OGG, "
                                       ".sf2) to convert to 1-bit DPCM, or a .dmc file to play as it is.",
-                                      [this] { openSamplePanel (KoniSynthProcessor::dpcmSample); })
+                                      [this] { openSamplePanel (KoniSynthProcessor::dpcmSample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::dpcmSample), [] {}); }))
                    .withPickCombo (s, "chipModel", [this] (int model) { loadRepresentative (7, model); })
                    .withItemTooltips ({
                        "Ricoh RP2A03, US NES. CPU 1.789773 MHz. 2 pulse channels (12.5/25/50/75 % duty), triangle, noise (long "
@@ -392,13 +406,13 @@ public:
                      "Yamaha YM3438 (OPN2C) core inside the later ASIC: no ladder effect and a cleaner low end; some early games "
                      "that relied on the ladder sound quieter. Same ~3.4 kHz FM low-pass as the emulators' Model 2 setting.",
                      "YM3438 core without the analog low-pass filter: the raw digital output, brighter than any real console." })
-                 .withHeaderButton ("Operators...", "Open the Mega Drive editor: the 4 operators with the YM2612's own registers.", [this] { openMdPanel(); })
+                 .withHeaderButton ("Operators...", "Open the Mega Drive editor: the 4 operators with the YM2612's own registers.", [this] { openMdPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<MdPanel> (koni); }))
                  .withKnob (s, "mdAlgorithm", "Algorithm").withKnob (s, "mdFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             mdSection.withKnob (s, "md" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");
         snesSection.withHeaderButton ("Sample...", "This engine's own user sample for Source = User Sample: load a sound (WAV, AIFF, FLAC, "
                                       "OGG, .sf2) to encode to BRR, or a .brr / .spc file to play as it is.",
-                                      [this] { openSamplePanel (KoniSynthProcessor::snesSample); })
+                                      [this] { openSamplePanel (KoniSynthProcessor::snesSample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::snesSample), [] {}); }))
                    .withHeaderButton ("Frame Macros...", "Experimental per-frame macros (60.10 Hz): volume, arpeggio, pitch and noise per voice. "
                                       "Nintendo's N-SPC driver stepped by tempo ticks, not video frames.", [this] { openSnesMacros(); })
                    .withCombo (s, "snesSource").withExtraToggle (s, "snesNoise", "Noise")
@@ -412,7 +426,7 @@ public:
                        .withKnob (s, "snesPan", "Pan").withKnob (s, "snesSpread", "Spread").withKnob (s, "snesOutput", "Output")
                        .withKnob (s, "snesDac", "DAC");
         n64Section.withHeaderButton ("Sample...", "This engine's own user sample for Source = User Sample: load a sound (WAV, AIFF, FLAC, "
-                                     "OGG, .sf2) to encode to VADPCM.", [this] { openSamplePanel (KoniSynthProcessor::n64Sample); })
+                                     "OGG, .sf2) to encode to VADPCM.", [this] { openSamplePanel (KoniSynthProcessor::n64Sample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::n64Sample), [] {}); }))
                   .withCombo (s, "n64Source").withExtraToggle (s, "n64Adpcm", "VADPCM")
                   .withKnob (s, "n64SourceRate", "Src Rate").withKnob (s, "n64OutputRate", "Out Rate").withKnob (s, "n64Volume", "Volume")
                   .withKnob (s, "n64Pan", "Pan").withKnob (s, "n64Spread", "Spread");
@@ -422,7 +436,7 @@ public:
                      .withSideBody (n64EnvView, 150, true);
         n64FxSection.withCombo (s, "n64Fx").withKnob (s, "n64FxMix", "Mix").withKnob (s, "n64Dac", "DAC");
         oplSection.withCombo (s, "oplModel").withExtraToggle (s, "oplFourOp", "4-Op")
-                  .withHeaderButton ("Operators...", "Open the OPL editor: the operators with the chip's own registers.", [this] { openOplPanel(); })
+                  .withHeaderButton ("Operators...", "Open the OPL editor: the operators with the chip's own registers.", [this] { openOplPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<OplPanel> (koni); }))
                   .withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             oplSection.withKnob (s, "opl" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");
@@ -435,7 +449,7 @@ public:
                     .withKnob (s, "mdPms", "PMS").withKnob (s, "mdAms", "AMS").withKnob (s, "mdPan", "Pan")
                     .withKnob (s, "mdOutput", "Output");
         mdVoiceSection.withHeaderButton ("Sample...", "This engine's own sample for Voice = DAC: load a sound (WAV, AIFF, FLAC, OGG, .sf2); "
-                                         "it is converted to the 8-bit DAC at the DAC Rate.", [this] { openSamplePanel (KoniSynthProcessor::mdSample); })
+                                         "it is converted to the 8-bit DAC at the DAC Rate.", [this] { openSamplePanel (KoniSynthProcessor::mdSample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::mdSample), [] {}); }))
                       .withHeaderButton ("Frame Macros...", "Per-frame macros of the sound driver (59.92 Hz): volume, arpeggio and pitch "
                                          "for FM and PSG, and the PSG noise type.", [this] { openMdMacros(); })
                       .withCombo (s, "mdVoice")
@@ -470,23 +484,20 @@ public:
                                       "here. They are recognised by size and SHA-1 (MT-32 v1.04-2.07, CM-32L, LAPC-I; halves are merged).",
                                       [this] { mt32RomMenu(); })
                    .withHeaderButton ("Options...", "Optional Munt beautifications, all off by default (the real unit as it is): "
-                                      "nice amp ramp, nice panning, nice partial mixing; the unit's reverb and the DAC mode.", [this]
-                   {
-                       openParamPanel ("MT-32 Options", [] (ParamPanel& p, APVTS& st)
+                                      "nice amp ramp, nice panning, nice partial mixing; the unit's reverb and the DAC mode.", paramDialog ("MT-32 Options", [] (ParamPanel& p, APVTS& st)
                        {
                            p.add ("Reverb").withToggle (st, "mt32Reverb");
                            p.add ("DAC").withCombo (st, "mt32Dac");
                            p.add ("Amp Ramp").withToggle (st, "mt32NiceAmp");
                            p.add ("Panning").withToggle (st, "mt32NicePan");
                            p.add ("Partial Mixing").withToggle (st, "mt32NiceMix");
-                       });
-                   })
+                       }))
                    .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb");
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
         fmDisplaySection.withBody (dx7Display, 0, 560); // 16 × 2 caracteres y el LED de 2 dígitos a ~4,6 px por punto
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")
                   .withHeaderButton ("Plate...", "Open the ANS plate: draw the score (pitch vertically, time horizontally) and set the 20 registers.",
-                                     [this] { openAnsPanel(); })
+                                     [this] { openAnsPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<AnsPanel> (koni); }))
                   .withKnob (s, "ansSpeed", "Speed").withKnob (s, "ansEmulsion", "Emulsion");
         flangerSection.withToggle (s, "flangerOn").withExtraToggle (s, "flangerMatrix", "Matrix")
                       .withKnob (s, "flangerRate", "Rate").withKnob (s, "flangerRange", "Range").withKnob (s, "flangerColor", "Color")
@@ -507,15 +518,12 @@ public:
         // 3. Entrada, vocoder y modulación
         inputSection.withKnob (s, "inputGain", "Gain").withKnob (s, "inputMonitor", "Monitor");
         vocoderSection.withToggle (s, "vocoderOn")
-                      .withHeaderButton ("Bands...", "Vocoder settings: filter bank, band envelopes (attack, release) and sibilance.", [this]
-                      {
-                          openParamPanel ("Vocoder", [] (ParamPanel& p, APVTS& st)
+                      .withHeaderButton ("Bands...", "Vocoder settings: filter bank, band envelopes (attack, release) and sibilance.", paramDialog ("Vocoder", [] (ParamPanel& p, APVTS& st)
                           {
                               p.add ("Filter Bank").withCombo (st, "vocoderBank");
                               p.add ("Band Envelopes").withKnob (st, "vocoderAttack", "Attack").withKnob (st, "vocoderRelease", "Release");
                               p.add ("Consonants").withKnob (st, "vocoderSibilance", "Sibilance");
-                          });
-                      })
+                          }))
                       .withKnob (s, "vocoderMix", "Mix").withKnob (s, "vocoderFormant", "Formant");
         lfo.withToggle (s, "lfoOn").withCombo (s, "lfoTarget")
            .withKnob (s, "lfoRate", "Rate").withKnob (s, "lfoDepth", "Depth").withKnob (s, "lfoShape", "Shape").withKnob (s, "lfoSync", "Sync")
@@ -524,7 +532,7 @@ public:
                    .withHeaderButton ("Matrix...", "Modulation matrix of the Synth engine: 8 slots, each a source (LFOs, envelopes, velocity, "
                                       "key, wheel, aftertouch, MPE timbre, random, bend) moving a destination per voice. The number in "
                                       "brackets is the count of active routes; amber rings on the knobs show their range.",
-                                      [this] { openPanel ("Modulation Matrix", std::make_unique<MatrixPanel> (koni), 1100, 520); })
+                                      [this] { openPanel ("Modulation Matrix", std::make_unique<MatrixPanel> (koni), 1100, 520); }).withResetSource (panelParams ([this] { return std::make_unique<MatrixPanel> (koni); }))
                    .withKnob (s, "lfo2Rate", "Rate").withKnob (s, "lfo2Depth", "Depth").withKnob (s, "lfo2Shape", "Shape").withKnob (s, "lfo2Sync", "Sync")
                    .withSideBody (lfo2View, 170, true);
         formantSection.withToggle (s, "formantOn").withCombo (s, "formantVoice")
@@ -533,9 +541,7 @@ public:
         controllerSection.withCombo (s, "voiceMode")
                          .withHeaderButton ("Voice...", "Voice settings of the Synth engine: aftertouch, MPE, voice assignment, oscillator "
                                             "phase, tolerances and analog VCA. MIDI channel, fine tune, bend range and controller "
-                                            "profiles are global: the MIDI button left of the engine selector.", [this]
-                         {
-                             openParamPanel ("Synth Voice", [] (ParamPanel& p, APVTS& st)
+                                            "profiles are global: the MIDI button left of the engine selector.", paramDialog ("Synth Voice", [] (ParamPanel& p, APVTS& st)
                              {
                                  p.add ("Aftertouch").withKnob (st, "atFilter", "AT Filt").withKnob (st, "atVibrato", "AT Vib").withKnob (st, "atAmp", "AT Vol");
                                  p.add ("MPE").withToggle (st, "mpeOn").withKnob (st, "mpeBendRange", "Bend");
@@ -543,20 +549,12 @@ public:
                                  p.add ("Osc Phase").withCombo (st, "oscPhase");
                                  p.add ("Tolerances").withCombo (st, "voiceTolerance");
                                  p.add ("Analog VCA").withKnob (st, "vcaClick", "Click").withKnob (st, "vcaLeak", "Leak");
-                             });
-                         })
+                             }))
                          .withKnob (s, "glide", "Glide").withKnob (s, "modWheelDepth", "Mod Wheel");
-        arpSection.withToggle (s, "arpOn").withCombo (s, "arpMode")
-                  .withHeaderButton ("Gate/Tempo...", "Arpeggiator settings: latch, octaves, gate, one-shot and the internal tempo.", [this]
-                  {
-                      openParamPanel ("Arpeggiator", [] (ParamPanel& p, APVTS& st)
-                      {
-                          p.add ("Arpeggiator").withExtraToggle (st, "arpLatch", "Latch").withKnob (st, "arpOctaves", "Octaves").withKnob (st, "arpGate", "Gate")
-                                               .withKnob (st, "arpOneShot", "1-Shot");
-                          p.add ("Tempo").withKnob (st, "arpBpm", "BPM");
-                      });
-                  })
-                  .withKnob (s, "arpRate", "Rate");
+        // Arpegiador: todos sus mandos en el panel; su tempo (arpBpm) es la perilla Tempo de Master
+        arpSection.withToggle (s, "arpOn").withCombo (s, "arpMode").withExtraToggle (s, "arpLatch", "Latch")
+                  .withKnob (s, "arpRate", "Rate").withKnob (s, "arpOctaves", "Octaves").withKnob (s, "arpGate", "Gate")
+                  .withKnob (s, "arpOneShot", "1-Shot");
 
         // Macros de interpretación (Params/PerfMacros.h): 8 perillas con el nombre de cada macro
         macroSection.withHeaderButton ("Assign...", "Performance macros: names, assigned parameters and their From / To ranges. "
@@ -576,26 +574,26 @@ public:
         // EQ: en el panel, como el de un ampli (Bass / Mid / Treble); todo lo demás, curva y nodos en EQ Bands...
         eqSection.withToggle (s, "eqOn")
                  .withHeaderButton ("EQ Bands...", "Parametric EQ: low/high cuts, shelves, two mid bands with Q, and the response curve "
-                                    "over the live spectrum (drag the nodes).", [this] { openPanel ("Equalizer", std::make_unique<EqPanel> (koni), 1180, 640); })
+                                    "over the live spectrum (drag the nodes).", [this] { openPanel ("Equalizer", std::make_unique<EqPanel> (koni), 1180, 640); }).withResetSource (panelParams ([this] { return std::make_unique<EqPanel> (koni); }))
                  .withKnob (s, "eqLowGain", "Bass").withKnob (s, "eqMid1Gain", "Mid").withKnob (s, "eqHighGain", "Treble");
         // Ampli: modelo y mandos de un ampli en el panel; Presence, Sag y Output en Cabinet...
         // Amp con su pantalla (la pantalla solo actúa con el ampli encendido): en el panel lo que se toca tocando, incluida la
         // mezcla de la pantalla (Cab); tipo de pantalla e IR del usuario en Cabinet...
         ampSection.withToggle (s, "ampOn").withCombo (s, "ampModel")
                   .withHeaderButton ("Cabinet...", "Amp: presence, power supply sag and output level; speaker cabinet type and your own "
-                                     "impulse response.", [this]
-                  {
-                      openParamPanel ("Amp and Cabinet", [this] (ParamPanel& p, APVTS& st)
+                                     "impulse response.", paramDialog ("Amp and Cabinet", [this] (ParamPanel& p, APVTS& st)
                       {
                           p.add ("Amp").withKnob (st, "ampPresence", "Presence").withKnob (st, "ampSag", "Sag").withKnob (st, "ampOutput", "Output");
-                          cabDialogSection = &p.add ("Cabinet").withCombo (st, "cabType")
-                                                .withHeaderButton ("Load IR...", "Load your own cabinet impulse response (WAV, AIFF, FLAC; up to 3 s) "
-                                                                   "and select User IR. The file is referenced by user presets, like samples.",
-                                                                   [this] { chooseCabIr(); })
-                                                .withKnob (st, "cabMix", "Mix");
+                          auto& cab = p.add ("Cabinet").withCombo (st, "cabType")
+                                          .withHeaderButton ("Load IR...", "Load your own cabinet impulse response (WAV, AIFF, FLAC; up to 3 s) "
+                                                             "and select User IR. The file is referenced by user presets, like samples.",
+                                                             [this] { chooseCabIr(); })
+                                          .withKnob (st, "cabMix", "Mix");
+                          if (p.dryRun)
+                              return; // en seco (Reset de la sección): el panel temporal no es el diálogo abierto
+                          cabDialogSection = &cab;
                           refreshCabIrInfo();
-                      });
-                  })
+                      }))
                   .withKnob (s, "ampGain", "Gain").withKnob (s, "ampBass", "Bass").withKnob (s, "ampMid", "Mid")
                   .withKnob (s, "ampTreble", "Treble").withKnob (s, "ampMaster", "Master").withKnob (s, "cabMix", "Cab");
         // Dinámica: en el panel lo que se toca tocando; tiempos, rodilla, llave y curva de transferencia en Sidechain...
@@ -603,37 +601,36 @@ public:
         compSection.withToggle (s, "compOn").withCombo (s, "compMode")
                    .withHeaderButton ("Sidechain...", "Compressor: attack, release, knee, makeup, sidechain filter and key (ducking from "
                                       "the audio input), with the transfer curve and the gain reduction meter.",
-                                      [this] { openPanel ("Dynamics", std::make_unique<DynamicsPanel> (koni), 980, 560); })
+                                      [this] { openPanel ("Dynamics", std::make_unique<DynamicsPanel> (koni), 980, 560); }).withResetSource (panelParams ([this] { return std::make_unique<DynamicsPanel> (koni); }))
                    .withKnob (s, "compThreshold", "Thresh").withKnob (s, "compRatio", "Ratio").withKnob (s, "compMix", "Mix");
         chorusSection.withToggle (s, "chorusOn").withCombo (s, "chorusMode")
                      .withKnob (s, "chorusMix", "Mix").withKnob (s, "chorusDepth", "Depth");
         echo.withToggle (s, "echoOn")
-            .withHeaderButton ("Tone/Wow...", "Tape echo settings: ping-pong, tone, wow and tempo sync.", [this]
-            {
-                openParamPanel ("Tape Echo", [] (ParamPanel& p, APVTS& st)
+            .withHeaderButton ("Tone/Wow...", "Tape echo settings: ping-pong, tone, wow and tempo sync.", paramDialog ("Tape Echo", [] (ParamPanel& p, APVTS& st)
                 {
                     p.add ("Tape Echo").withExtraToggle (st, "echoPingPong", "Ping-Pong")
                                        .withKnob (st, "echoTone", "Tone").withKnob (st, "echoWow", "Wow").withKnob (st, "echoSync", "Sync");
-                });
-            })
+                }))
             .withKnob (s, "echoTime", "Time").withKnob (s, "echoFeedback", "Feedback").withKnob (s, "echoMix", "Mix");
         ambient.withToggle (s, "ambientOn").withExtraToggle (s, "reverbFreeze", "Freeze")
-               .withHeaderButton ("Diffusion...", "Plate reverb settings: predelay, diffusion, damping, tone, modulation and width.", [this]
-               {
-                   openParamPanel ("Plate Reverb", [] (ParamPanel& p, APVTS& st)
+               .withHeaderButton ("Diffusion...", "Plate reverb settings: predelay, diffusion, damping, tone, modulation and width.", paramDialog ("Plate Reverb", [] (ParamPanel& p, APVTS& st)
                    {
                        p.add ("Plate Reverb").withKnob (st, "reverbPredelay", "Predelay").withKnob (st, "reverbDiffusion", "Diffusion")
                                              .withKnob (st, "reverbDamp", "Damp").withKnob (st, "reverbTone", "Tone")
                                              .withKnob (st, "reverbMod", "Mod").withKnob (st, "reverbWidth", "Width");
-                   });
-               })
+                   }))
                .withKnob (s, "reverbDecay", "Decay").withKnob (s, "ambientSize", "Size").withKnob (s, "ambientMix", "Mix");
         mediaSection.withToggle (s, "mediaOn").withCombo (s, "mediaType")
                     .withKnob (s, "mediaAge", "Age").withKnob (s, "mediaNoise", "Noise")
                     .withKnob (s, "mediaWow", "Wow").withKnob (s, "mediaDrive", "Drive");
         limiterSection.withToggle (s, "limOn").withCombo (s, "limLookahead")
                       .withKnob (s, "limCeiling", "Ceiling").withKnob (s, "limRelease", "Release");
-        master.withExtraToggle (s, "monoOut", "Mono").withKnob (s, "gain", "Gain");
+        // Tempo: el reloj del motor activo, el mismo que muestra y edita el LED del BPM (BpmDisplay::clockParam): Drum Machine,
+        // Omnichord y VL-1 tienen el suyo (también en su sección); el resto, el tempo interno (arpegiador, secuenciador, eco y
+        // LFO sincronizados). Hay una perilla por reloj y updateInert deja visible solo la del motor elegido
+        master.withExtraToggle (s, "monoOut", "Mono").withKnob (s, "gain", "Gain")
+              .withKnob (s, "arpBpm", "Tempo").withKnob (s, "drumTempo", "Tempo").withKnob (s, "omniTempo", "Tempo")
+              .withKnob (s, "vl1Tempo", "Tempo");
 
         refreshSampleInfo();
         startTimerHz (2); // el host puede restaurar un estado con otro sample con el editor abierto
@@ -808,38 +805,6 @@ private:
         });
     }
 
-    // Indicador de microafinación en la barra superior: "μ" ámbar, solo visible con una escala Scala o un maestro MTS-ESP
-    // activos (el proyecto la guarda: que no pase inadvertida). Clic: menú Tuning
-    struct TuningLed : juce::Component, juce::SettableTooltipClient
-    {
-        std::function<void()> onClick;
-        void mouseDown (const juce::MouseEvent&) override { if (onClick) onClick(); }
-        void paint (juce::Graphics& g) override
-        {
-            const auto r = getLocalBounds().toFloat().reduced (1.0f);
-            g.setColour (Skin::c (0xff2a1d08));
-            g.fillRoundedRectangle (r, 4.0f);
-            g.setColour (Skin::c (0xffffb000));
-            g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
-            g.setFont (juce::FontOptions (15.0f, juce::Font::bold));
-            g.drawText (juce::String::fromUTF8 ("\xce\xbc"), r, juce::Justification::centred); // μ
-        }
-    };
-    TuningLed tuningLed;
-
-    void refreshTuningLed()
-    {
-        auto& t = koni.tuning;
-        const auto mts = t.mtsHasMaster(), on = mts || t.hasScala();
-        const auto tip = on ? "Microtonal tuning: " + (mts ? "MTS-ESP master (" + t.mtsScaleName() + ")" : "Scala " + t.getScaleName())
-                                  + ". Saved with the project, not with presets. Click: tuning menu."
-                            : juce::String();
-        if (tuningLed.isVisible() != on)
-            tuningLed.setVisible (on);
-        if (tip != tuningLed.getTooltip())
-            tuningLed.setTooltip (tip);
-    }
-
     // Microafinación (Dsp/Tuning.h): Scala y MTS-ESP
     void addTuningItems (juce::PopupMenu& m)
     {
@@ -854,6 +819,9 @@ private:
         const auto status = tuning.mtsHasMaster() ? "MTS-ESP: " + tuning.mtsScaleName()
                           : tuning.hasScala() ? "Scala: " + tuning.getScaleName() : juce::String ("12-TET (standard)");
         t.addItem (status, false, false, [] {});
+        // Theremin, Drum Machine, ANS y MT-32 no aplican la microafinación (Visualizer::engineTunes)
+        if (const auto e = (int) koni.apvts.getRawParameterValue ("engine")->load(); e == 1 || e == 5 || e == 9 || e == 14)
+            t.addItem (koni.apvts.getParameter ("engine")->getCurrentValueAsText() + " ignores microtuning", false, false, [] {});
         t.addSeparator();
         t.addItem ("Load Scala scale (.scl)...", [this] { chooseTuning (false); });
         t.addItem ("Load keyboard mapping (.kbm)...", [this] { chooseTuning (true); });
@@ -1129,6 +1097,20 @@ private:
         const auto w = juce::jlimit (420, kWidth - 40, juce::roundToInt (body->weight() * 78.0f) + 52);
         openPanel (panelTitle, std::move (body), w, 230);
     }
+    // Botón de cabecera que abre un diálogo Edit... de parámetros (Section::withHeaderButton con Dialog): sus parámetros entran
+    // en el Reset de la sección; se averiguan construyendo el cuerpo en seco (ParamPanel (true)), sin abrirlo
+    Section::Dialog paramDialog (const juce::String& panelTitle, std::function<void (ParamPanel&, APVTS&)> build)
+    {
+        return { [this, panelTitle, build] { openParamPanel (panelTitle, build); },
+                 [this, build] { ParamPanel p (true); build (p, koni.apvts); juce::StringArray ids; collectParamIds (p, ids); return ids; } };
+    }
+    // Parámetros de un diálogo propio (Operators..., EQ Bands..., Matrix...): se construye sin mostrarlo y se recorren sus
+    // mandos. Sus constructores no enganchan nada al procesador (solo temporizadores de repintado)
+    static std::function<juce::StringArray()> panelParams (std::function<std::unique_ptr<juce::Component>()> make)
+    {
+        return [make] { const auto c = make(); juce::StringArray ids; collectParamIds (*c, ids); return ids; };
+    }
+
     // Teclas 1-9 del PC: el favorito n (0-8) en el orden del usuario (se reordena en el navegador de presets)
     void loadFavorite (int n)
     {
@@ -1527,6 +1509,51 @@ private:
         dim (echo.knobFor ("echoTime"), v ("echoSync") > 0.5f);
         dim (ambient.knobFor ("reverbDecay"), v ("reverbFreeze") > 0.5f);
         dim (filter.knobFor ("filterSpread"), (int) v ("filterMode") < VoiceFilters::dualBp);
+        // Math Models: solo las perillas que usa el modelo elegido (en el orden fijo de la sección). Damping solo actúa en el lazo
+        // de Noise Burst y Pick (la guía de Bow, Hammer y E-Bow tiene su propio filtro, Bright); Buzz, igual; Modal usa Level y
+        // Decay; los vientos, Level y los suyos; Banded, Level, Decay, Press (atenuada al golpear) y los suyos; Shaker, Level y los
+        // suyos; Mallet, Level, Decay y los suyos
+        {
+            const auto excite = (int) v ("stringExcite");
+            const auto pluck = excite <= 1, guide = excite >= 2 && excite <= 4, string = pluck || guide;
+            const auto banded = excite == 9, shaker = excite == 10, mallet = excite == 11;
+            const std::pair<const char*, bool> shown[] = {
+                { "stringLevel", true }, { "stringDecay", string || excite == 5 || banded || mallet }, { "stringBright", string },
+                { "stringPick", string }, { "stringDamping", pluck }, { "stringPickup", string },
+                { "stringBowPressure", excite == 2 || banded }, { "stringHammerFelt", excite == 3 }, { "stringEbowDrive", excite == 4 },
+                { "stringBuzz", pluck }, { "stringHarmonic", string }, { "stringStiff", string }, { "stringTension", string },
+                { "reedEmbouchure", excite == 6 }, { "reedNoise", excite == 6 }, { "fluteJet", excite == 7 },
+                { "fluteNoise", excite == 7 }, { "brassLip", excite == 8 }, { "brassSlide", excite == 8 },
+                { "bandedShape", banded }, { "bandedExcite", banded }, { "shakerType", shaker }, { "shakerObjects", shaker },
+                { "shakerShake", shaker }, { "shakerTone", shaker }, { "malletHardness", mallet }, { "malletMass", mallet },
+                { "malletDamp", mallet } };
+            dim (stringSection.knobFor ("stringBowPressure"), banded && v ("bandedExcite") < 0.5f);
+            auto changed = false;
+            for (const auto& [id, on] : shown)
+                if (auto* k = stringSection.knobFor (id); k != nullptr && k->isVisible() != on)
+                {
+                    k->setVisible (on);
+                    changed = true;
+                }
+            if (changed)
+                stringSection.resized();
+        }
+        // Tempo de Master: solo la perilla del reloj del motor activo; atenuada si manda el tempo del host (salvo el VL-1, que
+        // no lo sigue)
+        {
+            const auto eng = (int) v ("engine");
+            const juce::String clock = eng == 5 ? "drumTempo" : eng == 4 ? "omniTempo" : eng == 2 ? "vl1Tempo" : "arpBpm";
+            auto changed = false;
+            for (const char* id : { "arpBpm", "drumTempo", "omniTempo", "vl1Tempo" })
+                if (auto* k = master.knobFor (id); k != nullptr && k->isVisible() != (clock == id))
+                {
+                    k->setVisible (clock == id);
+                    changed = true;
+                }
+            if (changed)
+                master.resized();
+            dim (master.knobFor (clock), koni.isDisplayBpmFromHost() && eng != 2);
+        }
         // Ladder quality solo actúa en los modos ladder; es de la instancia y se puede elegir siempre: atenuación más suave
         filter.setHeaderControlAlpha ((int) v ("filterMode") < VoiceFilters::svfLp ? 1.0f : 0.6f);
         const auto mt32Multi = v ("mt32Multi") > 0.5f; // MT-32: con Multi el teclado no se enruta; Program solo en Part 1
@@ -1623,7 +1650,6 @@ private:
                 }
         }
         refreshCabIrInfo();
-        refreshTuningLed();
         for (int m = 0; m < PerfMacros::numMacros; ++m) // nombres de las macros (editados en su diálogo o al cargar un preset)
             if (auto* k = macroSection.knob ((size_t) m)) k->name = koni.perfMacros.name (m);
         if (engine == 3 && (int) koni.apvts.getRawParameterValue ("styloModel")->load() != shownStyloModel) // el Gen X-2 tiene sus propias secciones
@@ -1833,7 +1859,7 @@ private:
                 tab->fxGroup = group;
                 tab->onFxDrop = [this] (int from, int to) { dropFx (from, to); };
                 attachModeTab (*tab, [this, foldId] { return dockMode (foldId); }, [this, foldId] (int m) { setDockMode (foldId, m); },
-                    [this, group] (juce::PopupMenu& m)
+                    [this, group, b] (juce::PopupMenu& m)
                     {
                         const auto order = koni.getFxOrder();
                         const auto at = (int) (std::find (order.begin(), order.end(), group) - order.begin());
@@ -1841,15 +1867,24 @@ private:
                         m.addItem (100, "Move earlier in the chain", at > 0);
                         m.addItem (101, "Move later in the chain", at < KoniSynthProcessor::numFxGroups - 1);
                         m.addItem (102, "Reset chain order", order != std::array<int, 6> { 0, 1, 2, 3, 4, 5 });
+                        addBlockResetItem (m, b);
                     },
-                    [this, group] (int id) { if (id == 102) setFxOrder ({ 0, 1, 2, 3, 4, 5 }); else moveFx (group, id == 100 ? -1 : 1); });
+                    [this, group, b] (int id)
+                    {
+                        if (id == 103) resetParamsToDefaults (koni.apvts, blockResetIds (b));
+                        else if (id == 102) setFxOrder ({ 0, 1, 2, 3, 4, 5 });
+                        else moveFx (group, id == 100 ? -1 : 1);
+                    });
                 tab->setTooltip (juce::String (blocks[b].tip) + " Click to fold or unfold; right-click: docked, folded or floating window, "
-                                 "and its place in the chain. Drag it onto another effects block to change the order of the chain.");
+                                 "its place in the chain and reset to defaults. Drag it onto another effects block to change the order of the chain.");
             }
             else
             {
-                attachDockTab (*tab, foldId);
-                tab->setTooltip (juce::String (blocks[b].tip) + " Click to fold or unfold; right-click: docked, folded or floating window.");
+                attachModeTab (*tab, [this, foldId] { return dockMode (foldId); }, [this, foldId] (int m) { setDockMode (foldId, m); },
+                               [this, b] (juce::PopupMenu& m) { addBlockResetItem (m, b); },
+                               [this, b] (int id) { if (id == 103) resetParamsToDefaults (koni.apvts, blockResetIds (b)); });
+                tab->setTooltip (juce::String (blocks[b].tip) + " Click to fold or unfold; right-click: docked, folded or floating window, "
+                                 "and reset to defaults.");
             }
             rows.addAndMakeVisible (*tab);
             blockTabs.push_back (std::move (tab));
@@ -1858,6 +1893,23 @@ private:
         attachDockTab (*bpmTab, bpmFoldId);
         bpmTab->setTooltip ("Tempo LED. Click to fold or unfold; right-click: docked, folded or floating window.");
         content.addAndMakeVisible (*bpmTab);
+    }
+
+    // Reset de un bloque desde su pestaña: los parámetros de todas sus secciones y de sus diálogos (id 103 del menú)
+    juce::StringArray blockResetIds (size_t b) const
+    {
+        juce::StringArray ids;
+        for (const auto* section : blocks[b].sections)
+            for (const auto& id : section->resetIds())
+                ids.addIfNotAlreadyThere (id);
+        return ids;
+    }
+    void addBlockResetItem (juce::PopupMenu& m, size_t b)
+    {
+        const auto off = paramsOffDefault (koni.apvts, blockResetIds (b));
+        m.addSeparator();
+        m.addItem (103, "Reset " + juce::String (blocks[b].name) + " to defaults"
+                            + (off > 0 ? " (" + juce::String (off) + " changed)" : juce::String()), off > 0);
     }
 
     bool blockFolded (size_t b) const { return (bool) koni.apvts.state.getProperty (blocks[b].foldId, false); }
@@ -2345,7 +2397,7 @@ private:
         version.setBounds (top.removeFromLeft (72).withTrimmedBottom (6));
         avxButton.setBounds (top.removeFromLeft (70));
         mcpButton.setBounds (top.removeFromLeft (64));
-        tuningLed.setBounds (top.removeFromLeft (20).withTrimmedLeft (1).withTrimmedRight (3).withSizeKeepingCentre (16, 20)); // hueco de 20 px ante el motor
+        top.removeFromLeft (20); // hueco de 20 px ante el motor
         // Orden del flujo: entrada MIDI -> motor | edición (deshacer) | presets; 15 px entre grupos
         midiButton.setBounds (top.removeFromLeft (34).withTrimmedRight (4));
         engineCombo.setBounds (top.removeFromLeft (190));
@@ -2371,7 +2423,7 @@ private:
         if (! displayFolded)
         {
             // DISPLAY: visualizador, PANIC y LED de tempo con su pestaña (BPM: plegarlo o sacarlo a una ventana)
-            auto scopeRow = r.removeFromTop (80);
+            auto scopeRow = r.removeFromTop (100); // 100 px: 4 filas de anunciadores legibles a la izquierda del display (80 antes)
             displayTab->setFolded (false);
             displayTab->setFloating (false);
             displayTab->setBounds (tabColumn.withY (scopeRow.getY()).withHeight (scopeRow.getHeight()));
@@ -2385,7 +2437,7 @@ private:
             {
                 scopeRow.removeFromRight (8);
                 bpmDisplay.setVisible (true);
-                bpmDisplay.setBounds (scopeRow.removeFromRight (190));
+                bpmDisplay.setBounds (scopeRow.removeFromRight (220));
                 scopeRow.removeFromRight (4);
                 bpmTab->setFolded (false);
                 bpmTab->setFloating (false);
@@ -3070,7 +3122,7 @@ private:
             osc2Section { "Osc 2" }, osc3Section { "Osc 3" }, noiseSection { "Noise" }, vl1Section { "Casio VL-1" }, vl1RhythmSection { "VL-1 Rhythm" },
             sampleSection { "Sample" }, vocoderSection { "Vocoder" }, inputSection { "Input" },
             filterEnvSection { "Filter Envelope" }, ampEnvSection { "Amp Envelope" }, controllerSection { "Voice" },
-            stringSection { "Plucked String" }, arpSection { "Arpeggiator" }, wavetableSection { "Wavetable" },
+            stringSection { "Math Models" }, arpSection { "Arpeggiator" }, wavetableSection { "Wavetable" },
             seqSection { "Sequencer" }, macroSection { "Macros" }, styloSection { "Stylophone" }, genxOscSection { "Gen X-2 Osc / Envelope (experimental)" }, genxFxSection { "Gen X-2 LFO / Filter / Delay" }, omniSection { "Omnichord" },
             omniRhythmSection { "Omnichord Rhythm" }, drumSection { "Drum Kit" }, drumPatternSection { "Pattern" },
             fmSection { "FM 6-Op" }, fmLfoSection { "FM LFO" }, chipSection { "8-Bit/DPCM" }, chipDriverSection { "8-Bit/DPCM Driver" }, chipStereoSection { "GB Stereo" }, chipVrc6Section { "Famicom Expansion" },

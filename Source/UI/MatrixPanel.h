@@ -66,7 +66,10 @@ public:
                 addAndMakeVisible (c);
             rows.push_back (std::move (row));
         }
-        hint.setText ("Each slot moves one destination per voice. Amber rings on the knobs show the range; the dot, the live value.",
+        randomFade = std::make_unique<Knob> (apvts, "mtxRandomFade", "Rnd Fade");
+        addAndMakeVisible (*randomFade);
+        hint.setText ("Each slot moves one destination per voice. Amber rings on the knobs show the range; the dot, the live value. "
+                      "Rnd Fade: the Random source fades with the filter envelope.",
                       juce::dontSendNotification);
         hint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         addAndMakeVisible (hint);
@@ -75,7 +78,9 @@ public:
     void resized() override
     {
         auto r = getLocalBounds().reduced (8);
-        hint.setBounds (r.removeFromBottom (22));
+        auto bottom = r.removeFromBottom (72); // Random Fade (de toda la matriz) y la indicación
+        randomFade->setBounds (bottom.removeFromLeft (80));
+        hint.setBounds (bottom.reduced (8, 0));
         const auto colW = r.getWidth() / 2;
         const auto rowH = r.getHeight() / (ModMatrix::numSlots / 2);
         for (int i = 0; i < ModMatrix::numSlots; ++i)
@@ -113,5 +118,6 @@ private:
 
     APVTS& apvts;
     std::vector<std::unique_ptr<Row>> rows;
+    std::unique_ptr<Knob> randomFade;
     juce::Label hint;
 };

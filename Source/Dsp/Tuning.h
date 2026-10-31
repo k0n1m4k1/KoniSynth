@@ -235,6 +235,8 @@ public:
         mtsEnabled.store (on);
     }
     bool isMtsEnabled() const { return mtsEnabled.load(); }
+    // MTS-ESP manda en el último bloque: maestro conectado o SysEx MTS recibido (anunciador MTS del display)
+    bool mtsActive() const { return mtsBlockActive.load (std::memory_order_relaxed); }
     bool mtsHasMaster() const { auto* c = client.load(); return mtsEnabled.load() && c != nullptr && MTS_HasMaster (c); }
     juce::String mtsScaleName() const { auto* c = client.load(); return c != nullptr ? juce::String (MTS_GetScaleName (c)) : juce::String(); }
 

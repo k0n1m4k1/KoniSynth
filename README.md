@@ -38,7 +38,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 
 | Engine | What it is | Manual |
 |---|---|---|
-| Synth | KoniSynth's own analog-style synth: 4 sources (oscillator, wavetable, sample, plucked string), Osc 2 (classic and mixed waves, wavetable or its own sample), Osc 3, noise, complex oscillator, 14 filters, matrix | [synth.md](docs/engines/synth.md) |
+| Synth | KoniSynth's own analog-style synth: 4 sources (oscillator, wavetable, sample, Math Models: 12 physical and stochastic models), Osc 2 (classic and mixed waves, wavetable or its own sample), Osc 3, noise, complex oscillator, 14 filters, matrix | [synth.md](docs/engines/synth.md), Math Models: [maths.md](docs/engines/maths.md) |
 | Theremin | Physical model of the theremin (pitch and volume antennas) with its own pad; also playable from MIDI | [theremin.md](docs/engines/theremin.md) |
 | Casio VL-1 | The 1979 VL-Tone: its sounds, ADSR digits, rhythms and LCD | [casio-vl1.md](docs/engines/casio-vl1.md) |
 | Stylophone | The 1968 stylus organ (20 keys) and the experimental Gen X-2, with a gold-plate pad | [stylophone.md](docs/engines/stylophone.md) |
@@ -81,8 +81,12 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   minor, modes, pentatonics, blues, whole tone...) on any key, with out-of-scale notes rounded to the scale (nearest, down
   or up) or left out; the keyboard marks the notes of the scale. The computer keyboard plays it too (octave and velocity
   keys, favorites on 1-9).
-- **Tuning:** fine tune (±100 cents), Scala `.scl`/`.kbm` microtuning (saved with the project; a LED shows it is active) and
-  MTS-ESP, in every engine.
+- **Tuning:** fine tune (±100 cents), Scala `.scl`/`.kbm` microtuning (saved with the project) and MTS-ESP (master plugin or
+  MIDI Tuning Standard SysEx), in every engine with pitched notes; Theremin, Drum Machine, ANS and Roland MT-32 ignore it.
+- **Display annunciators:** a column at the left of the top display lights up what is on (information only): SCL and MTS
+  (microtuning; half lit when the engine ignores it), MPE, MONO, ARP, SEQ, HOLD (sustain pedal), VEL (Drum Machine
+  velocity), REV (reverb), LIM (limiter), ST (stereo output), IN (audio input or vocoder), MIDI (flashes with incoming
+  MIDI), LRN (MIDI Learn waiting), PLAY and REC (session transport).
 - **Audio input and vocoder:** a microphone or line input can go through the effects chain, or be the modulator of a channel
   vocoder (VP-330 with 10 bands, 16 or 32 bands) with any engine as the carrier.
 - **Transport:** record the session to WAV, play audio files, import (also SysEx) and export MIDI.
@@ -92,13 +96,15 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   Presets that use your own files tell you when one is missing. User presets can be exported (one as `.xml`, all as a
   `.zip` bank) and imported from the browser.
 - **Your own content:** samples (WAV, AIFF, FLAC), SoundFont zones, SNES BRR/SPC, DX7 SysEx banks, impulse responses, Roland
-  MT-32 ROMs. You supply them; KoniSynth only includes three original samples, used by its factory presets.
+  MT-32 ROMs. You supply them; KoniSynth includes no samples.
 - **User rhythms:** 8 rhythms of your own for the Drum Machine, the Omnichord (with its auto bass) and the Casio VL-1,
   drawn in a rhythm editor or in any sequencer: each one is a MIDI file (see [User rhythms](docs/user-rhythms.md)).
 - **MIDI controllers:** setup profiles for the M-Audio Oxygen Pro Mini, Casio CT-S400, Yamaha PSR-EW425 and Yamaha reface YC;
   a Controller Setup assistant learns the knobs of your unit one by one and suggests the settings for it.
-- **Display:** oscilloscope, spectrum, spectrogram, goniometer, VU meters and **Arcade** (a pixel-art shooter played by the
-  music), in modern, green or amber phosphor style. Its bezel follows the skin and style (graphite, terminal casing or
+- **Display:** oscilloscope, spectrum, spectrogram, goniometer, VU meters, **Arcade** (a pixel-art shooter played by the
+  music) and **Demo** (the brand loop of a 90s car stereo dot-matrix display: 3D logo, demoscene effects, a racer and a
+  cockpit shooter; it runs on its own in silence and follows the music and the highest held note while playing), in
+  modern, green or amber phosphor style. Its bezel follows the skin and style (graphite, terminal casing or
   brushed steel), or is brass, or none; with a bezel the screen has CRT-style glass. BPM display and transport next to it. The VL-1, DX7 and MT-32
   engines also show their own front-panel display, and the Drum Machine its step lights.
 - **Interface:** collapsible blocks, floating windows (handy on multi-monitor setups; a pin in the title bar keeps one on
@@ -156,7 +162,8 @@ Not available yet: building requires a Mac with Xcode. See [docs/BUILDING.md](do
    - **Filters** on the left: Source (All, ★ Favorites, Factory, User), Category and Engine, each with the number of
      presets it would leave.
    - Click a row or use the arrow keys to **listen**; double-click or Enter loads it and closes the browser.
-   - `(sa)` after a name: the preset plays one of the samples built into KoniSynth; `(st)`: it uses the String source.
+   - `(sa)` after a name: the preset plays a sample of your own (Sample source or Osc 2 in Sample mode); `(st)`: it uses
+     the Math Models source.
    - **Favorites:** click the star. The first nine show their number next to the star, and keys **1-9** load them (with
      the KoniSynth window focused, outside text fields). To reorder them: drag the rows while the table is sorted by the
      star column, or right-click a favorite (Move to top / up / down / to end), or Alt + Up / Down.

@@ -92,7 +92,8 @@ public:
         table.setBounds (r);
     }
 
-    void paint (juce::Graphics& g) override { g.fillAll (Skin::c (0xff262c33)); }
+    // En Brushed Metal no rellena: se ve el acero de la cara del diálogo (Skin::dialogFace)
+    void paint (juce::Graphics& g) override { if (Skin::current() != Skin::metal) g.fillAll (Skin::c (0xff262c33)); }
 
     // Línea de inserción mientras se arrastra un favorito
     void paintOverChildren (juce::Graphics& g) override

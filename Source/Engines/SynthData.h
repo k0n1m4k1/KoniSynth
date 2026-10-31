@@ -109,15 +109,6 @@ struct SampleData
         return fromReader (std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (file)), file.getFileName(), error);
     }
 
-    // Audio en memoria (samples de fábrica incrustados con BinaryData): los bytes deben vivir mientras dure la lectura
-    static std::unique_ptr<SampleData> fromMemory (const void* bytes, size_t size, const juce::String& name, juce::String& error)
-    {
-        juce::AudioFormatManager formats;
-        formats.registerBasicFormats();
-        return fromReader (std::unique_ptr<juce::AudioFormatReader> (formats.createReaderFor (
-                               std::make_unique<juce::MemoryInputStream> (bytes, size, false))), name, error);
-    }
-
     static std::unique_ptr<SampleData> fromReader (std::unique_ptr<juce::AudioFormatReader> reader, const juce::String& fileName, juce::String& error)
     {
         if (reader == nullptr)
@@ -204,6 +195,73 @@ struct SampleData
     int length() const { return (int) levels[0].size(); }
 };
 
+// Receta de Math Models > Modal (síntesis modal, Adrien 1991): hasta 8 modos, cada uno una senoide que se apaga,
+//   s(t) = w(t) · Σ A_k · e^(-t / τ_k) · sin(2π · r_k · f · t),  w(t) = min(1, t / 1,5 ms),
+// con f la nota tocada, r_k la relación de frecuencia, A_k la amplitud y τ_k la caída (s; a τ la amplitud es 1/e, -8,7 dB).
+// Texto: una línea por modo "r A τ" (separados por espacios, comas o punto y coma; '#' empieza un comentario). Vacío = la
+// receta por defecto (Soft Key). Se lee en el hilo de mensajes y se publica con DataSlot
+struct ModalRecipe
+{
+    static constexpr int maxModes = 8;
+    int count = 0;
+    std::array<float, maxModes> ratio {}, amp {}, tau {};
+    float norm = 1.0f; // 1 / pico de la suma en C4 (261,63 Hz, 48 kHz, 50 ms): a esa nota suena con pico 1, como un sample cargado
+
+    // Soft Key y Metal: los dos ataques aditivos de los presets de la 1.0.1 (antes WAV renderizados con esta misma fórmula)
+    static const char* softKey() { return "1 1 0.32\n2 0.32 0.17\n3 0.12 0.08\n7 0.06 0.025"; }
+    static const char* metal()   { return "1 1 0.14\n2.73 0.5 0.08\n5.41 0.3 0.04\n8.17 0.16 0.025"; }
+
+    // nullptr y error (en inglés: lo muestra la UI) si una línea no es válida
+    static std::unique_ptr<ModalRecipe> parse (const juce::String& text, juce::String& error)
+    {
+        auto r = std::make_unique<ModalRecipe>();
+        juce::StringArray lines;
+        lines.addLines (text.trim().isEmpty() ? juce::String (softKey()) : text);
+        for (int i = 0; i < lines.size(); ++i)
+        {
+            const auto line = lines[i].upToFirstOccurrenceOf ("#", false, false).trim();
+            if (line.isEmpty())
+                continue;
+            const auto tokens = juce::StringArray::fromTokens (line, " \t,;", "");
+            juce::StringArray numbers;
+            for (const auto& t : tokens)
+                if (t.isNotEmpty()) numbers.add (t);
+            const auto where = "Line " + juce::String (i + 1) + ": ";
+            if (numbers.size() != 3)
+                return error = where + "expected 3 numbers (ratio, amplitude, decay in s).", nullptr;
+            for (const auto& n : numbers)
+                if (! n.containsOnly ("0123456789.-+eE") || ! n.containsAnyOf ("0123456789"))
+                    return error = where + "\"" + n + "\" is not a number.", nullptr;
+            const auto ratio = numbers[0].getFloatValue(), amp = numbers[1].getFloatValue(), tau = numbers[2].getFloatValue();
+            if (! (ratio > 0.0f && ratio <= 64.0f)) return error = where + "ratio must be above 0 and at most 64.", nullptr;
+            if (! (amp >= 0.0f && amp <= 10.0f))    return error = where + "amplitude must be between 0 and 10.", nullptr;
+            if (! (tau >= 0.001f && tau <= 60.0f))  return error = where + "decay must be between 0.001 and 60 s.", nullptr;
+            if (r->count == maxModes)               return error = "At most " + juce::String (maxModes) + " modes.", nullptr;
+            r->ratio[(size_t) r->count] = ratio;
+            r->amp[(size_t) r->count] = amp;
+            r->tau[(size_t) r->count] = tau;
+            ++r->count;
+        }
+        if (r->count == 0)
+            return error = "No modes: write one line per mode (ratio, amplitude, decay in s).", nullptr;
+        float peak = 1.0e-9f;
+        for (int n = 0; n < 2400; ++n)
+            peak = juce::jmax (peak, std::abs (r->value ((double) n / 48000.0, 261.625565)));
+        r->norm = 1.0f / peak;
+        error = {};
+        return r;
+    }
+
+    // s(t) sin normalizar, con la entrada de 1,5 ms (también la dibuja el diálogo Formula...)
+    float value (double t, double f, double decayScale = 1.0) const
+    {
+        double s = 0.0;
+        for (int k = 0; k < count; ++k)
+            s += amp[(size_t) k] * std::exp (-t / (tau[(size_t) k] * decayScale)) * std::sin (juce::MathConstants<double>::twoPi * ratio[(size_t) k] * f * t);
+        return (float) (s * juce::jmin (1.0, t / 0.0015));
+    }
+};
+
 // Intercambio de datos (sample, wavetable) entre hilos sin bloqueos en audio: el hilo de audio solo lee 'current'. Lo sustituido
 // se retira y se libera cuando el audio ha completado 2 bloques desde el cambio (blocksDone, que incrementa el final de
 // processBlock): ningún bloque que pudiera tener el puntero viejo sigue en curso. Sin audio, se libera al destruir.
@@ -260,6 +318,7 @@ private:
 };
 
 using SampleSlot = DataSlot<SampleData>;
+using ModalSlot = DataSlot<ModalRecipe>;
 
 // Wavetable: fotogramas de 2048 muestras (formato de las wavetables de Serum: WAV de n × 2048 muestras, estándar de facto que
 // leen otros sintetizadores; kvraudio.com, forum.vital.audio). Por fotograma, 11 niveles limitados en banda por FFT: el nivel L

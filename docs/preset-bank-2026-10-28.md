@@ -6,20 +6,10 @@
 
 - **Values:** each factory entry stores only the parameters that differ from their default value (`Source/Presets/Factory.h`, end of the list), rounded to 6 significant digits. Sub-parameters of blocks that are switched off (for example amp settings with Amp off) were dropped: rendering every preset with and without them gave identical audio, sample for sample.
 - **No personal paths:** the source files pointed wavetable slots to a local file, but no preset selects the "User File" table, so those paths had no effect and were removed.
-- **Level:** peak measured at velocity 100 on one note (C4, or the nearest note in the recommended range), 4 s render (8 s for Orbital Bloom). When the peak fell outside 0.06-0.10 (up to 0.11 for Drums, FX, Cinematic and Sequence), `gain` (linear, last in the chain) was scaled to reach 0.08, with a ceiling of gain = 1. Presets inside the band keep their level.
+- **Level:** loudness, not peak, for the whole factory bank except Drums, Machines, FX and Nature. Each preset is played at velocity 100 for 4 s on the lowest, middle and highest note of its recommended range; its loudness is the maximum K-weighted power (ITU-R BS.1770, which accounts for frequency) over 200 ms windows, averaged in power over the three notes. `gain` (linear, last in the chain) is scaled to reach -26.8 LUFS (the median of the bank), with a tolerance of ±0.5 dB, a ceiling of gain = 1 and peaks at or below -6 dBFS; 38 presets that need more than gain = 1 stay at the ceiling. The spread between presets (10th to 90th percentile) went from 10.9 dB to 1.5 dB.
 - **Check:** each factory entry was rendered against its source preset; the output matches the source scaled by the gain change (largest relative difference 4.8e-6, from the rounding).
 - **Patterns:** sequencer and arpeggiator presets have Latch off: releasing the key stops the pattern.
-- **Markers:** in the preset list and the browser, `(sa)` follows the name of a preset that plays one of the embedded samples and `(st)` one that uses the String source (Karplus-Strong plucked string).
-
-## Embedded samples
-
-Three original samples, made for these presets, are compiled into the plug-in (`Resources/samples`, BinaryData). Presets refer to them as `factory:<file>`, so they do not depend on any folder; a user preset saved from one of them keeps that reference.
-
-| File | Content | Used by |
-|---|---|---|
-| `original-metal-C4.wav` | synthesized metallic attack, C4, mono, 0.42 s | Metal Memory |
-| `original-soft-key-C4.wav` | synthesized keyboard attack, C4, mono, 0.70 s | Soft Chord Memory, Why Heart Gospel Keys (Osc 2) |
-| `original-orbital-bloom-C3.wav` | cinematic swell, C3, stereo, 6.0 s (the sampler plays it in mono; chorus and reverb make the stereo image) | Orbital Bloom |
+- **Markers:** in the preset list and the browser, `(st)` follows the name of a preset that uses a string model of Math Models. No factory preset uses a sample (`(sa)` only marks user presets with a sample of their own).
 
 ## New categories
 
@@ -59,12 +49,11 @@ A user preset whose category this version does not know (one saved by a later ve
 | Vowel Aurora |  | Pad | Ambient - Vowel Aurora | 0.054 | 0.350 → 0.514 | Pad category replaces the "Ambient -" prefix |
 | Berlin Time Resonance |  | Keys | = | 0.064 | 0.900 → 0.900 | Unique FM bell + comb voice |
 | Monolith Cluster |  | Cinematic | Cinema - Monolith Cluster | 0.057 | 0.900 → 1.000 | Cinematic category replaces the prefix |
-| Orbital Bloom | (sa) | Cinematic | Cinema - Orbital Bloom | 0.108 | 0.900 → 0.900 | Original asset embedded; final version with stereo chorus and reverb |
 | Clean Electric Guitar | (st) | Guitar | Clean Electric Guitar 2 | 0.037 | 0.400 → 0.876 | Canonical: the amp version measured 0.0068 peak (-43 dBFS); this one bypasses the amp |
 | Crystal Hybrid 1987 |  | Pad | = | 0.048 | 0.400 → 0.672 | Unique FM/wavetable pad |
 | Funk Filter Bass |  | Bass | Daft Filter Motion | 0.118 | 0.900 → 0.612 | Artist name removed |
 | Octave Sync Solo |  | Lead | Daft Sync Solo 2 | 0.089 | 0.900 → 0.900 | Canonical of the pair (exact octave, stronger fundamental); artist name removed |
-| Metal Memory | (sa) | Keys | Depeche Metal Memory | 0.120 | 0.900 → 0.598 | Artist name removed; original asset embedded |
+| Metal Memory |  | Keys | Depeche Metal Memory | 0.120 | 0.900 → 0.598 | Artist name removed; attack by Math Models > Modal (Metal recipe) |
 | Electro Hybrid Bass | (st) | Bass | Electric Bass - Electro Hybrid | 0.112 | 0.950 → 0.679 | Prefix moved to a suffix |
 | Fingerstyle Bass | (st) | Bass | Electric Bass - Fingerstyle | 0.131 | 0.950 → 0.581 | Prefix moved to a suffix |
 | Fretless Bass | (st) | Bass | Electric Bass - Fretless | 0.052 | 0.950 → 1.000 | Prefix moved to a suffix |
@@ -96,7 +85,7 @@ A user preset whose category this version does not know (one saved by a later ve
 | Tubular Bells |  | Mallets | Mallets - Tubular Bells | 0.032 | 0.300 → 0.752 | Mallets category |
 | Velvet Vibraphone |  | Mallets | Mallets - Velvet Vibraphone | 0.051 | 0.400 → 0.633 | Mallets category |
 | Dusk Chamber |  | Pad | Moby Dusk Chamber | 0.061 | 0.350 → 0.350 | Artist name removed |
-| Soft Chord Memory | (sa) | Keys | Moby Soft Chord Memory | 0.035 | 0.350 → 0.792 | Artist name removed; original asset embedded |
+| Soft Chord Memory |  | Keys | Moby Soft Chord Memory | 0.035 | 0.350 → 0.792 | Artist name removed; attack by Math Models > Modal (Soft Key recipe) |
 | Muted Trumpet Noir |  | Brass | = | 0.056 | 0.400 → 0.576 | Unique |
 | Numbers Metal Perc |  | Drums | = | 0.115 | 0.900 → 0.626 | Unique |
 | Forest Ocarina |  | Woodwind | Ocarina - Forest Breath | 0.109 | 0.900 → 0.662 | Woodwind category |
@@ -131,7 +120,7 @@ A user preset whose category this version does not know (one saved by a later ve
 | Synth Soft Piano |  | Keys | Synth Soft Piano 2 | 0.046 | 0.400 → 0.693 | Canonical: stable tuning |
 | Venetian Chamber Synth |  | Strings | = | 0.062 | 0.900 → 0.900 | Unique |
 | Warm Trombone |  | Brass | = | 0.038 | 0.400 → 0.836 | Unique |
-| Why Heart Gospel Keys | (sa) | Keys | = | 0.041 | 0.350 → 0.677 | Original asset embedded (Osc 2 sample) |
+| Why Heart Gospel Keys |  | Keys | = | 0.041 | 0.350 → 0.677 | Attack by Math Models > Modal (Soft Key recipe) |
 | Wrong Pulse Drive |  | Bass | Wrong Pulse Drive 2 | 0.099 | 0.900 → 0.900 | Canonical: the darker, smoother revision |
 
 ## Not shipped (aliases)

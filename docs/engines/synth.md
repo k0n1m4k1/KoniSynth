@@ -4,7 +4,7 @@ The Synth is KoniSynth's own eight-voice polyphonic synthesizer (also Mono and L
 ladder low-pass (LP 24) with three qualities against aliasing, the Minimoog Tri-Saw and an analog triangle measured on two
 Model D units. It does not emulate a specific instrument: it is a subtractive design with its own personality, combining
 four summed sources (a minBLEP oscillator with unison, a wavetable, a
-sample player and a Karplus-Strong plucked string), a Buchla 259-style complex oscillator, a second oscillator
+sample player and Math Models, physical models such as plucked and bowed strings, winds, bars and shakers), a Buchla 259-style complex oscillator, a second oscillator
 (classic and mixed waves, its own wavetable or its own sample file), a third oscillator that grows from the classic sub,
 noise (white, pink and the 8-bit LFSR), 14 filter modes, per-voice saturation before or after the filter, analog RC or
 linear envelopes, two tempo-synced LFOs, an 8-slot modulation matrix (11 sources, 15 destinations), MPE and polyphonic
@@ -30,7 +30,7 @@ Osc 1 and its modulator when the complex oscillator is on, marked *LP* when Mod 
 saturation in their current order, the amp, the effects (their order is in the FX tooltip) and the output. LEDs show what
 sounds or is on; on the right, the active modulations. Clicking a source opens its tab and its view on the wave display.
 
-### Source tabs: Osc 1, Wavetable, Sample, String
+### Source tabs: Osc 1, Wavetable, Sample, Math Models
 
 The four sources sound summed; each tab has its own level and LED. Right-click a tab for **Mute / Solo** (Mute
 silences the source without changing its level; mutes are off by default and presets do not change them).
@@ -78,17 +78,25 @@ Loop, Level, Root, Start, Length and a **Load** button. The file chooser accepts
 | Length | Cuts the sample after this time with a short fade; short values give LA-style synthesis. | Full, up to 2000 ms / Full |
 | Loop | Loops from Start to the end while the note is held. | Off / On / Off |
 
-**String** (Karplus-Strong plucked string)
+**Math Models** computes a physical or stochastic model for every note (strings, modes, winds, bars, shakers and a
+mallet); the panel shows only the chosen model's controls, and Formula... shows its formula.
 
-| Control | What it does | Range / default |
+| Model | Published model | Own controls |
 |---|---|---|
-| Excite menu | Noise: filtered noise burst (classic, a bit grainy). Pick: triangle shape with its tip at Pick. | Noise, Pick / Noise |
-| Level | Plucked string volume. | 0-100 % / 0 % |
-| Decay | Time to fall by 60 dB. | 0.10-20 s / 3.00 s |
-| Bright | Low = soft finger, high = hard plectrum or harpsichord quill. | 0-100 % / 60 % |
-| Pick | Pluck position: near the end bright and thin, the middle hollow. | 2-50 % / 13 % |
-| Damping | Upper partials die out sooner than the fundamental; fundamental Decay and tuning are compensated. | 0-100 % / 0 % |
-| Pickup | Magnetic pickup position from the bridge; harmonic k is shaped by 2·abs(sin(π·k·position)). | Off-50 % / Off |
+| Noise Burst | Karplus & Strong 1983; Jaffe & Smith 1983 | Decay, Bright, Position, Damping, Pickup, Buzz, Harmonic, Stiff, Tension |
+| Pick | Jaffe & Smith 1983 | as Noise Burst |
+| Bow | McIntyre, Schumacher & Woodhouse 1983; Smith 1986 | Decay, Bright, Position, Pickup, Press, Harmonic, Stiff, Tension |
+| Hammer | Hall 1992 | as Bow, with Felt |
+| E-Bow | after Heet's patent, 1978 (own model) | as Bow, with Drive |
+| Modal | Adrien 1991 | Decay |
+| Reed | Guillemain, Kergomard & Voinier 2005 | Embouchure, Noise |
+| Flute | Karjalainen et al. 1991; Välimäki et al. 1992; STK Flute | Jet, Noise |
+| Brass | Cook 1991 (TBone); STK Brass | Lip, Slide |
+| Banded | Essl & Cook 1999; STK BandedWG | Decay, Shape, Excite, Press (with Bow) |
+| Shaker | Cook 1997 (PhISEM); STK Shakers | Type, Objects, Shake, Tone |
+| Mallet | Avanzini & Rocchesso 2001 | Decay, Hardness, Mass, Damp |
+
+Full reference, formulas and history: [Math Models](maths.md)
 
 **Tri-Saw** (all four waveform menus) is the triangle-sawtooth of the Minimoog oscillators 1 and 2: the saw and triangle
 mixed passively at the waveform switch, 10/57 saw and 47/57 triangle (47 kΩ and 10 kΩ resistors). Checked against a recorded
@@ -328,7 +336,13 @@ their modulation range.
 
 | Sources | Destinations (reach at 100 %) |
 |---|---|
-| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note, fixed during the note), Pitch Bend | Pitch and Osc 2 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position |
+| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note; fixed during the note, or fading with Rnd Fade), Pitch Bend | Pitch and Osc 2 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position |
+
+**Rnd Fade** (bottom of the dialog, default 0 %) makes the Random source fade with the filter envelope: the slot gets
+random × (1 − fade + fade × filter envelope). At 100 % with filter sustain 0, each note starts off target and settles
+on it during the filter decay. Uses: Random → Pitch at 2-5 % for a scoop into every note (leads, brass), at 30-50 % for
+a chord that converges from random pitches (Convergence Swell); Random → Cutoff or Pan for plucks whose attacks vary
+and settle (Restless Pluck). It applies to every slot that uses Random.
 
 ## Playing it
 
@@ -346,7 +360,7 @@ Recipe, sync lead:
 2. LFO 2 or the matrix (Mod Wheel -> Osc 2 Pitch) to sweep the sync.
 
 Recipe, plucked harpsichord:
-1. String tab: Level 100 %, Decay 4 s, Bright 90 %, Pick 10 %; Osc 1 Level 0 %.
+1. Math Models tab: Pick, Level 100 %, Decay 4 s, Bright 90 %, Position 10 %; Osc 1 Level 0 %.
 2. Amp envelope: Attack 1 ms, Sustain 100 %, Release 0.25 s. These are the values of the factory preset
    **Baroque Harpsichord**; try Excite = Pick for the triangle-shaped pluck.
 
@@ -402,9 +416,9 @@ These are the Synth's own design choices, not an emulation of a particular unit.
 
 ## Factory presets
 
-309 factory presets have no "engine" value and therefore use the Synth. In the preset list and the browser, `(sa)` after
-a name means the preset plays one of the three original samples built into KoniSynth, and `(st)` that it uses the String
-source. The 77 added in 1.0.1 and the new categories are described in [Synth preset bank](../preset-bank-2026-10-28.md). Those recreated from a reference recording went
+308 factory presets have no "engine" value and therefore use the Synth; none of them uses a sample. In the preset list and
+the browser, `(sa)` after a name means a user preset plays a sample of its own, and `(st)` that the preset uses a string
+model of Math Models (all but Modal). The 77 added in 1.0.1 and the new categories are described in [Synth preset bank](../preset-bank-2026-10-28.md). Those recreated from a reference recording went
 through A/B/C listening tests (two or three candidates on the same notes and level as the reference, chosen by ear; the
 measurements of the chosen one are noted in the code). Presets whose sound depends on the note or on how
 they are played (nature sounds, one-voice drums, sequences, chip effects) say so: the display shows the hint for a few
@@ -443,7 +457,7 @@ another white key. By category:
 | Sequence | Berlin Sequence, Hardbass Donk Bounce, Robot Arp, On the Run Sequence, Acid Step Line, Irregular 7-Step, Equinox Orbit Sequence, EBM Drive Sequence, Pocket Computer Sequence, Progressive Prism Pluck, Binary Resonator, Bode Conveyor, Comb Machine, Cross Sync Orbit, Odd Ring Laboratory, Phase Transmission, Sample Hold Workshop |
 | Drums | Model D Dark Toms, Model D Room Snare, Model D Hi-Hat, Model D Tri Kick, Model D Rez Hit, Gabber Kick, Children Boom Kick, Minimal Techno Click Perc, Hex Pad Tom, 808-Style Kick, 808-Style Long Boom, 909-Style Kick, 808-Style Snare, 808-Style Tom, 808-Style Conga, 808-Style Rimshot, 808-Style Claves, 808-Style Cowbell, 808-Style Closed Hat, 808-Style Open Hat, FM Ride Cymbal, Analog Hand Clap, Numbers Metal Perc |
 | FX | Model D Vocal Bot, Model D Very Bad Place, Model D Abandoned Planet, Model D Freqy, Model D Jurassic Love, Model D Whirlwind, Model D Light Cycle, Model D 70s Sci-Fi Wobble, Model D 60s Space, Model D Singing Wind, Model D Square Meow, Model D Broken Radio, Orchestra Hit 8-Bit, Noise Riser, Sub Drop, Underwater Pad, Bode Bells, Sci-Fi Laser Zap, Resonant Whistle Swell, Bode Drift |
-| Cinematic | Monolith Cluster, Orbital Bloom |
+| Cinematic | Monolith Cluster |
 | Hybrid | Bowed Reed, Bowed Resonator |
 | 8-Bit | 8-Bit Power-Up, 8-Bit Hit, 8-Bit Menu Blip, Chip Square Bass, SID-Style Sync Lead, SID-Style PWM Bass, SID-Style Ring Bell |
 | Nature | Field Cricket, Dolbear Cricket 25C, Cicada Buzz, Spring Peeper, Bullfrog Croak, Chickadee Fee-Bee, Syrinx Tweet, Tawny Owl Hoot, Wolf Howl, Cat Meow, Cat Purr, Humpback Moan, Gull Long Call, Rain Drops, Campfire Crackle, Wind Whistle, Thunder Strike, Ocean Surf, Gusting Wind, Distant Thunder |
