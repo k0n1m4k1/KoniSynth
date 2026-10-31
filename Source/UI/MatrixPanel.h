@@ -1,50 +1,9 @@
 // Se incluye desde KoniSynth.cpp, dentro de la misma unidad de compilación; usa las declaraciones previas de
-// KoniSynth.cpp (JUCE, ModMatrix, Knob, SortableComboBox, ParamMenu, paramTooltip). No es una cabecera independiente.
+// KoniSynth.cpp (JUCE, ModMatrix, MatrixUi, Knob, SortableComboBox, ParamMenu, paramTooltip). No es una cabecera independiente.
 #pragma once
 
-//==============================================================================
-// UI de la matriz de modulación (Dsp/ModMatrix.h): diálogo con las 8 ranuras y cálculo de los anillos de modulación de los
-// mandos que son destino.
-namespace MatrixUi
-{
-// Mando que representa cada destino y cómo se aplica el desplazamiento a su valor real: sumando en su unidad, en octavas
-// (corte) o escalado (resonancia: el destino está en k = 4,4·Reso). Tono, volumen y paneo no tienen un mando propio
-struct Target { const char* paramId; int kind; float scale; }; // kind 0 suma, 1 octavas
-inline Target targetFor (int destination)
-{
-    switch (destination)
-    {
-        case ModMatrix::dstOsc2Pitch:  return { "osc2Semi", 0, 1.0f };
-        case ModMatrix::dstCutoff:     return { "cutoff", 1, 1.0f };
-        case ModMatrix::dstResonance:  return { "resonance", 0, 1.0f / 4.4f };
-        case ModMatrix::dstDrive:      return { "filterDrive", 0, 1.0f };
-        case ModMatrix::dstPulseWidth: return { "pulseWidth", 0, 1.0f };
-        case ModMatrix::dstOsc1Level:  return { "osc1Level", 0, 1.0f };
-        case ModMatrix::dstOsc2Level:  return { "osc2Level", 0, 1.0f };
-        case ModMatrix::dstNoiseLevel: return { "noiseLevel", 0, 1.0f };
-        case ModMatrix::dstFmIndex:    return { "fmIndex", 0, 1.0f };
-        case ModMatrix::dstTimbre:     return { "timbre", 0, 1.0f };
-        case ModMatrix::dstWtPosition: return { "wtPosition", 0, 1.0f };
-        case ModMatrix::dstOsc2WtPosition: return { "osc2WtPosition", 0, 1.0f };
-        default:                       return { nullptr, 0, 1.0f };
-    }
-}
-
-inline bool bipolar (int source)
-{
-    return source == ModMatrix::srcLfo1 || source == ModMatrix::srcLfo2 || source == ModMatrix::srcKeyTrack
-        || source == ModMatrix::srcRandom || source == ModMatrix::srcPitchBend;
-}
-
-// Normalizado (0..1) del parámetro desplazado 'offset' unidades del destino desde su valor actual
-inline float shifted (juce::RangedAudioParameter& p, const Target& t, float offset)
-{
-    const auto range = p.getNormalisableRange();
-    const auto base = p.convertFrom0to1 (p.getValue());
-    const auto v = t.kind == 1 ? base * std::exp2 (offset) : base + offset * t.scale;
-    return p.convertTo0to1 (juce::jlimit (range.start, range.end, v));
-}
-} // namespace MatrixUi
+// UI de la matriz de modulación (Dsp/ModMatrix.h): diálogo con las 8 ranuras. Los ayudantes (destino de cada mando, anillos,
+// colores, añadir y quitar rutas) están en UI/MatrixUi.h
 
 // Cuerpo del diálogo "Modulation Matrix": 8 filas (fuente, destino, cantidad) en dos columnas
 class MatrixPanel : public juce::Component

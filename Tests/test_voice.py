@@ -40,7 +40,7 @@ for mode in ('Soft', 'Diode', 'Hard'):
     c.check(abs(db(pp)) < 1.0, 'nivel %s 12 dB: pico a pico %.2f dB respecto a sin saturar (< 1)' % (mode, db(pp)))
 
 # --- VCA analógico ---
-SILENT = ['Osc1 Level=0%', 'Osc2 Level=0%', 'Sub Level=0%', 'Noise Level=0%', 'Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=1 ms', 'Drift=0%']
+SILENT = ['Osc1 Level=0%', 'Osc2 Level=0%', 'Osc3 Level=0%', 'Noise Level=0%', 'Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=1 ms', 'Drift=0%']
 x, fs = render(SILENT + ['VCA Click=100%'], 1.0, ['60:0.1:0.5:127'], 'vca.wav')
 k = int(0.1 * fs) + int(np.argmax(np.abs(x[int(0.1 * fs):int(0.15 * fs)])))
 seg = np.abs(x[k:k + int(0.2 * fs)]) / abs(x[k])
@@ -149,9 +149,9 @@ c.check(abs(a_wt0 - a_sine) < 0.5, 'Osc 2 Wavetable con sync, tabla en seno: ali
 a_wt30 = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Wavetable', 'Osc2 WT Position=30%'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
 c.check(a_wt30 < -50, 'Osc 2 Wavetable con sync, posición 30 %%, C4: aliasing %.1f dB (< -50)' % a_wt30)
 
-# --- Osc 3 (el Sub ampliado): f3 = f1 · 2^(octava + (semi + fine/100)/12); por defecto, la cuadrada de siempre (bit a bit:
-# comprobado contra el binario anterior en 5 configuraciones del Sub al integrarlo) ---
-O3 = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%', 'Sub Level=100%']
+# --- Osc 3: f3 = f1 · 2^(octava + (semi + fine/100)/12), Oct -2..+2 (por defecto -1) y Semi ±12; por defecto, la cuadrada del
+# sub de siempre (bit a bit: comprobado contra el binario anterior en 5 configuraciones del Sub al integrarlo) ---
+O3 = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%', 'Osc3 Level=100%']
 SHAPE = {'Sine': [None, None, None, None], 'Triangle': [None, -19.08, None, -27.96], 'Saw': [-6.02, -9.54, -12.04, -13.98],
          'Square': [None, -9.54, None, -13.98]}  # h2..h5 respecto a h1 (dB); None = ausente (< -100)
 for wave, shape in SHAPE.items():
@@ -160,13 +160,13 @@ for wave, shape in SHAPE.items():
     h = harmonics(x, fs, want, 5); h = db(h[1:] / h[0])
     ok = all((v < -100) if s is None else abs(v - s) < 0.1 for v, s in zip(h, shape))
     c.check(abs(ct) < 0.05 and ok, 'Osc 3 %s, -1 oct + 12 st + 10 ct: %+.3f ct; h2..h5 %s dB' % (wave, ct, ' '.join('%.1f' % v for v in h)))
-x, _ = render(O3 + ['Sub Octave=-2 oct', 'Osc3 Wave=Sine', 'Osc3 Semi=-24'], 1.5, ['81:0.05:1.4:127'], 'osc3.wav')
-ct = 1200 * np.log2(pitch(x, fs) / 55.0)
-c.check(abs(ct) < 0.05, 'Osc 3 en el extremo grave (-2 oct - 24 st = -4 oct de A5): %.3f Hz (55, %+.3f ct)' % (pitch(x, fs), ct))
+x, _ = render(O3 + ['Osc3 Octave=-2', 'Osc3 Wave=Sine', 'Osc3 Semi=-12'], 1.5, ['81:0.05:1.4:127'], 'osc3.wav')
+ct = 1200 * np.log2(pitch(x, fs) / 110.0)
+c.check(abs(ct) < 0.05, 'Osc 3 en el extremo grave (-2 oct - 12 st = -3 oct de A5): %.3f Hz (110, %+.3f ct)' % (pitch(x, fs), ct))
 # Agudo (+1 oct de C7 = 4186 Hz): sierra y cuadrada con minBLEP; el triángulo, sin corregir su pendiente, igual que el de Osc 2
 f8 = 440 * 2 ** (39 / 12)  # C8, una octava sobre la nota C7 tocada
 for wave in ('Saw', 'Square', 'Triangle'):
-    a3 = alias_ratio(render(O3 + ['Osc3 Wave=' + wave, 'Osc3 Semi=24'], 1.5, ['96:0.05:1.4:127'], 'osc3.wav')[0], fs, f8)
+    a3 = alias_ratio(render(O3 + ['Osc3 Wave=' + wave, 'Osc3 Octave=1'], 1.5, ['96:0.05:1.4:127'], 'osc3.wav')[0], fs, f8)
     if wave != 'Triangle':
         c.check(a3 < -90, 'Osc 3 %s a %.0f Hz: aliasing %.1f dB (< -90, minBLEP)' % (wave, f8, a3))
     else:
@@ -183,11 +183,11 @@ c.check(sha(render(WT + WTS + O2W + ['Wavetable Mute=On'], 1.2, MN, 'mute.wav')[
         'Mute de Wavetable con Osc 2 en la misma tabla: suena solo Osc 2 (bit a bit)')
 c.check(sha(render(WT + WTS + O2W + ['Osc2 Mute=On'], 1.2, MN, 'mute.wav')[0]) == sha(render(WT + WTS, 1.2, MN, 'mute.wav')[0]),
         'Mute de Osc 2: suena solo la fuente Wavetable (bit a bit)')
-O3S = ['Sub Level=100%', 'Osc3 Wave=Saw']
+O3S = ['Osc3 Level=100%', 'Osc3 Wave=Saw']
 c.check(sha(render(WT + O3S + ['Noise Level=50%', 'Noise Mute=On', 'Osc2 Level=60%', 'Osc2 Mute=On'], 1.2, MN, 'mute.wav')[0])
         == sha(render(WT + O3S, 1.2, MN, 'mute.wav')[0]), 'Mute de Osc 2 y Noise: igual que sin ellos (bit a bit)')
 # La matriz no devuelve el nivel a una fuente en Mute (antes de los Mute de Osc 2 / Osc 3 / Noise, Osc 1 sí sonaba: RMS 0,054)
-for src in ('Osc 1', 'Osc 2', 'Noise'):
+for src in ('Osc 1', 'Osc 2', 'Osc 3', 'Noise'):
     pid = src.replace(' ', '')
     x, _ = render(WT + ['%s Level=0%%' % pid, '%s Mute=On' % pid, 'Matrix 1 Source=Velocity', 'Matrix 1 Dest=%s Level' % src, 'Matrix 1 Amount=100%'],
                   1.2, MN, 'mute.wav')
@@ -198,7 +198,7 @@ CX = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%'
 NA = ['57:0.05:1.4:127']
 ref, fs = render(CX + ['FM Index=I 3.00', 'Mod Ratio=2.000x'], 1.5, NA, 'xmod.wav')
 for name, args in (('Osc 2 seno +1 oct', ['Complex Mod Source=Osc 2', 'Osc2 Wave=Sine', 'Osc2 Octave=1', 'Osc2 Level=0%']),
-                   ('Osc 3 seno -1 oct +24 st', ['Complex Mod Source=Osc 3', 'Osc3 Wave=Sine', 'Osc3 Semi=24', 'Sub Level=0%'])):
+                   ('Osc 3 seno +1 oct', ['Complex Mod Source=Osc 3', 'Osc3 Wave=Sine', 'Osc3 Octave=1', 'Osc3 Level=0%'])):
     x, _ = render(CX + ['FM Index=I 3.00'] + args, 1.5, NA, 'xmod.wav')
     c.check(sha(x) == sha(ref), 'FM con %s a nivel 0 = modulador interno seno x2 (bit a bit)' % name)
 O2M = CX + ['FM Index=I 2.00', 'Complex Mod Source=Osc 2', 'Osc2 Semi=7']
@@ -239,7 +239,7 @@ XS = {'Osc 2 sierra con sync, FM, unísono 5': ['Unison Voices=5', 'Wave=Saw', '
                                               'Osc2 Sync=On', 'Osc2 Semi=7', 'Osc2 Level=30%', 'Mod Sync=On'],
       'Osc 2 Wavetable, AM, unísono 7': ['Unison Voices=7', 'Wave=Square', 'AM Depth=100%', 'FM Index=I 1.00', 'Complex Mod Source=Osc 2',
                                          'Wavetable=Harmonic Sweep', 'Osc2 Wave=Wavetable', 'Osc2 WT Position=40%'],
-      'Osc 3 triángulo, FM, unísono 3': ['Unison Voices=3', 'FM Index=I 3.00', 'Complex Mod Source=Osc 3', 'Osc3 Wave=Triangle', 'Osc3 Semi=19',
+      'Osc 3 triángulo, FM, unísono 3': ['Unison Voices=3', 'FM Index=I 3.00', 'Complex Mod Source=Osc 3', 'Osc3 Wave=Triangle', 'Osc3 Octave=1', 'Osc3 Semi=-5',
                                          'Mod Sync=On']}
 XN = ['48:0.05:0.9:110', '55:0.3:0.7:90', '64:0.6:0.6:127']
 orig = open(CFG, 'rb').read() if os.path.exists(CFG) else None
@@ -359,7 +359,7 @@ c.check(np.abs(x).max() == 0.0 and np.abs(y).max() == 0.0, 'Osc 2 Sample sin fic
 TS = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%']
 NT = ['57:0.05:1.4:100']
 for name, pre, wid in (('Osc 1', [], 'Wave'), ('Osc 2', ['Osc1 Level=0%', 'Osc2 Level=100%'], 'Osc2 Wave'),
-                       ('Osc 3', ['Osc1 Level=0%', 'Sub Level=100%', 'Osc3 Semi=12'], 'Osc3 Wave'),
+                       ('Osc 3', ['Osc1 Level=0%', 'Osc3 Level=100%', 'Osc3 Semi=12'], 'Osc3 Wave'),
                        ('modulador del Complex (ring: lineal en el modulador)', ['Complex On=On', 'AM Depth=100%', 'Wave=Sine'], 'Mod Wave')):
     part = {w: render(TS + pre + ['%s=%s' % (wid, w)], 1.5, NT, 'trisaw.wav')[0] for w in ('Saw', 'Triangle', 'Tri-Saw')}
     d = rel(part['Tri-Saw'], (10 * part['Saw'] + 47 * part['Triangle']) / 57)
@@ -384,7 +384,7 @@ MIX = {'Saw+Pulse': (5 / 8.75, 0, 3.75 / 8.75), 'Saw+Tri': (sO / (sO + tri), -tr
        'Tri+Pulse': (0, -tri / (pO + tri), pO / (pO + tri)),
        'Saw+Tri+Pulse': (sB / (sB + pB + tri), -tri / (sB + pB + tri), pB / (sB + pB + tri)), 'Saw+Pulse (Juno)': (0.5, 0, 0.5)}
 for name, pre, wid in (('Osc 1', [], 'Wave'), ('Osc 2', ['Osc1 Level=0%', 'Osc2 Level=100%'], 'Osc2 Wave'),
-                       ('Osc 3', ['Osc1 Level=0%', 'Sub Level=100%', 'Osc3 Semi=12'], 'Osc3 Wave'),
+                       ('Osc 3', ['Osc1 Level=0%', 'Osc3 Level=100%', 'Osc3 Semi=12'], 'Osc3 Wave'),
                        ('modulador del Complex (ring)', ['Complex On=On', 'AM Depth=100%', 'Wave=Sine'], 'Mod Wave')):
     part = {w: render(TS + pre + ['%s=%s' % (wid, w)], 1.5, NT, 'mixwave.wav')[0] for w in ['Saw', 'Triangle', 'Square'] + list(MIX)}
     worst = max(rel(part[w], ws * part['Saw'] + wt * part['Triangle'] - wp * part['Square'] / 0.7) for w, (ws, wt, wp) in MIX.items())

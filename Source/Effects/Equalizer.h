@@ -86,6 +86,18 @@ struct Settings
     int lowCutOrder = 1, highCutOrder = 1; // secciones de 2.º orden: 1 = 12 dB/oct, 2 = 24, 4 = 48; 0 = una de 1.er orden (6 dB/oct)
 };
 
+// Bypass por etapa (0 Low Cut, 1 Low, 2 Mid 1, 3 Mid 2, 4 High, 5 High Cut): una etapa apagada pasa a su valor neutro
+// (ganancia 0 dB, corte en el extremo). El audio llega a él con el suavizado de 20 ms de los ajustes: sin clic al conmutar
+inline void bypass (Settings& s, const std::array<bool, 6>& on)
+{
+    if (! on[0]) s.lowCut = 20.0;
+    if (! on[1]) s.lowGain = 0.0;
+    if (! on[2]) s.mid1Gain = 0.0;
+    if (! on[3]) s.mid2Gain = 0.0;
+    if (! on[4]) s.highGain = 0.0;
+    if (! on[5]) s.highCut = 20000.0;
+}
+
 // Secciones en 12 posiciones fijas (0-3 Low Cut, 4 Low, 5 Mid 1, 6 Mid 2, 7 High, 8-11 High Cut). Las inactivas (ganancia
 // 0 dB, corte en el extremo o sección de un orden menor) son la identidad: en posiciones fijas el estado de cada filtro
 // no cambia de sitio al activarse otra etapa, así que no hay que vaciarlo (vaciarlo provocaría un clic)

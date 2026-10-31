@@ -106,8 +106,11 @@ static APVTS::ParameterLayout createLayout()
                                                    parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " ct"; }))));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc2Level", 1 },   "Osc2 Level",  NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc2Sync", 1 },    "Osc2 Sync", false));
-    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "subLevel", 1 },    "Sub Level",   NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "subOctave", 1 },   "Sub Octave",  StringArray { "-1 oct", "-2 oct" }, 0));
+    // Nivel de Osc 3: conserva el ID del antiguo Sub (subLevel) para no tocar presets, proyectos ni perfiles MIDI
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "subLevel", 1 },    "Osc3 Level",  NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
+    // Octava de Osc 3, como la de Osc 2 pero con -1 por defecto (el sub de siempre). Sustituye a subOctave ("-1 oct" / "-2 oct")
+    // en la 1.0.1: PresetManager::osc3FromSub migra presets (formato 7) y proyectos
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc3Octave", 1 },  "Osc3 Octave", -2, 2, -1));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "noiseLevel", 1 },  "Noise Level", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
     // LFSR: ruido digital de 15 bits de los chips de 8 bits (NES 2A03, nesdev.org/wiki/APU_Noise): realimentación bit0 XOR bit1
     // (modo largo, 32767 pasos) o bit0 XOR bit6 (modo corto, 93 pasos: tonal). Reloj ligado a la nota (diseño propio:
@@ -437,6 +440,11 @@ static APVTS::ParameterLayout createLayout()
         l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "eqHighCut", 1 },      "EQ High Cut", skewed (1000.0f, 20000.0f, 8000.0f), 20000.0f, freq));
         l.add (std::make_unique<AudioParameterChoice> (ParameterID { "eqHighCutSlope", 1 }, "EQ High Cut Slope", slopes, 1));
         l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "eqOutput", 1 },       "EQ Output", gainRange, 0.0f, decibels));
+        // Bypass por etapa (encendidas por defecto: los presets no cambian)
+        const char* bandIds[6] = { "eqLowCutOn", "eqLowOn", "eqMid1On", "eqMid2On", "eqHighOn", "eqHighCutOn" };
+        const char* bandNames[6] = { "EQ Low Cut On", "EQ Low On", "EQ Mid 1 On", "EQ Mid 2 On", "EQ High On", "EQ High Cut On" };
+        for (int b = 0; b < 6; ++b)
+            l.add (std::make_unique<AudioParameterBool> (ParameterID { bandIds[b], 1 }, bandNames[b], true));
     }
     // Ampli + pantalla (Effects/AmpSim.h): tras COLOR, antes de la dinámica. Los mandos del tone stack, 0-1 como los potenciómetros
     {
@@ -917,10 +925,14 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc2WtTable", 1 },    "Osc2 Wavetable",
         StringArray { "Basic Shapes", "PWM Sweep", "Harmonic Sweep", "Sync Sweep", "Formant Sweep", "User File" }, 0));
 
-    // Osc 3: el Sub ampliado (subLevel y subOctave siguen siendo su nivel y su octava base). Por defecto, la cuadrada al 50 % de
-    // siempre; f3 = f1 · 2^(octava + (semi + fine/100)/12): con -1 oct, Semi -24..+24 cubre de -3 a +1 octavas
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc3Wave", 1 }, "Osc3 Wave", StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw", "Saw+Pulse", "Saw+Tri", "Tri+Pulse", "Saw+Tri+Pulse", "Saw+Pulse (Juno)" }, 3));
-    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc3Semi", 1 }, "Osc3 Semi", -24, 24, 0));
+    // Osc 3: un oscilador completo, como Osc 2 (subLevel es su nivel). Por defecto, la cuadrada al 50 % una octava por debajo: el
+    // sub de siempre. f3 = f1 · 2^(osc3Octave + (semi + fine/100)/12): Oct -2..+2 y Semi -12..+12 cubren de -3 a +3 octavas,
+    // como Osc 2 (en la 1.0.0-beta, Semi ±24 sobre una base de -1 o -2 octavas: de -4 a +1).
+    // Wavetable (tabla propia, osc3WtTable, fichero osc3WtPath) y Sample (fichero propio, osc3SamplePath) añadidas al final en la
+    // 1.0.1, como en osc2Wave: los presets y los estados guardan el índice y no cambian; las automatizaciones grabadas de
+    // osc3Wave sí (JUCE normaliza como índice / (n - 1): de 9 a 11 pasos). El motor usa los códigos de osc2WaveFromChoice
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc3Wave", 1 }, "Osc3 Wave", StringArray { "Sine", "Triangle", "Saw", "Square", "Tri-Saw", "Saw+Pulse", "Saw+Tri", "Tri+Pulse", "Saw+Tri+Pulse", "Saw+Pulse (Juno)", "Wavetable", "Sample" }, 3));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc3Semi", 1 }, "Osc3 Semi", -12, 12, 0));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc3Fine", 1 }, "Osc3 Fine", NormalisableRange<float> (-50.0f, 50.0f), 0.0f,
                                                    parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return String (v, 1) + " ct"; }))));
 
@@ -939,8 +951,9 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc3Mute", 1 },  "Osc3 Mute", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "noiseMute", 1 }, "Noise Mute", false));
 
-    // Modulador del Complex Oscillator: el interno (Mod Wave, Ratio) o Osc 2 / Osc 3 tal como suenan (afinación, forma, tabla)
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "complexModSource", 1 }, "Complex Mod Source", StringArray { "Internal", "Osc 2", "Osc 3" }, 0));
+    // Modulador del Complex Oscillator: el interno (Mod Wave, Ratio), Osc 2 / Osc 3 tal como suenan (afinación, forma, tabla,
+    // sample) o el ruido de la voz con su color (Noise, añadido al final en la 1.0.1: las automatizaciones grabadas cambian)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "complexModSource", 1 }, "Complex Mod Source", StringArray { "Internal", "Osc 2", "Osc 3", "Noise" }, 0));
 
     // Osc 2 en modo Sample (osc2Wave = Sample): mismos controles que la fuente Sample, con su propio fichero (osc2SamplePath) y
     // la afinación, la deriva, el nivel y el Mute de Osc 2
@@ -973,6 +986,20 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "n64SampleStart", 1 }, "N64 Sample Start", NormalisableRange<float> (0.0f, 0.99f), 0.0f, percent));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "n64SampleLoop", 1 }, "N64 Sample Loop", false));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "n64SampleLength", 1 }, "N64 Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
+        parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
+            { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
+
+    // Osc 3 con las mismas opciones que Osc 2 (1.0.1): sync duro a Osc 1, tabla propia en modo Wavetable (ruta osc3WtPath en el
+    // estado) con su posición, y fichero propio en modo Sample (osc3SamplePath) con su región. Con la afinación, el nivel
+    // (subLevel) y el Mute de Osc 3. Por defecto apagados: sin cambio de sonido
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc3Sync", 1 },       "Osc3 Sync", false));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc3WtPosition", 1 }, "Osc3 WT Position", NormalisableRange<float> (0.0f, 1.0f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "osc3WtTable", 1 },    "Osc3 Wavetable",
+        StringArray { "Basic Shapes", "PWM Sweep", "Harmonic Sweep", "Sync Sweep", "Formant Sweep", "User File" }, 0));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "osc3SampleRoot", 1 },  "Osc3 Sample Root", 0, 127, 60, noteName));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc3SampleStart", 1 }, "Osc3 Sample Start", NormalisableRange<float> (0.0f, 0.99f), 0.0f, percent));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "osc3SampleLoop", 1 },  "Osc3 Sample Loop", false));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "osc3SampleLength", 1 }, "Osc3 Sample Length", skewed (0.0f, 2000.0f, 150.0f), 0.0f,
         parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
             { return v < 0.5f ? String ("Full") : String (roundToInt (v)) + " ms"; }))));
     return l;

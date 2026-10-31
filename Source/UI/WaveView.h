@@ -15,7 +15,8 @@ public:
     explicit WaveView (KoniSynthProcessor& p) : koni (p), s (p.apvts)
     {
         setTooltip ("The selected source, drawn with the engine's own waveform. Drag the markers on the trace (right-click: "
-                    "MIDI Learn, Set value, Reset); the knobs stay in the sections. The labels on top choose the view.");
+                    "MIDI Learn, Set value, Reset); the knobs stay in the sections. The labels on top choose the view; double-click "
+                    "MIX to pin it (the final wave stays on screen while you switch tabs), double-click again to release it.");
         // Asas: parámetro, forma y vista en la que aparecen
         addHandle ("pulseWidth", Handle::circle);
         addHandle ("osc1TriSym", Handle::circle);
@@ -26,6 +27,7 @@ public:
         addHandle ("osc3TriRound", Handle::diamond);
         addHandle ("wtPosition", Handle::circle);
         addHandle ("osc2WtPosition", Handle::circle);
+        addHandle ("osc3WtPosition", Handle::circle);
         addHandle ("sampleStart", Handle::bar);
         addHandle ("sampleLength", Handle::bar);
         addHandle ("sampleLoop", Handle::button);
@@ -48,7 +50,7 @@ public:
     std::function<void (int view)> onViewPicked;
     void setView (int v)
     {
-        if (v == view) return;
+        if (v == view || (mixPinned && v != mix)) return; // MIX fijado: las pestañas y la tira de señal no cambian la vista
         view = v;
         sampleWidth = -1; // el resumen del sample se pide de nuevo para la vista que lo use
         resized(); // asas y traza tras el filtro
@@ -69,7 +71,14 @@ public:
             else    g.drawRoundedRectangle (r.reduced (0.5f), 3.0f, 1.0f);
             g.setColour (on ? juce::Colours::black : Skin::white().withAlpha (0.8f));
             g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 11.0f, juce::Font::plain));
-            g.drawText (viewName (v), r, juce::Justification::centred);
+            if (v == mix && mixPinned)
+            {
+                // Fijado: punto de chincheta a la derecha y el rótulo desplazado para dejarle sitio
+                g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ r.getRight() - 6.0f, r.getCentreY() }));
+                g.drawText (viewName (v), r.withTrimmedRight (8.0f), juce::Justification::centred);
+            }
+            else
+                g.drawText (viewName (v), r, juce::Justification::centred);
         }
 
         // Pantalla: fondo, retícula y la vista
@@ -107,10 +116,22 @@ public:
         for (int v = 0; v < numViews; ++v)
             if (chipBounds (v).contains (e.getPosition()))
             {
+                if (v != mix) mixPinned = false; // elegir otra vista aquí mismo suelta MIX
                 setView (v);
                 if (onViewPicked) onViewPicked (v);
                 return;
             }
+    }
+
+    // Doble clic en MIX: la fija (o la suelta). Fijada, se sigue viendo la onda final mientras se cambian pestañas y bloques.
+    // Solo para la sesión de la ventana: no es un parámetro ni un ajuste
+    void mouseDoubleClick (const juce::MouseEvent& e) override
+    {
+        if (! chipBounds (mix).contains (e.getPosition()))
+            return;
+        mixPinned = ! mixPinned;
+        setView (mix);
+        repaint();
     }
 
 private:
@@ -258,11 +279,11 @@ private:
         }
         else if (v == osc3)
         {
-            o.wave = waveFromChoice (choice ("osc3Wave"));
+            o.wave = osc2WaveFromChoice (choice ("osc3Wave")); // mismos códigos que Osc 2 (4 Wavetable, 5 Sample)
             o.pw = 0.5f; // la cuadrada de Osc 3 va siempre al 50 % (Synth.h)
             o.tri.set (value ("osc3TriSym"), value ("osc3TriRound"));
             o.level = value ("subLevel");
-            o.ratio = (choice ("subOctave") == 0 ? 0.5 : 0.25) * std::exp2 (((double) value ("osc3Semi") + (double) value ("osc3Fine") / 100.0) / 12.0);
+            o.ratio = std::exp2 ((double) value ("osc3Octave")) * std::exp2 (((double) value ("osc3Semi") + (double) value ("osc3Fine") / 100.0) / 12.0);
             o.symId = "osc3TriSym"; o.roundId = "osc3TriRound";
         }
         else
@@ -318,6 +339,8 @@ private:
         const auto r = inner();
         if (view == osc2 && o.wave == 4) { paintTable (g, screen, "osc2WtPosition", KoniSynthProcessor::wtOsc2); return; }
         if (view == osc2 && o.wave == 5) { paintSampleOverview (g, KoniSynthProcessor::osc2Sample, false); return; }
+        if (view == osc3 && o.wave == 4) { paintTable (g, screen, "osc3WtPosition", KoniSynthProcessor::wtOsc3); return; }
+        if (view == osc3 && o.wave == 5) { paintSampleOverview (g, KoniSynthProcessor::osc3Sample, false); return; }
         const auto alpha = o.level > 0.0f ? 1.0f : 0.45f;
 
         // PWM (LFO 1 ± PWM Depth alrededor de PW, acotado a 5-95 %, Synth.h): banda de la zona que barre el flanco
@@ -374,15 +397,15 @@ private:
     // Osc 1 con el Complex encendido: los dos primeros ciclos de la nota con la recursión de Synth::complexSample (fases desde
     // 0 como al empezar la nota; FM lineal que atraviesa cero, AM / ring, sync duro) y el plegador de Synth::fold (Timbre más
     // Timbre Mod por el modulador, Symmetry). Modulador interno (Mod Wave a Mod Ratio) u Osc 2 / Osc 3 con su forma y su
-    // relación; Osc 2 en Wavetable o Sample no se dibuja como modulador (queda a 0). Mod LP con la nota en C4 (261,63 Hz). Sin
-    // minBLEP ni el bloqueo de continua del plegador. Debajo, tenue, el modulador
+    // relación; Osc 2 / Osc 3 en Wavetable o Sample y el ruido (Noise) no se dibujan como modulador (queda a 0). Mod LP con la
+    // nota en C4 (261,63 Hz). Sin minBLEP ni el bloqueo de continua del plegador. Debajo, tenue, el modulador
     void paintComplex (juce::Graphics& g, juce::Rectangle<float> r, const OscSpec& o, float alpha)
     {
         const int n = juce::jmax (256, 2 * (int) r.getWidth());
         const auto dtP = cycles / (double) n;
         const auto source = choice ("complexModSource");
         const auto ext = source == 1 ? spec (osc2) : spec (osc3);
-        const auto extUsable = source != 0 && ! (source == 1 && (ext.wave == 4 || ext.wave == 5));
+        const auto extUsable = (source == 1 || source == 2) && ext.wave != 4 && ext.wave != 5;
         const auto modWave = waveFromChoice (choice ("modWave"));
         const auto ratio = source == 0 ? (double) value ("modRatio") : ext.ratio;
         const auto dtM = dtP * ratio;
@@ -421,7 +444,8 @@ private:
         strokeTrace (g, p, alpha);
         g.setColour (Skin::trace().withAlpha (0.7f));
         g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 10.0f, juce::Font::plain));
-        g.drawText (juce::String ("CPLX ") + (source == 0 ? "INT" : source == 1 ? "OSC 2" : "OSC 3") + (extUsable || source == 0 ? "" : " (not drawn)"),
+        g.drawText (juce::String ("CPLX ") + (source == 0 ? "INT" : source == 1 ? "OSC 2" : source == 2 ? "OSC 3" : "NOISE")
+                        + (extUsable || source == 0 ? "" : " (not drawn)"),
                     r.withHeight (12.0f).translated (0.0f, -12.0f), juce::Justification::topRight, false);
     }
 
@@ -757,9 +781,11 @@ private:
         if (v == osc1 || v == osc2 || v == osc3)
         {
             const auto o = spec (v);
-            if (v == osc2 && o.wave == 5) return {};
+            if ((v == osc2 || v == osc3) && o.wave == 5) return {};
             if (v == osc2 && o.wave == 4)
                 return [f = frameAt ("osc2WtPosition", KoniSynthProcessor::wtOsc2), table, level = o.level, ratio = o.ratio] (double t) { return level * table (f, t * ratio); };
+            if (v == osc3 && o.wave == 4)
+                return [f = frameAt ("osc3WtPosition", KoniSynthProcessor::wtOsc3), table, level = o.level, ratio = o.ratio] (double t) { return level * table (f, t * ratio); };
             return [o] (double t) { const auto ph = t * o.ratio; return o.level * sampleOsc (o, ph - std::floor (ph)); };
         }
         if (v == wavetable)
@@ -768,10 +794,10 @@ private:
         const auto solo = koni.getParams().soloSource.load();
         const auto audible = [&] (int src, const char* muteId) { return solo >= 0 ? solo == src : value (muteId) < 0.5f; };
         std::array<OscSpec, 3> o { spec (osc1), spec (osc2), spec (osc3) };
-        // Osc 2 en modo Wavetable (4) o Sample (5): fuera, como el sample
+        // Osc 2 / Osc 3 en modo Wavetable (4) o Sample (5): fuera, como el sample
         const std::array<bool, 3> on { o[0].level > 0.0f && audible (Params::srcOsc1, "osc1Mute"),
                                        o[1].level > 0.0f && o[1].wave != 4 && o[1].wave != 5 && audible (Params::srcOsc2, "osc2Mute"),
-                                       o[2].level > 0.0f && audible (Params::srcOsc3, "osc3Mute") };
+                                       o[2].level > 0.0f && o[2].wave != 4 && o[2].wave != 5 && audible (Params::srcOsc3, "osc3Mute") };
         const auto wtLevel = value ("wtLevel") > 0.0f && audible (Params::srcWavetable, "wtMute") ? value ("wtLevel") : 0.0f;
         const auto mathLevel = value ("stringLevel") > 0.0f && audible (Params::srcString, "stringMute") ? value ("stringLevel") : 0.0f;
         return [o, on, wtLevel, f = frameAt ("wtPosition", KoniSynthProcessor::wtMain), table, mathLevel, math = mathModelShape()] (double t)
@@ -950,8 +976,9 @@ private:
                 info = text ("osc2Wave");
                 break;
             case osc3:
-                lines.add (text ("subOctave") + " | SEMI " + text ("osc3Semi") + " | FINE " + text ("osc3Fine"));
+                lines.add ("OCT " + text ("osc3Octave") + " | SEMI " + text ("osc3Semi") + " | FINE " + text ("osc3Fine"));
                 lines.add ("RATIO x" + juce::String (spec (osc3).ratio, 3) + " | LEVEL " + pct ("subLevel"));
+                if (spec (osc3).wave == 4) lines.add ("WT POS " + pct ("osc3WtPosition") + " | " + koni.getWavetableName (KoniSynthProcessor::wtOsc3));
                 info = text ("osc3Wave");
                 break;
             case wavetable:
@@ -1057,11 +1084,12 @@ private:
         if (view == osc1 || view == osc2 || view == osc3)
         {
             const auto o = spec (view);
-            if (view == osc2 && o.wave == 4)
+            if ((view == osc2 || view == osc3) && o.wave == 4)
             {
                 const auto rail = railBounds();
-                show ("osc2WtPosition", { rail.getCentreX(), rail.getBottom() - value ("osc2WtPosition") * rail.getHeight() });
-                show ("osc2Level", { r.getX() - 6.0f, yOf (r, value ("osc2Level")) }, 22, 16);
+                const auto* posId = view == osc2 ? "osc2WtPosition" : "osc3WtPosition";
+                show (posId, { rail.getCentreX(), rail.getBottom() - value (posId) * rail.getHeight() });
+                show (levelId (view), { r.getX() - 6.0f, yOf (r, o.level) }, 22, 16);
                 return;
             }
             if (view != osc3 && waveUsesPw (o.wave))
@@ -1132,7 +1160,7 @@ private:
         }
         if (id.endsWith ("TriSym") || id.endsWith ("TriRound")) // arriba = más; todo el alto del área = 0..100 %
             return juce::jlimit (0.0f, 1.0f, (r.getBottom() - at.y) / r.getHeight());
-        if (id == "wtPosition" || id == "osc2WtPosition")
+        if (id == "wtPosition" || id == "osc2WtPosition" || id == "osc3WtPosition")
         {
             const auto rail = railBounds();
             return juce::jlimit (0.0f, 1.0f, (rail.getBottom() - at.y) / rail.getHeight());
@@ -1163,12 +1191,11 @@ private:
         }
         if (id == "osc2Semi" || id == "osc3Semi")
         {
-            // Largo del primer ciclo -> relación con Osc 1 -> semitonos, quitando octava (o la del Sub) y Fine
+            // Largo del primer ciclo -> relación con Osc 1 -> semitonos, quitando octava y Fine
             const auto semis = 12.0f * std::log2 (cycleW / juce::jmax (4.0f, at.x - r.getX()));
-            if (id == "osc2Semi")
-                return juce::jlimit (-12.0f, 12.0f, (float) juce::roundToInt (semis - 12.0f * value ("osc2Octave") - value ("osc2Fine") / 100.0f));
-            const auto base = choice ("subOctave") == 0 ? -12.0f : -24.0f;
-            return juce::jlimit (-24.0f, 24.0f, (float) juce::roundToInt (semis - base - value ("osc3Fine") / 100.0f));
+            const auto osc2 = id == "osc2Semi";
+            return juce::jlimit (-12.0f, 12.0f, (float) juce::roundToInt (semis - 12.0f * value (osc2 ? "osc2Octave" : "osc3Octave")
+                                                                          - value (osc2 ? "osc2Fine" : "osc3Fine") / 100.0f));
         }
         if (id == "stringDecay")
         {
@@ -1189,7 +1216,9 @@ private:
         for (const auto* id : watched)
             if (auto* v = s.getRawParameterValue (id))
                 h = h * 1000003u ^ (std::uint64_t) (std::hash<float>{} (v->load()));
-        h ^= (std::uint64_t) std::hash<juce::String>{} (koni.getWavetableName() + "|" + koni.getWavetableName (KoniSynthProcessor::wtOsc2)) ^ (std::uint64_t) std::hash<juce::String>{} (koni.getSampleInfo (KoniSynthProcessor::sourceSample)) * 31u;
+        h ^= (std::uint64_t) std::hash<juce::String>{} (koni.getWavetableName() + "|" + koni.getWavetableName (KoniSynthProcessor::wtOsc2)
+                                                        + "|" + koni.getWavetableName (KoniSynthProcessor::wtOsc3))
+           ^ (std::uint64_t) std::hash<juce::String>{} (koni.getSampleInfo (KoniSynthProcessor::sourceSample)) * 31u;
         h ^= (std::uint64_t) (koni.getParams().soloSource.load() + 2) << 56;
         if (h != lastHash)
         {
@@ -1203,7 +1232,7 @@ private:
     static constexpr const char* watched[] = {
         "wave", "osc1Level", "unisonVoices", "unisonDetune", "unisonSpread", "pulseWidth", "pwmDepth", "drift", "osc1TriSym", "osc1TriRound",
         "osc2Wave", "osc2Level", "osc2Octave", "osc2Semi", "osc2Fine", "osc2WtPosition", "osc2WtTable", "osc2TriSym", "osc2TriRound",
-        "osc3Wave", "subLevel", "subOctave", "osc3Semi", "osc3Fine", "osc3TriSym", "osc3TriRound", "noiseColor", "noiseLevel",
+        "osc3Wave", "subLevel", "osc3Octave", "osc3Semi", "osc3Fine", "osc3WtPosition", "osc3WtTable", "osc3TriSym", "osc3TriRound", "noiseColor", "noiseLevel",
         "wtTable", "wtLevel", "wtPosition", "sampleLevel", "sampleStart", "sampleLength", "sampleLoop", "sampleRoot",
         "stringLevel", "stringDecay", "stringBright", "stringPick", "stringPickup", "stringExcite", "stringDamping", "stringHarmonic",
         "stringBowPressure", "stringHammerFelt", "stringEbowDrive", "stringBuzz", "stringStiff", "stringTension", "reedEmbouchure", "reedNoise", "fluteJet", "fluteNoise",
@@ -1217,8 +1246,8 @@ private:
     APVTS& s;
     std::vector<std::unique_ptr<Handle>> handles;
     int view = osc1;
-    std::array<std::vector<std::vector<float>>, 2> frames; // por tabla: wtMain, wtOsc2
-    std::array<juce::String, 2> tableName;
+    std::array<std::vector<std::vector<float>>, KoniSynthProcessor::numWavetableSlots> frames; // por tabla: wtMain, wtOsc2, wtOsc3
+    std::array<juce::String, KoniSynthProcessor::numWavetableSlots> tableName;
     juce::String sampleInfo;
     std::vector<std::pair<float, float>> overview;
     int sampleWidth = -1, sampleWhich = -1, sampleLength = 0;
@@ -1226,6 +1255,7 @@ private:
     float mixPeak = 0.0f;
     std::uint64_t lastHash = 0;
     bool showPost = true;                // interruptor POST FILTER (estado de la vista, no se guarda)
+    bool mixPinned = false;              // MIX fijada con doble clic (estado de la vista, no se guarda)
     std::vector<float> post;             // traza tras el filtro (vacía: sin filtro o vista no periódica)
     std::vector<float> postLo, postHi;   // la misma en los extremos del barrido de los LFO sobre el corte
     FilterSim::Settings postSettings;
@@ -1248,6 +1278,7 @@ public:
     }
 
     std::function<void (int source)> onSourcePicked; // Params::SourceIndex
+    std::function<void()> onMixer; // ficha Mixer: abre el diálogo Mixer (UI/MixerPanel.h)
     void setRoutes (int n) { if (n != routes) { routes = n; repaint(); } }
 
     float layoutWeight() const override { return 1.3f; }
@@ -1256,17 +1287,18 @@ public:
     void paint (juce::Graphics& g) override
     {
         chips.clear();
-        const auto r = getLocalBounds().toFloat().reduced (0.0f, 2.0f);
+        const auto r = getLocalBounds().toFloat().reduced (0.0f, 1.0f);
         g.setColour (Skin::c (0xff14171b).withAlpha (0.85f));
         g.fillRoundedRectangle (r, 4.0f);
         g.setColour (Skin::c (0xff3a434d));
         g.drawRoundedRectangle (r.reduced (0.5f), 4.0f, 1.0f);
 
-        const juce::Font font (juce::FontOptions (12.5f));
-        const juce::Font small (juce::FontOptions (11.0f));
+        // Fichas con 3 px de margen arriba y abajo (el contorno discontinuo de los grupos, justo dentro): 30 px de alto fija
+        const juce::Font font (juce::FontOptions (14.0f));
+        const juce::Font small (juce::FontOptions (12.5f));
         auto x = r.getX() + 10.0f;
         const auto cy = r.getCentreY();
-        const auto chipH = juce::jmin (22.0f, r.getHeight() - 6.0f);
+        const auto chipH = juce::jmin (30.0f, r.getHeight() - 6.0f);
         g.setFont (small);
         g.setColour (Skin::white().withAlpha (0.55f));
         g.drawText ("SIGNAL", juce::Rectangle<float> (x, r.getY(), 50.0f, r.getHeight()), juce::Justification::centredLeft);
@@ -1279,10 +1311,29 @@ public:
             const auto w = juce::GlyphArrangement::getStringWidth (font, text) + (led >= 0 ? 26.0f : 16.0f);
             const juce::Rectangle<float> b (x, cy - chipH * 0.5f, w, chipH);
             const auto selected = source >= 0 && source == selectedSource;
-            g.setColour (Skin::c (0xff2c333b));
-            g.fillRoundedRectangle (b, 3.0f);
-            g.setColour (accent || selected ? Skin::accent() : Skin::c (0xff8e989b).withAlpha (0.6f));
-            g.drawRoundedRectangle (b, 3.0f, selected ? 2.0f : 1.0f);
+            if (source == mixerChip) // Mixer: botón con relieve (abre su diálogo): sombra, cara en degradado y canto iluminado
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.45f));
+                g.fillRoundedRectangle (b.translated (0.0f, 1.5f), 3.0f);
+                g.setGradientFill (juce::ColourGradient (Skin::c (0xff59616b), 0.0f, b.getY(), Skin::c (0xff262a30), 0.0f, b.getBottom(), false));
+                g.fillRoundedRectangle (b, 3.0f);
+                g.setColour (juce::Colours::white.withAlpha (0.18f));
+                g.drawHorizontalLine (juce::roundToInt (b.getY() + 1.0f), b.getX() + 3.0f, b.getRight() - 3.0f);
+                g.setColour (juce::Colours::black.withAlpha (0.7f));
+                g.drawRoundedRectangle (b, 3.0f, 1.0f);
+            }
+            else if (source >= 0) // fuentes: al pulsarlas eligen su pestaña; la elegida, con borde de acento fino
+            {
+                g.setColour (Skin::c (0xff2c333b));
+                g.fillRoundedRectangle (b, 3.0f);
+                g.setColour (selected ? Skin::accent() : Skin::c (0xff8e989b).withAlpha (0.6f));
+                g.drawRoundedRectangle (b, 3.0f, selected ? 1.2f : 1.0f);
+            }
+            else if (accent) // etapa informativa resaltada: solo un subrayado
+            {
+                g.setColour (Skin::accent());
+                g.fillRect (b.withTop (b.getBottom() - 1.5f).reduced (6.0f, 0.0f));
+            }
             auto text_ = b.withTrimmedLeft (8.0f);
             if (led >= 0)
             {
@@ -1328,17 +1379,18 @@ public:
         chip (names[0], sounding (0) ? 1 : 0, 0, sourceTip (0));
         if (value ("complexOn") > 0.5f)
         {
-            // Con el Complex encendido, Osc 1 ES el oscilador complejo: su modulador (interno, Osc 2 u Osc 3, con el Mod LP
-            // si está puesto) entra por la izquierda
+            // Con el Complex encendido, Osc 1 ES el oscilador complejo: su modulador (interno, Osc 2, Osc 3 o el ruido, con el
+            // Mod LP si está puesto) entra por la izquierda
             const auto src = (int) value ("complexModSource");
             const auto lp = value ("modLp") < 19999.0f;
+            const juce::String extName = src == 1 ? "Osc 2" : src == 2 ? "Osc 3" : "Noise";
             glyph (back);
             chip ("Complex", 1, -1, "Osc 1 is the complex oscillator: FM / AM / ring and wavefolder on its own carrier, "
-                                    "modulated by " + juce::String (src == 0 ? "its internal modulator" : src == 1 ? "Osc 2" : "Osc 3")
+                                    "modulated by " + (src == 0 ? juce::String ("its internal modulator") : extName)
                                     + (lp ? " through the Mod LP filter (" + text ("modLp") + ")." : "."));
             glyph (back);
-            chip ((src == 0 ? juce::String ("Mod ") + text ("modWave") : juce::String (src == 1 ? "Osc 2" : "Osc 3")) + (lp ? " LP" : ""),
-                  -1, src == 1 ? 4 : src == 2 ? 5 : -1, "Modulator of the Complex" + juce::String (lp ? ", low-passed by Mod LP." : "."));
+            chip ((src == 0 ? juce::String ("Mod ") + text ("modWave") : extName) + (lp ? " LP" : ""),
+                  -1, src == 1 ? 4 : src == 2 ? 5 : src == 3 ? 6 : -1, "Modulator of the Complex" + juce::String (lp ? ", low-passed by Mod LP." : "."));
         }
         for (int k = 1; k < 4; ++k) chip (names[k], sounding (k) ? 1 : 0, k, sourceTip (k));
         outline (x0);
@@ -1350,7 +1402,7 @@ public:
         outline (x0);
         x += 4.0f;
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
-        chip ("Mixer", -1, -1, "All sources are summed at their levels.", true);
+        chip ("Mixer", -1, mixerChip, "All sources are summed at their levels. Click: Mixer (faders in dB, meters, mute, solo).", true);
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
         const auto filterChip = [&] { chip ("Filter " + text ("filterMode"), value ("filterOn") > 0.5f ? 1 : 0, -1,
                                             "Filter: LED lit when it is on (off = the sound goes straight through)."); };
@@ -1392,6 +1444,9 @@ public:
     void mouseUp (const juce::MouseEvent& e) override
     {
         for (const auto& c : chips)
+            if (c.source == mixerChip && c.bounds.contains (e.position) && onMixer)
+                onMixer();
+        for (const auto& c : chips)
             if (c.source >= 0 && c.bounds.contains (e.position) && onSourcePicked)
             {
                 selectedSource = c.source;
@@ -1399,6 +1454,16 @@ public:
                 repaint();
             }
     }
+
+    // Cursor de mano sobre las fichas que hacen algo al pulsarlas (fuentes y Mixer); flecha en el resto
+    void mouseMove (const juce::MouseEvent& e) override
+    {
+        auto hand = false;
+        for (const auto& c : chips)
+            if (c.source != -1 && c.bounds.contains (e.position)) hand = true;
+        setMouseCursor (hand ? juce::MouseCursor::PointingHandCursor : juce::MouseCursor::NormalCursor);
+    }
+    void mouseExit (const juce::MouseEvent&) override { setMouseCursor (juce::MouseCursor::NormalCursor); }
 
     juce::String getTooltip() override
     {
@@ -1430,6 +1495,7 @@ private:
     }
 
     struct Chip { juce::Rectangle<float> bounds; int source; juce::String tip; };
+    static constexpr int mixerChip = -2; // "source" de la ficha Mixer (las fuentes son >= 0; el resto, -1)
     KoniSynthProcessor& koni;
     APVTS& s;
     std::vector<Chip> chips;

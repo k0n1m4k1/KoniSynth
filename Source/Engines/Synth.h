@@ -43,8 +43,11 @@ struct VoiceLfo
 // Voz: VCO (con drift) -> VCF (ladder + envolvente AD) -> VCA (ADSR). LFO propio con key sync.
 struct SynthVoice : juce::SynthesiserVoice
 {
-    SynthVoice (const Params& p, const SampleSlot& s, const SampleSlot& s2, const WavetableSlot& w, const WavetableSlot& w2, const ModalSlot& m)
-        : params (p), sampleSlot (s), osc2SampleSlot (s2), wavetableSlot (w), osc2WavetableSlot (w2), modalSlot (m) { rng.setSeedRandomly(); }
+    // Slots: sample de la fuente Sample, de Osc 2 y de Osc 3; wavetable de la fuente Wavetable, de Osc 2 y de Osc 3; receta de Modal
+    SynthVoice (const Params& p, const SampleSlot& s, const SampleSlot& s2, const SampleSlot& s3,
+                const WavetableSlot& w, const WavetableSlot& w2, const WavetableSlot& w3, const ModalSlot& m)
+        : params (p), sampleSlot (s), osc2SampleSlot (s2), osc3SampleSlot (s3), modalSlot (m), wavetableSlot (w), osc2WavetableSlot (w2),
+          osc3WavetableSlot (w3) { rng.setSeedRandomly(); }
 
     bool canPlaySound (juce::SynthesiserSound* s) override { return dynamic_cast<SynthSound*> (s) != nullptr; }
 
@@ -277,6 +280,7 @@ struct SynthVoice : juce::SynthesiserVoice
         }
 
         updateEnvelopes(); // los potenciómetros se leen una vez por bloque
+        publishSourcePeaks();
 
         const auto sampleRate = getSampleRate();
         const auto wave       = waveFromChoice ((int) params.wave->load()); // mezclas: opciones 4..9 -> códigos 6..11
@@ -361,6 +365,7 @@ struct SynthVoice : juce::SynthesiserVoice
         // devolvería el nivel a una fuente silenciada)
         const auto osc1Gate = unmuted (Params::srcOsc1, params.osc1Mute);
         const auto osc2Gate = unmuted (Params::srcOsc2, params.osc2Mute);
+        const auto osc3Gate = unmuted (Params::srcOsc3, params.osc3Mute);
         const auto noiseGate = unmuted (Params::srcNoise, params.noiseMute);
         mix.osc1Level  = params.osc1Level->load() * osc1Gate;
         mix.pulseWidth = params.pulseWidth->load();
@@ -374,12 +379,11 @@ struct SynthVoice : juce::SynthesiserVoice
                                     + ((double) params.osc2Semi->load() + (double) params.osc2Fine->load() / 100.0) / 12.0);
         mix.osc2Level  = params.osc2Level->load() * osc2Gate;
         mix.osc2Sync   = params.osc2Sync->load() > 0.5f;
-        mix.subLevel   = params.subLevel->load() * unmuted (Params::srcOsc3, params.osc3Mute);
-        // Osc 3 (el Sub ampliado): octava base -1/-2 y Semi/Fine encima. Con Semi 0 y Fine 0, exp2(0) = 1 exacto: la relación es la
-        // de siempre (0,5 o 0,25) bit a bit
-        mix.subRatio   = ((int) params.subOctave->load() == 0 ? 0.5 : 0.25)
-                       * std::exp2 (((double) params.osc3Semi->load() + (double) params.osc3Fine->load() / 100.0) / 12.0);
-        mix.subWave    = waveFromChoice ((int) params.osc3Wave->load());
+        mix.subLevel   = params.subLevel->load() * osc3Gate;
+        mix.subRatio   = osc3Ratio();
+        // Mismos códigos que Osc 2 (opciones 0..9 = waveFromChoice, bit a bit; 10 Wavetable, 11 Sample)
+        mix.subWave    = osc2WaveFromChoice ((int) params.osc3Wave->load());
+        mix.osc3Sync   = params.osc3Sync->load() > 0.5f;
         mix.noiseLevel = params.noiseLevel->load() * noiseGate;
         mix.noiseColor = (int) params.noiseColor->load();
         const auto sampleLevel = params.sampleLevel->load() * unmuted (Params::srcSample, params.sampleMute);
@@ -392,9 +396,14 @@ struct SynthVoice : juce::SynthesiserVoice
         mix.osc2Table = mix.osc2Wave == wavetableWave ? osc2WavetableSlot.current.load (std::memory_order_acquire) : nullptr;
         // Osc 2 en modo Sample: su propio fichero (sin fichero: Osc 2 calla)
         mix.osc2Sample = mix.osc2Wave == sampleWave ? osc2SampleSlot.current.load (std::memory_order_acquire) : nullptr;
+        // Osc 3, igual: su tabla y su posición (la matriz la mueve por muestra, Osc 3 WT Position) y su fichero; sin ellos, Osc 3 calla
+        mix.osc3Table = mix.subWave == wavetableWave ? osc3WavetableSlot.current.load (std::memory_order_acquire) : nullptr;
+        mix.osc3WtPos = juce::jlimit (0.0f, 1.0f, params.osc3WtPosition->load());
+        mix.osc3Sample = mix.subWave == sampleWave ? osc3SampleSlot.current.load (std::memory_order_acquire) : nullptr;
         updateStringParams();
         sample.loop = params.sampleLoop->load() > 0.5f;
         osc2Sample.loop = params.osc2SampleLoop->load() > 0.5f;
+        osc3Sample.loop = params.osc3SampleLoop->load() > 0.5f;
         const auto* blockSample = sampleSlot.current.load (std::memory_order_acquire);
         const auto baseCutoff = params.cutoff->load() * cutoffSpread
                               * std::exp2 (params.filterKey->load() * keyOctaves);
@@ -410,13 +419,16 @@ struct SynthVoice : juce::SynthesiserVoice
         complex.symmetry  = params.symmetry->load();
         complex.timbreMod = params.timbreMod->load();
         complex.sync      = params.modSync->load() > 0.5f;
-        complex.modSource = (int) params.complexModSource->load(); // 0 interno, 1 Osc 2, 2 Osc 3
+        complex.modSource = (int) params.complexModSource->load(); // 0 interno, 1 Osc 2, 2 Osc 3, 3 ruido
         {
             // Pasa-bajos de un polo del modulador a 2·fs: c = 1 - e^(-2π·fc / (2·fs)); arriba del todo, apagado (c = 0)
             const auto fc = params.modLp->load();
             complex.modLpCoef = fc >= 19999.0f ? 0.0 : 1.0 - std::exp (-juce::MathConstants<double>::twoPi * fc / (2.0 * getSampleRate()));
         }
         const auto externalMod = complex.on && complex.modSource != 0;
+        const auto noiseModulates = externalMod && complex.modSource == 3;
+        // Osc 2 u Osc 3 de modulador: sus fases avanzan aunque no suenen (el ruido no tiene fase)
+        const auto keepOscPhases = externalMod && ! noiseModulates;
         const auto fmIndexBase = complex.fmIndex; // la matriz modula alrededor de estos valores
         const auto timbreBase = complex.timbre;
 
@@ -519,6 +531,7 @@ struct SynthVoice : juce::SynthesiserVoice
                                                    : bendRangeNow > 0.0f ? juce::jlimit (-1.0f, 1.0f, bendSmoothed / bendRangeNow) : 0.0f;
                 matrix.compute (src, mtx);
                 lastMtx = mtx;
+                lastSrc = src;
                 semis += mtx[ModMatrix::dstPitch];
                 osc2Semis += mtx[ModMatrix::dstOsc2Pitch];
                 lfoOctaves += mtx[ModMatrix::dstCutoff];
@@ -559,6 +572,21 @@ struct SynthVoice : juce::SynthesiserVoice
             const auto osc2Mul = (osc2Semis != 0.0f ? std::exp2 (osc2Semis / 12.0) : 1.0) * osc2Drift;
             if (mix.osc2Table != nullptr)
                 mix.osc2WtPos = juce::jlimit (0.0f, 1.0f, osc2WtPositionBase + mtx[ModMatrix::dstOsc2WtPosition]);
+            // Osc 3 desde la matriz, solo en esta muestra (se restauran tras renderMonoSources): afinación y posición WT. Antes del
+            // Complex, que lo lee como modulador (externalModulator usa mix.subRatio y mix.osc3WtPos)
+            const auto savedSubRatio = mix.subRatio;
+            const auto savedOsc3WtPos = mix.osc3WtPos;
+            if (matrix.targets[ModMatrix::dstOsc3Pitch])
+                mix.subRatio = savedSubRatio * std::exp2 (mtx[ModMatrix::dstOsc3Pitch] / 12.0);
+            if (matrix.targets[ModMatrix::dstOsc3WtPosition])
+                mix.osc3WtPos = juce::jlimit (0.0f, 1.0f, savedOsc3WtPos + mtx[ModMatrix::dstOsc3WtPosition]);
+            // Ruido de modulador: una muestra del generador de la voz (su color), retenida en las dos submuestras del Complex; la
+            // salida de Noise de renderMonoSources usa la misma (el generador avanza una vez por muestra)
+            if (noiseModulates)
+            {
+                noiseMod = nextNoise (dt);
+                noiseModReady = true;
+            }
 
             if (complex.on)
             {
@@ -668,18 +696,24 @@ struct SynthVoice : juce::SynthesiserVoice
                                                                           : mix.osc1Level;
             left  *= osc1Gain;
             right *= osc1Gain;
-            const auto savedOsc2Level = mix.osc2Level, savedNoiseLevel = mix.noiseLevel; // la matriz los mueve solo en esta muestra
+            tapSource (Params::srcOsc1, std::max (std::abs (left), std::abs (right)));
+            const auto savedOsc2Level = mix.osc2Level, savedSubLevel = mix.subLevel, savedNoiseLevel = mix.noiseLevel; // la matriz los mueve solo en esta muestra
             if (matrix.targets[ModMatrix::dstOsc2Level])  mix.osc2Level = juce::jlimit (0.0f, 1.0f, savedOsc2Level + mtx[ModMatrix::dstOsc2Level]) * osc2Gate;
+            if (matrix.targets[ModMatrix::dstOsc3Level])  mix.subLevel = juce::jlimit (0.0f, 1.0f, savedSubLevel + mtx[ModMatrix::dstOsc3Level]) * osc3Gate;
             if (matrix.targets[ModMatrix::dstNoiseLevel]) mix.noiseLevel = juce::jlimit (0.0f, 1.0f, savedNoiseLevel + mtx[ModMatrix::dstNoiseLevel]) * noiseGate;
-            auto monoSources = renderMonoSources (dt, pw, osc2Mul, externalMod);
+            auto monoSources = renderMonoSources (dt, pw, osc2Mul, keepOscPhases);
+            noiseModReady = false; // sin usar (Noise a 0 o renderMonoSources sin trabajo): la muestra siguiente calcula otra
             mix.osc2Level = savedOsc2Level;
+            mix.subLevel = savedSubLevel;
             mix.noiseLevel = savedNoiseLevel;
+            mix.subRatio = savedSubRatio;
+            mix.osc3WtPos = savedOsc3WtPos;
             if (sampleLevel > 0.0f)
-                monoSources += sampleLevel * sample.render (dt, blockSample);
+                monoSources += tapSource (Params::srcSample, sampleLevel * sample.render (dt, blockSample));
             if (stringLevel > 0.0f && stringActive)
-                monoSources += stringLevel * renderString (dt);
+                monoSources += tapSource (Params::srcString, stringLevel * renderString (dt));
             if (blockWavetable != nullptr)
-                monoSources += wtLevel * renderWavetable (*blockWavetable, dt, juce::jlimit (0.0f, 1.0f, wtPositionBase + wtPosMod));
+                monoSources += tapSource (Params::srcWavetable, wtLevel * renderWavetable (*blockWavetable, dt, juce::jlimit (0.0f, 1.0f, wtPositionBase + wtPosMod)));
             left  += monoSources;
             right += monoSources;
 
@@ -851,6 +885,12 @@ struct SynthVoice : juce::SynthesiserVoice
             for (size_t d = 0; d < lastMtx.size(); ++d)
                 params.liveMod[d].store (lastMtx[d], std::memory_order_relaxed);
             params.liveModTick.fetch_add (1, std::memory_order_relaxed);
+            const auto card = (size_t) juce::jlimit (0, Params::liveVoices - 1, cardIndex); // un punto por voz en los mandos
+            for (size_t d = 0; d < lastMtx.size(); ++d)
+                params.liveModVoice[card][d].store (lastMtx[d], std::memory_order_relaxed);
+            params.liveVoiceTick[card].fetch_add (1, std::memory_order_relaxed);
+            for (size_t s = 0; s < lastSrc.size(); ++s) // lámparas piloto: valor de cada fuente
+                params.liveSrc[s].store (lastSrc[s], std::memory_order_relaxed);
         }
     }
 
@@ -918,41 +958,43 @@ private:
     // después, en la misma muestra. Osc 2 con su sync: se reinicia en f = (1 - syncPhase)/dt y desde ahí su fase es
     // (τ - f)·dt2 (en τ = 1, el syncPhase/dt·dt2 de renderMonoSources). El valor es la forma de onda evaluada a 2·fs con
     // PolyBLEP (como el modulador interno), no la salida minBLEP del oscilador audible.
+    //  Osc 2 y Osc 3 siguen el mismo código, cada uno con su fase, su incremento, su sync, su forma y su tabla o su sample (la
+    //  cuadrada de Osc 3 va al 50 %). Ruido (modSource 3): el valor de noiseMod, retenido en las dos submuestras; incremento
+    //  nominal el de la nota (escala del índice FM, como un modulador interno a Ratio 1) y sin vuelta (Mod Sync no actúa).
     void externalModulator (int sub, double dt, double osc2Mul, float pw, konisimd::ComplexArgs& a) const
     {
-        const auto t0 = 0.5 * sub, t1 = t0 + 0.5;
-        double inc, u0, u1;
-        bool reset = false;
-        const auto syncs = mix.osc2Sync && syncPhase + dt >= 1.0;
-        const auto f = (1.0 - syncPhase) / dt;
-        if (complex.modSource == 1)
-        {
-            inc = dt * mix.osc2Ratio * osc2Mul; // = dt2 de renderMonoSources
-            const auto unwrapped = [&] (double t) { return syncs && t >= f ? (t - f) * inc : osc2Phase + t * inc; };
-            u0 = unwrapped (t0);
-            u1 = unwrapped (t1);
-            reset = syncs && t0 < f && f <= t1;
-        }
-        else
-        {
-            inc = dt * mix.subRatio;
-            u0 = subPhase + t0 * inc;
-            u1 = subPhase + t1 * inc;
-        }
-        const auto p0 = u0 - std::floor (u0);
         a.external = true;
+        if (complex.modSource == 3)
+        {
+            a.extMod = (double) noiseMod;
+            a.extDtM = 0.5 * dt;
+            a.extWrapped = false;
+            a.extPhaseEnd = 0.0;
+            return;
+        }
+        const auto osc2 = complex.modSource == 1;
+        const auto t0 = 0.5 * sub, t1 = t0 + 0.5;
+        const auto inc = osc2 ? dt * mix.osc2Ratio * osc2Mul // = dt2 de renderMonoSources
+                              : dt * mix.subRatio;           // = dt3
+        const auto phase = osc2 ? osc2Phase : subPhase;
+        const auto syncs = (osc2 ? mix.osc2Sync : mix.osc3Sync) && syncPhase + dt >= 1.0;
+        const auto f = (1.0 - syncPhase) / dt;
+        const auto unwrapped = [&] (double t) { return syncs && t >= f ? (t - f) * inc : phase + t * inc; };
+        const auto u0 = unwrapped (t0), u1 = unwrapped (t1);
+        const auto reset = syncs && t0 < f && f <= t1;
+        const auto p0 = u0 - std::floor (u0);
         a.extDtM = 0.5 * inc;
         a.extWrapped = reset || std::floor (u1) > std::floor (u0);
         a.extPhaseEnd = u1 - std::floor (u1);
-        if (complex.modSource == 2)
-            a.extMod = oscillator (mix.subWave, p0, a.extDtM, 0.5f, true);
-        else if (mix.osc2Wave == sampleWave)
+        const auto wave = osc2 ? mix.osc2Wave : mix.subWave;
+        if (wave == sampleWave)
         {
             // Sample: el cursor en el instante τ (tras el reinicio del sync, desde Start), con su final, su bucle y el fundido de
-            // Length; la fase nominal de Osc 2 sigue dando el incremento (escala del índice FM) y la vuelta (Mod Sync)
+            // Length; la fase nominal del oscilador sigue dando el incremento (escala del índice FM) y la vuelta (Mod Sync)
             a.extMod = 0.0;
-            const auto& r = osc2Sample;
-            if (mix.osc2Sample != nullptr && r.data == mix.osc2Sample)
+            const auto& r = osc2 ? osc2Sample : osc3Sample;
+            const auto* blockData = osc2 ? mix.osc2Sample : mix.osc3Sample;
+            if (blockData != nullptr && r.data == blockData)
             {
                 const auto afterReset = syncs && t0 >= f;
                 const auto at = afterReset ? r.loopStart + (t0 - f) * inc * r.data->sampleRate / r.rootHz
@@ -962,10 +1004,13 @@ private:
                     a.extMod = r.valueAt (p) * r.fade();
             }
         }
-        else if (mix.osc2Wave != wavetableWave)
-            a.extMod = oscillator (mix.osc2Wave, p0, a.extDtM, pw, true);
+        else if (wave != wavetableWave)
+            a.extMod = oscillator (wave, p0, a.extDtM, osc2 ? pw : 0.5f, true);
         else
-            a.extMod = mix.osc2Table != nullptr ? readWavetable (*mix.osc2Table, p0, a.extDtM, mix.osc2WtPos) : 0.0;
+        {
+            const auto* table = osc2 ? mix.osc2Table : mix.osc3Table;
+            a.extMod = table != nullptr ? readWavetable (*table, p0, a.extDtM, osc2 ? mix.osc2WtPos : mix.osc3WtPos) : 0.0;
+        }
     }
 
     // Wavefolder senoidal: f(v) = sin(a·v), v = x + Symmetry/2, a = π/2·(1 + 9·Timbre). Se evalúa a 2·fs.
@@ -1031,26 +1076,51 @@ private:
     struct MixParams
     {
         float osc1Level = 1.0f, pulseWidth = 0.5f, pwmDepth = 0.0f, osc2Level = 0.0f, subLevel = 0.0f, noiseLevel = 0.0f;
-        int osc2Wave = saw, subWave = square; // subWave: forma de Osc 3
+        int osc2Wave = saw, subWave = square; // subWave: forma de Osc 3 (códigos de osc2WaveFromChoice, como osc2Wave)
         double osc2Ratio = 1.0, subRatio = 0.5;
-        bool osc2Sync = false;
+        bool osc2Sync = false, osc3Sync = false;
         int noiseColor = 0; // 0 blanco, 1 rosa, 2 LFSR largo, 3 LFSR corto
         const WavetableData* osc2Table = nullptr; // modo Wavetable: tabla del bloque y posición de esta muestra
         float osc2WtPos = 0.0f;
         const SampleData* osc2Sample = nullptr; // modo Sample: fichero del bloque
+        const WavetableData* osc3Table = nullptr; // Osc 3, igual (posición por bloque)
+        float osc3WtPos = 0.0f;
+        const SampleData* osc3Sample = nullptr;
         TriShape osc1Tri, osc2Tri, osc3Tri;     // forma del triángulo (TriSym, TriRound); inactiva a 0 %
     };
-    static constexpr int wavetableWave = 4; // osc2Wave = Wavetable (código del motor; opción 10, osc2WaveFromChoice)
-    static constexpr int sampleWave = 5;    // osc2Wave = Sample (opción 11)
+    static constexpr int wavetableWave = 4; // osc2Wave / osc3Wave = Wavetable (código del motor; opción 10, osc2WaveFromChoice)
+    static constexpr int sampleWave = 5;    // osc2Wave / osc3Wave = Sample (opción 11)
 
     // Fuentes mono del mezclador. dt = incremento de fase de Osc 1 (con vibrato y drift), así Osc 2 y el sub los siguen.
     //  Osc 2: dt·2^(oct + (semi + fine/100)/12); sync duro a la fundamental de Osc 1 (fase de referencia sin unísono ni FM),
     //    reiniciando con la fracción de muestra transcurrida desde el reinicio.
-    //  Sub / Osc 3: -1 o -2 octavas más Semi (±24) y Fine; seno, triángulo, sierra o cuadrada al 50 % (por defecto, la cuadrada
-    //    del Sub). minBLEP en sierra y cuadrada, como Osc 1 y Osc 2.
+    //  Osc 3: dt·2^(oct + (semi + fine/100)/12) (osc3Ratio); seno, triángulo, sierra o cuadrada al 50 % (por defecto, la cuadrada
+    //    una octava por debajo: el sub de siempre), las mezclas, o su propia tabla o su propio sample; mismo sync que Osc 2 (osc3Sync). minBLEP en sierra y
+    //    cuadrada, como Osc 1 y Osc 2.
     //  Ruido: blanco uniforme (RMS 0,577) o rosa (filtro "refined" de Paul Kellet, musicdsp.org); medido en réplica:
     //    plano ±0,2 dB por banda de octava de 125 Hz a 4 kHz (-0,7 dB a 8 kHz); ×0,3277 iguala su RMS al del blanco.
-    // keepPhases: Osc 2 u Osc 3 modulan el Complex; sus fases avanzan aunque su nivel sea 0 (o estén en Mute o fuera del Solo)
+    // keepPhases: Osc 2 u Osc 3 modulan el Complex; sus fases avanzan aunque su nivel sea 0 (o estén en Mute o fuera del Solo).
+    //  Con el ruido de modulador, la salida de Noise usa el valor ya calculado (noiseModReady)
+    // Medidores del Mixer: pico de cada fuente en este bloque (tras su nivel, antes del filtro y sin las colas minBLEP) y
+    // publicación al empezar el bloque siguiente, como máximo entre voces (Params::sourcePeak)
+    float tapSource (int k, float v)
+    {
+        srcPeak[(size_t) k] = std::max (srcPeak[(size_t) k], std::abs (v));
+        return v;
+    }
+    void publishSourcePeaks()
+    {
+        for (size_t k = 0; k < srcPeak.size(); ++k)
+        {
+            if (srcPeak[k] <= 0.0f) continue;
+            auto& shared = params.sourcePeak[k];
+            auto seen = shared.load (std::memory_order_relaxed);
+            while (srcPeak[k] > seen && ! shared.compare_exchange_weak (seen, srcPeak[k], std::memory_order_relaxed)) {}
+            srcPeak[k] = 0.0f;
+        }
+    }
+    std::array<float, 7> srcPeak {};
+
     float renderMonoSources (double dt, float pw, double osc2Mul, bool keepPhases)
     {
         float out = 0.0f, unused = 0.0f;
@@ -1073,67 +1143,46 @@ private:
             if (! osc2Table && ! osc2Sampled)
             {
                 const auto s = oscillator (mix.osc2Wave, osc2Phase, dt2, pw, false);
-                out += mix.osc2Level * (mix.osc2Tri.active && mix.osc2Wave == triangle ? mix.osc2Tri (s) : s);
+                out += tapSource (Params::srcOsc2, mix.osc2Level * (mix.osc2Tri.active && mix.osc2Wave == triangle ? mix.osc2Tri (s) : s));
             }
             else if (osc2Table && mix.osc2Table != nullptr)
-                out += mix.osc2Level * readWavetable (*mix.osc2Table, osc2Phase, dt2, mix.osc2WtPos);
+                out += tapSource (Params::srcOsc2, mix.osc2Level * readWavetable (*mix.osc2Table, osc2Phase, dt2, mix.osc2WtPos));
         }
-        // Osc 2 Sample: avanza siempre que se llega aquí (también a nivel 0, en Mute o como modulador del Complex), como su fase.
-        // Con sync, el salto entre el valor en el instante del reinicio (f = (1 - syncPhase)/dt) y el de Start se mide antes de
-        // avanzar y se corrige con minBLEP más abajo; sin sync el sample suena tal cual
-        float osc2SampleJump = 0.0f;
-        const auto osc2SyncAt = syncPhase + dt >= 1.0 ? (1.0 - syncPhase) / dt : 1.0;
+        // Osc 2 Sample (y Osc 3 Sample, abajo): avanza siempre que se llega aquí (también a nivel 0, en Mute o como modulador del
+        // Complex), como su fase. Con sync, el salto entre el valor en el instante del reinicio (syncAt = (1 - syncPhase)/dt, la
+        // misma referencia para Osc 2 y Osc 3) y el de Start se mide antes de avanzar y se corrige con minBLEP más abajo
+        const auto syncNow = syncPhase + dt >= 1.0;
+        const auto syncAt = syncNow ? (1.0 - syncPhase) / dt : 1.0;
+        const auto osc2SampleJump = osc2Sampled ? sampleSyncJump (osc2Sample, mix.osc2Sample, mix.osc2Level, mix.osc2Sync, syncNow, dt2, syncAt) : 0.0f;
         if (osc2Sampled)
+            out += tapSource (Params::srcOsc2, mix.osc2Level * osc2Sample.render (dt2, mix.osc2Sample));
+
+        // Osc 3: mismas formas que Osc 2 (la cuadrada va siempre al 50 %: no sigue al mando PW, como el Sub), su tabla y su sample
+        const auto dt3 = dt * mix.subRatio;
+        const auto osc3Table = mix.subWave == wavetableWave; // mix.osc3Table puede faltar: calla
+        const auto osc3Sampled = mix.subWave == sampleWave;  // mix.osc3Sample puede faltar: calla
+        if (mix.subLevel > 0.0f)
         {
-            if (mix.osc2Level > 0.0f && mix.osc2Sync && syncPhase + dt >= 1.0)
+            if (! osc3Table && ! osc3Sampled)
             {
-                const auto before = osc2Sample.playing && osc2Sample.data == mix.osc2Sample
-                                  ? osc2Sample.place (osc2Sample.pos + osc2SyncAt * dt2 * osc2Sample.data->sampleRate / osc2Sample.rootHz) : -1.0;
-                const auto after = osc2Sample.canRestart (mix.osc2Sample) ? osc2Sample.valueAt (osc2Sample.loopStart) : 0.0f;
-                osc2SampleJump = osc2Sample.fade() * (after - (before >= 0.0 ? osc2Sample.valueAt (before) : 0.0f));
+                const auto s = oscillator (mix.subWave, subPhase, dt3, 0.5f, false);
+                out += tapSource (Params::srcOsc3, mix.subLevel * (mix.osc3Tri.active && mix.subWave == triangle ? mix.osc3Tri (s) : s));
             }
-            out += mix.osc2Level * osc2Sample.render (dt2, mix.osc2Sample);
+            else if (osc3Table && mix.osc3Table != nullptr)
+                out += tapSource (Params::srcOsc3, mix.subLevel * readWavetable (*mix.osc3Table, subPhase, dt3, mix.osc3WtPos));
         }
-        if (mix.subLevel > 0.0f) // Osc 3: la cuadrada va siempre al 50 % (no sigue al mando PW, como el Sub)
-        {
-            const auto s = oscillator (mix.subWave, subPhase, dt * mix.subRatio, 0.5f, false);
-            out += mix.subLevel * (mix.osc3Tri.active && mix.subWave == triangle ? mix.osc3Tri (s) : s);
-        }
+        const auto osc3SampleJump = osc3Sampled ? sampleSyncJump (osc3Sample, mix.osc3Sample, mix.subLevel, mix.osc3Sync, syncNow, dt3, syncAt) : 0.0f;
+        if (osc3Sampled)
+            out += tapSource (Params::srcOsc3, mix.subLevel * osc3Sample.render (dt3, mix.osc3Sample));
+
         if (mix.noiseLevel > 0.0f)
         {
-            const auto w = 2.0f * rng.nextFloat() - 1.0f;
-            float n = w;
-            if (mix.noiseColor >= 2)
-            {
-                // LFSR de 15 bits (nesdev APU_Noise): realimentación bit0 XOR bit1 (largo) o bit0 XOR bit6 (corto), desplazamiento a la
-                // derecha y realimentación en el bit 14. Salida ±1 según el bit 0 (×0,577: mismo RMS que el blanco uniforme)
-                const auto shortMode = mix.noiseColor == 3;
-                lfsrPhase += dt * (shortMode ? 93.0 : 8.0);
-                if (lfsrPhase >= 64.0) // tope de trabajo por muestra: a esa velocidad la salida ya es ruido sin periodo audible
-                    lfsrPhase = 63.0 + (lfsrPhase - std::floor (lfsrPhase));
-                while (lfsrPhase >= 1.0)
-                {
-                    lfsrPhase -= 1.0;
-                    const auto fb = (lfsr ^ (lfsr >> (shortMode ? 6 : 1))) & 1u;
-                    lfsr = (lfsr >> 1) | (fb << 14);
-                }
-                n = (lfsr & 1u) ? 0.577f : -0.577f;
-            }
-            else if (mix.noiseColor == 1)
-            {
-                pink[0] = 0.99886f * pink[0] + w * 0.0555179f;
-                pink[1] = 0.99332f * pink[1] + w * 0.0750759f;
-                pink[2] = 0.96900f * pink[2] + w * 0.1538520f;
-                pink[3] = 0.86650f * pink[3] + w * 0.3104856f;
-                pink[4] = 0.55000f * pink[4] + w * 0.5329522f;
-                pink[5] = -0.7616f * pink[5] - w * 0.0168980f;
-                n = 0.3277f * (pink[0] + pink[1] + pink[2] + pink[3] + pink[4] + pink[5] + pink[6] + w * 0.5362f);
-                pink[6] = w * 0.115926f;
-            }
-            out += mix.noiseLevel * n;
+            const auto n = noiseModReady ? noiseMod : nextNoise (dt); // con el ruido de modulador, el mismo valor (renderNextBlock)
+            noiseModReady = false;
+            out += tapSource (Params::srcNoise, mix.noiseLevel * n);
         }
 
-        // Saltos de este paso para el minBLEP: Osc 2 (con su reinicio si la referencia da la vuelta) y sub
+        // Saltos de este paso para el minBLEP: Osc 2 y Osc 3 (con su reinicio si la referencia da la vuelta)
         {
             const auto syncWraps = syncPhase + dt >= 1.0;
             if (mix.osc2Level > 0.0f && ! osc2Table && ! osc2Sampled)
@@ -1142,19 +1191,18 @@ private:
             // Wavetable: la tabla ya está limitada en banda (mipmaps); solo el reinicio del sync es un salto: tabla(0) - tabla(fase
             // en el instante del reinicio), con la misma posición y el mismo nivel de mipmap
             if (mix.osc2Level > 0.0f && osc2Table && mix.osc2Table != nullptr && mix.osc2Sync && syncWraps)
-            {
-                const auto f = (1.0 - syncPhase) / dt;
-                auto ta = osc2Phase + dt2 * f;
-                ta -= std::floor (ta);
-                const auto jump = readWavetable (*mix.osc2Table, 0.0, dt2, mix.osc2WtPos)
-                                - readWavetable (*mix.osc2Table, ta, dt2, mix.osc2WtPos);
-                monoBlep.add (f, jump * mix.osc2Level, jump * mix.osc2Level);
-            }
+                tableSyncJump (*mix.osc2Table, osc2Phase, dt, dt2, mix.osc2WtPos, mix.osc2Level);
             // Sample: el mismo tratamiento (el fichero ya está limitado en banda por su nivel diezmado)
             if (osc2SampleJump != 0.0f)
-                monoBlep.add (osc2SyncAt, osc2SampleJump * mix.osc2Level, osc2SampleJump * mix.osc2Level);
-            if (mix.subLevel > 0.0f)
-                MinBlep::segment (monoBlep, mix.subWave, subPhase, dt * mix.subRatio, 0.0, 1.0, 0.5, mix.subLevel, mix.subLevel);
+                monoBlep.add (syncAt, osc2SampleJump * mix.osc2Level, osc2SampleJump * mix.osc2Level);
+            // Osc 3: igual. Sin sync, syncedStep es el segment (0, 1) de siempre (bit a bit)
+            if (mix.subLevel > 0.0f && ! osc3Table && ! osc3Sampled)
+                MinBlep::syncedStep (monoBlep, mix.subWave, subPhase, dt3, mix.osc3Sync && syncWraps,
+                                     syncWraps ? (1.0 - syncPhase) / dt : 1.0, 0.5, mix.subLevel, mix.subLevel);
+            if (mix.subLevel > 0.0f && osc3Table && mix.osc3Table != nullptr && mix.osc3Sync && syncWraps)
+                tableSyncJump (*mix.osc3Table, subPhase, dt, dt3, mix.osc3WtPos, mix.subLevel);
+            if (osc3SampleJump != 0.0f)
+                monoBlep.add (syncAt, osc3SampleJump * mix.subLevel, osc3SampleJump * mix.subLevel);
         }
 
         // Avance de fases (después de leer: mismo convenio que Osc 1)
@@ -1170,10 +1218,62 @@ private:
             if (osc2Sampled) // de nuevo desde Start, en el instante exacto: lo recorrido tras el reinicio
                 osc2Sample.restart (syncPhase / dt * dt2, mix.osc2Sample);
         }
-        subPhase += dt * mix.subRatio;
+        subPhase += dt3;
         subPhase -= std::floor (subPhase);
+        if (mix.osc3Sync && syncWrapped)
+        {
+            subPhase = syncPhase / dt * dt3;
+            subPhase -= std::floor (subPhase);
+            if (osc3Sampled)
+                osc3Sample.restart (syncPhase / dt * dt3, mix.osc3Sample);
+        }
 
         return out;
+    }
+
+    // Sync de un oscilador en modo Wavetable: salto tabla(0) - tabla(fase en el instante del reinicio) al minBLEP
+    void tableSyncJump (const WavetableData& table, double phase, double dt, double dtOsc, float position, float gain)
+    {
+        const auto f = (1.0 - syncPhase) / dt;
+        auto ta = phase + dtOsc * f;
+        ta -= std::floor (ta);
+        const auto jump = readWavetable (table, 0.0, dtOsc, position) - readWavetable (table, ta, dtOsc, position);
+        monoBlep.add (f, jump * gain, jump * gain);
+    }
+
+    // Una muestra del generador de ruido de la voz con su color (salida de Noise y modulador Noise del Complex)
+    float nextNoise (double dt)
+    {
+        const auto w = 2.0f * rng.nextFloat() - 1.0f;
+        float n = w;
+        if (mix.noiseColor >= 2)
+        {
+            // LFSR de 15 bits (nesdev APU_Noise): realimentación bit0 XOR bit1 (largo) o bit0 XOR bit6 (corto), desplazamiento a la
+            // derecha y realimentación en el bit 14. Salida ±1 según el bit 0 (×0,577: mismo RMS que el blanco uniforme)
+            const auto shortMode = mix.noiseColor == 3;
+            lfsrPhase += dt * (shortMode ? 93.0 : 8.0);
+            if (lfsrPhase >= 64.0) // tope de trabajo por muestra: a esa velocidad la salida ya es ruido sin periodo audible
+                lfsrPhase = 63.0 + (lfsrPhase - std::floor (lfsrPhase));
+            while (lfsrPhase >= 1.0)
+            {
+                lfsrPhase -= 1.0;
+                const auto fb = (lfsr ^ (lfsr >> (shortMode ? 6 : 1))) & 1u;
+                lfsr = (lfsr >> 1) | (fb << 14);
+            }
+            n = (lfsr & 1u) ? 0.577f : -0.577f;
+        }
+        else if (mix.noiseColor == 1)
+        {
+            pink[0] = 0.99886f * pink[0] + w * 0.0555179f;
+            pink[1] = 0.99332f * pink[1] + w * 0.0750759f;
+            pink[2] = 0.96900f * pink[2] + w * 0.1538520f;
+            pink[3] = 0.86650f * pink[3] + w * 0.3104856f;
+            pink[4] = 0.55000f * pink[4] + w * 0.5329522f;
+            pink[5] = -0.7616f * pink[5] - w * 0.0168980f;
+            n = 0.3277f * (pink[0] + pink[1] + pink[2] + pink[3] + pink[4] + pink[5] + pink[6] + w * 0.5362f);
+            pink[6] = w * 0.115926f;
+        }
+        return n;
     }
 
     void updateEnvelopes()
@@ -1302,6 +1402,19 @@ private:
         }
     };
 
+    // Sync de un oscilador en modo Sample (Osc 2 u Osc 3): salto entre el valor en el instante del reinicio (syncAt, con la
+    // referencia dando la vuelta en esta muestra: wraps) y el de Start, medido antes de avanzar el sample y corregido con minBLEP;
+    // 0 sin reinicio. Sin sync el sample suena tal cual
+    static float sampleSyncJump (const SampleReader& r, const SampleData* blockData, float level, bool sync, bool wraps,
+                                 double dtOsc, double syncAt)
+    {
+        if (! (level > 0.0f && sync && wraps))
+            return 0.0f;
+        const auto before = r.playing && r.data == blockData ? r.place (r.pos + syncAt * dtOsc * r.data->sampleRate / r.rootHz) : -1.0;
+        const auto after = r.canRestart (blockData) ? r.valueAt (r.loopStart) : 0.0f;
+        return r.fade() * (after - (before >= 0.0 ? r.valueAt (before) : 0.0f));
+    }
+
     void startSample (int note)
     {
         const auto hz = juce::MidiMessage::getMidiNoteInHertz (note) * KoniTuning::ratio (note);
@@ -1313,6 +1426,17 @@ private:
                                           + ((double) params.osc2Semi->load() + (double) params.osc2Fine->load() / 100.0) / 12.0);
         osc2Sample.start (osc2SampleSlot.current.load (std::memory_order_acquire), hz * osc2Ratio, (int) params.osc2SampleRoot->load(),
                           params.osc2SampleStart->load(), params.osc2SampleLength->load(), getSampleRate());
+        // Osc 3, igual, con su relación (la de mix.subRatio)
+        osc3Sample.start (osc3SampleSlot.current.load (std::memory_order_acquire), hz * osc3Ratio(), (int) params.osc3SampleRoot->load(),
+                          params.osc3SampleStart->load(), params.osc3SampleLength->load(), getSampleRate());
+    }
+
+    // Relación de Osc 3 con Osc 1: 2^oct · 2^((semi + fine/100)/12). 2^oct es exacto y el producto por una potencia de 2 también:
+    // con Semi y Fine a 0 da 0,5 (Oct -1, el sub de siempre) o 0,25 bit a bit
+    double osc3Ratio() const
+    {
+        return std::exp2 ((double) params.osc3Octave->load())
+             * std::exp2 (((double) params.osc3Semi->load() + (double) params.osc3Fine->load() / 100.0) / 12.0);
     }
 
     // Parámetros de la fuente Math Models que se recalculan por bloque con la frecuencia base de la nota (renderNextBlock y
@@ -2776,9 +2900,11 @@ private:
     const Params& params;
     const SampleSlot& sampleSlot;
     const SampleSlot& osc2SampleSlot;
+    const SampleSlot& osc3SampleSlot;
     const ModalSlot& modalSlot;
     const WavetableSlot& wavetableSlot;
     const WavetableSlot& osc2WavetableSlot;
+    const WavetableSlot& osc3WavetableSlot;
     double wtPhase = 0.0;
     float bendTarget = 0.0f, modTarget = 0.0f, bendSmoothed = 0.0f, modSmoothed = 0.0f, controlCoef = 1.0f;
     float glideSemis = 0.0f, pitchEnvValue = 0.0f;
@@ -2788,7 +2914,11 @@ private:
     float polyPressure = 0.0f, channelPressure = 0.0f, pressureSmoothed = 0.0f;
     unsigned lfsr = 1u; // 15 bits, nunca 0 (estado bloqueado del LFSR)
     double lfsrPhase = 0.0;
-    SampleReader sample, osc2Sample; // fuente Sample y Osc 2 en modo Sample
+    SampleReader sample, osc2Sample, osc3Sample; // fuente Sample, Osc 2 y Osc 3 en modo Sample
+    // Complex con el ruido de modulador (complexModSource = Noise): valor de ruido de esta muestra, calculado antes del Complex;
+    // noiseModReady: renderMonoSources lo usa también como salida de Noise (un solo valor por muestra, como sin modulador)
+    float noiseMod = 0.0f;
+    bool noiseModReady = false;
     VoiceLfo lfo1, lfo2;
     double frequency = 440.0;
     konisimd::UnisonLanes lanes {}; // fases, relaciones y ganancias del unísono (8 carriles; usa maxUnison = 7)
@@ -2833,6 +2963,7 @@ private:
     // Matriz de modulación: ranuras del bloque y fuentes propias de la voz
     ModMatrix::Block matrix;
     std::array<float, ModMatrix::numDestinations> lastMtx {};
+    std::array<float, ModMatrix::numSources> lastSrc {}; // valores de las fuentes en la última muestra (lámparas de la UI)
 public:
     int cardIndex = 0; // voz física (Tolerances: Per Voice Card)
 private:

@@ -9,7 +9,7 @@
 - **Level:** loudness, not peak, for the whole factory bank except Drums, Machines, FX and Nature. Each preset is played at velocity 100 for 4 s on the lowest, middle and highest note of its recommended range; its loudness is the maximum K-weighted power (ITU-R BS.1770, which accounts for frequency) over 200 ms windows, averaged in power over the three notes. `gain` (linear, last in the chain) is scaled to reach -26.8 LUFS (the median of the bank), with a tolerance of ±0.5 dB, a ceiling of gain = 1 and peaks at or below -6 dBFS; 38 presets that need more than gain = 1 stay at the ceiling. The spread between presets (10th to 90th percentile) went from 10.9 dB to 1.5 dB.
 - **Check:** each factory entry was rendered against its source preset; the output matches the source scaled by the gain change (largest relative difference 4.8e-6, from the rounding).
 - **Patterns:** sequencer and arpeggiator presets have Latch off: releasing the key stops the pattern.
-- **Markers:** in the preset list and the browser, `(st)` follows the name of a preset that uses a string model of Math Models. No factory preset uses a sample (`(sa)` only marks user presets with a sample of their own).
+- **Markers:** in the preset list and the browser, `(π)` follows the name of a preset that uses the Math Models source (any model, Modal included). No factory preset uses a sample (`(s)` only marks user presets with a sample of their own).
 
 ## New categories
 
@@ -49,33 +49,33 @@ A user preset whose category this version does not know (one saved by a later ve
 | Vowel Aurora |  | Pad | Ambient - Vowel Aurora | 0.054 | 0.350 → 0.514 | Pad category replaces the "Ambient -" prefix |
 | Berlin Time Resonance |  | Keys | = | 0.064 | 0.900 → 0.900 | Unique FM bell + comb voice |
 | Monolith Cluster |  | Cinematic | Cinema - Monolith Cluster | 0.057 | 0.900 → 1.000 | Cinematic category replaces the prefix |
-| Clean Electric Guitar | (st) | Guitar | Clean Electric Guitar 2 | 0.037 | 0.400 → 0.876 | Canonical: the amp version measured 0.0068 peak (-43 dBFS); this one bypasses the amp |
+| Clean Electric Guitar | (π) | Guitar | Clean Electric Guitar 2 | 0.037 | 0.400 → 0.876 | Canonical: the amp version measured 0.0068 peak (-43 dBFS); this one bypasses the amp |
 | Crystal Hybrid 1987 |  | Pad | = | 0.048 | 0.400 → 0.672 | Unique FM/wavetable pad |
 | Funk Filter Bass |  | Bass | Daft Filter Motion | 0.118 | 0.900 → 0.612 | Artist name removed |
 | Octave Sync Solo |  | Lead | Daft Sync Solo 2 | 0.089 | 0.900 → 0.900 | Canonical of the pair (exact octave, stronger fundamental); artist name removed |
 | Metal Memory |  | Keys | Depeche Metal Memory | 0.120 | 0.900 → 0.598 | Artist name removed; attack by Math Models > Modal (Metal recipe) |
-| Electro Hybrid Bass | (st) | Bass | Electric Bass - Electro Hybrid | 0.112 | 0.950 → 0.679 | Prefix moved to a suffix |
-| Fingerstyle Bass | (st) | Bass | Electric Bass - Fingerstyle | 0.131 | 0.950 → 0.581 | Prefix moved to a suffix |
-| Fretless Bass | (st) | Bass | Electric Bass - Fretless | 0.052 | 0.950 → 1.000 | Prefix moved to a suffix |
-| Hardcore Grind Bass | (st) | Bass | Electric Bass - Hardcore Grind | 0.140 | 0.918 → 0.524 | Prefix moved to a suffix |
-| Pick Drive Bass | (st) | Bass | Electric Bass - Pick Drive | 0.086 | 0.950 → 0.950 | Prefix moved to a suffix |
-| Slap Pop Bass | (st) | Bass | Electric Bass - Slap Pop | 0.127 | 0.950 → 0.600 | Prefix moved to a suffix |
+| Electro Hybrid Bass | (π) | Bass | Electric Bass - Electro Hybrid | 0.112 | 0.950 → 0.679 | Prefix moved to a suffix |
+| Fingerstyle Bass | (π) | Bass | Electric Bass - Fingerstyle | 0.131 | 0.950 → 0.581 | Prefix moved to a suffix |
+| Fretless Bass | (π) | Bass | Electric Bass - Fretless | 0.052 | 0.950 → 1.000 | Prefix moved to a suffix |
+| Hardcore Grind Bass | (π) | Bass | Electric Bass - Hardcore Grind | 0.140 | 0.918 → 0.524 | Prefix moved to a suffix |
+| Pick Drive Bass | (π) | Bass | Electric Bass - Pick Drive | 0.086 | 0.950 → 0.950 | Prefix moved to a suffix |
+| Slap Pop Bass | (π) | Bass | Electric Bass - Slap Pop | 0.127 | 0.950 → 0.600 | Prefix moved to a suffix |
 | Enjoy Bell Pluck |  | Pluck | = | 0.102 | 0.900 → 0.708 | Unique |
 | Equinox Orbit Sequence |  | Sequence | = | 0.074 | 0.900 → 0.900 | Unique; latch off |
-| Banjo Pick | (st) | World | Ethnic - Banjo Pick | 0.038 | 0.400 → 0.832 | World category replaces the "Ethnic -" prefix |
-| Hammered Dulcimer | (st) | World | Ethnic - Hammered Dulcimer | 0.041 | 0.400 → 0.773 | World category replaces the prefix |
-| Koto Silk | (st) | World | Ethnic - Koto Silk | 0.032 | 0.400 → 0.999 | World category replaces the prefix |
-| Sitar Resonance | (st) | World | Ethnic - Sitar Resonance | 0.031 | 0.400 → 1.000 | World category replaces the prefix |
+| Banjo Pick | (π) | World | Ethnic - Banjo Pick | 0.038 | 0.400 → 0.832 | World category replaces the "Ethnic -" prefix |
+| Hammered Dulcimer | (π) | World | Ethnic - Hammered Dulcimer | 0.041 | 0.400 → 0.773 | World category replaces the prefix |
+| Koto Silk | (π) | World | Ethnic - Koto Silk | 0.032 | 0.400 → 0.999 | World category replaces the prefix |
+| Sitar Resonance | (π) | World | Ethnic - Sitar Resonance | 0.031 | 0.400 → 1.000 | World category replaces the prefix |
 | Bode Drift |  | FX | Experimental - Bode Drift | 0.069 | 0.731 → 0.731 | Prefix removed |
 | EBM Drive Sequence |  | Sequence | Frontline EBM Sequence | 0.113 | 0.900 → 0.636 | Name alluding to a band replaced |
-| Ambient Spells Guitar | (st) | Guitar | Guitar - Ambient Spells | 0.054 | 0.500 → 0.739 | Guitar category; prefix moved to a suffix |
-| Darkwave Razor Guitar | (st) | Guitar | Guitar - Darkwave Razor | 0.174 | 0.063 → 0.029 | Kept apart from Industrial Drive: 26 values differ (comp, chorus, decay) |
-| Disco Mute Guitar | (st) | Guitar | Guitar - Disco Mute | 0.122 | 0.950 → 0.623 | Guitar category |
-| French Filter Guitar | (st) | Guitar | Guitar - French Filter | 0.092 | 0.950 → 0.950 | Guitar category |
-| Glass Chorus Guitar | (st) | Guitar | Guitar - Glass Chorus | 0.110 | 0.950 → 0.689 | Guitar category |
-| Industrial Drive Guitar | (st) | Guitar | Guitar - Industrial Drive | 0.175 | 0.050 → 0.023 | Guitar category |
-| New Age Harmonics Guitar | (st) | Guitar | Guitar - New Age Harmonics | 0.093 | 0.950 → 0.950 | Guitar category |
-| Personal Twang Guitar | (st) | Guitar | Guitar - Personal Twang | 0.211 | 0.350 → 0.132 | Guitar category |
+| Ambient Spells Guitar | (π) | Guitar | Guitar - Ambient Spells | 0.054 | 0.500 → 0.739 | Guitar category; prefix moved to a suffix |
+| Darkwave Razor Guitar | (π) | Guitar | Guitar - Darkwave Razor | 0.174 | 0.063 → 0.029 | Kept apart from Industrial Drive: 26 values differ (comp, chorus, decay) |
+| Disco Mute Guitar | (π) | Guitar | Guitar - Disco Mute | 0.122 | 0.950 → 0.623 | Guitar category |
+| French Filter Guitar | (π) | Guitar | Guitar - French Filter | 0.092 | 0.950 → 0.950 | Guitar category |
+| Glass Chorus Guitar | (π) | Guitar | Guitar - Glass Chorus | 0.110 | 0.950 → 0.689 | Guitar category |
+| Industrial Drive Guitar | (π) | Guitar | Guitar - Industrial Drive | 0.175 | 0.050 → 0.023 | Guitar category |
+| New Age Harmonics Guitar | (π) | Guitar | Guitar - New Age Harmonics | 0.093 | 0.950 → 0.950 | Guitar category |
+| Personal Twang Guitar | (π) | Guitar | Guitar - Personal Twang | 0.211 | 0.350 → 0.132 | Guitar category |
 | Hardcore Fold Impact |  | Bass | = | 0.089 | 0.900 → 0.900 | Unique |
 | Harder Robot Carrier |  | Vocoder | = | 0.000 | 0.350 → 0.350 | Vocoder preset (needs audio input; level not measurable offline) |
 | Bowed Reed |  | Hybrid | Hybrid - Bowed Reed | 0.107 | 0.100 → 0.075 | Canonical of the Heavy Bow 2 duplicate; honest hybrid name |

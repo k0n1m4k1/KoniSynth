@@ -1545,9 +1545,9 @@ int main (int argc, char** argv)
         { "17. Osc 2 sierra + sync, 8 notas", { { "Osc2 Wave", 2.0f / 11.0f }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f } }, 8 },
         { "18. Osc 2 Wavetable + sync, 8 notas", { { "Osc2 Wave", 10.0f / 11.0f }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f },
                                                     { "Osc2 WT Position", 0.5f }, { "Wavetable", 0.4f } }, 8 },
-        // El 2 con Osc 3 en sierra a +1 octava (Sub Octave -1, Semi +24: normalizado 1): coste de Osc 3 frente al 2
+        // El 2 con Osc 3 en sierra a +1 octava (Osc3 Octave +1: normalizado 0,75 de -2..+2; Semi 0: 0,5): coste de Osc 3 frente al 2
         { "19. Unisono 7 + filtro + Osc 3 sierra, 8 notas", { { "Unison Voices", 1.0f }, { "Resonance", 0.5f }, { "Filter Drive", 0.5f },
-                                                              { "Sub Level", 1.0f }, { "Osc3 Wave", 2.0f / 3.0f }, { "Osc3 Semi", 1.0f } }, 8 },
+                                                              { "Osc3 Level", 1.0f }, { "Osc3 Wave", 2.0f / 11.0f }, { "Osc3 Octave", 0.75f }, { "Osc3 Semi", 0.5f } }, 8 },
         // El 3 con Osc 2 / Osc 3 como modulador del Complex (Complex Mod Source: Osc 2 = 1/2, Osc 3 = 2/2), a nivel 0: coste del
         // modulador externo frente al interno
         { "20. Complex 2x + unisono 7, modulador Osc 2 sierra + sync", { { "Complex On", 1.0f }, { "Unison Voices", 1.0f }, { "FM Index", 0.5f },
@@ -1555,7 +1555,7 @@ int main (int argc, char** argv)
                                                                         { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f } }, 8 },
         { "21. Complex 2x + unisono 7, modulador Osc 3", { { "Complex On", 1.0f }, { "Unison Voices", 1.0f }, { "FM Index", 0.5f },
                                                           { "Timbre", 0.6f }, { "AM Depth", 0.3f }, { "Complex Mod Source", 1.0f },
-                                                          { "Osc3 Semi", 1.0f } }, 8 },
+                                                          { "Osc3 Octave", 0.75f }, { "Osc3 Semi", 0.5f } }, 8 },
         // Eventos densos: con la subdivisión de 1 muestra del Synth (KoniSynth.cpp) cada evento parte el render de las voces
         { "22. Init, 8 notas + pitch bend cada 32 muestras", {}, 8, 32 },
         { "22b. Init, 8 notas + pitch bend cada 8 muestras", {}, 8, 8 },

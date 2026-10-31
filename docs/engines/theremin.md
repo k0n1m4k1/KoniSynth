@@ -40,7 +40,7 @@ are automatable; the pad sends them as gestures, so the DAW can record them as a
 | Control | What it does in this engine | Range / default |
 |---|---|---|
 | On (header) | Turns the LFO on. | Off / On / Off |
-| Target menu | Vibrato or Tremolo. Filter has no effect: the theremin does not go through the filter. | Vibrato, Tremolo, Filter / Vibrato |
+| Target (cable in Mod Patch) | PITCH (vibrato) or AMP (tremolo); the theremin has no filter, so CUTOFF is not shown. | PITCH, AMP / PITCH |
 | Rate | LFO speed. | 0.02-100 Hz / 5.00 Hz |
 | Depth | Physical: vibrato moves the pitch hand by up to +/-1.5 cm. Ideal: up to +/-2 semitones. Tremolo: up to full depth. | 0-100 % / 30 % |
 

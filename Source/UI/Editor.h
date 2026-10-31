@@ -174,35 +174,54 @@ public:
                 displayWindow->view.showCaption (p.name, p.playHint);
         };
 
-        // 1. Generación
+        // 1. Generación. En cada sección, las perillas que son destino de la matriz van juntas y primero: Section las enmarca
+        // (grupo modulable, Section::layoutModFrame)
         osc.withCombo (s, "wave")
-           .withKnob (s, "osc1Level", "Level").withKnob (s, "unisonVoices", "Voices").withKnob (s, "unisonDetune", "Detune").withKnob (s, "unisonSpread", "Spread")
-           .withKnob (s, "pulseWidth", "PW").withKnob (s, "pwmDepth", "PWM").withKnob (s, "drift", "Drift")
+           .withKnob (s, "osc1Level", "Level").withKnob (s, "pulseWidth", "PW")
+           .withKnob (s, "unisonVoices", "Voices").withKnob (s, "unisonDetune", "Detune").withKnob (s, "unisonSpread", "Spread")
+           .withKnob (s, "pwmDepth", "PWM").withKnob (s, "drift", "Drift")
            .withKnob (s, "pitchEnvAmount", "P.Env").withKnob (s, "pitchEnvDecay", "P.Decay")
            .withKnob (s, "osc1TriSym", "Tri Sym").withKnob (s, "osc1TriRound", "Tri Rnd")
            .withSideBody (pitchEnvView, 120, true)
            .withControlRows (2); // 6 + 5 perillas: la fila del display es alta y así el display gana ancho
-        complexSection.withToggle (s, "complexOn").withCombo (s, "modWave").withExtraToggle (s, "modSync", "Sync")
-                      .withKnob (s, "complexModSource", "Mod Src").withKnob (s, "modRatio", "Ratio").withKnob (s, "fmIndex", "FM")
-                      .withKnob (s, "amDepth", "AM/Ring").withKnob (s, "timbre", "Timbre")
-                      .withKnob (s, "symmetry", "Symmetry").withKnob (s, "timbreMod", "T.Mod").withKnob (s, "modLp", "Mod LP");
-        // Segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), con Mute/Solo como las fuentes de Osc 1
-        osc2Section.withCombo (s, "osc2Wave").withExtraToggle (s, "osc2Sync", "Sync")
+        // Mod Src y Sync no son perillas: son conexiones del panel PATCH (PatchBay, a la derecha de la sección)
+        complexSection.withToggle (s, "complexOn").withCombo (s, "modWave")
+                      .withKnob (s, "fmIndex", "FM").withKnob (s, "timbre", "Timbre")
+                      .withKnob (s, "modRatio", "Ratio").withKnob (s, "amDepth", "AM/Ring")
+                      .withKnob (s, "symmetry", "Symmetry").withKnob (s, "timbreMod", "T.Mod").withKnob (s, "modLp", "Mod LP")
+                      .withControlRows (2); // 2 filas de 4 (la segunda, 3): a su derecha, el panel PATCH
+        // Perillas en 368 px (4 de 92); el panel ocupa el resto: de x = 10 + 368 + 14 al borde, bajo la línea de título
+        complexSection.controlsWidth = 368;
+        complexSection.addAndMakeVisible (complexBay);
+        complexBay.dockFrom (392, 24, 8);
+        // Segundo grupo de pestañas (Osc 2 | Osc 3 | Noise), con Mute/Solo como las fuentes de Osc 1. El Sync de Osc 2 y el de
+        // Osc 3 no son botones: son conexiones del panel PATCH del Complex (OSC 1 -> SYNC 2 / SYNC 3)
+        osc2Section.withCombo (s, "osc2Wave")
                    .withHeaderButton ("Osc 2 Sample...", "Open the sample editor of Osc 2 (Sample waveform): load its own file, see its waveform, "
                                       "set Root, Start, Length and Loop.", [this] { openSamplePanel (KoniSynthProcessor::osc2Sample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::osc2Sample), [] {}); }))
                    .withHeaderButton ("Osc 2 Table...", "Open the wavetable editor of Osc 2 (Wavetable waveform): its own table, "
                                       "independent of the Wavetable tab; see the frames, load your own file.",
                                       [this] { openWavetablePanel (KoniSynthProcessor::wtOsc2); }).withResetSource (panelParams ([this] { return std::make_unique<WavetablePanel> (koni, KoniSynthProcessor::wtOsc2, [] {}); }))
-                   .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Semi", "Semi")
-                   .withKnob (s, "osc2Fine", "Fine").withKnob (s, "osc2WtPosition", "WT Pos")
-                   .withKnob (s, "osc2TriSym", "Tri Sym").withKnob (s, "osc2TriRound", "Tri Rnd");
+                   .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Semi", "Semi").withKnob (s, "osc2WtPosition", "WT Pos")
+                   .withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Fine", "Fine")
+                   .withKnob (s, "osc2TriSym", "Tri Sym").withKnob (s, "osc2TriRound", "Tri Rnd")
+                   .withControlRows (2); // 4 + 3 perillas
         osc3Section.withCombo (s, "osc3Wave")
-                   .withKnob (s, "subLevel", "Level").withKnob (s, "subOctave", "Oct").withKnob (s, "osc3Semi", "Semi")
-                   .withKnob (s, "osc3Fine", "Fine").withKnob (s, "osc3TriSym", "Tri Sym").withKnob (s, "osc3TriRound", "Tri Rnd");
+                   .withHeaderButton ("Osc 3 Sample...", "Open the sample editor of Osc 3 (Sample waveform): load its own file, see its waveform, "
+                                      "set Root, Start, Length and Loop.", [this] { openSamplePanel (KoniSynthProcessor::osc3Sample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::osc3Sample), [] {}); }))
+                   .withHeaderButton ("Osc 3 Table...", "Open the wavetable editor of Osc 3 (Wavetable waveform): its own table, "
+                                      "independent of the Wavetable tab and of Osc 2; see the frames, load your own file.",
+                                      [this] { openWavetablePanel (KoniSynthProcessor::wtOsc3); }).withResetSource (panelParams ([this] { return std::make_unique<WavetablePanel> (koni, KoniSynthProcessor::wtOsc3, [] {}); }))
+                   // Mismo orden que Osc 2 (las perillas con el mismo nombre, en el mismo sitio)
+                   .withKnob (s, "subLevel", "Level").withKnob (s, "osc3Semi", "Semi").withKnob (s, "osc3WtPosition", "WT Pos")
+                   .withKnob (s, "osc3Octave", "Oct").withKnob (s, "osc3Fine", "Fine")
+                   .withKnob (s, "osc3TriSym", "Tri Sym").withKnob (s, "osc3TriRound", "Tri Rnd")
+                   .withControlRows (2); // 4 + 3 perillas
+        // Noise: bloque propio junto a las pestañas Osc 2 / Osc 3 (su Mute y su Solo, en el Mixer)
         noiseSection.withCombo (s, "noiseColor").withKnob (s, "noiseLevel", "Level");
         mixerTabs = std::make_unique<SourceTabs> (s, std::vector<SourceTabs::Source> {
-            { "Osc 2", &osc2Section, "osc2Level", "osc2Mute" }, { "Osc 3", &osc3Section, "subLevel", "osc3Mute" },
-            { "Noise", &noiseSection, "noiseLevel", "noiseMute" } }, Params::srcOsc2, koni.getParams().soloSource);
+            { "Osc 2", &osc2Section, "osc2Level", "osc2Mute" }, { "Osc 3", &osc3Section, "subLevel", "osc3Mute" } },
+            Params::srcOsc2, koni.getParams().soloSource);
         // Sample, Wavetable y Sequencer: sección compacta + panel de edición propio (Edit Sample..., Edit Table..., Edit Steps...)
         sampleSection.withHeaderButton ("Edit Sample...", "Open the sample editor: load a file, see its waveform, set Start, Length and Loop.",
                                         [this] { openSamplePanel (KoniSynthProcessor::sourceSample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::sourceSample), [] {}); }))
@@ -259,13 +278,14 @@ public:
         {
             waveView.setView (v);
             if (v < Params::srcOsc2) sourceTabs->show (v);
-            else if (v < WaveView::mix) mixerTabs->show (v - Params::srcOsc2);
+            else if (v < Params::srcNoise) mixerTabs->show (v - Params::srcOsc2); // Noise no es pestaña: su bloque está a la vista
             signalStrip.setSelectedSource (v < WaveView::mix ? v : -1);
         };
         sourceTabs->onSelect = [pickSource] (int k) { pickSource (Params::srcOsc1 + k); };
         mixerTabs->onSelect = [pickSource] (int k) { pickSource (Params::srcOsc2 + k); };
         waveView.onViewPicked = pickSource;
         signalStrip.onSourcePicked = pickSource;
+        signalStrip.onMixer = [this] { openPanel ("Mixer", std::make_unique<MixerPanel> (koni), 860, 460); };
 
         // 2. Forma: filtro + envolventes (sliders verticales, como en un panel de hardware)
         qualitySelector.addItemList ({ "Classic", "Balanced", "High Quality" }, 1);
@@ -525,10 +545,12 @@ public:
                               p.add ("Consonants").withKnob (st, "vocoderSibilance", "Sibilance");
                           }))
                       .withKnob (s, "vocoderMix", "Mix").withKnob (s, "vocoderFormant", "Formant");
-        lfo.withToggle (s, "lfoOn").withCombo (s, "lfoTarget")
+        // Destinos de LFO 1 y LFO 2: cables del panel MOD PATCH (lfoPatchSection), no desplegables
+        lfo.withToggle (s, "lfoOn")
            .withKnob (s, "lfoRate", "Rate").withKnob (s, "lfoDepth", "Depth").withKnob (s, "lfoShape", "Shape").withKnob (s, "lfoSync", "Sync")
            .withSideBody (lfoView, 170, true); // forma, alcance en el destino, Depth y Rate arrastrables (UI/ModViews.h)
-        lfo2Section.withToggle (s, "lfo2On").withCombo (s, "lfo2Target")
+        lfoPatchSection.withBody (lfoBay, 0, 40 + 52 * 6); // 6 entradas a 52 px (PatchBay::preferredWidth con LFO 2)
+        lfo2Section.withToggle (s, "lfo2On")
                    .withHeaderButton ("Matrix...", "Modulation matrix of the Synth engine: 8 slots, each a source (LFOs, envelopes, velocity, "
                                       "key, wheel, aftertouch, MPE timbre, random, bend) moving a destination per voice. The number in "
                                       "brackets is the count of active routes; amber rings on the knobs show their range.",
@@ -575,7 +597,10 @@ public:
         eqSection.withToggle (s, "eqOn")
                  .withHeaderButton ("EQ Bands...", "Parametric EQ: low/high cuts, shelves, two mid bands with Q, and the response curve "
                                     "over the live spectrum (drag the nodes).", [this] { openPanel ("Equalizer", std::make_unique<EqPanel> (koni), 1180, 640); }).withResetSource (panelParams ([this] { return std::make_unique<EqPanel> (koni); }))
-                 .withKnob (s, "eqLowGain", "Bass").withKnob (s, "eqMid1Gain", "Mid").withKnob (s, "eqHighGain", "Treble");
+                 .withKnob (s, "eqLowGain", "Bass").withKnob (s, "eqMid1Gain", "Mid").withKnob (s, "eqHighGain", "Treble")
+                 .withSideBody (eqMiniCurve, 150, true); // la curva del EQ, pequeña: un clic abre EQ Bands...
+        eqMiniCurve.rate = [this] { return koni.getSampleRate(); };
+        eqMiniCurve.onClick = [this] { openPanel ("Equalizer", std::make_unique<EqPanel> (koni), 1180, 640); };
         // Ampli: modelo y mandos de un ampli en el panel; Presence, Sag y Output en Cabinet...
         // Amp con su pantalla (la pantalla solo actúa con el ampli encendido): en el panel lo que se toca tocando, incluida la
         // mezcla de la pantalla (Cab); tipo de pantalla e IR del usuario en Cabinet...
@@ -628,7 +653,8 @@ public:
         // Tempo: el reloj del motor activo, el mismo que muestra y edita el LED del BPM (BpmDisplay::clockParam): Drum Machine,
         // Omnichord y VL-1 tienen el suyo (también en su sección); el resto, el tempo interno (arpegiador, secuenciador, eco y
         // LFO sincronizados). Hay una perilla por reloj y updateInert deja visible solo la del motor elegido
-        master.withExtraToggle (s, "monoOut", "Mono").withKnob (s, "gain", "Gain")
+        master.withExtraToggle (s, "monoOut", "Mono")
+              .withKnob (s, "gain", "Gain")
               .withKnob (s, "arpBpm", "Tempo").withKnob (s, "drumTempo", "Tempo").withKnob (s, "omniTempo", "Tempo")
               .withKnob (s, "vl1Tempo", "Tempo");
 
@@ -637,13 +663,14 @@ public:
         ringTimer.tick = [this] { updateRings(); };
         ringTimer.startTimerHz (30);
 
-        for (auto* c : { &master, &lfo, &echo, &ambient, &tube, &eqSection, &crushSection, &phaserSection, &lfo2Section, &formantSection, &chorusSection, &mediaSection, &vocoderSection, &inputSection,
+        for (auto* c : { &master, &lfo, &lfoPatchSection, &echo, &ambient, &tube, &eqSection, &crushSection, &phaserSection, &lfo2Section, &formantSection, &chorusSection, &mediaSection, &vocoderSection, &inputSection,
                          &controllerSection, &arpSection, &seqSection, &macroSection, &flangerSection, &fshiftSection, &leslieSection, &springSection,
                          &transSection, &compSection, &limiterSection, &ampSection })
             rows.addAndMakeVisible (*c);
         rows.addChildComponent (*sourceTabs);
         rows.addChildComponent (*mixerTabs);
-        for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, &filter, &complexSection, &thereminSection,
+        content.addChildComponent (modBar);
+        for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, &filter, &complexSection, &noiseSection, &thereminSection,
                                                                  &vl1Section, &vl1RhythmSection, &vl1DisplaySection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
                                                                  &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
@@ -653,25 +680,18 @@ public:
             content.addChildComponent (*c);
         rowsView.setViewedComponent (&rows, false);
         rowsView.setScrollBarsShown (true, false); // solo vertical
-        rowsView.setScrollBarThickness (32);       // 32 px (antes 12): más fácil de agarrar
-        // Arrastrar el fondo (marcos, títulos, huecos) desplaza el panel en vertical; los controles no: botones, selectores y
-        // listas se marcan aquí (perillas, sliders y asas de los displays ya lo hacen en su constructor)
-        rowsView.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::all);
-        std::function<void (juce::Component&)> blockDrag = [&blockDrag] (juce::Component& c)
-        {
-            if (dynamic_cast<juce::Button*> (&c) != nullptr || dynamic_cast<juce::ComboBox*> (&c) != nullptr
-                || dynamic_cast<juce::ListBox*> (&c) != nullptr || dynamic_cast<juce::TextEditor*> (&c) != nullptr)
-                c.setViewportIgnoreDragFlag (true);
-            for (auto* child : c.getChildren())
-                blockDrag (*child);
-        };
-        blockDrag (rows);
+        rowsView.setScrollBarThickness (22);       // 22 px (antes 12, luego 32 y 27): fácil de agarrar sin robar ancho
+        // Desplazamiento solo con la barra y la rueda: arrastrar el fondo no mueve el panel (un arrastre que empieza en un
+        // hueco, un marco o un cable no debe desplazar las filas)
+        rowsView.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
         content.addAndMakeVisible (rowsView);
         content.addAndMakeVisible (scaleBar);
         content.addAndMakeVisible (scope);
         // Modo y estilo del display: propiedades del estado del plugin
         scope.setMode ((int) koni.apvts.state.getProperty ("displayMode", 0));
-        scope.setStyle ((int) koni.apvts.state.getProperty ("displayStyle", 0));
+        // Sin estilo guardado, el del skin (como al cambiarlo en el menú): Vintage 60s y Phosphor Green, verde; Amber, ámbar
+        scope.setStyle ((int) koni.apvts.state.getProperty ("displayStyle", Skin::current() == Skin::green || Skin::current() == Skin::vintage ? 1
+                                                                             : Skin::current() == Skin::amber ? 2 : 0));
         scope.onModeChange = [this] (int m, int st)
         {
             koni.apvts.state.setProperty ("displayMode", m, nullptr);
@@ -869,7 +889,7 @@ private:
         Skin::set (id);
         // El display toma el tono del skin (fósforo verde / ámbar; normal en Default y Brushed Metal); luego se puede cambiar
         // a mano en su menú como siempre (sus colores no pasan por el skin)
-        scope.setStyle (id == Skin::green ? 1 : id == Skin::amber ? 2 : 0);
+        scope.setStyle (id == Skin::green || id == Skin::vintage ? 1 : id == Skin::amber ? 2 : 0); // Vintage: fósforo verde (osciloscopios de los 60)
         lookAndFeel.applySkin();
         sendLookAndFeelChange();
         auto& desktop = juce::Desktop::getInstance();
@@ -1053,10 +1073,11 @@ private:
         styloPad.setVisible (engine == 3 && padMode() == 0);
         padTab->setVisible (engine == 1 || engine == 3);
         syncFloatingPad();
-        for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, sourceTabs.get(), &filter, &complexSection, mixerTabs.get(), &filterEnvSection, &ampEnvSection,
-                                                                 &lfo2Section, &controllerSection })
+        for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, sourceTabs.get(), &filter, &complexSection, mixerTabs.get(), &noiseSection, &filterEnvSection, &ampEnvSection,
+                                                                 &lfo2Section, &controllerSection, &modBar })
             c->setVisible (synthMode); // layoutContent las vuelve a ocultar si su grupo está plegado
         lfo.setVisible (synthMode || thereminMode); // LFO 1 solo actúa en el Synth y el Theremin (filas de ENGINE)
+        lfoPatchSection.setVisible (synthMode || thereminMode);
         layoutContent();
     }
 
@@ -1083,7 +1104,7 @@ private:
     }
     void openWavetablePanel (int which = KoniSynthProcessor::wtMain)
     {
-        openPanel (which == KoniSynthProcessor::wtOsc2 ? "Osc 2 Wavetable" : "Wavetable",
+        openPanel (WavetablePanel::titleOf (which),
                    std::make_unique<WavetablePanel> (koni, which, [this, which] { chooseWavetable (which); }), 1100, 620);
     }
     void openSequencerPanel()  { openPanel ("Step Sequencer", std::make_unique<SequencerPanel> (koni), 1300, 560); }
@@ -1259,7 +1280,7 @@ private:
             });
     }
 
-    // which: KoniSynthProcessor::sourceSample (pestaña Sample) u osc2Sample (Osc 2 en modo Sample)
+    // which: KoniSynthProcessor::sourceSample (pestaña Sample), osc2Sample u osc3Sample (Osc 2 / Osc 3 en modo Sample) o el de un motor
     void chooseSample (int which)
     {
         fileChooser = std::make_unique<juce::FileChooser> ("Load sample, SoundFont (.sf2), SNES BRR or SPC, NES DMC", juce::File(), SampleImport::fileFilter);
@@ -1349,7 +1370,8 @@ private:
             overlay = Overlay::create (*this, "Sample", error, std::nullopt, "OK", {}, [this] (bool, const juce::String&, int) { overlay.reset(); });
             return;
         }
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (which == KoniSynthProcessor::osc2Sample ? &osc2Section : &sampleSection),
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (which == KoniSynthProcessor::osc2Sample ? &osc2Section
+                                                                            : which == KoniSynthProcessor::osc3Sample ? &osc3Section : &sampleSection),
             [safe = SafePointer<KoniSynthEditor> (this), file, items, which] (int result)
             {
                 if (safe != nullptr && result > 0 && result <= items->size())
@@ -1466,11 +1488,12 @@ private:
             if (c != nullptr && c->getAlpha() != (inert ? 0.35f : 1.0f)) c->setAlpha (inert ? 0.35f : 1.0f);
         };
         const auto osc1Sounds = v ("osc1Level") > 0.0f || targeted (ModMatrix::dstOsc1Level);
-        // Complex con Osc 2 u Osc 3 de modulador: Mod Wave y Ratio no actúan, y ese oscilador cuenta aunque su nivel sea 0
+        // Complex con Osc 2, Osc 3 o el ruido de modulador: Mod Wave y Ratio no actúan, y esa fuente cuenta aunque su nivel sea 0
         const auto externalMod = (int) v ("complexModSource") != 0;
         const auto complexOn = v ("complexOn") > 0.5f;
         const auto osc2Sounds = v ("osc2Level") > 0.0f || targeted (ModMatrix::dstOsc2Level) || (complexOn && (int) v ("complexModSource") == 1);
-        const auto osc3Sounds = v ("subLevel") > 0.0f || (complexOn && (int) v ("complexModSource") == 2);
+        const auto osc3Sounds = v ("subLevel") > 0.0f || targeted (ModMatrix::dstOsc3Level) || (complexOn && (int) v ("complexModSource") == 2);
+        const auto noiseSounds = v ("noiseLevel") > 0.0f || targeted (ModMatrix::dstNoiseLevel) || (complexOn && (int) v ("complexModSource") == 3);
         dim (complexSection.knobFor ("modRatio"), externalMod);
         dim (&complexSection.comboComponent(), externalMod);
         const auto osc2Wave = osc2WaveFromChoice ((int) v ("osc2Wave")); // código del motor: 4 Wavetable, 5 Sample
@@ -1486,21 +1509,24 @@ private:
         for (auto* id : { "osc2Octave", "osc2Semi", "osc2Fine" })
             dim (osc2Section.knobFor (id), ! osc2Sounds);
         dim (&osc2Section.comboComponent(), ! osc2Sounds);
-        dim (&osc2Section.extraToggleComponent(), ! osc2Sounds);
-        for (const auto* id : { "subOctave", "osc3Semi", "osc3Fine" })
+        for (const auto* id : { "osc3Octave", "osc3Semi", "osc3Fine" })
             dim (osc3Section.knobFor (id), ! osc3Sounds);
         dim (&osc3Section.comboComponent(), ! osc3Sounds);
-        dim (&noiseSection.comboComponent(), v ("noiseLevel") <= 0.0f && ! targeted (ModMatrix::dstNoiseLevel));
+        dim (&noiseSection.comboComponent(), ! noiseSounds);
+        const auto osc3Wave = osc2WaveFromChoice ((int) v ("osc3Wave")); // mismos códigos que Osc 2: 4 Wavetable, 5 Sample
         dim (osc2Section.knobFor ("osc2WtPosition"), osc2Wave != 4 || ! osc2Sounds); // solo con la forma Wavetable
+        dim (osc3Section.knobFor ("osc3WtPosition"), osc3Wave != 4 || ! osc3Sounds);
         // Forma del triángulo: solo con la forma Triangle (índice 1 en las tres listas); en Osc 1, no con el oscilador complejo
         const auto tri1 = (int) v ("wave") == 1 && osc1Sounds && ! complexOn;
         const auto tri2 = osc2Wave == triangle && osc2Sounds;
-        const auto tri3 = (int) v ("osc3Wave") == 1 && osc3Sounds;
+        const auto tri3 = osc3Wave == triangle && osc3Sounds;
         dim (osc.knobFor ("osc1TriSym"), ! tri1);         dim (osc.knobFor ("osc1TriRound"), ! tri1);
         dim (osc2Section.knobFor ("osc2TriSym"), ! tri2); dim (osc2Section.knobFor ("osc2TriRound"), ! tri2);
         dim (osc3Section.knobFor ("osc3TriSym"), ! tri3); dim (osc3Section.knobFor ("osc3TriRound"), ! tri3);
         dim (osc2Section.headerButton (0), osc2Wave != 5); // Osc 2 Sample... (fichero de Osc 2): solo con la forma Sample
         dim (osc2Section.headerButton (1), osc2Wave != 4); // Osc 2 Table... (tabla de Osc 2): solo con la forma Wavetable
+        dim (osc3Section.headerButton (0), osc3Wave != 5); // Osc 3 Sample...
+        dim (osc3Section.headerButton (1), osc3Wave != 4); // Osc 3 Table...
         const auto theremin = engine == 1; // el Theremin usa LFO 1 con seno fijo y su propia velocidad (sin Shape ni Sync)
         dim (lfo.knobFor ("lfoRate"), ! theremin && v ("lfoSync") > 0.5f);
         dim (lfo.knobFor ("lfoShape"), theremin);
@@ -1591,6 +1617,15 @@ private:
         liveQuietFrames = tick != lastLiveTick ? 0 : liveQuietFrames + 1;
         lastLiveTick = tick;
         const auto live = liveQuietFrames < 6; // 0,2 s a 30 Hz
+        // Voces vivas (su contador avanzó en los últimos 0,2 s): un punto por voz en cada mando destino
+        std::array<bool, Params::liveVoices> voiceLive {};
+        for (size_t v = 0; v < voiceLive.size(); ++v)
+        {
+            const auto t = koni.getParams().liveVoiceTick[v].load (std::memory_order_relaxed);
+            voiceQuiet[v] = t != lastVoiceTick[v] ? 0 : voiceQuiet[v] + 1;
+            lastVoiceTick[v] = t;
+            voiceLive[v] = voiceQuiet[v] < 6;
+        }
         std::array<float, ModMatrix::numDestinations> lo {}, hi {};
         std::array<bool, ModMatrix::numDestinations> used {};
         int routes = 0;
@@ -1621,11 +1656,23 @@ private:
             for (int d = 1; d < ModMatrix::numDestinations; ++d)
                 if (const auto t = MatrixUi::targetFor (d); t.paramId != nullptr && k->paramId == t.paramId) { dst = d; break; }
             auto* p = dst > 0 ? koni.apvts.getParameter (k->paramId) : nullptr;
-            if (p == nullptr || ! used[(size_t) dst]) { k->setRing (false, 0.0f, 0.0f, -1.0f); continue; }
+            if (p == nullptr || ! used[(size_t) dst]) { k->setRing (false, 0.0f, 0.0f, -1.0f); k->setModView ({}, {}); continue; }
             const auto t = MatrixUi::targetFor (dst);
             const auto a = MatrixUi::shifted (*p, t, lo[(size_t) dst]), b = MatrixUi::shifted (*p, t, hi[(size_t) dst]);
             const auto v = live ? MatrixUi::shifted (*p, t, koni.getParams().liveMod[(size_t) dst].load (std::memory_order_relaxed)) : -1.0f;
             k->setRing (true, juce::jmin (a, b), juce::jmax (a, b), v);
+            std::vector<float> dots;
+            for (size_t voice = 0; live && voice < voiceLive.size(); ++voice)
+                if (voiceLive[voice])
+                    dots.push_back (MatrixUi::shifted (*p, t, koni.getParams().liveModVoice[voice][(size_t) dst].load (std::memory_order_relaxed)));
+            std::vector<Knob::Lamp> lamps; // una por ranura que mueve este mando, brillando con el valor de su fuente
+            for (const auto slot : MatrixUi::slotsFor (koni.apvts, dst))
+            {
+                const auto src = (int) MatrixUi::slotValue (koni.apvts, "mtxSrc", slot);
+                const auto glow = live ? juce::jlimit (0.0f, 1.0f, std::abs (koni.getParams().liveSrc[(size_t) src].load (std::memory_order_relaxed))) : 0.0f;
+                lamps.push_back ({ MatrixUi::sourceColour (src), glow });
+            }
+            k->setModView (std::move (dots), std::move (lamps));
         }
     }
 
@@ -1683,7 +1730,8 @@ private:
         using Kind = KoniSynthProcessor::MissingFile::Kind;
         const auto sampleWhich = KoniSynthProcessor::sampleWhichFor (m.kind);
         const juce::String what = sampleWhich >= 0 ? juce::String (SampleIds::of (sampleWhich).title)
-                                : m.kind == Kind::cabIr ? "Cabinet IR" : m.kind == Kind::osc2Wavetable ? "Osc 2 wavetable" : "Wavetable";
+                                : m.kind == Kind::cabIr ? "Cabinet IR" : m.kind == Kind::osc2Wavetable ? "Osc 2 wavetable"
+                                : m.kind == Kind::osc3Wavetable ? "Osc 3 wavetable" : "Wavetable";
         const auto heading = what + (m.unreadable ? " file can't be read" : " file not found");
         const auto message = "\"" + m.file.getFileName() + "\" was expected at:\n" + m.file.getParentDirectory().getFullPathName()
                              + "\nLocate it to load it again, or ignore to continue without it.";
@@ -1705,7 +1753,8 @@ private:
         }
         const auto isSample = KoniSynthProcessor::sampleWhichFor (m.kind) >= 0;
         const auto which = juce::jmax (0, KoniSynthProcessor::sampleWhichFor (m.kind));
-        const auto table = m.kind == KoniSynthProcessor::MissingFile::Kind::osc2Wavetable ? KoniSynthProcessor::wtOsc2 : KoniSynthProcessor::wtMain;
+        const auto table = m.kind == KoniSynthProcessor::MissingFile::Kind::osc2Wavetable ? KoniSynthProcessor::wtOsc2
+                         : m.kind == KoniSynthProcessor::MissingFile::Kind::osc3Wavetable ? KoniSynthProcessor::wtOsc3 : KoniSynthProcessor::wtMain;
         const auto start = m.file.getParentDirectory().isDirectory() ? m.file.getParentDirectory()
                                                                      : juce::File::getSpecialLocation (juce::File::userHomeDirectory);
         fileChooser = std::make_unique<juce::FileChooser> (isSample ? "Locate sample: " + m.file.getFileName()
@@ -1774,15 +1823,24 @@ private:
     {
         switch (engine)
         {
-            // Fuentes en dos filas: display de onda + pestañas A (Osc 1 / Wavetable / Sample / String) y, debajo, complejo -> Osc 2 /
-            // Osc 3 / Noise. Encima, la tira del recorrido de la señal (0,24: ~40 px). La fila del display, la más alta (1,85):
-            // con las perillas de Osc 1 en dos filas, el display queda en ~2,5:1 en vez de ~3,5:1 con 1,5
-            case 0:  return { { 0.24f, { &signalStrip }, 0 },
-                              { 1.85f, { &waveSection, sourceTabs.get() }, 0 },
-                              { 1.35f, { &complexSection, mixerTabs.get() }, 2 },
-                              { 1.3f, { &filter, &filterEnvSection, &ampEnvSection }, 0 }, // 1,3: el filtro, con display y 2 filas
-                              { 1.0f, { &controllerSection, &lfo, &lfo2Section }, 0 } };      // voz y modulación: solo actúan en el Synth
-            case 1:  return { { 1.0f, { &thereminSection, &lfo }, 1 } };                        // el Theremin usa LFO 1 (vibrato / trémolo)
+            // Fuentes en dos filas: display de onda + pestañas A (Osc 1 / Wavetable / Sample / Math) y, debajo, Osc 2 / Osc 3 /
+            // Noise + complejo, alineado bajo las pestañas de Osc 1 (alignComplex), con su panel PATCH.
+            // Encima, la tira del recorrido de la señal (0,24: ~40 px). La fila del display, la más alta (1,85): con las perillas
+            // de Osc 1 en dos filas, el display queda en ~2,5:1 en vez de ~3,5:1 con 1,5. Con ENGINE acoplado, la tira de señal y
+            // las fuentes de la matriz van fijas sobre el scroll (synthBarsFixed, layoutContent); en su ventana flotante, como filas
+            case 0:
+            {
+                const auto fixedBars = synthBarsFixed();
+                std::vector<RowSpec> r;
+                if (! fixedBars) r.push_back ({ 0.24f, { &signalStrip }, 0 });
+                if (! fixedBars) r.push_back ({ 0.21f, { &modBar }, 0 }); // barra MOD: fichas de las fuentes (~35 px)
+                r.push_back ({ 1.85f, { &waveSection, sourceTabs.get() }, 0 });
+                r.push_back ({ 1.35f, { mixerTabs.get(), &noiseSection, &complexSection }, 0 });
+                r.push_back ({ 1.3f, { &filter, &filterEnvSection, &ampEnvSection }, 0 }); // 1,3: el filtro, con display y 2 filas
+                r.push_back ({ 1.0f, { &controllerSection, &lfo, &lfo2Section, &lfoPatchSection }, 0 }); // voz y modulación: solo en el Synth
+                return r;
+            }
+            case 1:  return { { 1.0f, { &thereminSection, &lfo, &lfoPatchSection }, 1 } };    // el Theremin usa LFO 1 (vibrato / trémolo)
             case 2:  return { { 1.0f, { &vl1Section, &vl1RhythmSection, &vl1DisplaySection }, 1 } };
             case 3:  if ((int) koni.apvts.getRawParameterValue ("styloModel")->load() == 1) // Gen X-2: cadena oscilador -> filtro/delay
                          return { { 1.0f, { &styloSection, &genxOscSection, &genxFxSection }, 3 } }; // una fila: cabe con PAD y KEYS
@@ -2007,6 +2065,8 @@ private:
     static constexpr const char* displayFoldId = "foldDisplay";
     static constexpr const char* engineFoldId = "foldEngine";
     bool engineCollapsed() const { return dockMode (engineFoldId) != 0; }
+    // Synth con ENGINE acoplado: la tira de señal y la barra de fuentes de la matriz quedan fijas sobre el área con scroll
+    bool synthBarsFixed() const { return engine == 0 && dockMode (engineFoldId) == 0; }
 
     // Ventana flotante de componentes del editor (secciones de un bloque, LED de BPM): los reparte en horizontal según su
     // peso; redimensionable y siempre encima. Al cerrar, el elemento vuelve al panel. Los componentes no son suyos: al
@@ -2016,6 +2076,7 @@ private:
         std::vector<std::vector<std::pair<juce::Component*, float>>> rows; // en cada fila, ancho por peso
         std::vector<float> rowWeights; // alto de cada fila por peso (los de engineRows); vacío = filas del mismo alto
         juce::Component* overlay = nullptr; // diálogo abierto encima (ocupa todo)
+        std::function<void()> afterLayout;   // ajuste tras repartir las filas (ENGINE del Synth: alignComplex)
         void paint (juce::Graphics& g) override { Skin::paintBackground (g, getLocalBounds(), juce::Colour (0xff22272e)); }
         void resized() override
         {
@@ -2036,6 +2097,8 @@ private:
                 for (auto& it : items)
                     it.first->setBounds (r.removeFromLeft (juce::roundToInt (unit * it.second)).reduced (items.size() > 1 ? 4 : 0, 2));
             }
+            if (afterLayout)
+                afterLayout();
         }
     };
 
@@ -2093,6 +2156,16 @@ private:
             dialog.reset();
             if (savedSize.x > 0)
                 setContentComponentSize (savedSize.x, savedSize.y);
+        }
+
+        // Ajuste tras cada reparto de filas (y ahora mismo)
+        void setAfterLayout (std::function<void()> f)
+        {
+            if (auto* holder = dynamic_cast<FloatHolder*> (getContentComponent()))
+            {
+                holder->afterLayout = std::move (f);
+                holder->resized();
+            }
         }
 
         std::function<void()> closed;
@@ -2174,6 +2247,8 @@ private:
                                                           std::move (rowWeights)); // 165 px por unidad de peso: minLineHeight del panel
             if (engineWindowPos.x != 0 || engineWindowPos.y != 0)
                 engineWindow->setTopLeftPosition (engineWindowPos);
+            if (engine == 0) // el complejo, con el ancho de las pestañas de Osc 1 también en la ventana
+                engineWindow->setAfterLayout ([this] { alignComplex(); });
             engineWindowSecs = engineSecs;
         }
 
@@ -2480,6 +2555,28 @@ private:
             r.removeFromBottom (8);
         }
 
+        // Synth acoplado: tira SIGNAL (40 px) y barra MOD con las fichas de las fuentes (34 px) fijas, fuera del scroll; con las
+        // mismas sangrías laterales que las filas (7 px) y 1 px arriba y abajo: el alto va a las fichas y su texto. Si no
+        // (ENGINE en su ventana o plegado), son filas del
+        // motor: vuelven a 'rows' solo si estaban fijas (en la ventana flotante ya están en ella)
+        const auto fixedBars = synthBarsFixed();
+        for (auto* bar : std::initializer_list<juce::Component*> { &signalStrip, &modBar })
+        {
+            if (fixedBars)
+            {
+                reparent (content, *bar);
+                bar->setVisible (true);
+            }
+            else if (bar->getParentComponent() == &content)
+                rows.addChildComponent (*bar);
+        }
+        if (fixedBars)
+        {
+            signalStrip.setBounds (r.removeFromTop (40).reduced (7, 1));
+            modBar.setBounds (r.removeFromTop (34).reduced (7, 1));
+            r.removeFromTop (4);
+        }
+
         // ENGINE (pestaña en la columna) y debajo los bloques abiertos en líneas, dentro del Viewport. Alto por unidad de peso:
         // el libre repartido entre las filas del motor (según su peso) y las líneas de bloques (peso 1), y nunca menos de
         // minLineHeight; si así no caben, scroll vertical (la barra quita su ancho: se recalculan las líneas con él)
@@ -2517,6 +2614,8 @@ private:
                 for (auto* sec : row.sections) if (sec != nullptr) sec->setVisible (true);
                 layoutRow (r.removeFromTop (juce::roundToInt (unit * row.weight)).reduced (0, 3), row);
             }
+            if (engine == 0)
+                alignComplex();
             reparent (rows, *groupTabs[0]);
             groupTabs[0]->setFolded (false);
             groupTabs[0]->setFloating (false);
@@ -2526,6 +2625,17 @@ private:
                       juce::roundToInt (unit));
         content.repaint();
         rows.repaint();
+    }
+
+    // Synth: el complejo, bajo las pestañas de Osc 1 (misma x y ancho); a su izquierda, Noise con su ancho natural y las
+    // pestañas Osc 2 / Osc 3 con el resto (14 px entre bloques)
+    void alignComplex()
+    {
+        const auto top = sourceTabs->getBounds();
+        complexSection.setBounds (complexSection.getBounds().withX (top.getX()).withWidth (top.getWidth()));
+        const auto noiseW = juce::roundToInt (noiseSection.naturalWidth()) - 14; // sin el margen de celda (layoutRow)
+        noiseSection.setBounds (noiseSection.getBounds().withX (top.getX() - 14 - noiseW).withWidth (noiseW));
+        mixerTabs->setBounds (mixerTabs->getBounds().withRight (noiseSection.getX() - 14));
     }
 
     // Ancho de cada sección proporcional a su peso (≈ número de controles). Las primeras chainLength secciones forman
@@ -2579,9 +2689,61 @@ private:
     juce::Viewport rowsView;
     FlowContent rows;
     static constexpr int minLineHeight = 165; // px lógicos por línea de peso 1 (antes ~114 con 7 líneas en 1050 px)
-    // Título clicable: abre el About (cursor de mano al pasar por encima)
+    // Título clicable: abre el About (cursor de mano al pasar por encima). Dibujado a juego con cada skin:
+    //  Modern: "Koni" blanco y "Synth" en el acento. Phosphor Green / Amber: monoespaciada en el fósforo con halo (tres
+    //  pasadas desplazadas, tenues), como el texto de un tubo. Brushed Metal: estampado en la chapa (sombra oscura encima y
+    //  luz debajo). Vintage 60s: mayúsculas espaciadas en crema, en negrita, con un filete ámbar debajo, como las placas de
+    //  nombre de los equipos de los 60. Todo cabe en los 112 px del sitio (drawFittedText comprime hasta el 70 %)
     struct TitleLabel : juce::Label
     {
+        void paint (juce::Graphics& g) override
+        {
+            const auto r = getLocalBounds().toFloat();
+            const auto fit = [&] (const juce::String& t, juce::Rectangle<float> box)
+                             { g.drawFittedText (t, box.toNearestInt(), juce::Justification::centredLeft, 1, 0.7f); };
+            switch (Skin::current())
+            {
+                case Skin::green: case Skin::amber:
+                {
+                    g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 21.0f, juce::Font::bold));
+                    const auto phosphor = Skin::accent();
+                    g.setColour (phosphor.withAlpha (0.18f));
+                    for (const auto [dx, dy] : { std::pair<float, float> { -1.2f, 0.0f }, { 1.2f, 0.0f }, { 0.0f, 1.2f } })
+                        fit ("KoniSynth", r.translated (dx, dy));
+                    g.setColour (phosphor.brighter (0.3f));
+                    fit ("KoniSynth", r);
+                    break;
+                }
+                case Skin::metal:
+                    g.setFont (juce::FontOptions (22.0f, juce::Font::bold));
+                    g.setColour (juce::Colours::white.withAlpha (0.35f)); // luz en el canto inferior del estampado
+                    fit ("KoniSynth", r.translated (0.0f, 1.0f));
+                    g.setColour (juce::Colour (0xff23272c));
+                    fit ("KoniSynth", r);
+                    break;
+                case Skin::vintage:
+                {
+                    g.setFont (juce::Font (juce::FontOptions (16.0f, juce::Font::bold)).withExtraKerningFactor (0.16f));
+                    g.setColour (juce::Colour (0xfff0e2c0));
+                    fit ("KONISYNTH", r.withTrimmedBottom (4.0f));
+                    g.setColour (Skin::accent());
+                    g.fillRect (juce::Rectangle<float> (r.getX() + 1.0f, r.getCentreY() + 8.0f, r.getWidth() - 8.0f, 1.5f));
+                    break;
+                }
+                default:
+                {
+                    const juce::Font bold (juce::FontOptions (22.0f, juce::Font::bold));
+                    g.setFont (bold);
+                    const auto koniW = juce::GlyphArrangement::getStringWidth (bold, "Koni");
+                    g.setColour (Skin::white());
+                    g.drawText ("Koni", r, juce::Justification::centredLeft, false);
+                    g.setColour (Skin::accent());
+                    g.drawText ("Synth", r.withTrimmedLeft (koniW), juce::Justification::centredLeft, false);
+                    break;
+                }
+            }
+        }
+
         std::function<void()> onClick, onRightClick;
         void mouseUp (const juce::MouseEvent& e) override
         {
@@ -2746,9 +2908,10 @@ private:
                     g.drawRect (w.translated (3.0f, -3.0f), 1.0f);
                 }
             }
-            else // nombre girado, de abajo arriba
+            else // nombre girado, de abajo arriba; 12,5 pt con un 15 % de espacio entre letras (sin espaciar se leía mal)
             {
                 juce::Graphics::ScopedSaveState save (g);
+                g.setFont (juce::Font (juce::FontOptions (12.5f, juce::Font::bold)).withExtraKerningFactor (0.15f));
                 g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, r.getCentreX(), r.getCentreY()));
                 const auto t = juce::Rectangle<float> (r.getHeight() - 24.0f, r.getWidth()).withCentre (r.getCentre().translated (0.0f, 0.0f));
                 g.drawText (getButtonText(), t, juce::Justification::centred);
@@ -3089,7 +3252,7 @@ private:
     juce::Component::SafePointer<juce::Component> hookedWindow, hookedOptions, hookedNotification;
     PresetBar presetBar;
     std::unique_ptr<SourceTabs> sourceTabs; // contiene osc, wavetableSection, sampleSection y stringSection (se crea en el constructor)
-    std::unique_ptr<SourceTabs> mixerTabs;  // contiene osc2Section, osc3Section y noiseSection
+    std::unique_ptr<SourceTabs> mixerTabs;  // contiene osc2Section y osc3Section (Noise es un bloque aparte)
     Visualizer scope;
     std::unique_ptr<VisualizerWindow> displayWindow;
     BpmDisplay bpmDisplay { koni };
@@ -3105,6 +3268,14 @@ private:
                  pvFEnvView { koni.apvts, EngineEnv::polivoks ("pvF") }, pvAEnvView { koni.apvts, EngineEnv::polivoks ("pvA") };
     // Curvas de transferencia: saturación por voz (diálogo Saturation...), Crush y Tube
     ShaperView voiceSatView { koni.apvts, Shapers::voiceSat() }, crushView { koni.apvts, Shapers::crush() }, tubeView { koni.apvts, Shapers::tube() };
+    EqCurve eqMiniCurve { koni.apvts, true }; // curva del EQ en su bloque (UI/EqPanel.h)
+    // Paneles de conexiones (UI/PatchBay.h): el del complejo (dentro de su sección) y el de los destinos de los LFO
+    PatchBay complexBay { koni.apvts, complexPatch (koni.apvts) };
+    PatchBay lfoBay { koni.apvts, lfoPatch (koni.apvts, [this] { return engine == 0; }) };
+    Section lfoPatchSection { "Mod Patch" };
+    ModSourceBar modBar { koni.apvts }; // barra MOD de fuentes: fija con el Synth acoplado, fila en la ventana flotante
+    std::array<unsigned, Params::liveVoices> lastVoiceTick {}; // updateRings: contador de cada voz en el fotograma anterior
+    std::array<int, Params::liveVoices> voiceQuiet {};         // fotogramas seguidos sin avanzar
     LfoView lfoView { koni.apvts, false }, lfo2View { koni.apvts, true }; // ídem, LFO 1 y LFO 2
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
@@ -3115,7 +3286,7 @@ private:
     std::unique_ptr<FloatWindow> bpmWindow, engineWindow;
     std::vector<Section*> engineWindowSecs; // secciones que tiene la ventana del motor (para detectar cambio de motor)
     juce::Point<int> engineWindowPos;
-    Section osc { "Oscillator" }, filter { "Filter" }, master { "Master" }, lfo { "LFO" },
+    Section osc { "Oscillator" }, filter { "Filter" }, master { "Master" }, lfo { "LFO 1" },
             echo { "Tape Echo" }, crushSection { "Crush" }, phaserSection { "Phaser" }, lfo2Section { "LFO 2" },
             formantSection { "Formant" }, ambient { "Plate Reverb" }, tube { "Tube" }, thereminSection { "Theremin" },
             chorusSection { "Chorus" }, mediaSection { "Media" }, complexSection { "Complex Oscillator" },

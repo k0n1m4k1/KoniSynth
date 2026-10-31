@@ -3,11 +3,17 @@
 #pragma once
 
 // UI: wavetable como pila de fotogramas en perspectiva (el actual, según Position, resaltado). which: la de la fuente
-// Wavetable (KoniSynthProcessor::wtMain) o la de Osc 2 (wtOsc2)
+// Wavetable (KoniSynthProcessor::wtMain), la de Osc 2 (wtOsc2) o la de Osc 3 (wtOsc3)
 class WavetableView : public juce::Component, private juce::Timer
 {
 public:
     WavetableView (KoniSynthProcessor& p, int w) : koni (p), which (w) { startTimerHz (15); }
+
+    // Parámetro de posición de cada tabla
+    static const char* positionId (int which)
+    {
+        return which == KoniSynthProcessor::wtOsc2 ? "osc2WtPosition" : which == KoniSynthProcessor::wtOsc3 ? "osc3WtPosition" : "wtPosition";
+    }
 
     void paint (juce::Graphics& g) override
     {
@@ -24,7 +30,7 @@ public:
         const auto area = r.reduced (16.0f);
         const auto depthX = area.getWidth() * 0.25f, depthY = area.getHeight() * 0.35f;
         const auto w = area.getWidth() - depthX, h = area.getHeight() - depthY;
-        const auto position = koni.apvts.getRawParameterValue (which == KoniSynthProcessor::wtOsc2 ? "osc2WtPosition" : "wtPosition")->load();
+        const auto position = koni.apvts.getRawParameterValue (positionId (which))->load();
         const auto current = juce::roundToInt (position * (float) (n - 1));
 
         auto drawFrame = [&] (int k, juce::Colour colour, float thickness)
@@ -72,17 +78,24 @@ private:
 class WavetablePanel : public juce::Component
 {
 public:
-    // which: KoniSynthProcessor::wtMain (pestaña Wavetable) o wtOsc2 (Osc 2 en modo Wavetable, nivel en Osc 2)
+    // which: KoniSynthProcessor::wtMain (pestaña Wavetable), wtOsc2 (Osc 2 en modo Wavetable, nivel en Osc 2) o wtOsc3 (Osc 3,
+    // nivel en Osc 3: subLevel)
+    static const char* titleOf (int which)
+    {
+        return which == KoniSynthProcessor::wtOsc2 ? "Osc 2 Wavetable" : which == KoniSynthProcessor::wtOsc3 ? "Osc 3 Wavetable" : "Wavetable";
+    }
+
     WavetablePanel (KoniSynthProcessor& p, int which, std::function<void()> chooseFile)
-        : view (p, which), controls (which == KoniSynthProcessor::wtOsc2 ? "Osc 2 Wavetable" : "Wavetable")
+        : view (p, which), controls (titleOf (which))
     {
         auto& s = p.apvts;
-        const auto osc2 = which == KoniSynthProcessor::wtOsc2;
-        controls.withCombo (s, osc2 ? "osc2WtTable" : "wtTable")
+        const auto osc2 = which == KoniSynthProcessor::wtOsc2, osc3 = which == KoniSynthProcessor::wtOsc3;
+        controls.withCombo (s, osc2 ? "osc2WtTable" : osc3 ? "osc3WtTable" : "wtTable")
                 .withHeaderButton ("Load", "Load a wavetable file: WAV with 2048 samples per frame (Serum format) or a single cycle.", std::move (chooseFile))
-                .withKnob (s, osc2 ? "osc2Level" : "wtLevel", "Level").withKnob (s, osc2 ? "osc2WtPosition" : "wtPosition", "Position");
+                .withKnob (s, osc2 ? "osc2Level" : osc3 ? "subLevel" : "wtLevel", "Level").withKnob (s, WavetableView::positionId (which), "Position");
         lfoHint.setText (osc2 ? "Osc 2 plays this table with its Wave set to Wavetable. Tip: a matrix slot with destination 'Osc 2 WT Position' sweeps it."
-                              : "Tip: set LFO 2 Target to 'WT Position' to sweep the table.", juce::dontSendNotification);
+                       : osc3 ? "Osc 3 plays this table with its Wave set to Wavetable. Tip: a matrix slot with destination 'Osc 3 WT Position' sweeps it."
+                              : "Tip: patch LFO 2 to WT POS in Mod Patch to sweep the table.", juce::dontSendNotification);
         lfoHint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         addAndMakeVisible (view);
         addAndMakeVisible (controls);

@@ -45,7 +45,7 @@ struct ComplexArgs
     int wave, modWave;
     double modRatio, fmIndex, am, pw;
     bool sync;
-    // Modulador externo (complexModSource = Osc 2 u Osc 3): un mismo valor para todos los carriles en esta submuestra, en
+    // Modulador externo (complexModSource = Osc 2, Osc 3 o Noise): un mismo valor para todos los carriles en esta submuestra, en
     // lugar del modulador interno (modWave, modRatio y modPhase por carril, que entonces no avanza)
     bool external = false;
     double extMod = 0.0;      // valor del modulador

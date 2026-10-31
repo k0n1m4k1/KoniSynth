@@ -117,6 +117,7 @@ public:
             paintCrt (g, full);
         else
             Skin::scanlines (g, full.toNearestInt()); // skins de fósforo: barrido también en el estilo normal
+        Skin::crtNoise (g, full, 8.0f); // Vintage 60s: grano y glitches de tubo
         if (framed)
             paintGlass (g, full);
     }

@@ -138,13 +138,13 @@ public:
     {
         for (int i = 0; i < 8; ++i)
         {
-            auto* voice = new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot, modalSlot);
+            auto* voice = new SynthVoice (params, sampleSlot, osc2SampleSlot, osc3SampleSlot, wavetableSlot, osc2WavetableSlot, osc3WavetableSlot, modalSlot);
             voice->cardIndex = i; // tarjeta de voz física (Tolerances: Per Voice Card)
             synth.addVoice (voice);
         }
         synth.addSound (new SynthSound());
         synth.assignMode = params.voiceAssign;
-        monoSynth.addVoice (new SynthVoice (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot, modalSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
+        monoSynth.addVoice (new SynthVoice (params, sampleSlot, osc2SampleSlot, osc3SampleSlot, wavetableSlot, osc2WavetableSlot, osc3WavetableSlot, modalSlot)); // Mono / Legato: una voz (el robo implementa la prioridad)
         monoSynth.addSound (new SynthSound());
         // Cada evento MIDI en su muestra: por defecto JUCE no parte el bloque si el siguiente evento está a menos de 32
         // muestras y lo adelanta (medido: notas a 1, 7 y 31 muestras de otra sonaban a la vez que ella; juce_Synthesiser.cpp:217).
@@ -168,13 +168,16 @@ public:
         startTimer (100); // libera datos retirados (DataSlot::collect) y genera la wavetable incluida elegida
         presetManager.onPresetFiles = [this] (std::optional<juce::String> sample, std::optional<juce::String> wavetable,
                                               std::optional<juce::String> cabIr, juce::String osc2SamplePath,
-                                              std::optional<juce::String> osc2Wavetable, PresetManager::EngineSamplePaths engineSamples)
+                                              std::optional<juce::String> osc2Wavetable, PresetManager::EngineSamplePaths engineSamples,
+                                              juce::String osc3SamplePath, std::optional<juce::String> osc3Wavetable)
         {
             if (sample.has_value())    restoreSample (*sample);
             if (wavetable.has_value()) restoreWavetable (*wavetable);
             if (osc2Wavetable.has_value()) restoreWavetable (*osc2Wavetable, wtOsc2);
+            if (osc3Wavetable.has_value()) restoreWavetable (*osc3Wavetable, wtOsc3);
             if (cabIr.has_value())     restoreCabIr (*cabIr);
             restoreSample (osc2SamplePath, osc2Sample);
+            restoreSample (osc3SamplePath, osc3Sample);
             for (int k = 0; k < 4; ++k)
                 if (engineSamples[(size_t) k].has_value())
                     restoreSample (*engineSamples[(size_t) k], dpcmSample + k);
@@ -188,12 +191,14 @@ public:
 
     // Samples (which), mismo código para todos; cada uno con su DataSlot, su ruta en el estado y su aviso: 0 = la fuente Sample
     // del Synth, 1 = Osc 2 en modo Sample, y el propio de cada motor de consola (su "User Sample"): 2 = 8-Bit/DPCM, 3 = Mega
-    // Drive (DAC), 4 = SNES, 5 = N64. Hasta la 1.0.0 los de consola usaban el 0 (se migra: PresetManager::engineSamples)
-    static constexpr int sourceSample = 0, osc2Sample = 1, dpcmSample = 2, mdSample = 3, snesSample = 4, n64Sample = 5, numSampleSlots = 6;
+    // Drive (DAC), 4 = SNES, 5 = N64. Hasta la 1.0.0 los de consola usaban el 0 (se migra: PresetManager::engineSamples).
+    // 6 = Osc 3 en modo Sample (1.0.1, añadido al final)
+    static constexpr int sourceSample = 0, osc2Sample = 1, dpcmSample = 2, mdSample = 3, snesSample = 4, n64Sample = 5, osc3Sample = 6,
+                         numSampleSlots = 7;
 
-    // Las dos wavetables del motor Synth (which): 0 = la fuente Wavetable, 1 = Osc 2 en modo Wavetable. Mismo código para las
-    // dos; cada una con su DataSlot, su parámetro de tabla, su ruta en el estado y su aviso
-    static constexpr int wtMain = 0, wtOsc2 = 1;
+    // Las wavetables del motor Synth (which): 0 = la fuente Wavetable, 1 = Osc 2 y 2 = Osc 3 en modo Wavetable. Mismo código para
+    // las tres; cada una con su DataSlot, su parámetro de tabla, su ruta en el estado y su aviso
+    static constexpr int wtMain = 0, wtOsc2 = 1, wtOsc3 = 2, numWavetableSlots = 3;
 
     // Carga un sample (cualquier hilo salvo el de audio). item: elemento de un banco .sf2/.spc (Import/SampleImport.h).
     // Devuelve el error o una cadena vacía.
@@ -796,6 +801,9 @@ public:
                     es.highFreq = params.eqHighFreq->load(); es.highGain = params.eqHighGain->load(); es.outputDb = params.eqOutput->load();
                     es.lowCutOrder = orders[juce::jlimit (0, 3, (int) params.eqLowCutSlope->load())];
                     es.highCutOrder = orders[juce::jlimit (0, 3, (int) params.eqHighCutSlope->load())];
+                    std::array<bool, 6> bandOn {};
+                    for (size_t b = 0; b < 6; ++b) bandOn[b] = params.eqBandOn[b]->load() > 0.5f;
+                    Eq::bypass (es, bandOn);
                     equalizer.process (buffer, es);
                 }
                 eqWasOn = eqOn;
@@ -1074,6 +1082,7 @@ public:
         sampleSlot.blocksDone.fetch_add (1, std::memory_order_release); // ver DataSlot
         for (auto& b : rhythmBanks) b.slot.blocksDone.fetch_add (1, std::memory_order_release);
         osc2SampleSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        osc3SampleSlot.blocksDone.fetch_add (1, std::memory_order_release);
         modalSlot.blocksDone.fetch_add (1, std::memory_order_release);
         for (auto* slot : { &dpcmSampleSlot, &mdSampleSlot, &snesSampleSlot, &n64SampleSlot })
             slot->blocksDone.fetch_add (1, std::memory_order_release);
@@ -1083,6 +1092,7 @@ public:
         snesMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
         wavetableSlot.blocksDone.fetch_add (1, std::memory_order_release);
         osc2WavetableSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        osc3WavetableSlot.blocksDone.fetch_add (1, std::memory_order_release);
         mt32Engine.slot.blocksDone.fetch_add (1, std::memory_order_release);
     }
 
@@ -1291,6 +1301,23 @@ public:
                         xml->setAttribute (osc2WtPathProp.toString(), xml->getStringAttribute (wtPathProp.toString()));
                 }
 
+                // Estados anteriores a osc3Octave (hasta la 1.0.0-beta): subOctave y Semi ±24 -> Oct y Semi ±12, misma afinación
+                // (PresetManager::osc3FromSub). subOctave se quita: ya no es un parámetro
+                if (xml->getChildByAttribute ("id", "osc3Octave") == nullptr)
+                {
+                    auto* sub = xml->getChildByAttribute ("id", "subOctave");
+                    auto* semi = xml->getChildByAttribute ("id", "osc3Semi");
+                    const auto [octave, semis] = PresetManager::osc3FromSub (sub != nullptr ? juce::roundToInt (sub->getDoubleAttribute ("value")) : 0,
+                                                                            semi != nullptr ? juce::roundToInt (semi->getDoubleAttribute ("value")) : 0);
+                    auto* e = xml->createNewChildElement ("PARAM");
+                    e->setAttribute ("id", "osc3Octave");
+                    e->setAttribute ("value", octave);
+                    if (semi != nullptr)
+                        semi->setAttribute ("value", semis);
+                    if (sub != nullptr)
+                        xml->removeChildElement (sub, true);
+                }
+
                 apvts.replaceState (juce::ValueTree::fromXml (*xml));
                 presetManager.invalidateSnapshot();
                 perfMacros.update();
@@ -1302,9 +1329,11 @@ public:
 
                 restoreFiles (apvts.state.getProperty (samplePathProp).toString(), apvts.state.getProperty (wtPathProp).toString());
                 restoreSample (apvts.state.getProperty (osc2SamplePathProp).toString(), osc2Sample); // sin la propiedad (proyectos anteriores): sin fichero
-                for (int which = dpcmSample; which < numSampleSlots; ++which)
+                restoreSample (apvts.state.getProperty (osc3SamplePathProp).toString(), osc3Sample); // ídem (anteriores a la 1.0.1)
+                for (int which = dpcmSample; which <= n64Sample; ++which)
                     restoreSample (apvts.state.getProperty (pathPropFor (which)).toString(), which);
                 restoreWavetable (apvts.state.getProperty (osc2WtPathProp).toString(), wtOsc2);
+                restoreWavetable (apvts.state.getProperty (osc3WtPathProp).toString(), wtOsc3); // sin la propiedad: la tabla incluida
                 restoreCabIr (apvts.state.getProperty (cabIrPathProp).toString());
                 restoreTuning();
                 // El host debe releer los valores: el wrapper CLAP lo traduce a params->rescan (clap-validator,
@@ -1388,7 +1417,9 @@ public:
             if (error.isNotEmpty())
             {
                 apvts.state.setProperty (tablePathProp (which), wavetablePath, nullptr);
-                reportMissing (which == wtOsc2 ? MissingFile::Kind::osc2Wavetable : MissingFile::Kind::wavetable, file, file.existsAsFile());
+                reportMissing (which == wtOsc2 ? MissingFile::Kind::osc2Wavetable : which == wtOsc3 ? MissingFile::Kind::osc3Wavetable
+                                                                                                    : MissingFile::Kind::wavetable,
+                               file, file.existsAsFile());
             }
         }
     }
@@ -1451,7 +1482,7 @@ public:
     // y los consume el editor, uno a uno
     struct MissingFile
     {
-        enum class Kind { sample, wavetable, cabIr, osc2Sample, osc2Wavetable, dpcmSample, mdSample, snesSample, n64Sample };
+        enum class Kind { sample, wavetable, cabIr, osc2Sample, osc2Wavetable, dpcmSample, mdSample, snesSample, n64Sample, osc3Sample, osc3Wavetable };
         Kind kind;
         juce::File file;
         bool unreadable = false;
@@ -1459,7 +1490,8 @@ public:
     static MissingFile::Kind missingKindFor (int which)
     {
         using K = MissingFile::Kind;
-        static constexpr K kinds[numSampleSlots] = { K::sample, K::osc2Sample, K::dpcmSample, K::mdSample, K::snesSample, K::n64Sample };
+        static constexpr K kinds[numSampleSlots] = { K::sample, K::osc2Sample, K::dpcmSample, K::mdSample, K::snesSample, K::n64Sample,
+                                                     K::osc3Sample };
         return kinds[juce::jlimit (0, numSampleSlots - 1, which)];
     }
     static int sampleWhichFor (MissingFile::Kind kind) // -1 si no es un sample
@@ -1902,31 +1934,36 @@ private:
     std::array<float, 2> crushHeld {};
     std::vector<float> inputMono;
     float lastInputGain = 1.0f;
-    SampleSlot sampleSlot, osc2SampleSlot;
+    SampleSlot sampleSlot, osc2SampleSlot, osc3SampleSlot;
     SampleSlot dpcmSampleSlot, mdSampleSlot, snesSampleSlot, n64SampleSlot; // sample propio de cada motor de consola
-    WavetableSlot wavetableSlot, osc2WavetableSlot;
+    WavetableSlot wavetableSlot, osc2WavetableSlot, osc3WavetableSlot;
     juce::CriticalSection missingLock;
     std::vector<MissingFile> missing;
-    std::array<std::atomic<int>, 2> builtInLoaded { -1, -1 }; // tabla incluida cargada en cada slot (wtMain, wtOsc2); -1 = fichero
-    static inline const juce::Identifier wtPathProp { "wtPath" }, osc2WtPathProp { "osc2WtPath" };
-    WavetableSlot& tableSlot (int which) { return which == wtOsc2 ? osc2WavetableSlot : wavetableSlot; }
-    const WavetableSlot& tableSlot (int which) const { return which == wtOsc2 ? osc2WavetableSlot : wavetableSlot; }
-    std::atomic<float>* tableParam (int which) const { return which == wtOsc2 ? params.osc2WtTable : params.wtTable; }
-    static const juce::Identifier& tablePathProp (int which) { return which == wtOsc2 ? osc2WtPathProp : wtPathProp; }
+    // Tabla incluida cargada en cada slot (wtMain, wtOsc2, wtOsc3); -1 = fichero
+    std::array<std::atomic<int>, numWavetableSlots> builtInLoaded { -1, -1, -1 };
+    static inline const juce::Identifier wtPathProp { "wtPath" }, osc2WtPathProp { "osc2WtPath" }, osc3WtPathProp { "osc3WtPath" };
+    WavetableSlot& tableSlot (int which) { return which == wtOsc2 ? osc2WavetableSlot : which == wtOsc3 ? osc3WavetableSlot : wavetableSlot; }
+    const WavetableSlot& tableSlot (int which) const { return which == wtOsc2 ? osc2WavetableSlot : which == wtOsc3 ? osc3WavetableSlot : wavetableSlot; }
+    std::atomic<float>* tableParam (int which) const { return which == wtOsc2 ? params.osc2WtTable : which == wtOsc3 ? params.osc3WtTable : params.wtTable; }
+    static const juce::Identifier& tablePathProp (int which) { return which == wtOsc2 ? osc2WtPathProp : which == wtOsc3 ? osc3WtPathProp : wtPathProp; }
+    static const char* tableParamId (int which) { return which == wtOsc2 ? "osc2WtTable" : which == wtOsc3 ? "osc3WtTable" : "wtTable"; }
     juce::CriticalSection sampleInfoLock;
-    // Por sample (sourceSample, osc2Sample): texto para la UI, nota raíz del formato (-1 = desconocida) y bucle propio
+    // Por sample (sourceSample, osc2Sample...): texto para la UI, nota raíz del formato (-1 = desconocida) y bucle propio
     struct SampleInfo { juce::String text; int rootKey = -1; bool hasLoop = false; };
     std::array<SampleInfo, numSampleSlots> sampleInfos;
     static inline const juce::Identifier samplePathProp { "samplePath" }, osc2SamplePathProp { "osc2SamplePath" },
                                          dpcmSamplePathProp { "dpcmSamplePath" }, mdSamplePathProp { "mdSamplePath" },
-                                         snesSamplePathProp { "snesSamplePath" }, n64SamplePathProp { "n64SamplePath" };
+                                         snesSamplePathProp { "snesSamplePath" }, n64SamplePathProp { "n64SamplePath" },
+                                         osc3SamplePathProp { "osc3SamplePath" };
     SampleSlot& slotFor (int which) { return *sampleSlots()[(size_t) juce::jlimit (0, numSampleSlots - 1, which)]; }
     const SampleSlot& slotFor (int which) const { return *const_cast<KoniSynthProcessor*> (this)->sampleSlots()[(size_t) juce::jlimit (0, numSampleSlots - 1, which)]; }
-    std::array<SampleSlot*, numSampleSlots> sampleSlots() { return { &sampleSlot, &osc2SampleSlot, &dpcmSampleSlot, &mdSampleSlot, &snesSampleSlot, &n64SampleSlot }; }
+    std::array<SampleSlot*, numSampleSlots> sampleSlots() { return { &sampleSlot, &osc2SampleSlot, &dpcmSampleSlot, &mdSampleSlot, &snesSampleSlot, &n64SampleSlot,
+                                                                      &osc3SampleSlot }; }
     static const juce::Identifier& pathPropFor (int which)
     {
         static const std::array<const juce::Identifier*, numSampleSlots> props { &samplePathProp, &osc2SamplePathProp, &dpcmSamplePathProp,
-                                                                                 &mdSamplePathProp, &snesSamplePathProp, &n64SamplePathProp };
+                                                                                 &mdSamplePathProp, &snesSamplePathProp, &n64SamplePathProp,
+                                                                                 &osc3SamplePathProp };
         return *props[(size_t) juce::jlimit (0, numSampleSlots - 1, which)];
     }
     static inline const juce::Identifier cabIrPathProp { "cabIrPath" }; // mismo nombre que el atributo del preset
@@ -1959,7 +1996,7 @@ public:
     {
         if (mathPreviewVoice == nullptr)
         {
-            mathPreviewVoice = std::make_unique<SynthVoice> (params, sampleSlot, osc2SampleSlot, wavetableSlot, osc2WavetableSlot, modalSlot);
+            mathPreviewVoice = std::make_unique<SynthVoice> (params, sampleSlot, osc2SampleSlot, osc3SampleSlot, wavetableSlot, osc2WavetableSlot, osc3WavetableSlot, modalSlot);
             mathPreviewVoice->setCurrentPlaybackSampleRate (mathPreviewRate);
         }
         mathPreviewVoice->renderMathPreview (out.data(), (int) out.size(), f0, velocity, gateSamples);
@@ -2015,6 +2052,7 @@ private:
             slot->collect();
         wavetableSlot.collect();
         osc2WavetableSlot.collect();
+        osc3WavetableSlot.collect();
         ansSlot.collect();
         updateAnsScore();
         chipMacroSlot.collect();
@@ -2068,7 +2106,7 @@ private:
     // un render offline sin bucle de mensajes (bounce, KoniBench) también la tiene desde el primer bloque
     void updateBuiltInWavetable()
     {
-        for (const auto which : { wtMain, wtOsc2 })
+        for (const auto which : { wtMain, wtOsc2, wtOsc3 })
         {
             const auto table = (int) tableParam (which)->load();
             auto& loaded = builtInLoaded[(size_t) which];
@@ -2151,7 +2189,7 @@ public:
         tableSlot (which).replace (std::move (data));
         builtInLoaded[(size_t) which] = -1;
         apvts.state.setProperty (tablePathProp (which), file.getFullPathName(), nullptr);
-        if (auto* p = apvts.getParameter (which == wtOsc2 ? "osc2WtTable" : "wtTable"))
+        if (auto* p = apvts.getParameter (tableParamId (which)))
             p->setValueNotifyingHost (p->convertTo0to1 (5.0f));
         return {};
     }
@@ -2289,8 +2327,11 @@ private:
 
 #include "UI/Skin.h" // antes que cualquier UI: Skin::c() en todos los colores
 #include "UI/Overlay.h" // antes de Widgets: el menú de parámetro abre "Set value..." en un Overlay
+#include "UI/MatrixUi.h" // antes de Widgets: la perilla es destino de las fuentes de la matriz
 #include "UI/Widgets.h"
 #include "UI/SourceTabs.h"
+#include "UI/PatchBay.h"
+#include "UI/ModSources.h"
 
 #include "UI/Displays.h"
 #include "UI/TransportPanel.h"
@@ -2327,6 +2368,7 @@ private:
 #include "UI/MacroPanel.h"
 #include "UI/PerfMacroPanel.h"
 #include "UI/EqPanel.h"
+#include "UI/MixerPanel.h"
 #include "UI/DynamicsPanel.h"
 #include "UI/MatrixPanel.h"
 

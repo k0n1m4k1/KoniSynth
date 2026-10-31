@@ -112,6 +112,22 @@ struct ParamMenu : juce::MouseListener
         else if (dynamic_cast<juce::AudioParameterBool*> (param) == nullptr)
             menu.addItem (4, "Set value...");
         menu.addItem (3, "Reset to default (" + param->getText (param->getDefaultValue(), 32) + ")");
+        // Modulaciones de la matriz que mueven este mando (UI/MatrixUi.h): quitar una o todas
+        const auto destination = MatrixUi::destinationOf (param->getParameterID());
+        const auto modSlots = destination > 0 ? MatrixUi::slotsFor (koni.apvts, destination) : std::vector<int>();
+        if (! modSlots.empty())
+        {
+            menu.addSeparator();
+            for (const auto slot : modSlots)
+            {
+                const auto src = (int) MatrixUi::slotValue (koni.apvts, "mtxSrc", slot);
+                const auto amt = MatrixUi::slotValue (koni.apvts, "mtxAmt", slot);
+                menu.addItem (300 + slot, "Remove modulation: " + ModMatrix::sourceNames()[src] + " ("
+                                              + (amt > 0.0f ? "+" : "") + juce::String (juce::roundToInt (amt * 100.0f)) + " %)");
+            }
+            if (modSlots.size() > 1)
+                menu.addItem (320, "Remove all modulation");
+        }
         // Macros de interpretación (Params/PerfMacros.h): asignar este parámetro a una (las macros no se asignan entre sí)
         const auto id = param->getParameterID();
         if (! PerfMacros::isMacroParam (id))
@@ -126,11 +142,15 @@ struct ParamMenu : juce::MouseListener
                 menu.addItem (210, "Remove from " + koni.perfMacros.name (current));
         }
         menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (component.getComponent()),
-            [this, p = param, l = &learn, index, safe = component] (int result)
+            [this, p = param, l = &learn, index, safe = component, modSlots] (int result)
             {
                 if (safe == nullptr)
                     return;
-                if (result >= 200 && result < 200 + PerfMacros::numMacros)
+                if (result >= 300 && result < 300 + ModMatrix::numSlots)
+                    MatrixUi::removeSlot (koni.apvts, result - 300);
+                else if (result == 320)
+                    for (const auto slot : modSlots) MatrixUi::removeSlot (koni.apvts, slot);
+                else if (result >= 200 && result < 200 + PerfMacros::numMacros)
                     koni.perfMacros.assign (result - 200, p->getParameterID());
                 else if (result == 210)
                     koni.perfMacros.remove (p->getParameterID());
@@ -400,12 +420,13 @@ inline void showResetMenu (APVTS& s, juce::Component& target, const juce::String
                      [st = &s, list] (int id) { if (id == 1) resetParamsToDefaults (*st, list); });
 }
 
-struct Knob : juce::Component, private juce::Timer
+struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Timer
 {
     enum class Style { rotary, vertical };
 
     Knob (APVTS& s, const juce::String& id, const juce::String& text, Style st = Style::rotary)
-        : style (st),
+        : apvts (s),
+          style (st),
           attachment (s, id, slider),
           menu (s, id, slider),
           name (text),
@@ -463,6 +484,11 @@ struct Knob : juce::Component, private juce::Timer
             slider.setMouseDragSensitivity (28 * (options - 1));
         }
         addAndMakeVisible (slider);
+        lampHit.setTooltip ("Modulation sources moving this knob (pilot lamps, glowing with their signal). Click: their "
+                            "attenuators. Right-click the knob: remove a modulation.");
+        lampHit.setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        lampHit.onClick = [this] { openAttenuators(); };
+        addChildComponent (lampHit);
         startTimerHz (5); // refleja asignaciones hechas desde el hilo de audio
     }
 
@@ -487,6 +513,7 @@ struct Knob : juce::Component, private juce::Timer
             r = r.withSizeKeepingCentre (r.getWidth(), juce::jmin (r.getHeight(), 18 + maxDial + 22));
         label.setBounds (r.removeFromTop (18));
         slider.setBounds (r);
+        layoutLamps();
         if (key.isVisible())
         {
             // Tecla de 56 × 34 px como mucho en el sitio del dial; debajo, la opción elegida en una caja de valor como la de
@@ -512,10 +539,30 @@ struct Knob : juce::Component, private juce::Timer
             g.setColour (juce::Colours::black.withAlpha (0.5f));
             g.fillRoundedRectangle (r.translated (0.0f, 1.2f - travel * 0.6f), 4.5f);
             r = r.translated (0.0f, travel);
-            g.setGradientFill (juce::ColourGradient (Skin::c (over ? 0xff5a616b : 0xff515861), 0.0f, r.getY(),
-                                                     Skin::c (0xff23272d), 0.0f, r.getBottom(), false));
+            // Material del skin (Skin::material), como las perillas: aluminio claro o topacio; si no, la de siempre
+            const auto mat = Skin::material();
+            const auto topaz = mat == Skin::Material::topaz, bake = mat == Skin::Material::bakelite;
+            const auto light = mat == Skin::Material::aluminium || topaz;
+            if (bake)
+                g.setGradientFill (juce::ColourGradient (juce::Colour (over ? 0xff47453f : 0xff3a3936), 0.0f, r.getY(),
+                                                         juce::Colour (0xff070707), 0.0f, r.getBottom(), false));
+            else if (topaz)
+                g.setGradientFill (juce::ColourGradient (juce::Colour (over ? 0xffe4a448 : 0xffd08a30), 0.0f, r.getY(),
+                                                         juce::Colour (0xff3e1c04), 0.0f, r.getBottom(), false));
+            else if (light)
+                g.setGradientFill (juce::ColourGradient (juce::Colour (over ? 0xffeef1f4 : 0xffdde1e5), 0.0f, r.getY(),
+                                                         juce::Colour (0xff7f868e), 0.0f, r.getBottom(), false));
+            else
+                g.setGradientFill (juce::ColourGradient (Skin::c (over ? 0xff5a616b : 0xff515861), 0.0f, r.getY(),
+                                                         Skin::c (0xff23272d), 0.0f, r.getBottom(), false));
             g.fillRoundedRectangle (r, 4.0f);
-            g.setColour (juce::Colours::white.withAlpha (0.16f)); // canto superior iluminado
+            if (topaz) // brillo interior de la gema en la mitad baja (la luz sale por el lado opuesto)
+            {
+                g.setGradientFill (juce::ColourGradient (juce::Colour (0xffffc45a).withAlpha (0.4f), r.getCentreX(), r.getBottom() - 3.0f,
+                                                         juce::Colour (0xffffc45a).withAlpha (0.0f), r.getCentreX(), r.getCentreY() - 2.0f, false));
+                g.fillRoundedRectangle (r, 4.0f);
+            }
+            g.setColour (juce::Colours::white.withAlpha (light ? 0.5f : bake ? 0.28f : 0.16f)); // canto superior iluminado
             g.drawHorizontalLine (juce::roundToInt (r.getY() + 1.0f), r.getX() + 4.0f, r.getRight() - 4.0f);
             g.setColour (juce::Colours::black.withAlpha (0.7f));
             g.drawRoundedRectangle (r, 4.0f, 1.0f);
@@ -526,7 +573,12 @@ struct Knob : juce::Component, private juce::Timer
                 g.setColour (juce::Colour (0xffff3030).withAlpha (0.35f));
                 g.fillRoundedRectangle (led.expanded (3.0f, 2.5f), 3.0f);
             }
-            g.setColour (on ? juce::Colour (0xffff5a4a) : Skin::c (0xff3a1414));
+            if (light) // ventana del LED hundida en el aluminio
+            {
+                g.setColour (juce::Colours::black.withAlpha (0.55f));
+                g.fillRoundedRectangle (led.expanded (1.2f), 2.0f);
+            }
+            g.setColour (on ? juce::Colour (0xffff5a4a) : light ? juce::Colour (0xff3a1414) : Skin::c (0xff3a1414));
             g.fillRoundedRectangle (led, 1.5f);
         }
     };
@@ -572,7 +624,7 @@ struct Knob : juce::Component, private juce::Timer
 
     float layoutWeight() const { return style == Style::rotary ? 1.0f : 0.9f; } // slider: su caja de valor ("300 ms") necesita ~50 px
 
-    // Anillo de modulación (matriz, UI/MatrixPanel.h): rango [lo, hi] y valor en vivo (normalizados; live < 0 = sin punto)
+    // Anillo de modulación (matriz, UI/MatrixUi.h): rango [lo, hi] y valor en vivo (normalizados; live < 0 = sin punto)
     void setRing (bool on, float lo, float hi, float live)
     {
         if (on == ringOn && std::abs (lo - ringLo) < 1.0e-3f && std::abs (hi - ringHi) < 1.0e-3f && std::abs (live - ringLive) < 1.0e-3f)
@@ -581,10 +633,67 @@ struct Knob : juce::Component, private juce::Timer
         repaint();
     }
 
+    // Lámpara piloto de una fuente que mueve este mando: su color y su brillo (0..1, el valor de la fuente ahora)
+    struct Lamp { juce::Colour colour; float glow; };
+    // Un punto por voz que suena (normalizados; sustituyen al punto único de setRing) y las lámparas de sus fuentes
+    void setModView (std::vector<float> dots, std::vector<Lamp> sources)
+    {
+        auto same = dots.size() == voiceDots.size() && sources.size() == lamps.size();
+        for (size_t i = 0; same && i < dots.size(); ++i) same = std::abs (dots[i] - voiceDots[i]) < 1.0e-3f;
+        for (size_t i = 0; same && i < sources.size(); ++i) same = sources[i].colour == lamps[i].colour && std::abs (sources[i].glow - lamps[i].glow) < 0.02f;
+        if (same) return;
+        voiceDots = std::move (dots);
+        lamps = std::move (sources);
+        lampHit.setVisible (! lamps.empty());
+        layoutLamps();
+        repaint();
+    }
+
+    // Fuentes de la matriz arrastradas desde Mod Sources ("modsrc:N"): solo los mandos que son destino
+    bool isInterestedInDragSource (const SourceDetails& d) override
+    {
+        return d.description.toString().startsWith ("modsrc:") && MatrixUi::destinationOf (paramId) > 0;
+    }
+    void itemDragEnter (const SourceDetails&) override { dropHover = true; repaint(); }
+    void itemDragExit (const SourceDetails&) override { dropHover = false; repaint(); }
+    void itemDropped (const SourceDetails& d) override
+    {
+        dropHover = false;
+        repaint();
+        const auto src = d.description.toString().fromFirstOccurrenceOf (":", false, false).getIntValue();
+        const auto r = MatrixUi::addRoute (apvts, src, MatrixUi::destinationOf (paramId));
+        if (r == MatrixUi::routeExists)
+            showMessage (ModMatrix::sourceNames()[src] + " already moves " + name);
+        else if (r == MatrixUi::routesFull)
+            showMessage ("All 8 matrix slots in use");
+    }
+
+    // Aviso breve en la burbuja (1,6 s)
+    void showMessage (const juce::String& text)
+    {
+        showBubble (true);
+        bubble.text = text;
+        const auto w = juce::roundToInt (juce::GlyphArrangement::getStringWidth (juce::Font (juce::FontOptions (15.0f, juce::Font::bold)), text)) + 24;
+        bubble.setSize (w, bubble.getHeight());
+        bubble.repaint();
+        juce::Timer::callAfterDelay (1600, [safe = juce::Component::SafePointer<Knob> (this)] { if (safe != nullptr) safe->showBubble (false); });
+    }
+
+    // Abre la tira de atenuadores de las fuentes de este mando (definida tras AttenuatorStrip)
+    void openAttenuators();
+
     // Arco ámbar por fuera del arco de valor, con la geometría de LookAndFeel_V4::drawRotarySlider tal como lo llama
-    // KoniLookAndFeel (rectángulo ampliado 8 px y reducido 10: neto, 2 px por lado)
+    // KoniLookAndFeel (rectángulo ampliado 8 px y reducido 10: neto, 2 px por lado). Encima: un punto por voz que suena y,
+    // en el hueco inferior del dial (los 90° sin recorrido), las lámparas piloto de las fuentes, que brillan con su valor
     void paintOverChildren (juce::Graphics& g) override
     {
+        if (dropHover) // una fuente arrastrada encima: se puede soltar aquí
+        {
+            g.setColour (Skin::accent().withAlpha (0.18f));
+            g.fillRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 6.0f);
+            g.setColour (Skin::accent());
+            g.drawRoundedRectangle (getLocalBounds().toFloat().reduced (1.0f), 6.0f, 1.2f);
+        }
         if (! ringOn || style != Style::rotary)
             return;
         const auto area = slider.getBounds().withTrimmedBottom (18).toFloat().reduced (2.0f);
@@ -598,14 +707,58 @@ struct Knob : juce::Component, private juce::Timer
         arc.addCentredArc (c.x, c.y, ringR, ringR, 0.0f, angle (ringLo), angle (juce::jmax (ringHi, ringLo + 0.004f)), true);
         g.setColour (Skin::c (0xffffb000).withAlpha (0.85f));
         g.strokePath (arc, juce::PathStrokeType (juce::jmax (2.0f, lineW * 0.35f), juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-        if (ringLive >= 0.0f)
+        const auto dot = [&] (float v)
         {
-            const auto a = angle (ringLive) - juce::MathConstants<float>::halfPi;
+            const auto a = angle (v) - juce::MathConstants<float>::halfPi;
             g.setColour (Skin::white());
             g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ c.x + ringR * std::cos (a), c.y + ringR * std::sin (a) }));
+            g.setColour (juce::Colours::black.withAlpha (0.5f));
+            g.drawEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ c.x + ringR * std::cos (a), c.y + ringR * std::sin (a) }), 0.6f);
+        };
+        if (! voiceDots.empty())
+            for (const auto v : voiceDots) dot (v);
+        else if (ringLive >= 0.0f)
+            dot (ringLive);
+        for (size_t i = 0; i < lamps.size(); ++i) // lámparas: halo según el brillo, cuerpo del color y reflejo
+        {
+            const auto r = lampRect ((int) i);
+            const auto glow = juce::jlimit (0.0f, 1.0f, lamps[i].glow);
+            g.setColour (lamps[i].colour.withAlpha (0.15f + 0.45f * glow));
+            g.fillEllipse (r.expanded (1.5f + 2.5f * glow));
+            g.setColour (lamps[i].colour.withMultipliedBrightness (0.45f + 0.55f * glow));
+            g.fillEllipse (r);
+            g.setColour (juce::Colours::white.withAlpha (0.25f + 0.5f * glow));
+            g.fillEllipse (r.reduced (r.getWidth() * 0.3f).translated (-0.8f, -0.8f));
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawEllipse (r, 0.7f);
         }
     }
 
+    // Lámpara i: 8 px, separadas 11, centradas en el hueco inferior del dial (0,8 del radio bajo el centro)
+    juce::Rectangle<float> lampRect (int i) const
+    {
+        const auto area = slider.getBounds().withTrimmedBottom (18).toFloat().reduced (2.0f);
+        const auto radius = juce::jmin (area.getWidth(), area.getHeight()) * 0.5f;
+        const auto n = (float) lamps.size();
+        const auto x = area.getCentreX() + ((float) i - (n - 1.0f) * 0.5f) * 11.0f;
+        return juce::Rectangle<float> (8.0f, 8.0f).withCentre ({ x, area.getCentreY() + radius * 0.8f });
+    }
+    void layoutLamps()
+    {
+        if (lamps.empty()) return;
+        const auto a = lampRect (0), b = lampRect ((int) lamps.size() - 1);
+        lampHit.setBounds (a.getUnion (b).expanded (4.0f, 5.0f).getSmallestIntegerContainer());
+        lampHit.toFront (false);
+    }
+
+    // Zona de clic de las lámparas (encima del dial): abre la tira de atenuadores
+    struct LampHit : juce::Component, juce::SettableTooltipClient
+    {
+        std::function<void()> onClick;
+        void mouseUp (const juce::MouseEvent& e) override { if (! e.mods.isPopupMenu() && contains (e.getPosition()) && onClick) onClick(); }
+    };
+
+    APVTS& apvts;
     Style style;
     juce::Slider slider;
     juce::Label label;
@@ -615,8 +768,11 @@ struct Knob : juce::Component, private juce::Timer
     MidiLearn& learn;
     int paramIndex;
     juce::String paramId;
-    bool ringOn = false;
+    bool ringOn = false, dropHover = false;
     float ringLo = 0.0f, ringHi = 0.0f, ringLive = -1.0f;
+    std::vector<float> voiceDots;
+    std::vector<Lamp> lamps;
+    LampHit lampHit;
     juce::RangedAudioParameter* paramPtr = nullptr;
     int options = 0;      // opciones de una elección (0 = valor numérico)
     KeySwitch key;        // solo con 2 opciones
@@ -624,6 +780,97 @@ struct Knob : juce::Component, private juce::Timer
     std::unique_ptr<APVTS::ButtonAttachment> keyAttachment; // tras key: muere antes
     std::unique_ptr<ParamMenu> keyMenu;
 };
+
+// Tira de atenuadores de un mando destino: un fader vertical bipolar por cada ranura de la matriz que lo mueve (su cantidad,
+// mtxAmtN, ±100 %), rotulado y teñido con el color de la fuente, y "Remove" debajo. Se rehace si cambian las ranuras (5 Hz)
+// y se cierra cuando ya no queda ninguna. Se abre en un CallOutBox desde las lámparas del mando (Knob::openAttenuators)
+struct AttenuatorStrip : juce::Component, private juce::Timer
+{
+    AttenuatorStrip (APVTS& s, int dest, const juce::String& knobName) : apvts (s), destination (dest)
+    {
+        title.setText (knobName + ": attenuators", juce::dontSendNotification);
+        title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+        addAndMakeVisible (title);
+        rebuild();
+        startTimerHz (5);
+    }
+    ~AttenuatorStrip() override { setLookAndFeel (nullptr); } // el que le da Knob::openAttenuators no es suyo
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (8);
+        title.setBounds (r.removeFromTop (20));
+        for (size_t i = 0; i < faders.size(); ++i)
+        {
+            auto col = r.removeFromLeft (84);
+            removes[i]->setBounds (col.removeFromBottom (22).reduced (4, 0));
+            faders[i]->setBounds (col);
+        }
+    }
+
+private:
+    juce::String signature() const
+    {
+        juce::String sig;
+        for (const auto slot : MatrixUi::slotsFor (apvts, destination))
+            sig << slot << ":" << (int) MatrixUi::slotValue (apvts, "mtxSrc", slot) << ";";
+        return sig;
+    }
+
+    void rebuild()
+    {
+        faders.clear();
+        removes.clear();
+        shown = signature();
+        for (const auto slot : MatrixUi::slotsFor (apvts, destination))
+        {
+            const auto src = (int) MatrixUi::slotValue (apvts, "mtxSrc", slot);
+            auto& k = faders.emplace_back (std::make_unique<Knob> (apvts, "mtxAmt" + juce::String (slot + 1), ModMatrix::sourceNames()[src],
+                                                                   Knob::Style::vertical));
+            k->label.setColour (juce::Label::textColourId, MatrixUi::sourceColour (src));
+            addAndMakeVisible (*k);
+            auto& b = removes.emplace_back (std::make_unique<juce::TextButton> ("Remove"));
+            b->setTooltip ("Remove this modulation (empties its matrix slot).");
+            b->onClick = [this, slot] { MatrixUi::removeSlot (apvts, slot); timerCallback(); };
+            addAndMakeVisible (*b);
+        }
+        setSize (16 + 84 * juce::jmax (1, (int) faders.size()), 300);
+        resized();
+    }
+
+    void timerCallback() override
+    {
+        if (signature() == shown)
+            return;
+        if (MatrixUi::slotsFor (apvts, destination).empty())
+        {
+            if (auto* box = findParentComponentOfClass<juce::CallOutBox>())
+                box->dismiss();
+            return;
+        }
+        rebuild();
+    }
+
+    APVTS& apvts;
+    const int destination;
+    juce::Label title;
+    juce::String shown;
+    std::vector<std::unique_ptr<Knob>> faders;
+    std::vector<std::unique_ptr<juce::TextButton>> removes;
+};
+
+inline void Knob::openAttenuators()
+{
+    const auto destination = MatrixUi::destinationOf (paramId);
+    auto* top = getTopLevelComponent();
+    if (destination <= 0 || top == nullptr || MatrixUi::slotsFor (apvts, destination).empty())
+        return;
+    // Con el LookAndFeel de este mando (el del editor: faders de consola): la ventana de nivel superior del standalone tiene
+    // el de JUCE por defecto y la tira lo heredaría. setLookAndFeel no la posee: KoniLookAndFeel vive mientras el editor
+    auto strip = std::make_unique<AttenuatorStrip> (apvts, destination, name);
+    strip->setLookAndFeel (&getLookAndFeel());
+    juce::CallOutBox::launchAsynchronously (std::move (strip), top->getLocalArea (this, lampHit.getBounds()), top);
+}
 
 // Lista de valores con nombre para un parámetro entero, en la fila de controles (Program del MT-32: "1 - Acou Piano 1"):
 // etiqueta arriba como en las perillas y un desplegable de una línea. Un elemento por paso del parámetro; los textos se
@@ -801,9 +1048,21 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
             g.setColour (juce::Colours::black.withAlpha (0.5f));
             g.fillEllipse (body.translated (0.0f, 1.0f).expanded (0.6f));
         }
-        // Faldón: metal oscuro con luz fija
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4a5059), body.getX(), body.getY(), juce::Colour (0xff0e1013), body.getRight(), body.getBottom(), false));
+        // Faldón con luz fija, del material del skin (Skin::material): metal oscuro, aluminio claro, topacio o baquelita
+        const auto mat = Skin::material();
+        const auto light = mat == Skin::Material::aluminium, topaz = mat == Skin::Material::topaz, bake = mat == Skin::Material::bakelite;
+        g.setGradientFill (juce::ColourGradient (juce::Colour (light ? 0xffe2e6ea : topaz ? 0xffb8741e : bake ? 0xff3a3936 : 0xff4a5059), body.getX(), body.getY(),
+                                                 juce::Colour (light ? 0xff6f767e : topaz ? 0xff2e1503 : bake ? 0xff050505 : 0xff0e1013), body.getRight(), body.getBottom(), false));
         g.fillEllipse (body);
+        if (topaz)
+        {
+            // Gema: la luz entra por arriba a la izquierda y sale refractada por el lado opuesto: brillo interior cálido
+            // desplazado 0,3·r hacia abajo a la derecha, que se apaga antes del borde
+            const juce::Point<float> glow { c.x + bodyR * 0.3f, c.y + bodyR * 0.3f };
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xffffc45a).withAlpha (0.55f), glow.x, glow.y,
+                                                     juce::Colour (0xffffc45a).withAlpha (0.0f), glow.x + bodyR * 0.9f, glow.y, true));
+            g.fillEllipse (body);
+        }
         // Estrías: n surcos que giran con el valor; cada uno con un canto de luz cuyo brillo es el coseno entre su ángulo
         // absoluto y la luz (0,03 de alfa a contraluz, 0,19 de frente)
         const auto capR = bodyR * 0.74f;
@@ -815,41 +1074,67 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
             const auto a = angle + step * (float) k;
             const auto lit = 0.5f + 0.5f * std::cos (a - lightA);
             const auto ca = std::cos (a), sa = std::sin (a);
-            g.setColour (juce::Colours::black.withAlpha (0.32f));
+            g.setColour ((topaz ? juce::Colour (0xff2a1002) : juce::Colours::black).withAlpha (light ? 0.22f : topaz ? 0.35f : bake ? 0.55f : 0.32f));
             g.drawLine (c.x + ca * (capR + 0.5f), c.y + sa * (capR + 0.5f), c.x + ca * (bodyR - 0.5f), c.y + sa * (bodyR - 0.5f), fluteW);
             const auto b = a + step * 0.28f;
             const auto cb = std::cos (b), sb = std::sin (b);
-            g.setColour (juce::Colours::white.withAlpha (0.03f + 0.16f * lit));
+            g.setColour ((topaz ? juce::Colour (0xfffff0c8) : juce::Colours::white)
+                             .withAlpha ((light ? 0.10f : topaz || bake ? 0.04f : 0.03f) + (light ? 0.35f : topaz ? 0.40f : bake ? 0.30f : 0.16f)
+                                         * lit * (topaz || bake ? lit : 1.0f)));
             g.drawLine (c.x + cb * (capR + 0.5f), c.y + sb * (capR + 0.5f), c.x + cb * (bodyR - 0.5f), c.y + sb * (bodyR - 0.5f), fluteW * 0.7f);
         }
-        g.setColour (juce::Colours::black.withAlpha (0.8f));
+        g.setColour (bake ? juce::Colour (0xff6a655d) : juce::Colours::black.withAlpha (0.8f)); // baquelita: canto gris cálido
         g.drawEllipse (body, 1.0f);
         {
             // Luz de canto en el borde del faldón, del lado de la luz (±70° alrededor de ella)
             juce::Path rim;
             rim.addCentredArc (c.x, c.y, bodyR - 0.7f, bodyR - 0.7f, 0.0f, lightA + halfPi - 1.22f, lightA + halfPi + 1.22f, true);
-            g.setColour (juce::Colours::white.withAlpha (0.2f));
+            g.setColour (juce::Colours::white.withAlpha (bake ? 0.4f : 0.2f));
             g.strokePath (rim, juce::PathStrokeType (1.0f));
         }
         // Tapa: cóncava (más oscura del lado de la luz que el faldón), con bisel claro arriba a la izquierda y oscuro abajo
         const auto cap = juce::Rectangle<float> (2.0f * capR, 2.0f * capR).withCentre (c);
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff2a2e34), cap.getX(), cap.getY(), juce::Colour (0xff474d56), cap.getRight(), cap.getBottom(), false));
+        if (topaz) // tabla de la gema: oscura del lado de la luz y encendida por dentro del opuesto (refracción)
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xfff6c060), c.x + capR * 0.35f, c.y + capR * 0.4f,
+                                                     juce::Colour (0xff4a2205), c.x - capR, c.y - capR, true));
+        else if (bake) // inserto de aluminio torneado: claro arriba a la izquierda (convexo, no cóncavo)
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xffeceef0), cap.getX(), cap.getY(),
+                                                     juce::Colour (0xff80868c), cap.getRight(), cap.getBottom(), false));
+        else
+            g.setGradientFill (juce::ColourGradient (juce::Colour (light ? 0xffa9b0b7 : 0xff2a2e34), cap.getX(), cap.getY(),
+                                                     juce::Colour (light ? 0xffeef1f4 : 0xff474d56), cap.getRight(), cap.getBottom(), false));
         g.fillEllipse (cap);
+        if (bake) // surcos del torneado: anillos concéntricos alternos, finos
+            for (int k = 1; k <= 4; ++k)
+            {
+                g.setColour (k % 2 ? juce::Colours::black.withAlpha (0.10f) : juce::Colours::white.withAlpha (0.18f));
+                g.drawEllipse (cap.reduced (capR * 0.18f * (float) k), 0.6f);
+            }
         g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.3f), cap.getX(), cap.getY(),
                                                  juce::Colours::black.withAlpha (0.6f), cap.getRight(), cap.getBottom(), false));
         g.drawEllipse (cap.reduced (0.5f), 1.0f);
         g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.14f), c.x - capR * 0.35f, c.y - capR * 0.45f,
                                                  juce::Colours::white.withAlpha (0.0f), c.x, c.y + capR * 0.2f, true));
         g.fillEllipse (cap.reduced (capR * 0.12f)); // reflejo fijo: no gira
+        if (topaz) // destello especular de la gema: pequeño y nítido, arriba a la izquierda
+        {
+            const auto spot = juce::Rectangle<float> (capR * 0.42f, capR * 0.26f).withCentre ({ c.x - capR * 0.38f, c.y - capR * 0.44f });
+            g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.85f), spot.getCentreX(), spot.getCentreY(),
+                                                     juce::Colours::white.withAlpha (0.0f), spot.getRight(), spot.getCentreY(), true));
+            g.fillEllipse (spot);
+        }
         // Indicador: surco oscuro con línea clara, del centro de la tapa al borde del faldón; gira con el valor
         const auto ia = angle - halfPi;
         const juce::Point<float> p0 { c.x + std::cos (ia) * capR * 0.2f, c.y + std::sin (ia) * capR * 0.2f },
                                  p1 { c.x + std::cos (ia) * (bodyR - 1.2f), c.y + std::sin (ia) * (bodyR - 1.2f) };
-        g.setColour (juce::Colours::black.withAlpha (0.65f));
+        // (en aluminio claro, al revés: surco claro y línea negra, que es la que contrasta)
+        g.setColour (light || bake ? juce::Colours::white.withAlpha (0.55f) : juce::Colours::black.withAlpha (topaz ? 0.5f : 0.65f));
         g.drawLine ({ p0, p1 }, juce::jmax (2.6f, bodyR * 0.17f));
-        g.setColour (enabled ? juce::Colours::white : juce::Colours::white.withAlpha (0.5f));
+        const auto mark = light || bake ? juce::Colour (0xff15181b) : topaz ? juce::Colour (0xfffff3dc) : juce::Colours::white;
+        g.setColour (enabled ? mark : mark.withAlpha (0.5f));
         g.drawLine ({ p0, p1 }, juce::jmax (1.3f, bodyR * 0.08f));
     }
+
 
     // Fader de consola (vertical u horizontal; otros estilos, V4): escala de 11 marcas a cada lado (cada 10 %, más largas en
     // 0, 50 y 100 %), ranura hundida de 3 px con el relleno de valor, y tapa de 18 px con dos caras talladas hacia la línea
@@ -911,7 +1196,10 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
             g.setColour (juce::Colours::black.withAlpha (0.55f)); // de contacto
             g.fillRoundedRectangle (cap.translated (0.0f, 1.2f).expanded (0.6f), 2.5f);
         }
-        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff4d535b), cap.getX(), cap.getY(), juce::Colour (0xff1a1d21), cap.getX(), cap.getBottom(), false));
+        const auto mat = Skin::material(); // material del skin (Skin::material)
+        const auto light = mat == Skin::Material::aluminium, topaz = mat == Skin::Material::topaz, bake = mat == Skin::Material::bakelite;
+        g.setGradientFill (juce::ColourGradient (juce::Colour (light ? 0xffd2d7dc : topaz ? 0xffc0802a : bake ? 0xff2c2b29 : 0xff4d535b), cap.getX(), cap.getY(),
+                                                 juce::Colour (light ? 0xff7c838b : topaz ? 0xff3a1a04 : bake ? 0xff050505 : 0xff1a1d21), cap.getX(), cap.getBottom(), false));
         g.fillRoundedRectangle (cap, 2.5f);
         // Caras talladas: mitad hacia la luz (arriba, o izquierda en horizontal) clara y la otra oscura, cada una con
         // degradado hacia la línea central (el fondo del tallado)
@@ -925,20 +1213,24 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
             const auto b = towardsEnd ? (vertical ? r.getBottomLeft() : r.getTopRight()) : r.getTopLeft();
             return juce::ColourGradient (from, a, to, b, false);
         };
-        g.setGradientFill (grad (firstHalf, juce::Colour (0xff8a919a), juce::Colour (0xff50565e), true));
+        g.setGradientFill (grad (firstHalf, juce::Colour (light ? 0xfff4f6f8 : topaz ? 0xfff8d68e : bake ? 0xff55524d : 0xff8a919a),
+                                 juce::Colour (light ? 0xffb4bac1 : topaz ? 0xffb06a18 : bake ? 0xff1c1b19 : 0xff50565e), true));
         g.fillRoundedRectangle (firstHalf, 1.5f);
-        g.setGradientFill (grad (secondHalf, juce::Colour (0xff3a3f46), juce::Colour (0xff23272c), false));
+        // Topacio: la cara de sombra se enciende hacia el fondo del tallado (la luz atraviesa la gema)
+        g.setGradientFill (grad (secondHalf, juce::Colour (light ? 0xff9ba1a8 : topaz ? 0xffe09a36 : bake ? 0xff141312 : 0xff3a3f46),
+                                 juce::Colour (light ? 0xff767d85 : topaz ? 0xff5a2a06 : bake ? 0xff060606 : 0xff23272c), false));
         g.fillRoundedRectangle (secondHalf, 1.5f);
         // Luz en el canto superior y contorno
         g.setColour (juce::Colours::white.withAlpha (0.35f));
         g.drawHorizontalLine (juce::roundToInt (cap.getY() + 0.5f), cap.getX() + 2.5f, cap.getRight() - 2.5f);
-        g.setColour (juce::Colours::black.withAlpha (0.75f));
+        g.setColour (bake ? juce::Colour (0xff6a655d) : juce::Colours::black.withAlpha (0.75f)); // baquelita: canto gris cálido
         g.drawRoundedRectangle (cap, 2.5f, 0.9f);
         // Línea central: surco oscuro con el trazo blanco
         g.setColour (juce::Colours::black.withAlpha (0.6f));
         if (vertical) g.fillRect (juce::Rectangle<float> (inner.getWidth(), 2.4f).withCentre (cap.getCentre()));
         else          g.fillRect (juce::Rectangle<float> (2.4f, inner.getHeight()).withCentre (cap.getCentre()));
-        g.setColour (juce::Colours::white.withAlpha (enabled ? 0.92f : 0.45f));
+        g.setColour ((light ? juce::Colour (0xff15181b) : topaz ? juce::Colour (0xfffff3dc) : juce::Colours::white)
+                     .withAlpha (enabled ? 0.92f : 0.45f)); // aluminio: trazo negro
         if (vertical) g.fillRect (juce::Rectangle<float> (inner.getWidth() - 2.0f, 1.0f).withCentre (cap.getCentre()));
         else          g.fillRect (juce::Rectangle<float> (1.0f, inner.getHeight() - 2.0f).withCentre (cap.getCentre()));
     }
@@ -950,6 +1242,18 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         const auto led = juce::Rectangle<float> (d, d).withCentre ({ r.getX() + 4.0f + d * 0.5f, r.getCentreY() });
         const auto on = b.getToggleState();
 
+        // Phosphor Green, Amber y Vintage: el LED va engastado en un bisel (aluminio claro, topacio o cromado), de luz arriba
+        // a la izquierda
+        if (const auto mat = Skin::material(); mat != Skin::Material::darkMetal)
+        {
+            const auto bezel = led.expanded (2.2f);
+            const auto topaz = mat == Skin::Material::topaz; // aluminio y baquelita: bisel cromado
+            g.setGradientFill (juce::ColourGradient (juce::Colour (topaz ? 0xfff2c470 : 0xffeef1f4), bezel.getX(), bezel.getY(),
+                                                     juce::Colour (topaz ? 0xff4a2205 : 0xff6f767e), bezel.getRight(), bezel.getBottom(), false));
+            g.fillEllipse (bezel);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawEllipse (bezel, 0.8f);
+        }
         // LED rojo fijo: no sigue el skin (el contraste del rojo sobre los skins monocromos)
         if (on)
         {
@@ -1000,6 +1304,26 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
             sheen.addColour (0.4, juce::Colours::white.withAlpha (0.12f));
             g.setGradientFill (sheen);
             g.fillRoundedRectangle (card, radius);
+        }
+        if (Skin::current() == Skin::vintage)
+        {
+            // Placa de aluminio anodizado en negro: vetas del cepillado (las de Brushed Metal, que sobre el grafito quedan
+            // en ±5 % de luz) y un brillo diagonal tenue (blanco al 6 % en el 35 % del recorrido), más suave que el pulido de metal
+            g.setTiledImageFill (Skin::brushedTile(), 0, 0, 1.0f);
+            g.fillRoundedRectangle (card, radius);
+            juce::ColourGradient sheen (juce::Colours::white.withAlpha (0.0f), card.getTopLeft(), juce::Colours::white.withAlpha (0.0f), card.getBottomRight(), false);
+            sheen.addColour (0.35, juce::Colours::white.withAlpha (0.06f));
+            g.setGradientFill (sheen);
+            g.fillRoundedRectangle (card, radius);
+            // Filete de aluminio cepillado en el canto superior (1,5 px, entre los radios de las esquinas; sombra de 0,8 px
+            // debajo), como el de los paneles de módulos de finales de los 60. En el canto y no bajo la banda de título: los
+            // controles de cabecera empiezan a 20 px (Section::resized) y una línea bajo la banda de título los cruzaba
+            const auto y = card.getY() + 0.8f;
+            const auto x0 = card.getX() + radius, x1 = card.getRight() - radius;
+            g.setGradientFill (juce::ColourGradient (juce::Colour (0xffd2d5d9), x0, y, juce::Colour (0xff8a8e93), x1, y, false));
+            g.fillRect (juce::Rectangle<float> (x0, y, x1 - x0, 1.5f));
+            g.setColour (juce::Colours::black.withAlpha (0.5f));
+            g.fillRect (juce::Rectangle<float> (x0, y + 1.5f, x1 - x0, 0.8f));
         }
         {
             juce::Graphics::ScopedSaveState state (g);
@@ -1236,6 +1560,8 @@ struct Section : juce::Component
         group.setText (title);
         group.setInterceptsMouseClicks (false, false); // el clic derecho en el marco llega a la sección (mouseDown)
         addAndMakeVisible (group);
+        modFrame.setInterceptsMouseClicks (false, false);
+        addChildComponent (modFrame); // tras el marco y antes de los mandos: queda debajo de ellos
     }
 
     // Clic derecho en el marco o en un hueco de la sección: "Reset <título> to defaults" con los parámetros de sus mandos y de
@@ -1474,12 +1800,12 @@ struct Section : juce::Component
     {
         group.setBounds (getLocalBounds());
 
-        auto r = getLocalBounds().reduced (10).withTrimmedTop (8);
+        auto r = getLocalBounds().reduced (10).withTrimmedTop (10); // 2 px de respiro bajo la línea del título
         // Componente lateral alto (withSideBody, tall): todo el alto de la caja, a 5 px del marco a los lados y abajo y bajo
         // la línea del título; la cabecera y los controles quedan a su derecha
         if (sideBody != nullptr && sideBodyTall)
         {
-            sideBody->setBounds (getLocalBounds().withTrimmedTop (18).withTrimmedBottom (5).withTrimmedLeft (5).withWidth (sideBodyWidth));
+            sideBody->setBounds (getLocalBounds().withTrimmedTop (20).withTrimmedBottom (5).withTrimmedLeft (5).withWidth (sideBodyWidth));
             r.setLeft (sideBody->getRight() + 8);
         }
         // Cabecera solo si tiene controles: sin ella, perillas y sliders ganan 28 px de alto
@@ -1499,8 +1825,10 @@ struct Section : juce::Component
             if (info.isVisible()) info.setBounds (header.withTrimmedLeft (6));
             r.removeFromTop (4);
         }
+        if (controlsWidth > 0) // el resto, a la derecha bajo la cabecera, queda libre (panel PATCH del complejo)
+            r.setWidth (juce::jmin (r.getWidth(), controlsWidth));
         if (body != nullptr && bodyFlush) // a ras del marco: todo el alto y el ancho de la caja, a 5 px, bajo la línea del título
-            body->setBounds (getLocalBounds().withTrimmedTop (18).withTrimmedBottom (5).reduced (5, 0));
+            body->setBounds (getLocalBounds().withTrimmedTop (20).withTrimmedBottom (5).reduced (5, 0));
         else if (body != nullptr)
         {
             body->setBounds (bodyHeight > 0 ? r.removeFromTop (bodyHeight) : r);
@@ -1512,8 +1840,10 @@ struct Section : juce::Component
             r.removeFromLeft (8);
         }
 
+        modFrame.setVisible (false);
         if (row.empty())
             return;
+        const juce::ScopeGuard placeModFrame { [this] { layoutModFrame(); } }; // tras colocar los mandos, en cualquier salida
 
         // Como mucho maxControlUnit px por unidad: con pocos controles en una sección ancha no se estiran hasta el borde; el
         // hueco queda al final (en las filas llenas la unidad real es ~55-70 px y no cambia nada). Con varias filas
@@ -1544,6 +1874,100 @@ struct Section : juce::Component
                 row[k].component->setBounds (line.removeFromLeft (juce::roundToInt (unit * row[k].weight())));
         }
     }
+
+    // Marco del grupo modulable, como la serigrafía de un panel: línea negra de perímetro (con un filo claro por fuera, como
+    // grabada) alrededor de las perillas que son destino de la matriz (se les puede soltar una fuente de la barra MOD), y el
+    // rótulo "MOD" cortando la línea de abajo a la izquierda; si debajo hay otra fila de mandos (Osc 1, Complex), en vertical
+    // sobre la línea izquierda, leído de abajo arriba. Las perillas del grupo van juntas en el orden de la sección (Editor)
+    struct ModFrame : juce::Component
+    {
+        bool sideLabel = false;
+        void paint (juce::Graphics& g) override
+        {
+            if (sideLabel)
+            {
+                paintSide (g);
+                return;
+            }
+            // 10,5 pt con un 18 % de espacio entre letras: a 9,5 pt sin espaciar se leía mal
+            const auto font = juce::Font (juce::FontOptions (10.5f, juce::Font::bold)).withExtraKerningFactor (0.18f);
+            const auto r = getLocalBounds().toFloat().reduced (1.0f).withTrimmedBottom (6.0f); // la línea de abajo, a media altura del rótulo
+            const auto textW = juce::GlyphArrangement::getStringWidth (font, "MOD") + 8.0f;
+            const auto gapX = r.getX() + 9.0f;
+            // Perímetro sin el tramo del rótulo: desde el final del hueco, en sentido antihorario, hasta su comienzo
+            juce::Path p;
+            const auto rad = 5.0f;
+            p.startNewSubPath (gapX + textW, r.getBottom());
+            p.lineTo (r.getRight() - rad, r.getBottom());
+            p.quadraticTo (r.getRight(), r.getBottom(), r.getRight(), r.getBottom() - rad);
+            p.lineTo (r.getRight(), r.getY() + rad);
+            p.quadraticTo (r.getRight(), r.getY(), r.getRight() - rad, r.getY());
+            p.lineTo (r.getX() + rad, r.getY());
+            p.quadraticTo (r.getX(), r.getY(), r.getX(), r.getY() + rad);
+            p.lineTo (r.getX(), r.getBottom() - rad);
+            p.quadraticTo (r.getX(), r.getBottom(), r.getX() + rad, r.getBottom());
+            p.lineTo (gapX, r.getBottom());
+            g.setColour (juce::Colours::white.withAlpha (0.10f)); // filo claro, 1 px abajo a la derecha: línea grabada
+            g.strokePath (p, juce::PathStrokeType (1.0f), juce::AffineTransform::translation (0.8f, 0.8f));
+            g.setColour (juce::Colours::black.withAlpha (0.85f));
+            g.strokePath (p, juce::PathStrokeType (1.3f));
+            g.setColour (Skin::white().withAlpha (0.7f));
+            g.setFont (font);
+            g.drawText ("MOD", juce::Rectangle<float> (gapX, r.getBottom() - 7.0f, textW, 14.0f), juce::Justification::centred);
+        }
+
+        // Rótulo en la línea izquierda: el perímetro deja un hueco en ella, abajo, y el texto va girado -90°
+        void paintSide (juce::Graphics& g)
+        {
+            // 10,5 pt con un 18 % de espacio entre letras: a 9,5 pt sin espaciar se leía mal
+            const auto font = juce::Font (juce::FontOptions (10.5f, juce::Font::bold)).withExtraKerningFactor (0.18f);
+            const auto r = getLocalBounds().toFloat().reduced (1.0f).withTrimmedLeft (6.0f);
+            const auto textW = juce::GlyphArrangement::getStringWidth (font, "MOD") + 8.0f;
+            const auto gapY = r.getBottom() - 9.0f; // el hueco acaba 9 px sobre la esquina de abajo
+            juce::Path p;
+            const auto rad = 5.0f;
+            p.startNewSubPath (r.getX(), gapY - textW);
+            p.lineTo (r.getX(), r.getY() + rad);
+            p.quadraticTo (r.getX(), r.getY(), r.getX() + rad, r.getY());
+            p.lineTo (r.getRight() - rad, r.getY());
+            p.quadraticTo (r.getRight(), r.getY(), r.getRight(), r.getY() + rad);
+            p.lineTo (r.getRight(), r.getBottom() - rad);
+            p.quadraticTo (r.getRight(), r.getBottom(), r.getRight() - rad, r.getBottom());
+            p.lineTo (r.getX() + rad, r.getBottom());
+            p.quadraticTo (r.getX(), r.getBottom(), r.getX(), r.getBottom() - rad);
+            p.lineTo (r.getX(), gapY);
+            g.setColour (juce::Colours::white.withAlpha (0.10f));
+            g.strokePath (p, juce::PathStrokeType (1.0f), juce::AffineTransform::translation (0.8f, 0.8f));
+            g.setColour (juce::Colours::black.withAlpha (0.85f));
+            g.strokePath (p, juce::PathStrokeType (1.3f));
+            const juce::Graphics::ScopedSaveState state (g);
+            g.addTransform (juce::AffineTransform::rotation (-juce::MathConstants<float>::halfPi, r.getX(), gapY));
+            g.setColour (Skin::white().withAlpha (0.7f));
+            g.setFont (font);
+            g.drawText ("MOD", juce::Rectangle<float> (r.getX(), gapY - 7.0f, textW, 14.0f), juce::Justification::centred);
+        }
+    };
+    void layoutModFrame()
+    {
+        juce::Rectangle<int> area;
+        for (auto& k : knobs)
+            if (k->isVisible() && k->style == Knob::Style::rotary && MatrixUi::destinationOf (k->paramId) > 0)
+                area = area.isEmpty() ? k->getBounds() : area.getUnion (k->getBounds());
+        modFrame.setVisible (! area.isEmpty());
+        if (area.isEmpty())
+            return;
+        // ¿Otro mando justo debajo (12 px)? Entonces el rótulo, en la línea izquierda
+        const auto below = juce::Rectangle<int> (area.getX(), area.getBottom(), area.getWidth(), 12);
+        modFrame.sideLabel = false;
+        for (auto& item : row)
+            if (item.component->isVisible() && item.component->getBounds().intersects (below))
+                modFrame.sideLabel = true;
+        // Rótulo abajo: 3 px por los lados, 2 arriba y 8 abajo. A la izquierda: 8 a la izquierda y 3 en el resto
+        modFrame.setBounds (modFrame.sideLabel ? area.withTrimmedLeft (-8).expanded (0, 2).withTrimmedRight (-3)
+                                               : area.expanded (3, 0).withTop (area.getY() - 2).withBottom (area.getBottom() + 8));
+        modFrame.repaint();
+    }
+    ModFrame modFrame;
 
     // Controles en n filas (en el orden en que se añadieron, ⌈N/n⌉ por fila): la sección pide el ancho de la fila más
     // ancha. Para secciones con muchas perillas en una fila alta (Osc 1 junto al display de onda)
@@ -1588,6 +2012,8 @@ struct Section : juce::Component
         return juce::jmax ((size_t) 1, (row.size() + (size_t) controlRows - 1) / (size_t) controlRows);
     }
     int controlRows = 1, slotsPerRow = 0;
+    // Ancho máximo de cuerpo y controles (px, 0 = todo): lo de su derecha lo ocupa otro componente (panel PATCH, PatchBay)
+    int controlsWidth = 0;
     // Elástica: si su fila cabe a ancho natural, se queda con el sobrante (Editor::layoutRow)
     bool stretchToFill = false;
     // A ras del marco: el cuerpo ocupa la caja entera bajo la línea del título (display de onda; sin cabecera ni controles)

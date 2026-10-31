@@ -7,19 +7,73 @@
 // logarítmica 20 Hz - 20 kHz con margen de 6 px; vertical ±24 dB. La curva sale de los mismos coeficientes que el audio
 // (Eq::responseDb). Nodos: Low Cut y High Cut (solo frecuencia), Low, Mid 1, Mid 2 y High (frecuencia y ganancia).
 // Arrastrar = mover (gesto de parámetro: deshacer, automatización); rueda sobre un medio = Q; doble clic = ganancia 0 dB.
-class EqCurve : public juce::Component, private juce::Timer
+// Compacta (compact = true): la misma curva, pequeña, en el bloque EQ del panel: sin rótulos ni nodos arrastrables; un clic
+// llama a onClick (abre el diálogo). Las etapas apagadas (bypass) dibujan su nodo en gris
+class EqCurve : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
     std::function<double()> rate; // frecuencia de muestreo del procesador
+    std::function<void()> onClick; // solo en compacta
 
-    explicit EqCurve (APVTS& s) : apvts (s)
+    explicit EqCurve (APVTS& s, bool isCompact = false) : apvts (s), compact (isCompact)
     {
         setInterceptsMouseClicks (true, false);
-        startTimerHz (30);
+        if (compact)
+            setTooltip ("EQ response (bands switched off in grey). Click: EQ Bands...");
+        startTimerHz (compact ? 15 : 30);
+    }
+
+    // Compacta: el mismo estilo que los otros displays pequeños (ShaperView, UI/ModViews.h): pantalla del skin, trazo de
+    // fósforo con halo, lectura monoespaciada de dos líneas arriba, estado abajo a la derecha y cristal encima
+    void paintCompact (juce::Graphics& g)
+    {
+        const auto screen = getLocalBounds().toFloat();
+        Skin::screen (g, screen, 6.0f);
+        const auto r = plot();
+        const auto trace = Skin::trace();
+        const auto on = apvts.getRawParameterValue ("eqOn")->load() > 0.5f;
+        g.setColour (trace.withAlpha (0.12f));
+        for (const auto f : { 100.0, 1000.0, 10000.0 })
+            g.drawVerticalLine (juce::roundToInt (xFor (f)), r.getY(), r.getBottom());
+        g.drawHorizontalLine (juce::roundToInt (yFor (0.0)), r.getX(), r.getRight());
+        const auto s = settings();
+        const auto fs = sampleRate();
+        juce::Path curve;
+        for (int px = 0; px <= (int) r.getWidth(); ++px)
+        {
+            const auto y = yFor (juce::jlimit (-24.0, 24.0, Eq::responseDb (s, fs, freqFor (r.getX() + (float) px))));
+            if (px == 0) curve.startNewSubPath (r.getX(), y); else curve.lineTo (r.getX() + (float) px, y);
+        }
+        const auto c = on ? trace : trace.withAlpha (0.4f);
+        g.setColour (c.withAlpha (0.18f * c.getFloatAlpha()));
+        g.strokePath (curve, juce::PathStrokeType (5.0f));
+        g.setColour (c);
+        g.strokePath (curve, juce::PathStrokeType (1.8f));
+        const auto shown = settings (false);
+        for (int i = 0; i < numNodes; ++i)
+        {
+            g.setColour (bandOn (nodeBand (i)) ? trace.withAlpha (0.9f) : trace.withAlpha (0.25f));
+            g.fillEllipse (juce::Rectangle<float> (4.0f, 4.0f).withCentre (nodePos (i, shown)));
+        }
+        g.setFont (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 10.0f, juce::Font::plain));
+        g.setColour (trace.withAlpha (0.85f));
+        auto text = screen.reduced (9.0f, 6.0f);
+        const auto db = [] (double v) { return (v >= 0.0 ? "+" : "") + juce::String (v, 1); };
+        const auto hz = [] (double f) { return f >= 1000.0 ? juce::String (f / 1000.0, 1) + "k" : juce::String (juce::roundToInt (f)); };
+        g.drawText ("L" + db (s.lowGain) + " M" + db (s.mid1Gain) + " H" + db (s.highGain), text, juce::Justification::topLeft, false); // 17 caracteres
+        g.drawText ("CUT " + hz (s.lowCut) + "-" + hz (s.highCut), text.withTrimmedTop (12.0f), juce::Justification::topLeft, false);
+        g.setColour (trace.withAlpha (0.55f));
+        g.drawText (on ? "RESPONSE" : "OFF", text, juce::Justification::bottomRight, false);
+        Skin::glass (g, screen, 6.0f);
     }
 
     void paint (juce::Graphics& g) override
     {
+        if (compact)
+        {
+            paintCompact (g);
+            return;
+        }
         const auto r = plot();
         g.setFont (juce::FontOptions (10.0f));
         for (const auto f : { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 })
@@ -27,6 +81,7 @@ public:
             const auto x = xFor (f);
             g.setColour (Skin::white().withAlpha (0.10f));
             g.drawVerticalLine (juce::roundToInt (x), r.getY(), r.getBottom());
+            if (compact) continue;
             g.setColour (Skin::white().withAlpha (0.45f));
             g.drawText (f >= 1000 ? juce::String (f / 1000, 0) + "k" : juce::String (f, 0), juce::Rectangle<float> (x + 2, r.getBottom() - 12, 30, 12), juce::Justification::left);
         }
@@ -34,6 +89,7 @@ public:
         {
             g.setColour (Skin::white().withAlpha (db == 0.0 ? 0.25f : 0.08f));
             g.drawHorizontalLine (juce::roundToInt (yFor (db)), r.getX(), r.getRight());
+            if (compact) continue;
             g.setColour (Skin::white().withAlpha (0.45f));
             g.drawText ((db > 0 ? "+" : "") + juce::String (db, 0), juce::Rectangle<float> (r.getRight() - 28, yFor (db) - 12, 26, 12), juce::Justification::right);
         }
@@ -55,10 +111,18 @@ public:
         g.fillPath (fill);
         g.setColour (Skin::c (0xff42a2c8).withAlpha (on ? 1.0f : 0.4f));
         g.strokePath (curve, juce::PathStrokeType (2.0f));
+        const auto shown = settings (false); // nodos en su sitio aunque la etapa esté apagada
         for (int i = 0; i < numNodes; ++i)
         {
-            const auto p = nodePos (i, s);
-            g.setColour (i == hot || i == dragging ? Skin::white() : Skin::c (0xffffb000));
+            const auto p = nodePos (i, shown);
+            const auto active = bandOn (nodeBand (i));
+            if (compact)
+            {
+                g.setColour (active ? Skin::c (0xffffb000) : Skin::white().withAlpha (0.3f));
+                g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (p));
+                continue;
+            }
+            g.setColour (i == hot || i == dragging ? Skin::white() : active ? Skin::c (0xffffb000) : Skin::white().withAlpha (0.35f));
             g.fillEllipse (juce::Rectangle<float> (12.0f, 12.0f).withCentre (p));
             g.setColour (Skin::black());
             g.setFont (juce::FontOptions (9.0f, juce::Font::bold));
@@ -72,11 +136,16 @@ public:
         }
     }
 
-    void mouseMove (const juce::MouseEvent& e) override { const auto h = nodeAt (e.position); if (h != hot) { hot = h; repaint(); } }
+    void mouseMove (const juce::MouseEvent& e) override { if (compact) return; const auto h = nodeAt (e.position); if (h != hot) { hot = h; repaint(); } }
     void mouseExit (const juce::MouseEvent&) override { hot = -1; repaint(); }
 
     void mouseDown (const juce::MouseEvent& e) override
     {
+        if (compact)
+        {
+            if (! e.mods.isPopupMenu() && onClick) onClick();
+            return;
+        }
         dragging = nodeAt (e.position);
         if (dragging < 0) return;
         for (auto* p : nodeParams (dragging)) if (p != nullptr) p->beginChangeGesture();
@@ -99,6 +168,7 @@ public:
 
     void mouseDoubleClick (const juce::MouseEvent& e) override
     {
+        if (compact) return;
         const auto n = nodeAt (e.position);
         if (n < 0) return;
         if (auto* gp = nodeParams (n)[1]) { gp->beginChangeGesture(); setReal (*gp, 0.0); gp->endChangeGesture(); }
@@ -107,6 +177,7 @@ public:
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
+        if (compact) return;
         const auto n = nodeAt (e.position);
         auto* q = n == 3 ? apvts.getParameter ("eqMid1Q") : n == 4 ? apvts.getParameter ("eqMid2Q") : nullptr;
         if (q == nullptr || w.deltaY == 0.0f) return;
@@ -118,7 +189,12 @@ public:
 private:
     static constexpr int numNodes = 6; // 0 Low Cut, 1 High Cut, 2 Low, 3 Mid 1, 4 Mid 2, 5 High
 
-    juce::Rectangle<float> plot() const { return getLocalBounds().toFloat().reduced (6.0f); }
+    // Compacta: bajo la lectura de dos líneas y sobre el estado, como ShaperView
+    juce::Rectangle<float> plot() const
+    {
+        return compact ? getLocalBounds().toFloat().reduced (10.0f, 0.0f).withTrimmedTop (34.0f).withTrimmedBottom (18.0f)
+                       : getLocalBounds().toFloat().reduced (6.0f);
+    }
     float xFor (double f) const { const auto r = plot(); return r.getX() + r.getWidth() * (float) (std::log (f / 20.0) / std::log (1000.0)); }
     double freqFor (float x) const { const auto r = plot(); return 20.0 * std::pow (1000.0, juce::jlimit (0.0, 1.0, (double) (x - r.getX()) / r.getWidth())); }
     float yFor (double db) const { const auto r = plot(); return r.getCentreY() - (float) (db / 24.0) * r.getHeight() * 0.5f; }
@@ -126,7 +202,16 @@ private:
 
     float raw (const char* id) const { return apvts.getRawParameterValue (id)->load(); }
 
-    Eq::Settings settings() const
+    // Etapa de cada nodo (Eq::bypass): 0 Low Cut, 1 High Cut, 2 Low, 3 Mid 1, 4 Mid 2, 5 High
+    static int nodeBand (int node) { static const int b[numNodes] = { 0, 5, 1, 2, 3, 4 }; return b[node]; }
+    bool bandOn (int band) const
+    {
+        static const char* ids[6] = { "eqLowCutOn", "eqLowOn", "eqMid1On", "eqMid2On", "eqHighOn", "eqHighCutOn" };
+        return raw (ids[band]) > 0.5f;
+    }
+
+    // Ajustes como los recibe el audio (withBypass) o tal cual están los mandos (para situar los nodos)
+    Eq::Settings settings (bool withBypass = true) const
     {
         Eq::Settings s;
         s.lowCut = raw ("eqLowCut"); s.highCut = raw ("eqHighCut");
@@ -137,6 +222,12 @@ private:
         static constexpr int orders[] = { 1, 2, 4, 0 }; // 0 = un polo (6 dB/oct)
         s.lowCutOrder = orders[juce::jlimit (0, 3, (int) raw ("eqLowCutSlope"))];
         s.highCutOrder = orders[juce::jlimit (0, 3, (int) raw ("eqHighCutSlope"))];
+        if (withBypass)
+        {
+            std::array<bool, 6> on {};
+            for (int b = 0; b < 6; ++b) on[(size_t) b] = bandOn (b);
+            Eq::bypass (s, on);
+        }
         return s;
     }
 
@@ -178,7 +269,8 @@ private:
     {
         double h = 0;
         for (const auto* id : { "eqOn", "eqLowCut", "eqHighCut", "eqLowFreq", "eqLowGain", "eqMid1Freq", "eqMid1Gain", "eqMid1Q",
-                                "eqMid2Freq", "eqMid2Gain", "eqMid2Q", "eqHighFreq", "eqHighGain", "eqOutput", "eqLowCutSlope", "eqHighCutSlope" })
+                                "eqMid2Freq", "eqMid2Gain", "eqMid2Q", "eqHighFreq", "eqHighGain", "eqOutput", "eqLowCutSlope", "eqHighCutSlope",
+                                "eqLowCutOn", "eqLowOn", "eqMid1On", "eqMid2On", "eqHighOn", "eqHighCutOn" })
             h = h * 1.0001 + raw (id);
         h = h * 1.0001 + sampleRate(); // otra frecuencia de muestreo: otra curva
         if (h != lastHash) { lastHash = h; repaint(); }
@@ -188,6 +280,7 @@ private:
     double sampleRate() const { const auto r = rate ? rate() : 0.0; return r > 0.0 ? r : 48000.0; }
 
     APVTS& apvts;
+    const bool compact;
     int hot = -1, dragging = -1;
     double lastHash = 0;
 };
@@ -208,12 +301,13 @@ public:
                       juce::dontSendNotification);
         hint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
         addAndMakeVisible (hint);
-        lowCut.withCombo (s, "eqLowCutSlope").withKnob (s, "eqLowCut", "Freq");
-        low.withKnob (s, "eqLowFreq", "Freq").withKnob (s, "eqLowGain", "Gain");
-        mid1.withKnob (s, "eqMid1Freq", "Freq").withKnob (s, "eqMid1Gain", "Gain").withKnob (s, "eqMid1Q", "Q");
-        mid2.withKnob (s, "eqMid2Freq", "Freq").withKnob (s, "eqMid2Gain", "Gain").withKnob (s, "eqMid2Q", "Q");
-        high.withKnob (s, "eqHighFreq", "Freq").withKnob (s, "eqHighGain", "Gain");
-        highCut.withCombo (s, "eqHighCutSlope").withKnob (s, "eqHighCut", "Freq");
+        // Interruptor de cada etapa en su cabecera: bypass sin perder los ajustes
+        lowCut.withToggle (s, "eqLowCutOn").withCombo (s, "eqLowCutSlope").withKnob (s, "eqLowCut", "Freq");
+        low.withToggle (s, "eqLowOn").withKnob (s, "eqLowFreq", "Freq").withKnob (s, "eqLowGain", "Gain");
+        mid1.withToggle (s, "eqMid1On").withKnob (s, "eqMid1Freq", "Freq").withKnob (s, "eqMid1Gain", "Gain").withKnob (s, "eqMid1Q", "Q");
+        mid2.withToggle (s, "eqMid2On").withKnob (s, "eqMid2Freq", "Freq").withKnob (s, "eqMid2Gain", "Gain").withKnob (s, "eqMid2Q", "Q");
+        high.withToggle (s, "eqHighOn").withKnob (s, "eqHighFreq", "Freq").withKnob (s, "eqHighGain", "Gain");
+        highCut.withToggle (s, "eqHighCutOn").withCombo (s, "eqHighCutSlope").withKnob (s, "eqHighCut", "Freq");
         output.withToggle (s, "eqOn").withKnob (s, "eqOutput", "Output");
         for (auto* sec : sections()) addAndMakeVisible (*sec);
     }

@@ -71,17 +71,36 @@ private:
 
         void paintButton (juce::Graphics& g, bool highlighted, bool) override
         {
-            const auto r = getLocalBounds().toFloat();
+            // Pestaña de carpeta: la activa, del color de la cara del bloque (Skin::panelFace con la banda de título) y abierta
+            // hacia él: baja hasta el borde inferior de la barra y tapa el canto superior del marco, sin línea debajo. Las
+            // inactivas, más bajas y apagadas, terminan en el canto del marco: su línea queda debajo de ellas
             const auto selected = owner.current == index;
-            g.setColour (Skin::c (selected ? 0xff2c333b : 0xff1b1f24).brighter (highlighted ? 0.1f : 0.0f));
-            g.fillRoundedRectangle (r, 4.0f);
-            if (selected)
+            const auto full = getLocalBounds().toFloat();
+            const auto r = selected ? full.withTrimmedTop (1.0f) : full.withTrimmedTop (3.0f).withBottom (cardTop);
+            const auto face = Skin::panelFace().top.overlaidWith (juce::Colours::white.withAlpha (0.035f));
+            juce::Path shape;
+            shape.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), 4.0f, 4.0f, true, true, false, false);
+            g.setColour ((selected ? face : face.darker (0.45f)).brighter (highlighted ? 0.1f : 0.0f));
+            g.fillPath (shape);
             {
-                g.setColour (Skin::c (0xff42a2c8));
-                g.fillRect (r.withTop (r.getBottom() - 2.0f));
+                // Contorno como el del marco (negro 55 %) por arriba y los lados; nada por abajo
+                juce::Path edge;
+                edge.startNewSubPath (r.getX() + 0.5f, r.getBottom());
+                edge.lineTo (r.getX() + 0.5f, r.getY() + 4.0f);
+                edge.quadraticTo (r.getX() + 0.5f, r.getY() + 0.5f, r.getX() + 4.0f, r.getY() + 0.5f);
+                edge.lineTo (r.getRight() - 4.0f, r.getY() + 0.5f);
+                edge.quadraticTo (r.getRight() - 0.5f, r.getY() + 0.5f, r.getRight() - 0.5f, r.getY() + 4.0f);
+                edge.lineTo (r.getRight() - 0.5f, r.getBottom());
+                g.setColour (juce::Colours::black.withAlpha (selected ? 0.55f : 0.4f));
+                g.strokePath (edge, juce::PathStrokeType (1.0f));
+                if (selected) // luz en el canto superior, como la del marco
+                {
+                    g.setColour (juce::Colours::white.withAlpha (0.10f));
+                    g.drawHorizontalLine (juce::roundToInt (r.getY() + 1.5f), r.getX() + 4.0f, r.getRight() - 4.0f);
+                }
             }
             // LED rojo encendido/apagado, como los interruptores de la interfaz
-            const auto d = juce::jmin (12.0f, r.getHeight() - 8.0f);
+            const auto d = juce::jmin (12.0f, r.getHeight() - 5.0f); // inactiva (14,5 px de alto): 9,5 px
             const auto led = juce::Rectangle<float> (d, d).withCentre ({ r.getX() + 6.0f + d * 0.5f, r.getCentreY() });
             const auto on = owner.sounding (index);
             if (on)
@@ -101,15 +120,15 @@ private:
             const auto tagText = soloed ? "S" : owner.muted (index) ? "M" : "";
             if (*tagText != 0)
             {
-                const auto tag = label.removeFromRight (18.0f).reduced (1.0f, 4.0f);
+                const auto tag = label.removeFromRight (18.0f).reduced (1.0f, selected ? 4.0f : 2.0f);
                 g.setColour (soloed ? Skin::c (0xffd8c040) : Skin::c (0xffc8a020).withAlpha (0.85f));
                 g.fillRoundedRectangle (tag, 2.0f);
                 g.setColour (Skin::black());
                 g.setFont (juce::FontOptions (11.0f, juce::Font::bold));
                 g.drawText (tagText, tag, juce::Justification::centred);
             }
-            g.setColour (Skin::white().withAlpha (muted ? 0.4f : (selected ? 1.0f : 0.8f)));
-            g.setFont (juce::FontOptions (14.0f));
+            g.setColour (Skin::white().withAlpha (muted ? 0.4f : (selected ? 1.0f : 0.6f)));
+            g.setFont (juce::FontOptions (selected ? 14.0f : 13.0f));
             g.drawFittedText (getButtonText(), label.toNearestInt(), juce::Justification::centredLeft, 1);
         }
 
@@ -126,6 +145,10 @@ private:
             else
                 juce::Button::mouseDown (e);
         }
+
+        // Canto superior del marco de la sección en coordenadas de la pestaña: la sección empieza a 16 px (resized) y su
+        // tarjeta, 1,5 px por dentro (drawGroupComponentOutline)
+        static constexpr float cardTop = 16.0f + 1.5f;
 
         SourceTabs& owner;
         int index;

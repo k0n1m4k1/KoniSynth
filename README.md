@@ -21,8 +21,8 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 - **A synth with its own personality.** The *Synth* engine is not an emulation: it is KoniSynth's own eight-voice polyphonic
   design (Mono and Legato too) with Moog traits: a 4-pole ladder low-pass with three qualities against aliasing, the Minimoog
   Tri-Saw and an analog triangle measured on two Model D units. Around them: minBLEP oscillators with up to 7-voice unison,
-  the Prophet-5 and Juno-106 waveform mixes, a Buchla 259-style complex oscillator (through-zero FM, ring, wavefolder; Osc 2
-  or Osc 3 can be its modulator), a wavetable (Serum format) and a sample player for Osc 2 as well, a Karplus-Strong plucked
+  the Prophet-5 and Juno-106 waveform mixes, a Buchla 259-style complex oscillator (through-zero FM, ring, wavefolder; Osc 2,
+  Osc 3 or the noise can be its modulator), a wavetable (Serum format) and a sample player for Osc 2 and Osc 3 as well, a Karplus-Strong plucked
   string, 14 filter models (ladder, SVF, MS-20, comb, dual), per-voice saturation before or after the filter, analog RC
   envelopes, 1/f drift with per-note or per-voice-card tolerances, an analog VCA (click and bleed), two tempo-synced LFOs,
   an 8-slot modulation matrix, MPE and polyphonic aftertouch, and AVX2 for the unison.
@@ -38,7 +38,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 
 | Engine | What it is | Manual |
 |---|---|---|
-| Synth | KoniSynth's own analog-style synth: 4 sources (oscillator, wavetable, sample, Math Models: 12 physical and stochastic models), Osc 2 (classic and mixed waves, wavetable or its own sample), Osc 3, noise, complex oscillator, 14 filters, matrix | [synth.md](docs/engines/synth.md), Math Models: [maths.md](docs/engines/maths.md) |
+| Synth | KoniSynth's own analog-style synth: 4 sources (oscillator, wavetable, sample, Math Models: 12 physical and stochastic models), Osc 2 and Osc 3 (classic and mixed waves, wavetable or their own sample), noise, complex oscillator, 14 filters, matrix | [synth.md](docs/engines/synth.md), Math Models: [maths.md](docs/engines/maths.md) |
 | Theremin | Physical model of the theremin (pitch and volume antennas) with its own pad; also playable from MIDI | [theremin.md](docs/engines/theremin.md) |
 | Casio VL-1 | The 1979 VL-Tone: its sounds, ADSR digits, rhythms and LCD | [casio-vl1.md](docs/engines/casio-vl1.md) |
 | Stylophone | The 1968 stylus organ (20 keys) and the experimental Gen X-2, with a gold-plate pad | [stylophone.md](docs/engines/stylophone.md) |
@@ -56,8 +56,10 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 
 ## Features
 
-- **Synth engine:** besides the four summed sources, a second group of tabs (Osc 2, Osc 3, Noise), with Mute and Solo on
-  every source; Osc 2 can play its own wavetable or its own sample file, and Osc 2 or Osc 3 can be the modulator of the
+- **Synth engine:** besides the four summed sources, a second group of tabs (Osc 2, Osc 3: two full oscillators with
+  their own octave, wave and sync) and a Noise block, with Mute and Solo on
+  every source and a **Mixer** (click the Mixer step of the signal strip): a fader in dB per source (the
+  same level knobs: 100 % = 0 dB, 50 % = -6 dB), Mute, Solo and a peak meter in dBFS, with Master apart; Osc 2 and Osc 3 can play their own wavetable or their own sample file, and Osc 2, Osc 3 or the noise can be the modulator of the
   complex oscillator, through a low-pass filter if you want softer FM. Wavetables in the Serum format (2048 samples per
   frame, or the frame size its `clm` chunk declares). Waveforms include the Minimoog Tri-Saw and the mixed waves of a Prophet-5 oscillator
   and of the Juno-106 (Saw+Pulse), and every triangle can be made lopsided and rounded like an analog one (Tri Sym, Tri Rnd).
@@ -71,11 +73,14 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   (threshold, makeup, ratio) with the limiter ceiling on it.
 - **Effects chain** (each group can be folded or opened in its own window), by default in this order; drag a group's
   tab onto another (or use its right-click menu) to reorder the first six, saved with the preset; output stays last:
-  color (bit crusher, formant filter, tube, parametric EQ with 6 to 48 dB/oct cuts) → amp and cabinet (built-in or your
+  color (bit crusher, formant filter, tube, parametric EQ with 6 to 48 dB/oct cuts, its response drawn in the EQ block and
+  each of its six stages switchable on and off) → amp and cabinet (built-in or your
   impulse response) → dynamics (transient shaper, compressor) → modulation (phaser, flanger, frequency shifter) → ensemble
   (chorus, Leslie) → space (tape echo, plate reverb, spring reverb) → output (media: cassette, vinyl, reel tape at three
   speeds, underwater; master; limiter).
-- **Performance:** arpeggiator, step sequencer, 8 performance macros, MIDI Learn on every knob and on the transport and PANIC
+- **Performance:** arpeggiator, step sequencer (a grid of steps grouped by beats: interval from the key you hold, the
+  note it gives from a reference root, Normal / Tie / Rest, keyboard entry, copy and paste; or one slider per step), 8
+  performance macros, MIDI Learn on every knob and on the transport and PANIC
   buttons, MPE and polyphonic aftertouch (Synth), undo/redo.
 - **Keyboard and scales:** under the on-screen keyboard, Transpose (±24 semitones) and a scale quantizer: 14 scales (major,
   minor, modes, pentatonics, blues, whole tone...) on any key, with out-of-scale notes rounded to the scale (nearest, down
@@ -108,8 +113,9 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   brushed steel), or is brass, or none; with a bezel the screen has CRT-style glass. BPM display and transport next to it. The VL-1, DX7 and MT-32
   engines also show their own front-panel display, and the Drum Machine its step lights.
 - **Interface:** collapsible blocks, floating windows (handy on multi-monitor setups; a pin in the title bar keeps one on
-  top), resizable window, tooltips on every control, right-click menu with Reset / Set value / MIDI Learn, skins (Default,
-  Phosphor Green, Phosphor Amber, Brushed Metal; the choice is global and remembered). Knobs turn like real ones; choices of
+  top), resizable window, tooltips on every control, right-click menu with Reset / Set value / MIDI Learn, skins (Vintage
+  60s by default: matte black panels, walnut, cream lettering and amber accents; Modern, Phosphor Green, Phosphor Amber,
+  Brushed Metal; the choice is global and remembered). Knobs turn like real ones; choices of
   a few options are stepped switches, on/off choices are keys, and waveform menus and switches show the waveform. The
   transpose and scale bar goes with the on-screen keyboard. Red LEDs keep their colour with every skin.
 - **Agent control (MCP):** an AI agent such as Claude can read and set parameters, browse and save presets, play and listen to
@@ -162,8 +168,8 @@ Not available yet: building requires a Mac with Xcode. See [docs/BUILDING.md](do
    - **Filters** on the left: Source (All, ★ Favorites, Factory, User), Category and Engine, each with the number of
      presets it would leave.
    - Click a row or use the arrow keys to **listen**; double-click or Enter loads it and closes the browser.
-   - `(sa)` after a name: the preset plays a sample of your own (Sample source or Osc 2 in Sample mode); `(st)`: it uses
-     the Math Models source.
+   - `(s)` after a name: the preset plays a sample of your own (Sample source, or Osc 2 or Osc 3 in Sample mode); `(π)`: it
+     uses the Math Models source (any of its models).
    - **Favorites:** click the star. The first nine show their number next to the star, and keys **1-9** load them (with
      the KoniSynth window focused, outside text fields). To reorder them: drag the rows while the table is sorted by the
      star column, or right-click a favorite (Move to top / up / down / to end), or Alt + Up / Down.

@@ -23,32 +23,34 @@ public:
         // Categoría escrita en el fichero si no es una de presetCategories() (preset de una versión posterior): la lista lo
         // muestra en Init, pero Save la conserva en vez de reescribirla como Init. Vacía si es conocida
         juce::String unknownCategory {};
-        // Fuentes del motor Synth que suenan (nivel > 0): un sample del usuario (fuente Sample u Osc 2 en modo Sample, con
-        // fichero) y Math Models salvo Modal (las cuerdas). Las listas lo marcan tras el nombre: "(sa)", "(st)". Los de
-        // fábrica no llevan samples: (sa) solo aparece en presets de usuario
-        bool sampleSource = false, stringSource = false;
+        // Fuentes del motor Synth que suenan (nivel > 0): un sample del usuario (fuente Sample, Osc 2 u Osc 3 en modo Sample, con
+        // fichero) y la fuente Math Models (cualquiera de sus modelos, Modal incluido). Las listas lo marcan tras el nombre: "(s)"
+        // y "(π)". Los de fábrica no llevan samples: (s) solo aparece en presets de usuario
+        bool sampleSource = false, mathSource = false;
 
         juce::String displayName() const
         {
-            return name + (sampleSource ? " (sa)" : "") + (stringSource ? " (st)" : "");
+            return name + (sampleSource ? " (s)" : "") + (mathSource ? juce::String (juce::CharPointer_UTF8 (" (\xcf\x80)")) : juce::String()); // π = U+03C0
         }
     };
 
-    // get (id, valor por defecto): valor real de un parámetro del preset. samplePath y osc2SamplePath: sus ficheros (vacío =
-    // ninguno)
+    // get (id, valor por defecto): valor real de un parámetro del preset. samplePath, osc2SamplePath y osc3SamplePath: sus
+    // ficheros (vacío = ninguno)
     template <typename Get>
-    static void markSources (Preset& p, Get&& get, const juce::String& samplePath, const juce::String& osc2SamplePath)
+    static void markSources (Preset& p, Get&& get, const juce::String& samplePath, const juce::String& osc2SamplePath,
+                             const juce::String& osc3SamplePath)
     {
         if (juce::roundToInt (get ("engine", 0.0f)) != 0)
             return;
         p.sampleSource = (get ("sampleLevel", 0.0f) > 0.0f && samplePath.isNotEmpty())
                       || (juce::roundToInt (get ("osc2Wave", 2.0f)) == osc2WaveSample && get ("osc2Level", 0.0f) > 0.0f
-                          && osc2SamplePath.isNotEmpty());
-        // Modal no marca: no es una cuerda sino una suma de senos (los presets que antes llevaban sus WAV no cambian de nombre)
-        p.stringSource = get ("stringLevel", 0.0f) > 0.0f && juce::roundToInt (get ("stringExcite", 0.0f)) != stringExciteModal;
+                          && osc2SamplePath.isNotEmpty())
+                      || (juce::roundToInt (get ("osc3Wave", 3.0f)) == osc3WaveSample && get ("subLevel", 0.0f) > 0.0f
+                          && osc3SamplePath.isNotEmpty());
+        p.mathSource = get ("stringLevel", 0.0f) > 0.0f;
     }
     static constexpr int osc2WaveSample = 11; // osc2Wave: Sample, la última opción (formato 4)
-    static constexpr int stringExciteModal = 5; // stringExcite: Modal
+    static constexpr int osc3WaveSample = 11; // osc3Wave: Sample, la última opción (1.0.1)
 
     // Cómo tocar el preset actual: propiedades del estado (no son parámetros). Las fija la carga de un preset, se pueden
     // editar desde el teclado en pantalla (cuentan como cambio sin guardar, "*") y las escribe Save / Save As
@@ -58,8 +60,12 @@ public:
     // fichero (atributo osc2SamplePath). 4: tabla propia de Osc 2 en modo Wavetable (osc2WtTable, fichero en osc2WtPath) y
     // osc2Wave con Wavetable y Sample al final de la lista. 5: KSL de los operadores OPL en dB/oct (antes, en OPL2/OPL3, el valor
     // de registro: 1 = 3 dB/oct, 2 = 1,5 dB/oct). 6: sample propio de cada motor de consola (dpcmSamplePath, mdSamplePath,
-    // snesSamplePath, n64SamplePath y sus parámetros de región); antes usaban el de la fuente Sample del Synth
-    static constexpr int formatVersion = 6;
+    // snesSamplePath, n64SamplePath y sus parámetros de región); antes usaban el de la fuente Sample del Synth.
+    // Sin cambio de formato (1.0.1): Osc 3 con Wavetable y Sample al final de osc3Wave (los índices anteriores no cambian),
+    // osc3Sync / osc3WtPosition / osc3WtTable / osc3Sample* (ausentes: su valor por defecto) y los ficheros osc3SamplePath y
+    // osc3WtPath (ausentes: sin fichero); complexModSource con Noise al final. 7 (1.0.1): Osc 3 con Oct -2..+2 (osc3Octave) en vez
+    // de subOctave ("-1 oct" / "-2 oct") y Semi ±12 en vez de ±24 (osc3FromSub)
+    static constexpr int formatVersion = 7;
 
     explicit PresetManager (APVTS& s) : apvts (s)
     {
@@ -89,7 +95,7 @@ public:
                              for (const auto& v : f.values)
                                  if (v.id == id) return v.value;
                              return def;
-                         }, f.samplePath, f.osc2SamplePath);
+                         }, f.samplePath, f.osc2SamplePath, juce::String()); // los de fábrica no llevan sample de Osc 3
         }
 
         auto files = userDirectory().findChildFiles (juce::File::findFiles, false, "*.xml");
@@ -114,7 +120,8 @@ public:
                                  known ? juce::String() : category });
             if (xml != nullptr && xml->hasTagName (xmlTag))
                 markSources (presets.back(), [&xml] (const char* id, float def) { return (float) xml->getDoubleAttribute (id, def); },
-                             xml->getStringAttribute (sampleAttribute), xml->getStringAttribute (osc2SampleAttribute));
+                             xml->getStringAttribute (sampleAttribute), xml->getStringAttribute (osc2SampleAttribute),
+                             xml->getStringAttribute (osc3SampleAttribute));
         }
     }
 
@@ -240,7 +247,9 @@ private:
         // Ficheros del preset (sample, wavetable, IR). Los presets de usuario anteriores a la 0.3 no tienen estos atributos:
         // entonces no se tocan los ficheros cargados. Los de fábrica quitan los dos samples del Synth (no llevan ninguno) y
         // no tocan wavetable ni IR. El de Osc 2 en modo Sample no se hereda nunca: sin el atributo
-        // (formato < 3) se quita, para que un preset no se guarde con el fichero de otro
+        // (formato < 3) se quita, para que un preset no se guarde con el fichero de otro. El de Osc 3 (1.0.1), igual: sin el
+        // atributo (presets anteriores), sin fichero. La tabla de Osc 3 sin el atributo no se toca (osc3WtTable ausente vuelve
+        // a Basic Shapes, que no usa fichero)
         if (! preset.factory)
             if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr && xml->hasAttribute ("ansUser"))
                 apvts.state.setProperty ("ansUser", xml->getStringAttribute ("ansUser"), nullptr);
@@ -250,7 +259,7 @@ private:
             {
                 for (const auto& f : factoryPresets())
                     if (f.name == preset.name)
-                        onPresetFiles (f.samplePath, std::nullopt, std::nullopt, f.osc2SamplePath, std::nullopt, {});
+                        onPresetFiles (f.samplePath, std::nullopt, std::nullopt, f.osc2SamplePath, std::nullopt, {}, juce::String(), std::nullopt);
             }
             else if (const auto xml = juce::XmlDocument::parse (preset.file); xml != nullptr)
             {
@@ -269,7 +278,10 @@ private:
                                xml->hasAttribute (wavetableAttribute) ? std::optional<juce::String> (xml->getStringAttribute (wavetableAttribute)) : std::nullopt,
                                xml->hasAttribute (cabIrAttribute) ? std::optional<juce::String> (xml->getStringAttribute (cabIrAttribute)) : std::nullopt,
                                xml->getStringAttribute (osc2SampleAttribute),
-                               osc2Table != nullptr ? std::optional<juce::String> (xml->getStringAttribute (osc2Table)) : std::nullopt, consoles);
+                               osc2Table != nullptr ? std::optional<juce::String> (xml->getStringAttribute (osc2Table)) : std::nullopt, consoles,
+                               xml->getStringAttribute (osc3SampleAttribute),
+                               xml->hasAttribute (osc3WavetableAttribute) ? std::optional<juce::String> (xml->getStringAttribute (osc3WavetableAttribute))
+                                                                          : std::nullopt);
             }
         }
         return juce::Result::ok();
@@ -290,11 +302,12 @@ public:
     }
 
     // Lo instala el procesador: aplica las rutas de fichero de un preset (hilo de mensajes). nullopt = no tocar ese fichero;
-    // osc2SamplePath siempre llega (vacía = sin fichero). engineSamples: los de 8-Bit/DPCM, Mega Drive, SNES y N64
+    // osc2SamplePath y osc3SamplePath siempre llegan (vacías = sin fichero). engineSamples: los de 8-Bit/DPCM, Mega Drive, SNES y N64
     using EngineSamplePaths = std::array<std::optional<juce::String>, 4>;
     std::function<void (std::optional<juce::String> samplePath, std::optional<juce::String> wavetablePath,
                         std::optional<juce::String> cabIrPath, juce::String osc2SamplePath,
-                        std::optional<juce::String> osc2WavetablePath, EngineSamplePaths engineSamples)> onPresetFiles;
+                        std::optional<juce::String> osc2WavetablePath, EngineSamplePaths engineSamples,
+                        juce::String osc3SamplePath, std::optional<juce::String> osc3WavetablePath)> onPresetFiles;
 
     // Sample propio de los motores de consola: atributo del preset (= propiedad del estado del procesador), motor que lo usa y
     // prefijo de sus parámetros de región (el DPCM no tenía región: no se copia)
@@ -546,10 +559,11 @@ private:
     {
         setConfigText ("favorites", favoritesOrderedMark + "\n" + favoriteOrder.joinIntoString ("\n"));
     }
-    // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, wtPathProp, osc2WtPathProp)
+    // Mismos nombres que las propiedades de estado del procesador (samplePathProp, osc2SamplePathProp, osc3SamplePathProp, wtPathProp,
+    // osc2WtPathProp, osc3WtPathProp)
     static constexpr const char* sampleAttribute = "samplePath";
-    static constexpr const char* osc2SampleAttribute = "osc2SamplePath";
-    static constexpr const char* wavetableAttribute = "wtPath", * osc2WavetableAttribute = "osc2WtPath";
+    static constexpr const char* osc2SampleAttribute = "osc2SamplePath", * osc3SampleAttribute = "osc3SamplePath";
+    static constexpr const char* wavetableAttribute = "wtPath", * osc2WavetableAttribute = "osc2WtPath", * osc3WavetableAttribute = "osc3WtPath";
     static constexpr const char* cabIrAttribute = "cabIrPath";
 
     // Parámetros que forman parte de un preset. Quedan fuera los de interpretación (el pad del theremin):
@@ -606,7 +620,29 @@ private:
         if (from < 6) // 5 -> 6: el motor de consola del preset toma la región de la fuente Sample para su sample propio
             copySampleRegionToEngine ([&real] (const juce::String& id, float def) { const auto it = real.find (id); return it != real.end() ? it->second : def; },
                                       [&real] (const juce::String& id, float v) { real[id] = v; });
+        if (from < 7) // 6 -> 7: subOctave + Semi ±24 -> osc3Octave + Semi ±12, con la misma afinación
+        {
+            const auto get = [&real] (const char* id, float def) { const auto it = real.find (id); return it != real.end() ? it->second : def; };
+            const auto [octave, semi] = osc3FromSub (juce::roundToInt (get ("subOctave", 0.0f)), juce::roundToInt (get ("osc3Semi", 0.0f)));
+            real["osc3Octave"] = (float) octave;
+            real["osc3Semi"] = (float) semi;
+            real.erase ("subOctave");
+        }
     }
+
+public:
+    // Osc 3 hasta la 1.0.0-beta (subOctave 0 = -1 oct, 1 = -2 oct; Semi -24..+24, lo que pasara se acotaba ahí) -> Oct -2..+2 y
+    // Semi -12..+12, misma afinación: total = base + Semi semitonos; Oct = total/12 redondeado (acotado a ±2) y Semi el resto.
+    // Exacto de -36 a +12 st, todo lo que cabía con -1 oct; con -2 oct y Semi < -12 (de -48 a -37 st) se queda en -36.
+    // Ejemplos: (-1 oct, +24) -> (+1, 0); (-1 oct, -24) -> (-2, -12); (-1 oct, +19) -> (+1, -5); (-1 oct, -5) -> (-1, -5).
+    // También lo usa KoniSynthProcessor::setStateInformation con los proyectos anteriores
+    static std::pair<int, int> osc3FromSub (int subOctave, int semi)
+    {
+        const auto total = (subOctave == 1 ? -24 : -12) + juce::jlimit (-24, 24, semi);
+        const auto octave = juce::jlimit (-2, 2, (int) std::lround (total / 12.0));
+        return { octave, juce::jlimit (-12, 12, total - 12 * octave) };
+    }
+private:
 
 public:
     // Región (Root, Start, Length, Loop) de la fuente Sample -> la del sample propio del motor de consola del preset (presets de
@@ -686,7 +722,8 @@ private:
             {
                 // Atributos que no son parámetros ni propiedades conocidas: de una versión posterior o renombrados
                 juce::StringArray known { formatAttribute, versionAttribute, categoryAttribute, playHintAttribute, playLowAttribute, playHighAttribute,
-                                          sampleAttribute, osc2SampleAttribute, wavetableAttribute, osc2WavetableAttribute, cabIrAttribute, "ansUser", "thereminOn" };
+                                          sampleAttribute, osc2SampleAttribute, osc3SampleAttribute, wavetableAttribute, osc2WavetableAttribute,
+                                          osc3WavetableAttribute, cabIrAttribute, "ansUser", "thereminOn", "subOctave" };
                 for (const auto& e : engineSamples()) known.add (e.attribute);
                 for (const auto* prop : textProperties()) known.add (prop);
                 for (auto* p : rangedParameters()) known.add (p->getParameterID());
@@ -734,10 +771,12 @@ private:
         // Rutas de los ficheros (no son parámetros: van en el estado). Vacías = sin fichero
         xml.setAttribute (sampleAttribute, apvts.state.getProperty (sampleAttribute).toString());
         xml.setAttribute (osc2SampleAttribute, apvts.state.getProperty (osc2SampleAttribute).toString());
+        xml.setAttribute (osc3SampleAttribute, apvts.state.getProperty (osc3SampleAttribute).toString());
         for (const auto& e : engineSamples())
             xml.setAttribute (e.attribute, apvts.state.getProperty (e.attribute).toString());
         xml.setAttribute (wavetableAttribute, apvts.state.getProperty (wavetableAttribute).toString());
         xml.setAttribute (osc2WavetableAttribute, apvts.state.getProperty (osc2WavetableAttribute).toString());
+        xml.setAttribute (osc3WavetableAttribute, apvts.state.getProperty (osc3WavetableAttribute).toString());
         xml.setAttribute (cabIrAttribute, apvts.state.getProperty (cabIrAttribute).toString());
         if (const auto ans = apvts.state.getProperty ("ansUser").toString(); ans.isNotEmpty())
             xml.setAttribute ("ansUser", ans); // partitura del ANS dibujada por el usuario

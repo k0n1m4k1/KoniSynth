@@ -58,7 +58,7 @@ struct Params
         voicePan = get ("voicePan"); voicePanMode = get ("voicePanMode");
         osc1Level = get ("osc1Level"); pulseWidth = get ("pulseWidth"); pwmDepth = get ("pwmDepth");
         osc2Wave = get ("osc2Wave"); osc2Octave = get ("osc2Octave"); osc2Semi = get ("osc2Semi"); osc2Fine = get ("osc2Fine");
-        osc2Level = get ("osc2Level"); osc2Sync = get ("osc2Sync"); subLevel = get ("subLevel"); subOctave = get ("subOctave");
+        osc2Level = get ("osc2Level"); osc2Sync = get ("osc2Sync"); subLevel = get ("subLevel"); osc3Octave = get ("osc3Octave");
         osc2WtPosition = get ("osc2WtPosition"); osc2WtTable = get ("osc2WtTable"); osc3Wave = get ("osc3Wave"); osc3Semi = get ("osc3Semi"); osc3Fine = get ("osc3Fine");
         osc1TriSym = get ("osc1TriSym"); osc1TriRound = get ("osc1TriRound"); osc2TriSym = get ("osc2TriSym"); osc2TriRound = get ("osc2TriRound");
         osc3TriSym = get ("osc3TriSym"); osc3TriRound = get ("osc3TriRound");
@@ -79,6 +79,7 @@ struct Params
         filterDecay = get ("filterDecay"); filterKey = get ("filterKey");
         tubeOn = get ("tubeOn"); tubeDrive = get ("tubeDrive"); tubeBias = get ("tubeBias");
         eqOn = get ("eqOn"); eqLowCut = get ("eqLowCut"); eqLowCutSlope = get ("eqLowCutSlope"); eqLowFreq = get ("eqLowFreq"); eqLowGain = get ("eqLowGain"); eqMid1Freq = get ("eqMid1Freq"); eqMid1Gain = get ("eqMid1Gain"); eqMid1Q = get ("eqMid1Q"); eqMid2Freq = get ("eqMid2Freq"); eqMid2Gain = get ("eqMid2Gain"); eqMid2Q = get ("eqMid2Q"); eqHighFreq = get ("eqHighFreq"); eqHighGain = get ("eqHighGain"); eqHighCut = get ("eqHighCut"); eqHighCutSlope = get ("eqHighCutSlope"); eqOutput = get ("eqOutput");
+        { const char* ids[6] = { "eqLowCutOn", "eqLowOn", "eqMid1On", "eqMid2On", "eqHighOn", "eqHighCutOn" }; for (size_t b = 0; b < 6; ++b) eqBandOn[b] = get (ids[b]); }
         transOn = get ("transOn"); transAttack = get ("transAttack"); transSustain = get ("transSustain"); compOn = get ("compOn"); compMode = get ("compMode"); compThreshold = get ("compThreshold"); compRatio = get ("compRatio"); compAttack = get ("compAttack"); compRelease = get ("compRelease"); compKnee = get ("compKnee"); compMakeup = get ("compMakeup"); compMix = get ("compMix"); compScHpf = get ("compScHpf"); compSource = get ("compSource"); limOn = get ("limOn"); limCeiling = get ("limCeiling"); limRelease = get ("limRelease"); limLookahead = get ("limLookahead");
         ampOn = get ("ampOn"); ampModel = get ("ampModel"); ampGain = get ("ampGain"); ampBass = get ("ampBass"); ampMid = get ("ampMid"); ampTreble = get ("ampTreble"); ampPresence = get ("ampPresence"); ampMaster = get ("ampMaster"); ampSag = get ("ampSag"); ampOutput = get ("ampOutput"); cabType = get ("cabType"); cabMix = get ("cabMix");
         phaserOn = get ("phaserOn"); phaserRate = get ("phaserRate"); phaserDepth = get ("phaserDepth");
@@ -201,6 +202,8 @@ struct Params
         mdSampleRoot = get ("mdSampleRoot"); mdSampleStart = get ("mdSampleStart"); mdSampleLoop = get ("mdSampleLoop"); mdSampleLength = get ("mdSampleLength");
         snesSampleRoot = get ("snesSampleRoot"); snesSampleStart = get ("snesSampleStart"); snesSampleLoop = get ("snesSampleLoop"); snesSampleLength = get ("snesSampleLength");
         n64SampleRoot = get ("n64SampleRoot"); n64SampleStart = get ("n64SampleStart"); n64SampleLoop = get ("n64SampleLoop"); n64SampleLength = get ("n64SampleLength");
+        osc3Sync = get ("osc3Sync"); osc3WtPosition = get ("osc3WtPosition"); osc3WtTable = get ("osc3WtTable");
+        osc3SampleRoot = get ("osc3SampleRoot"); osc3SampleStart = get ("osc3SampleStart"); osc3SampleLoop = get ("osc3SampleLoop"); osc3SampleLength = get ("osc3SampleLength");
     }
 
     // Interpretación (no son parámetros): los escribe processBlock desde el MIDI entrante (pitch bend en semitonos ya
@@ -218,6 +221,7 @@ struct Params
     mutable unsigned panAlternate = 0;
     std::array<std::atomic<float>*, ModMatrix::numSlots> mtxSrc {}, mtxDst {}, mtxAmt {}; // matriz de modulación (Dsp/ModMatrix.h)
     std::atomic<float>* mtxRandomFade {}; // Random de la matriz × (1 - f + f·envolvente de filtro)
+    std::array<std::atomic<float>*, 6> eqBandOn {}; // bypass por etapa del EQ (Effects/Equalizer.h, Eq::bypass)
     std::atomic<float>* mpeOn {}, *mpeBendRange {}, *voiceAssign {}, *oscPhase {}, *voiceTolerance {}, *vcaClick {}, *vcaLeak {}, *voiceSatMode {}, *voiceSatDrive {}, *voiceSatPos {}, *filterCleanDrive {}, *filterSpread {}, *stringPickup {}, *stringDamping {}, *stringExcite {};
     std::atomic<float>* stringBowPressure {}, *stringHammerFelt {}, *stringEbowDrive {}, *stringBuzz {}, *stringHarmonic {}, *stringStiff {}, *stringTension {};
     std::atomic<float>* reedEmbouchure {}, *reedNoise {}, *fluteJet {}, *fluteNoise {}, *brassLip {}, *brassSlide {};
@@ -226,6 +230,13 @@ struct Params
     // Matriz: desplazamiento por destino de la última voz renderizada (para los anillos de la UI) y contador de bloques con voces
     mutable std::array<std::atomic<float>, ModMatrix::numDestinations> liveMod {};
     mutable std::atomic<unsigned> liveModTick { 0 };
+    // Por voz física (cardIndex 0..7): desplazamientos de la matriz al final de su último bloque y un contador que avanza en
+    // cada bloque que suena (la UI dibuja un punto por voz viva en los mandos destino). Fuentes de la última voz que sonó
+    // (brillo de las lámparas piloto de los mandos)
+    static constexpr int liveVoices = 8;
+    mutable std::array<std::array<std::atomic<float>, ModMatrix::numDestinations>, liveVoices> liveModVoice {};
+    mutable std::array<std::atomic<unsigned>, liveVoices> liveVoiceTick {};
+    mutable std::array<std::atomic<float>, ModMatrix::numSources> liveSrc {};
     std::array<std::atomic<float>, 16> channelTimbre {}; // último CC74 de cada canal (0..1): lo hereda una nota nueva (MPE)
     std::atomic<float> *voiceMode {}, *glide {}, *pitchEnvAmount {}, *pitchEnvDecay {};
     std::atomic<float> *lfoShape {}, *lfoSync {}, *lfo2On {}, *lfo2Target {}, *lfo2Shape {}, *lfo2Rate {}, *lfo2Sync {}, *lfo2Depth {}, *fineTune {};
@@ -283,13 +294,16 @@ struct Params
     // Solo de las pestañas de fuentes, compartido por los dos grupos: -1 ninguno; 0 Osc 1, 1 Wavetable, 2 Sample, 3 String,
     // 4 Osc 2, 5 Osc 3, 6 Noise. Transitorio: no es un parámetro, no se guarda y no toca los Mute (el motor lo combina con ellos)
     mutable std::atomic<int> soloSource { -1 };
+    // Medidores del Mixer (UI/MixerPanel.h): pico de cada fuente (índice SourceIndex) en la voz, tras su nivel y antes del
+    // filtro, el máximo entre voces. Las voces lo suben (máximo) y la UI lo lee y lo pone a 0
+    mutable std::array<std::atomic<float>, 7> sourcePeak {};
     enum SourceIndex { srcOsc1 = 0, srcWavetable, srcSample, srcString, srcOsc2, srcOsc3, srcNoise };
     std::atomic<float> *n64Source {}, *n64SourceRate {}, *n64OutputRate {}, *n64Adpcm {}, *n64Dac {}, *n64Attack {}, *n64Decay {}, *n64Release {},
                        *n64AttackVolume {}, *n64DecayVolume {}, *n64Volume {}, *n64Pan {}, *n64Spread {}, *n64Fx {}, *n64FxMix {}, *n64Velocity {};
     std::atomic<float> *gain {}, *wave {}, *attack {}, *decay {}, *sustain {}, *release {}, *envCurve {}, *drift {},
                        *unisonVoices {}, *unisonDetune {}, *unisonSpread {}, *voicePan {}, *voicePanMode {},
                        *osc1Level {}, *pulseWidth {}, *pwmDepth {}, *osc2Wave {}, *osc2Octave {}, *osc2Semi {}, *osc2Fine {},
-                       *osc2Level {}, *osc2Sync {}, *subLevel {}, *subOctave {}, *noiseLevel {}, *noiseColor {}, *osc2WtPosition {}, *osc2WtTable {}, *osc3Wave {}, *osc3Semi {}, *osc3Fine {},
+                       *osc2Level {}, *osc2Sync {}, *subLevel {}, *osc3Octave {}, *noiseLevel {}, *noiseColor {}, *osc2WtPosition {}, *osc2WtTable {}, *osc3Wave {}, *osc3Semi {}, *osc3Fine {},
                        *osc1TriSym {}, *osc1TriRound {}, *osc2TriSym {}, *osc2TriRound {}, *osc3TriSym {}, *osc3TriRound {},
                        *wtLevel {}, *wtTable {}, *wtPosition {},
                        *stringLevel {}, *stringDecay {}, *stringBright {}, *stringPick {},
@@ -335,5 +349,6 @@ struct Params
                        *timbreMod {}, *modLp {}, *modSync {}, *complexModSource {}, *osc2SampleRoot {}, *osc2SampleStart {}, *osc2SampleLoop {}, *osc2SampleLength {},
                        *dpcmSampleStart {}, *dpcmSampleLength {}, *mdSampleRoot {}, *mdSampleStart {}, *mdSampleLoop {}, *mdSampleLength {},
                        *snesSampleRoot {}, *snesSampleStart {}, *snesSampleLoop {}, *snesSampleLength {},
-                       *n64SampleRoot {}, *n64SampleStart {}, *n64SampleLoop {}, *n64SampleLength {};
+                       *n64SampleRoot {}, *n64SampleStart {}, *n64SampleLoop {}, *n64SampleLength {},
+                       *osc3Sync {}, *osc3WtPosition {}, *osc3WtTable {}, *osc3SampleRoot {}, *osc3SampleStart {}, *osc3SampleLoop {}, *osc3SampleLength {};
 };

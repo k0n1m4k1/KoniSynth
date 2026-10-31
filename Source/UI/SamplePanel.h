@@ -9,11 +9,11 @@ static void setParameterReal (APVTS& s, const juce::String& id, float value)
         p->setValueNotifyingHost (p->convertTo0to1 (value));
 }
 
-// Parámetros de cada sample: el mismo panel para la fuente Sample y Osc 2 del Synth y para el sample propio de cada motor de
+// Parámetros de cada sample: el mismo panel para la fuente Sample, Osc 2 y Osc 3 del Synth y para el sample propio de cada motor de
 // consola. level y root pueden faltar (nullptr): los de consola no tienen nivel propio y el DPCM no tiene Root
 struct SampleIds
 {
-    int which; // KoniSynthProcessor::sourceSample, osc2Sample, dpcmSample, mdSample, snesSample o n64Sample
+    int which; // KoniSynthProcessor::sourceSample, osc2Sample, osc3Sample, dpcmSample, mdSample, snesSample o n64Sample
     const char *level, *root, *start, *length, *loop, *title;
 
     static SampleIds of (int which)
@@ -22,6 +22,7 @@ struct SampleIds
         switch (which)
         {
             case K::osc2Sample: return { which, "osc2Level", "osc2SampleRoot", "osc2SampleStart", "osc2SampleLength", "osc2SampleLoop", "Osc 2 Sample" };
+            case K::osc3Sample: return { which, "subLevel", "osc3SampleRoot", "osc3SampleStart", "osc3SampleLength", "osc3SampleLoop", "Osc 3 Sample" };
             case K::dpcmSample: return { which, nullptr, nullptr, "dpcmSampleStart", "dpcmSampleLength", "chipDpcmLoop", "8-Bit/DPCM Sample" };
             case K::mdSample:   return { which, nullptr, "mdSampleRoot", "mdSampleStart", "mdSampleLength", "mdSampleLoop", "Mega Drive Sample" };
             case K::snesSample: return { which, nullptr, "snesSampleRoot", "snesSampleStart", "snesSampleLength", "snesSampleLoop", "SNES Sample" };

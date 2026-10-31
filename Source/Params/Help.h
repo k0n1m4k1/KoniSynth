@@ -189,7 +189,8 @@ static juce::String paramHelp (const juce::String& id)
         { "osc1Level", "Oscillator 1 volume in the mixer." },
         { "pulseWidth", "Square wave pulse width (also the pulse in the Saw+Pulse, Tri+Pulse and Saw+Tri+Pulse waveforms of Osc 1, Osc 2 "
                         "and the modulator): 50 % sounds hollow; extreme values sound thin and nasal." },
-        { "pwmDepth", "How much the LFO moves the pulse width (PWM): adds motion and body to the square wave and the pulse mixes." },
+        { "pwmDepth", "How much LFO 1 moves the pulse width (PWM): adds motion and body to the square wave and the pulse mixes. "
+                      "It is the attenuator of the LFO 1 -> PWM cable in Mod Patch (0 % = no cable). Default: 0 %." },
         { "osc2Wave", "Oscillator 2 waveform. Tri-Saw: the Minimoog triangle-sawtooth. Saw+Pulse, Saw+Tri, Tri+Pulse, "
                       "Saw+Tri+Pulse: Prophet-5 waveform mixes; Saw+Pulse (Juno): the Juno-106 mix (see Wave). Wavetable: plays its "
                       "own table (Osc 2 Table... in the header), independent of the Wavetable tab, at its own position (WT Pos), "
@@ -205,15 +206,32 @@ static juce::String paramHelp (const juce::String& id)
         { "osc2Semi", "Oscillator 2 offset in semitones (7 = fifth, 12 = octave)." },
         { "osc2Fine", "Oscillator 2 fine detune in cents: a few cents give a thick beating sound." },
         { "osc2Level", "Oscillator 2 volume in the mixer." },
-        { "osc2Sync", "Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the classic metallic sync lead." },
-        { "subLevel", "Oscillator 3 volume. By default it is the classic sub-oscillator (square one octave down) that adds weight "
-                      "to the bass; its wave and tuning (Wave, Semi, Fine) make it a third oscillator." },
-        { "subOctave", "Oscillator 3 base octave: -1 or -2 octaves below oscillator 1. Semi adds up to +/-24 semitones "
-                       "(-1 oct + 12 st = same octave, + 24 st = one octave up)." },
+        { "osc2Sync", "Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the classic metallic sync lead. Patch it in "
+                      "the PATCH panel of the Complex Oscillator (OSC 1 -> SYNC 2). Default: Off." },
+        { "subLevel", "Oscillator 3 volume. With its defaults (Square, Oct -1) it is the classic sub-oscillator that adds weight "
+                      "to the bass; its wave and tuning (Oct, Semi, Fine) make it a full third oscillator, like Osc 2." },
+        { "osc3Octave", "Oscillator 3 octave relative to oscillator 1, -2 to +2. Default -1 (one octave down: the classic "
+                        "sub-oscillator). Above 0 it suits Sync and the Complex modulator (OSC 3 -> MOD)." },
         { "osc3Wave", "Oscillator 3 waveform. Square (default, 50 % pulse) is the classic sub-oscillator; Sine gives a clean "
                       "fundamental (the Init preset uses it); Tri-Saw is the Minimoog triangle-sawtooth; the Saw/Tri/Pulse mixes are "
-                      "the Prophet-5 and Juno-106 ones (see Wave), with the pulse at 50 %." },
-        { "osc3Semi", "Oscillator 3 offset in semitones from its base octave, -24 to +24. Default 0." },
+                      "the Prophet-5 and Juno-106 ones (see Wave), with the pulse at 50 %. Wavetable: plays its own table (Osc 3 "
+                      "Table... in the header) at its own position (WT Pos). Sample: plays its own audio file (Osc 3 Sample... in the "
+                      "header: Load, Root, Start, Length, Loop) with the tuning, level and mute of Osc 3. Sync works with all of them." },
+        { "osc3Sync", "Hard-syncs oscillator 3 to oscillator 1: every cycle of Osc 1 restarts it (its table from the start of the "
+                      "cycle, its sample from Start); raise its tuning for the metallic sync sound. Patch it in the PATCH panel of "
+                      "the Complex Oscillator (OSC 1 -> SYNC 3). Default: Off." },
+        { "osc3WtPosition", "Position of oscillator 3 in its own wavetable (Wavetable waveform only; the table is chosen in "
+                            "Osc 3 Table...). Matrix destination: Osc 3 WT Position. Default 0 %." },
+        { "osc3WtTable", "Wavetable of oscillator 3 (Wavetable waveform only), independent of the Wavetable tab and of Osc 2: "
+                         "built-in tables or your own file (Osc 3 Table... > Load: WAV with 2048 samples per frame, the Serum "
+                         "format, or a single cycle). Default: Basic Shapes." },
+        { "osc3SampleRoot", "Osc 3 Sample: the note at which its file plays at its original pitch (before the Oct, Semi "
+                            "and Fine of Osc 3: at Oct -1 it sounds one octave lower). Default: C4." },
+        { "osc3SampleStart", "Osc 3 Sample: playback start point, also where Sync restarts it. Default: 0 %." },
+        { "osc3SampleLength", "Osc 3 Sample: cuts the file after this time with a short fade (Full = the whole file). Default: Full." },
+        { "osc3SampleLoop", "Osc 3 Sample: loops the file from Start to the end (or its own loop, if the file has one) while "
+                            "the note is held. Default: Off." },
+        { "osc3Semi", "Oscillator 3 offset in semitones (7 = fifth, 12 = octave), -12 to +12. Default 0." },
         { "osc3Fine", "Oscillator 3 fine detune in cents, -50 to +50. Default 0." },
         { "osc1TriSym", "Triangle symmetry of Oscillator 1 (Triangle waveform only): adds the even harmonics of an analog triangle "
                         "that is slightly lopsided. About 50-60 % matches a Minimoog Model D. Default 0 % (ideal triangle)." },
@@ -463,6 +481,12 @@ static juce::String paramHelp (const juce::String& id)
         { "eqHighCut", "High cut (low-pass) frequency: tames fizz and hiss above it. At 20 kHz it is off." },
         { "eqHighCutSlope", "Steepness of the high cut: 6 dB/oct very gentle (one pole), 12 gentle, 24 standard, 48 brick-wall. Default 24." },
         { "eqOutput", "EQ output level, to compensate boosts or cuts." },
+        { "eqLowCutOn", "Low Cut stage on/off (bypass without losing its settings; the change glides in 20 ms). Default on." },
+        { "eqLowOn", "Low shelf on/off (bypass without losing its settings; the change glides in 20 ms). Default on." },
+        { "eqMid1On", "Mid 1 band on/off (bypass without losing its settings; the change glides in 20 ms). Default on." },
+        { "eqMid2On", "Mid 2 band on/off (bypass without losing its settings; the change glides in 20 ms). Default on." },
+        { "eqHighOn", "High shelf on/off (bypass without losing its settings; the change glides in 20 ms). Default on." },
+        { "eqHighCutOn", "High Cut stage on/off (bypass without losing its settings; the change glides in 20 ms). Default on." },
         { "tubeBias", "Tube asymmetry: adds even harmonics (warmer sound)." },
         { "lfoOn", "Turns the LFO (slow modulation oscillator) on." },
         { "lfoTarget", "What the LFO modulates: pitch (vibrato), volume (tremolo) or filter (wah)." },
@@ -741,10 +765,11 @@ static juce::String paramHelp (const juce::String& id)
         { "mdAms", "Tremolo depth from the LFO on operators with AM on (0-3: 0, 1.4, 5.9, 11.8 dB)." },
         { "mdVelocity", "Key velocity lowers the carriers' level (KoniSynth's driver; the chip itself has no velocity)." },
         { "modSync", "Hard-syncs the main oscillator to the modulator." },
-        { "complexModSource", "Which oscillator modulates oscillator 1 in the complex oscillator. Internal (default): its own "
-                              "modulator (Mod Wave and Ratio). Osc 2 or Osc 3: that oscillator with its tuning, wave and "
-                              "wavetable position (Mod Wave and Ratio do nothing); it modulates even at level 0 or muted, so "
-                              "turn its level down to hear only the modulation." },
+        { "complexModSource", "Which source modulates oscillator 1 in the complex oscillator. Internal (default): its own "
+                              "modulator (Mod Wave and Ratio). Osc 2 or Osc 3: that oscillator with its tuning, wave, "
+                              "wavetable position or sample (Mod Wave and Ratio do nothing); it modulates even at level 0 or "
+                              "muted, so turn its level down to hear only the modulation. Noise: the voice's noise with its "
+                              "colour (FM and AM by noise: rough, gritty tones), also at Noise level 0 or muted." },
     };
     const auto it = help.find (id);
     if (it != help.end())
