@@ -46,7 +46,7 @@ inline int destinationOf (const juce::String& paramId)
 inline bool bipolar (int source)
 {
     return source == ModMatrix::srcLfo1 || source == ModMatrix::srcLfo2 || source == ModMatrix::srcKeyTrack
-        || source == ModMatrix::srcRandom || source == ModMatrix::srcPitchBend;
+        || source == ModMatrix::srcRandom || source == ModMatrix::srcPitchBend || source == ModMatrix::srcNoise;
 }
 
 // Fuentes "por nota": su valor queda fijo desde el note-on de cada nota (cada nota el suyo)
@@ -59,7 +59,7 @@ inline bool perNote (int source)
 inline juce::Colour sourceColour (int source)
 {
     static const juce::uint32 c[] = { 0xff808080, 0xff42a2c8, 0xffd070c0, 0xffe0a040, 0xff60c080, 0xfff2e6d0, 0xff80a0ff,
-                                      0xffc8c060, 0xffe07060, 0xff70d0d0, 0xffb0b0b0, 0xffff9c40 };
+                                      0xffc8c060, 0xffe07060, 0xff70d0d0, 0xffb0b0b0, 0xffff9c40, 0xffd8d8e8 };
     return juce::Colour (c[juce::jlimit (0, (int) std::size (c) - 1, source)]);
 }
 

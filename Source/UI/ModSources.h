@@ -99,6 +99,32 @@ private:
 // activas) y Random Fade como perilla pequeña con su valor. Clic derecho en un hueco: Reset matrix to defaults (las 8 ranuras
 // y Random Fade). Mismo fondo que SignalStrip. Con ENGINE acoplado va fija sobre el scroll; en su ventana flotante, como una
 // fila más (por eso es una Section sin marco, como SignalStrip)
+// Botón con el relieve de la ficha Mixer de la tira SIGNAL (UI/WaveView.h): sombra, cara en degradado, canto superior
+// iluminado y contorno; texto de 14 px. Pulsado, sin sombra y 1 px más abajo
+struct RaisedButton : juce::Button
+{
+    explicit RaisedButton (const juce::String& text) : juce::Button (text) {} // el constructor de juce::Button es protegido
+    void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        auto b = getLocalBounds().toFloat().reduced (1.0f, 2.0f);
+        if (down) b.translate (0.0f, 1.0f);
+        else
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.fillRoundedRectangle (b.translated (0.0f, 1.5f), 3.0f);
+        }
+        g.setGradientFill (juce::ColourGradient (Skin::c (over ? 0xff646c76 : 0xff59616b), 0.0f, b.getY(), Skin::c (0xff262a30), 0.0f, b.getBottom(), false));
+        g.fillRoundedRectangle (b, 3.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.18f));
+        g.drawHorizontalLine (juce::roundToInt (b.getY() + 1.0f), b.getX() + 3.0f, b.getRight() - 3.0f);
+        g.setColour (juce::Colours::black.withAlpha (0.7f));
+        g.drawRoundedRectangle (b, 3.0f, 1.0f);
+        g.setColour (Skin::white().withAlpha (0.9f));
+        g.setFont (juce::FontOptions (14.0f));
+        g.drawText (getButtonText(), b, juce::Justification::centred, false);
+    }
+};
+
 class ModSourceBar : public Section
 {
 public:
@@ -172,7 +198,7 @@ public:
 private:
     APVTS& apvts;
     ModSourceChips chips;
-    juce::TextButton matrix { "Matrix..." };
+    RaisedButton matrix { "Matrix..." };
     juce::Slider fade;
     juce::Label fadeLabel, fadeValue;
     APVTS::SliderAttachment fadeAttachment; // tras fade: orden de construcción

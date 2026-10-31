@@ -7,7 +7,7 @@
 // Las fuentes son las que ya calcula la voz (sin avanzar nada dos veces): LFO 1 y 2 (±1), envolventes de filtro y de amplitud
 // (0..1), velocidad (0..1), seguimiento de teclado (±1 = ±5 octavas desde C4), rueda (0..1), aftertouch (máximo de poly y
 // canal, 0..1), timbre MPE (CC74 del canal de la nota, 0..1), aleatorio por nota (±1, fijo desde el note-on y sembrado:
-// Dsp/RandomClock.h) y pitch bend (±1).
+// Dsp/RandomClock.h), pitch bend (±1) y ruido (±1, el generador de Noise con su color, a frecuencia de audio; 1.0.1).
 // Cada destino suma la contribución de todas las ranuras que lo apuntan; el alcance a cantidad 100 % y fuente 1 está en
 // destinationRange. Las ranuras vacías (fuente o destino None, o cantidad 0) no cuestan nada.
 namespace ModMatrix
@@ -15,7 +15,9 @@ namespace ModMatrix
 constexpr int numSlots = 8;
 
 enum Source { srcNone = 0, srcLfo1, srcLfo2, srcFilterEnv, srcAmpEnv, srcVelocity, srcKeyTrack, srcModWheel, srcAftertouch,
-              srcTimbre, srcRandom, srcPitchBend, numSources };
+              srcTimbre, srcRandom, srcPitchBend,
+              srcNoise, // 1.0.1
+              numSources }; // los presets guardan el índice: solo se añade al final
 
 enum Destination { dstNone = 0, dstPitch, dstOsc2Pitch, dstCutoff, dstResonance, dstDrive, dstPulseWidth, dstOsc1Level,
                    dstOsc2Level, dstNoiseLevel, dstVolume, dstPan, dstFmIndex, dstTimbre, dstWtPosition, dstOsc2WtPosition,
@@ -25,7 +27,7 @@ enum Destination { dstNone = 0, dstPitch, dstOsc2Pitch, dstCutoff, dstResonance,
 inline const juce::StringArray& sourceNames()
 {
     static const juce::StringArray n { "None", "LFO 1", "LFO 2", "Filter Env", "Amp Env", "Velocity", "Key Track", "Mod Wheel",
-                                       "Aftertouch", "MPE Timbre", "Random", "Pitch Bend" };
+                                       "Aftertouch", "MPE Timbre", "Random", "Pitch Bend", "Noise" };
     return n;
 }
 

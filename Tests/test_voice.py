@@ -99,10 +99,11 @@ for d in (0, 80):
 c.check(abs(dec[80] - dec[0]) < 0.5, 'cuerda, Damping 80 %%: caída de la fundamental en 1 s %.2f dB frente a %.2f sin Damping (< 0,5 dB)' % (dec[80], dec[0]))
 c.check(abs(1200 * np.log2(dec['80'] / dec['0'])) < 1.0, 'cuerda, Damping 80 %%: afinación %.3f Hz frente a %.3f Hz (< 1 cent)' % (dec['80'], dec['0']))
 
-# --- Osc 2 en modo Wavetable: tabla propia (aquí, la misma que la fuente Wavetable para compararlas), fase y posición propias ---
+# --- Wavetable de Osc 2 (WT Lvl, familia de Osc 2): tabla propia (aquí, la misma que la fuente Wavetable para compararlas),
+# la fase y la afinación de Osc 2 y su posición. El oscilador de Osc 2 queda a 0 (su nivel por defecto) ---
 WT = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%', 'Wavetable=Harmonic Sweep',
       'Osc2 Wavetable=Harmonic Sweep']
-OSC2 = WT + ['Osc2 Wave=Wavetable', 'Osc2 Level=100%']
+OSC2 = WT + ['Osc2 WT Level=100%']
 fa = 440 * 2 ** ((57 - 69) / 12)
 
 
@@ -144,9 +145,9 @@ c.check(d < 0.01, 'matriz Velocity -> Osc 2 WT Position 100 %%, velocidad 127 = 
 SYNC = ['Osc2 Level=100%', 'Osc2 Sync=On', 'Osc2 Octave=1', 'Osc2 Semi=5']
 fc4 = 440 * 2 ** ((60 - 69) / 12)
 a_sine = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Sine'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
-a_wt0 = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Wavetable', 'Osc2 WT Position=0%'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
+a_wt0 = alias_ratio(render(WT + SYNC[1:] + ['Osc2 WT Level=100%', 'Osc2 WT Position=0%'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
 c.check(abs(a_wt0 - a_sine) < 0.5, 'Osc 2 Wavetable con sync, tabla en seno: aliasing %.1f dB = Sine clásico %.1f dB (±0,5)' % (a_wt0, a_sine))
-a_wt30 = alias_ratio(render(WT + SYNC + ['Osc2 Wave=Wavetable', 'Osc2 WT Position=30%'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
+a_wt30 = alias_ratio(render(WT + SYNC[1:] + ['Osc2 WT Level=100%', 'Osc2 WT Position=30%'], 1.5, ['60:0.05:1.4:127'], 'osc2wt.wav')[0], fs, fc4)
 c.check(a_wt30 < -50, 'Osc 2 Wavetable con sync, posición 30 %%, C4: aliasing %.1f dB (< -50)' % a_wt30)
 
 # --- Osc 3: f3 = f1 · 2^(octava + (semi + fine/100)/12), Oct -2..+2 (por defecto -1) y Semi ±12; por defecto, la cuadrada del
@@ -178,11 +179,11 @@ import hashlib
 sha = lambda x: hashlib.sha256(x.tobytes()).hexdigest()
 MN = ['57:0.05:1.0:127', '64:0.3:0.8:100']
 WTS = ['Wavetable Level=100%', 'Wavetable Position=60%']
-O2W = ['Osc2 Wave=Wavetable', 'Osc2 Level=100%', 'Osc2 WT Position=20%']
+O2W = ['Osc2 WT Level=100%', 'Osc2 WT Position=20%']
 c.check(sha(render(WT + WTS + O2W + ['Wavetable Mute=On'], 1.2, MN, 'mute.wav')[0]) == sha(render(WT + O2W, 1.2, MN, 'mute.wav')[0]),
         'Mute de Wavetable con Osc 2 en la misma tabla: suena solo Osc 2 (bit a bit)')
-c.check(sha(render(WT + WTS + O2W + ['Osc2 Mute=On'], 1.2, MN, 'mute.wav')[0]) == sha(render(WT + WTS, 1.2, MN, 'mute.wav')[0]),
-        'Mute de Osc 2: suena solo la fuente Wavetable (bit a bit)')
+c.check(sha(render(WT + WTS + O2W + ['Osc2 WT Mute=On'], 1.2, MN, 'mute.wav')[0]) == sha(render(WT + WTS, 1.2, MN, 'mute.wav')[0]),
+        'Mute del WT de Osc 2: suena solo la fuente Wavetable (bit a bit)')
 O3S = ['Osc3 Level=100%', 'Osc3 Wave=Saw']
 c.check(sha(render(WT + O3S + ['Noise Level=50%', 'Noise Mute=On', 'Osc2 Level=60%', 'Osc2 Mute=On'], 1.2, MN, 'mute.wav')[0])
         == sha(render(WT + O3S, 1.2, MN, 'mute.wav')[0]), 'Mute de Osc 2 y Noise: igual que sin ellos (bit a bit)')
@@ -237,8 +238,8 @@ import os
 CFG = os.path.join(os.environ['APPDATA'], 'KoniSynth', 'config.settings')
 XS = {'Osc 2 sierra con sync, FM, unísono 5': ['Unison Voices=5', 'Wave=Saw', 'FM Index=I 2.00', 'Complex Mod Source=Osc 2', 'Osc2 Wave=Saw',
                                               'Osc2 Sync=On', 'Osc2 Semi=7', 'Osc2 Level=30%', 'Mod Sync=On'],
-      'Osc 2 Wavetable, AM, unísono 7': ['Unison Voices=7', 'Wave=Square', 'AM Depth=100%', 'FM Index=I 1.00', 'Complex Mod Source=Osc 2',
-                                         'Wavetable=Harmonic Sweep', 'Osc2 Wave=Wavetable', 'Osc2 WT Position=40%'],
+      'Osc 2 Wavetable, AM, unísono 7': ['Unison Voices=7', 'Wave=Square', 'AM Depth=100%', 'FM Index=I 1.00', 'Complex Mod Source=Osc 2 WT',
+                                         'Wavetable=Harmonic Sweep', 'Osc2 WT Position=40%'],
       'Osc 3 triángulo, FM, unísono 3': ['Unison Voices=3', 'FM Index=I 3.00', 'Complex Mod Source=Osc 3', 'Osc3 Wave=Triangle', 'Osc3 Octave=1', 'Osc3 Semi=-5',
                                          'Mod Sync=On']}
 XN = ['48:0.05:0.9:110', '55:0.3:0.7:90', '64:0.6:0.6:127']
@@ -260,7 +261,7 @@ for name in XS:
     d = db(np.abs(out[(name, 1)] - out[(name, 0)]).max() / np.abs(out[(name, 0)]).max())
     c.check(d < -100, 'AVX2 = escalar con %s: diferencia máxima %.1f dB del pico (< -100)' % (name, d))
 
-# --- Osc 2 en modo Sample: su propio fichero, con la afinación, el nivel y el Mute de Osc 2 ---
+# --- Sample de Osc 2 (Smp Lvl, familia de Osc 2): su propio fichero, con la afinación de Osc 2 y su nivel y su Mute ---
 # Ficheros sintéticos propios (en Tests/renders): A = tono armónico en C4 a 44,1 kHz con un golpe de ruido inicial; B = tono de
 # armónicos impares en A3 a 48 kHz (0,8 s); S = seno de 440 Hz a 48 kHz (3 s)
 import wave
@@ -283,7 +284,7 @@ t = np.arange(38400) / 48000.0
 FB = write_wav('o2s_B.wav', 0.5 * sum(np.sin(2 * np.pi * k * 220.0 * t) / k for k in range(1, 12, 2)) * np.minimum(1, t / 0.005), 48000)
 FS = write_wav('o2s_S.wav', 0.5 * np.sin(2 * np.pi * 440.0 * np.arange(144000) / 48000.0), 48000)
 SB = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%', 'Osc1 Level=0%']
-O2S = ['Osc2 Wave=Sample', 'Osc2 Level=100%']
+O2S = ['Osc2 Sample Level=100%']
 NC = ['60:0.05:1.4:127']
 rel = lambda a, b: db(np.abs(a - b).max() / max(np.abs(b).max(), 1e-12))
 s1, fs = render(SB + ['Sample Level=100%', '--sample=' + FA], 1.5, NC, 'o2s.wav')
@@ -298,7 +299,7 @@ c.check(d < -100, 'dos ficheros a la vez (Sample A en C4, Osc 2 Sample B en A3 +
 x, _ = render(SB + O2S + ['Osc2 Sample Root=A4', 'Osc2 Semi=7', 'Osc2 Fine=10.0 ct', '--osc2-sample=' + FS], 1.5, NC, 'o2s.wav')
 want = c4 * 2 ** (7.1 / 12); ct = 1200 * np.log2(pitch(x, fs) / want)
 c.check(abs(ct) < 0.05, 'Osc 2 Sample (seno, raíz A4) con +7 st +10 ct en C4: %.3f Hz (esperado %.3f, %+.3f ct)' % (pitch(x, fs), want, ct))
-x, _ = render(SB + O2S + ['Osc2 Mute=On', '--osc2-sample=' + FA], 1.5, NC, 'o2s.wav')
+x, _ = render(SB + O2S + ['Osc2 Sample Mute=On', '--osc2-sample=' + FA], 1.5, NC, 'o2s.wav')
 c.check(np.abs(x).max() == 0.0, 'Osc 2 Sample en Mute: pico %.1e (silencio)' % np.abs(x).max())
 # Fin, bucle, Length y sync (B dura 0,8 s a su raíz: tocado en A3 termina a 0,85 s)
 NB = ['57:0.05:1.4:127']
@@ -329,11 +330,11 @@ CS = ['Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Release=5 ms', 'Drift=0%'
 for name, extra in (('ring', ['AM Depth=100%']), ('FM I 2', ['FM Index=I 2.00']), ('ring con sync', ['AM Depth=100%', 'Osc2 Sync=On', 'Osc2 Octave=1'])):
     for note in (57, 81):
         x1, _ = render(CS + extra + ['Osc2 Wave=Sine'], 1.0, ['%d:0.05:0.9:127' % note], 'o2s.wav')
-        x2, _ = render(CS + extra + ['Osc2 Wave=Sample', 'Osc2 Sample Root=A4', '--osc2-sample=' + FS], 1.0, ['%d:0.05:0.9:127' % note], 'o2s.wav')
+        x2, _ = render(CS + extra + ['Complex Mod Source=Osc 2 Sample', 'Osc2 Sample Root=A4', '--osc2-sample=' + FS], 1.0, ['%d:0.05:0.9:127' % note], 'o2s.wav')
         d = rel(x2[int(0.06 * fs):int(0.9 * fs)], x1[int(0.06 * fs):int(0.9 * fs)])
         c.check(d < -50, 'Complex %s, nota %d, modulador Osc 2 Sample (seno) = Osc 2 Sine: %.1f dB (< -50)' % (name, note, d))
-x0, _ = render(CS + ['AM Depth=100%', 'Osc2 Wave=Sample', '--osc2-sample=' + FS], 1.0, ['57:0.05:0.9:127'], 'o2s.wav')
-xm, _ = render(CS[:-2] + ['Osc2 Level=50%', 'Osc2 Mute=On', 'Osc2 Semi=7', 'AM Depth=100%', 'Osc2 Wave=Sample', '--osc2-sample=' + FS], 1.0,
+x0, _ = render(CS + ['AM Depth=100%', 'Complex Mod Source=Osc 2 Sample', '--osc2-sample=' + FS], 1.0, ['57:0.05:0.9:127'], 'o2s.wav')
+xm, _ = render(CS + ['Osc2 Sample Level=50%', 'Osc2 Sample Mute=On', 'AM Depth=100%', 'Complex Mod Source=Osc 2 Sample', '--osc2-sample=' + FS], 1.0,
                ['57:0.05:0.9:127'], 'o2s.wav')
 c.check(sha(x0) == sha(xm) and np.abs(x0).max() > 0.01, 'Osc 2 Sample modulando en Mute (nivel 50 %) = a nivel 0 (bit a bit)')
 # Estado: la ruta viaja en el estado; sin fichero (o sin la propiedad, proyectos anteriores) Osc 2 Sample calla

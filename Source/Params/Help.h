@@ -30,6 +30,19 @@ static juce::String paramHelp (const juce::String& id)
         { "stringMute", "Silences the plucked string without changing its level." },
         { "osc2Mute", "Silences Oscillator 2 without changing its level (tab right-click: Mute / Solo)." },
         { "osc3Mute", "Silences Oscillator 3 without changing its level (tab right-click: Mute / Solo)." },
+        { "osc2WtMute", "Silences the wavetable of Osc 2 without changing its level (Mixer: M / S)." },
+        { "osc2SampleMute", "Silences the sample of Osc 2 without changing its level (Mixer: M / S)." },
+        { "osc3WtMute", "Silences the wavetable of Osc 3 without changing its level (Mixer: M / S)." },
+        { "osc3SampleMute", "Silences the sample of Osc 3 without changing its level (Mixer: M / S)." },
+        { "osc2WtLevel", "Volume of the wavetable of Osc 2: its own table (Osc 2 Table... in the header) at its own position (WT Pos), "
+                         "played with the tuning, phase, drift and sync of Osc 2, together with the oscillator. Default 0 %." },
+        { "osc2SampleLevel", "Volume of the sample of Osc 2: its own audio file (Osc 2 Sample... in the header: Load, Root, Start, "
+                             "Length, Loop), played with the tuning, drift and sync of Osc 2 (Sync restarts it from Start), together "
+                             "with the oscillator. Default 0 %." },
+        { "osc3WtLevel", "Volume of the wavetable of Osc 3: its own table (Osc 3 Table...) at its own position (WT Pos), with the "
+                         "tuning, phase and sync of Osc 3. Default 0 %." },
+        { "osc3SampleLevel", "Volume of the sample of Osc 3: its own audio file (Osc 3 Sample...), with the tuning and sync of Osc 3. "
+                             "Default 0 %." },
         { "noiseMute", "Silences the noise without changing its level (tab right-click: Mute / Solo)." },
         { "monoOut", "Sums left and right to mono at the very end, to check how the sound holds up in mono." },
         { "mdOutput", "Mega Drive output. Stereo: Model 1 headphone jack or Model 2 AV. Mono: Model 1 AV and RF outputs, as most people heard it on a TV." },
@@ -192,14 +205,11 @@ static juce::String paramHelp (const juce::String& id)
         { "pwmDepth", "How much LFO 1 moves the pulse width (PWM): adds motion and body to the square wave and the pulse mixes. "
                       "It is the attenuator of the LFO 1 -> PWM cable in Mod Patch (0 % = no cable). Default: 0 %." },
         { "osc2Wave", "Oscillator 2 waveform. Tri-Saw: the Minimoog triangle-sawtooth. Saw+Pulse, Saw+Tri, Tri+Pulse, "
-                      "Saw+Tri+Pulse: Prophet-5 waveform mixes; Saw+Pulse (Juno): the Juno-106 mix (see Wave). Wavetable: plays its "
-                      "own table (Osc 2 Table... in the header), independent of the Wavetable tab, at its own position (WT Pos), "
-                      "with its own tuning and phase; Sync works too. Sample: plays its own audio file (Osc 2 Sample... in the header: "
-                      "Load, Root, Start, Length, Loop), a different one from the Sample tab, with the tuning, drift, level and mute "
-                      "of Osc 2; Sync restarts it from Start every cycle of Osc 1. Default: Saw." },
-        { "osc2WtPosition", "Position of oscillator 2 in its own wavetable (Wavetable waveform only; the table is chosen in "
-                            "Osc 2 Table...). Default 0 %." },
-        { "osc2WtTable", "Wavetable of oscillator 2 (Wavetable waveform only), independent of the Wavetable tab: built-in "
+                      "Saw+Tri+Pulse: Prophet-5 waveform mixes; Saw+Pulse (Juno): the Juno-106 mix (see Wave). Its own wavetable "
+                      "and sample play alongside, at their own levels (WT Lvl, Smp Lvl). Default: Saw." },
+        { "osc2WtPosition", "Position in the wavetable of Osc 2 (the table is chosen in Osc 2 Table...; heard with WT Lvl). "
+                            "Default 0 %." },
+        { "osc2WtTable", "Wavetable of Osc 2 (heard with WT Lvl), independent of the Wavetable tab: built-in "
                          "tables or your own file (Osc 2 Table... > Load: WAV with 2048 samples per frame, the Serum format, "
                          "or a single cycle). Default: Basic Shapes." },
         { "osc2Octave", "Oscillator 2 octave relative to oscillator 1." },
@@ -214,15 +224,14 @@ static juce::String paramHelp (const juce::String& id)
                         "sub-oscillator). Above 0 it suits Sync and the Complex modulator (OSC 3 -> MOD)." },
         { "osc3Wave", "Oscillator 3 waveform. Square (default, 50 % pulse) is the classic sub-oscillator; Sine gives a clean "
                       "fundamental (the Init preset uses it); Tri-Saw is the Minimoog triangle-sawtooth; the Saw/Tri/Pulse mixes are "
-                      "the Prophet-5 and Juno-106 ones (see Wave), with the pulse at 50 %. Wavetable: plays its own table (Osc 3 "
-                      "Table... in the header) at its own position (WT Pos). Sample: plays its own audio file (Osc 3 Sample... in the "
-                      "header: Load, Root, Start, Length, Loop) with the tuning, level and mute of Osc 3. Sync works with all of them." },
+                      "the Prophet-5 and Juno-106 ones (see Wave), with the pulse at 50 %. Its own wavetable and sample play alongside, "
+                      "at their own levels (WT Lvl, Smp Lvl). Sync works with all of them." },
         { "osc3Sync", "Hard-syncs oscillator 3 to oscillator 1: every cycle of Osc 1 restarts it (its table from the start of the "
                       "cycle, its sample from Start); raise its tuning for the metallic sync sound. Patch it in the PATCH panel of "
                       "the Complex Oscillator (OSC 1 -> SYNC 3). Default: Off." },
-        { "osc3WtPosition", "Position of oscillator 3 in its own wavetable (Wavetable waveform only; the table is chosen in "
-                            "Osc 3 Table...). Matrix destination: Osc 3 WT Position. Default 0 %." },
-        { "osc3WtTable", "Wavetable of oscillator 3 (Wavetable waveform only), independent of the Wavetable tab and of Osc 2: "
+        { "osc3WtPosition", "Position in the wavetable of Osc 3 (the table is chosen in Osc 3 Table...; heard with WT Lvl). "
+                            "Matrix destination: Osc 3 WT Position. Default 0 %." },
+        { "osc3WtTable", "Wavetable of Osc 3 (heard with WT Lvl), independent of the Wavetable tab and of Osc 2: "
                          "built-in tables or your own file (Osc 3 Table... > Load: WAV with 2048 samples per frame, the Serum "
                          "format, or a single cycle). Default: Basic Shapes." },
         { "osc3SampleRoot", "Osc 3 Sample: the note at which its file plays at its original pitch (before the Oct, Semi "
@@ -246,11 +255,21 @@ static juce::String paramHelp (const juce::String& id)
         { "osc3TriRound", "Rounds the tips of the Oscillator 3 triangle (Triangle waveform only): softer, with weaker odd harmonics; "
                           "100 % is a sine. The filter already rounds them a little: about 0-20 % matches a Minimoog Model D (30-50 % with Filter off). Default 0 % (sharp tips)." },
         { "noiseLevel", "Noise volume in the mixer (wind, percussion, breath)." },
-        { "noiseColor", "Noise colour: white (bright hiss), pink (darker, like rain) or LFSR digital noise from 8-bit game chips (Short = metallic, tonal noise that follows the key)." },
+        { "noiseColor", "Noise colour: white (bright hiss), pink (darker, like rain), LFSR digital noise from 8-bit game chips (Short = metallic, tonal noise that follows the key) or Crackle (random clicks, like dust on a record; Tone sets how many)." },
+        { "noiseTone", "Noise tone: below 0 darker (down to a deep rumble), above 0 brighter (thin hiss); the level is kept about the same. "
+                       "With Crackle it sets how many clicks per second (2 to 2000). Default 0 (unchanged)." },
+        { "noiseBand", "Resonant band on the noise, tuned to the key plus this interval: whistling wind, pitched air, metallic hats. "
+                       "It follows pitch bend and glide. Default Off." },
+        { "noiseWidth", "Width of the noise band (Q): low = wide and airy, high = narrow, almost a whistle. Only with Band on. Default Q 2." },
+        { "noiseAttack", "Fade-in time of the noise at each note (breath that swells). Default 0 (instant)." },
+        { "noiseDecay", "The noise fades out on its own in this time (to -60 dB): a short burst at the start of the note, like a flute "
+                        "chiff or a snare hit. Off (default) = the noise lasts as long as the note." },
+        { "noisePath", "Where the noise enters: Pre Filter (default, through the filter like the oscillators) or Post Filter (after it: "
+                       "the hiss stays bright even in a dark patch)." },
         { "wtLevel", "Wavetable oscillator volume in the mixer: a stack of waveforms you can sweep through (Position)." },
         { "wtTable", "Wavetable: built-in tables or your own file (WAV with 2048 samples per frame, the Serum format, or a single cycle)." },
         { "wtPosition", "Position inside the wavetable: sweeps from the first to the last waveform. LFO 2 can move it." },
-        { "stringLevel", "Math Models volume in the mixer: a sound computed in real time from a formula (not a sample): a string "
+        { "stringLevel", "Math Model volume in the mixer: a sound computed in real time from a formula (not a sample): a string "
                          "plucked, bowed, struck or driven, or a set of fading modes (Modal)." },
         { "stringDecay", "How long the string rings once it is free (seconds to fall by 60 dB): after a pluck or a hammer, or after "
                          "you release the key with Bow and E-Bow. With Modal it scales every decay of the recipe (x1 at 3 s)." },
@@ -564,7 +583,8 @@ static juce::String paramHelp (const juce::String& id)
                       "Random: a random phase per note." },
         { "voiceTolerance", "Where the Drift tolerances (detune, cutoff spread, thermal coefficient) live. Per Note: new values for each note. "
                             "Per Voice Card: fixed per physical voice, like the voice cards of a vintage polysynth." },
-        { "filterCleanDrive", "Clean filter input. Off (default): the input stage always saturates a little, even at Drive 0 % "
+        { "filterCleanDrive", "Clean filter input; it changes how the Drive knob of the Filter block behaves. Off (default): the "
+                              "input stage always saturates a little, even at Drive 0 % "
                               "(analog character, 3rd harmonic of a full-scale sine at about -29 dB). On: Drive 0 % is linear and the "
                               "saturation fades in over the first 25 % of Drive. SVF, comb and dual modes become linear; the ladder and MS-20 "
                               "keep their own core saturation (3rd harmonic about -34 dB)." },
@@ -769,10 +789,11 @@ static juce::String paramHelp (const juce::String& id)
         { "mdVelocity", "Key velocity lowers the carriers' level (KoniSynth's driver; the chip itself has no velocity)." },
         { "modSync", "Hard-syncs the main oscillator to the modulator." },
         { "complexModSource", "Which source modulates oscillator 1 in the complex oscillator. Internal (default): its own "
-                              "modulator (Mod Wave and Ratio). Osc 2 or Osc 3: that oscillator with its tuning, wave, "
-                              "wavetable position or sample (Mod Wave and Ratio do nothing); it modulates even at level 0 or "
-                              "muted, so turn its level down to hear only the modulation. Noise: the voice's noise with its "
-                              "colour (FM and AM by noise: rough, gritty tones), also at Noise level 0 or muted." },
+                              "modulator (Mod Wave and Ratio). Osc 2 or Osc 3: that oscillator with its tuning and wave "
+                              "(Mod Wave and Ratio do nothing); it modulates even at level 0 or muted, so turn its level down "
+                              "to hear only the modulation. Noise: the voice's noise with its colour (FM and AM by noise: rough, "
+                              "gritty tones), also at Noise level 0 or muted. Osc 2 WT / Sample, Osc 3 WT / Sample: the wavetable "
+                              "or the sample of that oscillator, with its tuning, also at level 0 or muted." },
     };
     const auto it = help.find (id);
     if (it != help.end())

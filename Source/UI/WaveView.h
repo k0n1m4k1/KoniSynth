@@ -36,7 +36,8 @@ public:
         addHandle ("stringDecay", Handle::level);
         // Más mandos sobre la traza: nivel de cada fuente (borde izquierdo, arrastre vertical), Spread del unísono (el punto
         // de la derecha), profundidad de PWM (borde de la banda) y el semitono de Osc 2 / Osc 3 (fin del primer ciclo)
-        for (const auto* id : { "osc1Level", "wtLevel", "sampleLevel", "stringLevel", "osc2Level", "subLevel", "noiseLevel" })
+        for (const auto* id : { "osc1Level", "wtLevel", "sampleLevel", "stringLevel", "osc2Level", "subLevel", "noiseLevel",
+                                "osc2WtLevel", "osc3WtLevel" })
             addHandle (id, Handle::level);
         addHandle ("unisonSpread", Handle::bar);
         addHandle ("pwmDepth", Handle::bar);
@@ -270,7 +271,7 @@ private:
         OscSpec o {};
         if (v == osc2)
         {
-            o.wave = osc2WaveFromChoice (choice ("osc2Wave")); // códigos del motor (4 Wavetable, 5 Sample, mezclas 6..11)
+            o.wave = osc2WaveFromChoice (choice ("osc2Wave")); // códigos del motor (mezclas 6..11)
             o.pw = value ("pulseWidth");
             o.tri.set (value ("osc2TriSym"), value ("osc2TriRound"));
             o.level = value ("osc2Level");
@@ -279,7 +280,7 @@ private:
         }
         else if (v == osc3)
         {
-            o.wave = osc2WaveFromChoice (choice ("osc3Wave")); // mismos códigos que Osc 2 (4 Wavetable, 5 Sample)
+            o.wave = osc2WaveFromChoice (choice ("osc3Wave")); // mismos códigos que Osc 2
             o.pw = 0.5f; // la cuadrada de Osc 3 va siempre al 50 % (Synth.h)
             o.tri.set (value ("osc3TriSym"), value ("osc3TriRound"));
             o.level = value ("subLevel");
@@ -297,6 +298,17 @@ private:
         }
         return o;
     }
+    // Miembro de la familia de Osc 2 / Osc 3 que muestra su vista: el oscilador si tiene nivel (o si nadie lo tiene); si no, su
+    // Wavetable o, si tampoco, su Sample. 0 oscilador, 1 Wavetable, 2 Sample
+    int familyShown (int v) const
+    {
+        if (v != osc2 && v != osc3) return 0;
+        const auto two = v == osc2;
+        if (value (two ? "osc2Level" : "subLevel") > 0.0f) return 0;
+        if (value (two ? "osc2WtLevel" : "osc3WtLevel") > 0.0f) return 1;
+        return value (two ? "osc2SampleLevel" : "osc3SampleLevel") > 0.0f ? 2 : 0;
+    }
+
     static float sampleOsc (const OscSpec& o, double t) // t: fase en [0, 1)
     {
         const auto x = oscillator (o.wave, t, 0.0, o.pw, false);
@@ -337,10 +349,11 @@ private:
     {
         const auto o = spec (view);
         const auto r = inner();
-        if (view == osc2 && o.wave == 4) { paintTable (g, screen, "osc2WtPosition", KoniSynthProcessor::wtOsc2); return; }
-        if (view == osc2 && o.wave == 5) { paintSampleOverview (g, KoniSynthProcessor::osc2Sample, false); return; }
-        if (view == osc3 && o.wave == 4) { paintTable (g, screen, "osc3WtPosition", KoniSynthProcessor::wtOsc3); return; }
-        if (view == osc3 && o.wave == 5) { paintSampleOverview (g, KoniSynthProcessor::osc3Sample, false); return; }
+        const auto shown = familyShown (view); // Osc 2 / Osc 3 sin nivel y con su WT o su Sample: se ve ese
+        if (view == osc2 && shown == 1) { paintTable (g, screen, "osc2WtPosition", KoniSynthProcessor::wtOsc2); return; }
+        if (view == osc2 && shown == 2) { paintSampleOverview (g, KoniSynthProcessor::osc2Sample, false); return; }
+        if (view == osc3 && shown == 1) { paintTable (g, screen, "osc3WtPosition", KoniSynthProcessor::wtOsc3); return; }
+        if (view == osc3 && shown == 2) { paintSampleOverview (g, KoniSynthProcessor::osc3Sample, false); return; }
         const auto alpha = o.level > 0.0f ? 1.0f : 0.45f;
 
         // PWM (LFO 1 ± PWM Depth alrededor de PW, acotado a 5-95 %, Synth.h): banda de la zona que barre el flanco
@@ -397,7 +410,7 @@ private:
     // Osc 1 con el Complex encendido: los dos primeros ciclos de la nota con la recursión de Synth::complexSample (fases desde
     // 0 como al empezar la nota; FM lineal que atraviesa cero, AM / ring, sync duro) y el plegador de Synth::fold (Timbre más
     // Timbre Mod por el modulador, Symmetry). Modulador interno (Mod Wave a Mod Ratio) u Osc 2 / Osc 3 con su forma y su
-    // relación; Osc 2 / Osc 3 en Wavetable o Sample y el ruido (Noise) no se dibujan como modulador (queda a 0). Mod LP con la
+    // relación; sus Wavetable o Sample y el ruido (Noise) no se dibujan como modulador (queda a 0). Mod LP con la
     // nota en C4 (261,63 Hz). Sin minBLEP ni el bloqueo de continua del plegador. Debajo, tenue, el modulador
     void paintComplex (juce::Graphics& g, juce::Rectangle<float> r, const OscSpec& o, float alpha)
     {
@@ -405,7 +418,7 @@ private:
         const auto dtP = cycles / (double) n;
         const auto source = choice ("complexModSource");
         const auto ext = source == 1 ? spec (osc2) : spec (osc3);
-        const auto extUsable = (source == 1 || source == 2) && ext.wave != 4 && ext.wave != 5;
+        const auto extUsable = source == 1 || source == 2;
         const auto modWave = waveFromChoice (choice ("modWave"));
         const auto ratio = source == 0 ? (double) value ("modRatio") : ext.ratio;
         const auto dtM = dtP * ratio;
@@ -722,9 +735,26 @@ private:
     void paintNoise (juce::Graphics& g, juce::Rectangle<float>)
     {
         // Los generadores del motor (Synth.h): blanco uniforme, rosa (filtro de Paul Kellet), LFSR de 15 bits largo o corto
-        // a la frecuencia de C3 (130,81 Hz) y 48 kHz; semilla fija: la imagen no cambia
+        // a la frecuencia de C3 (130,81 Hz) y 48 kHz, o Crackle; semilla fija: la imagen no cambia. Tone y Band, con los mismos
+        // filtros que la voz a la tasa de las columnas (12 kHz: 4 muestras por columna, como el reloj del LFSR); la ganancia de
+        // Tone y Band, aproximada (la imagen no busca medir nivel)
         const auto r = inner();
         const auto color = choice ("noiseColor");
+        const auto tone = value ("noiseTone"), band = value ("noiseBand"), q = juce::jmax (0.5f, value ("noiseWidth"));
+        constexpr double colRate = 12000.0;
+        const auto pi = juce::MathConstants<double>::pi;
+        const auto fcTone = tone < 0.0f ? 50.0 * std::pow (4000.0, 1.0 + (double) tone) : 20.0 * std::pow (250.0, (double) tone);
+        const auto toneC = tone < 0.0f ? (float) (1.0 - std::exp (-2.0 * pi * fcTone / colRate))
+                                       : (float) (std::tan (pi * std::min (fcTone, 0.49 * colRate) / colRate) / (1.0 + std::tan (pi * std::min (fcTone, 0.49 * colRate) / colRate)));
+        const auto toneOn = color != 4 && std::abs (tone) >= 1.0e-4f;
+        const auto toneLp = (fcTone * std::atan (6000.0 / fcTone)) / 6000.0;
+        const auto toneGain = (float) (1.0 / std::sqrt (std::max (1.0e-3, tone < 0.0f ? toneLp : 1.0 - toneLp)));
+        const auto bandOn = band > -24.5f;
+        const auto f0 = std::min (0.45, 130.81 * std::exp2 ((double) band / 12.0) / colRate);
+        const auto bg = (float) std::tan (pi * f0), bk = 1.0f / q;
+        const auto bGain = (float) std::min (100.0, std::sqrt (6000.0 * 2.0 * q / (pi * f0 * colRate)));
+        const auto crackleProb = (float) (2.0 * std::pow (1000.0, 0.5 * (tone + 1.0f)) / colRate);
+        float toneZ = 0.0f, ic1 = 0.0f, ic2 = 0.0f, crackle = 0.0f;
         juce::Random rng (0x5EED);
         float pink[7] {};
         std::uint32_t lfsr = 1;
@@ -736,7 +766,7 @@ private:
         {
             const auto w = 2.0f * rng.nextFloat() - 1.0f;
             auto v = w;
-            if (color >= 2)
+            if (color == 2 || color == 3)
             {
                 const auto shortMode = color == 3;
                 lfsrPhase += dt * (shortMode ? 93.0 : 8.0) * 4.0; // 4 muestras por columna
@@ -756,6 +786,26 @@ private:
                 v = 0.3277f * (pink[0] + pink[1] + pink[2] + pink[3] + pink[4] + pink[5] + pink[6] + w * 0.5362f);
                 pink[6] = w * 0.115926f;
             }
+            else if (color == 4)
+            {
+                if (rng.nextFloat() < crackleProb) { const auto u = rng.nextFloat(); crackle = 0.25f + 1.25f * u * u; }
+                v = crackle * w;
+                crackle *= 0.264f; // caída de 0,25 ms a 12 kHz: e^(-1/3)
+            }
+            if (toneOn)
+            {
+                if (tone < 0.0f) { toneZ += toneC * (v - toneZ); v = toneZ * toneGain; }
+                else { const auto d = (v - toneZ) * toneC, lp = d + toneZ; toneZ = lp + d; v = (v - lp) * toneGain; }
+            }
+            if (bandOn)
+            {
+                const auto a1 = 1.0f / (1.0f + bg * (bg + bk)), a2 = bg * a1;
+                const auto v3 = v - ic2, v1 = a1 * ic1 + a2 * v3, v2 = ic2 + bg * v1;
+                ic1 = 2.0f * v1 - ic1;
+                ic2 = 2.0f * v2 - ic2;
+                v = bk * v1 * bGain;
+            }
+            v = juce::jlimit (-1.2f, 1.2f, v);
             const auto x = r.getX() + r.getWidth() * (float) i / (float) n;
             const auto y = yOf (r, value ("noiseLevel") * v); // a la amplitud de su nivel, como los osciladores
             if (i == 0) p.startNewSubPath (x, y); else p.lineTo (x, y);
@@ -781,11 +831,12 @@ private:
         if (v == osc1 || v == osc2 || v == osc3)
         {
             const auto o = spec (v);
-            if ((v == osc2 || v == osc3) && o.wave == 5) return {};
-            if (v == osc2 && o.wave == 4)
-                return [f = frameAt ("osc2WtPosition", KoniSynthProcessor::wtOsc2), table, level = o.level, ratio = o.ratio] (double t) { return level * table (f, t * ratio); };
-            if (v == osc3 && o.wave == 4)
-                return [f = frameAt ("osc3WtPosition", KoniSynthProcessor::wtOsc3), table, level = o.level, ratio = o.ratio] (double t) { return level * table (f, t * ratio); };
+            const auto shown = familyShown (v);
+            if (shown == 2) return {};
+            if (v == osc2 && shown == 1)
+                return [f = frameAt ("osc2WtPosition", KoniSynthProcessor::wtOsc2), table, level = value ("osc2WtLevel"), ratio = o.ratio] (double t) { return level * table (f, t * ratio); };
+            if (v == osc3 && shown == 1)
+                return [f = frameAt ("osc3WtPosition", KoniSynthProcessor::wtOsc3), table, level = value ("osc3WtLevel"), ratio = o.ratio] (double t) { return level * table (f, t * ratio); };
             return [o] (double t) { const auto ph = t * o.ratio; return o.level * sampleOsc (o, ph - std::floor (ph)); };
         }
         if (v == wavetable)
@@ -794,17 +845,23 @@ private:
         const auto solo = koni.getParams().soloSource.load();
         const auto audible = [&] (int src, const char* muteId) { return solo >= 0 ? solo == src : value (muteId) < 0.5f; };
         std::array<OscSpec, 3> o { spec (osc1), spec (osc2), spec (osc3) };
-        // Osc 2 / Osc 3 en modo Wavetable (4) o Sample (5): fuera, como el sample
+        // Los Samples (de Osc 1, Osc 2 y Osc 3) quedan fuera: no son periódicos
         const std::array<bool, 3> on { o[0].level > 0.0f && audible (Params::srcOsc1, "osc1Mute"),
-                                       o[1].level > 0.0f && o[1].wave != 4 && o[1].wave != 5 && audible (Params::srcOsc2, "osc2Mute"),
-                                       o[2].level > 0.0f && o[2].wave != 4 && o[2].wave != 5 && audible (Params::srcOsc3, "osc3Mute") };
-        const auto wtLevel = value ("wtLevel") > 0.0f && audible (Params::srcWavetable, "wtMute") ? value ("wtLevel") : 0.0f;
-        const auto mathLevel = value ("stringLevel") > 0.0f && audible (Params::srcString, "stringMute") ? value ("stringLevel") : 0.0f;
-        return [o, on, wtLevel, f = frameAt ("wtPosition", KoniSynthProcessor::wtMain), table, mathLevel, math = mathModelShape()] (double t)
+                                       o[1].level > 0.0f && audible (Params::srcOsc2, "osc2Mute"),
+                                       o[2].level > 0.0f && audible (Params::srcOsc3, "osc3Mute") };
+        const auto levelIf = [&] (const char* levelId, int src, const char* muteId) { return value (levelId) > 0.0f && audible (src, muteId) ? value (levelId) : 0.0f; };
+        const auto wtLevel = levelIf ("wtLevel", Params::srcWavetable, "wtMute");
+        const auto wt2Level = levelIf ("osc2WtLevel", Params::srcOsc2Wt, "osc2WtMute");
+        const auto wt3Level = levelIf ("osc3WtLevel", Params::srcOsc3Wt, "osc3WtMute");
+        const auto mathLevel = levelIf ("stringLevel", Params::srcString, "stringMute");
+        return [o, on, wtLevel, f = frameAt ("wtPosition", KoniSynthProcessor::wtMain), wt2Level, f2 = frameAt ("osc2WtPosition", KoniSynthProcessor::wtOsc2),
+                wt3Level, f3 = frameAt ("osc3WtPosition", KoniSynthProcessor::wtOsc3), table, mathLevel, math = mathModelShape()] (double t)
         {
             float y = 0.0f;
             for (size_t k = 0; k < 3; ++k)
                 if (on[k]) { const auto ph = t * o[k].ratio; y += o[k].level * sampleOsc (o[k], ph - std::floor (ph)); }
+            y += wt2Level > 0.0f ? wt2Level * table (f2, t * o[1].ratio) : 0.0f;
+            y += wt3Level > 0.0f ? wt3Level * table (f3, t * o[2].ratio) : 0.0f;
             return y + wtLevel * table (f, t) + (mathLevel > 0.0f ? mathLevel * math (t) : 0.0f);
         };
     }
@@ -972,13 +1029,15 @@ private:
             case osc2:
                 lines.add ("OCT " + text ("osc2Octave") + " | SEMI " + text ("osc2Semi") + " | FINE " + text ("osc2Fine"));
                 lines.add ("RATIO x" + juce::String (spec (osc2).ratio, 3) + " | LEVEL " + pct ("osc2Level"));
-                if (spec (osc2).wave == 4) lines.add ("WT POS " + pct ("osc2WtPosition") + " | " + koni.getWavetableName (KoniSynthProcessor::wtOsc2));
+                if (value ("osc2WtLevel") > 0.0f || value ("osc2SampleLevel") > 0.0f)
+                    lines.add ("WT " + pct ("osc2WtLevel") + " (POS " + pct ("osc2WtPosition") + ") | SMP " + pct ("osc2SampleLevel"));
                 info = text ("osc2Wave");
                 break;
             case osc3:
                 lines.add ("OCT " + text ("osc3Octave") + " | SEMI " + text ("osc3Semi") + " | FINE " + text ("osc3Fine"));
                 lines.add ("RATIO x" + juce::String (spec (osc3).ratio, 3) + " | LEVEL " + pct ("subLevel"));
-                if (spec (osc3).wave == 4) lines.add ("WT POS " + pct ("osc3WtPosition") + " | " + koni.getWavetableName (KoniSynthProcessor::wtOsc3));
+                if (value ("osc3WtLevel") > 0.0f || value ("osc3SampleLevel") > 0.0f)
+                    lines.add ("WT " + pct ("osc3WtLevel") + " (POS " + pct ("osc3WtPosition") + ") | SMP " + pct ("osc3SampleLevel"));
                 info = text ("osc3Wave");
                 break;
             case wavetable:
@@ -1084,14 +1143,18 @@ private:
         if (view == osc1 || view == osc2 || view == osc3)
         {
             const auto o = spec (view);
-            if ((view == osc2 || view == osc3) && o.wave == 4)
+            const auto shown = familyShown (view);
+            if (shown == 1) // Osc 2 / Osc 3 sin nivel con su Wavetable: la posición y el nivel de la tabla
             {
                 const auto rail = railBounds();
                 const auto* posId = view == osc2 ? "osc2WtPosition" : "osc3WtPosition";
+                const auto* wtLevelId = view == osc2 ? "osc2WtLevel" : "osc3WtLevel";
                 show (posId, { rail.getCentreX(), rail.getBottom() - value (posId) * rail.getHeight() });
-                show (levelId (view), { r.getX() - 6.0f, yOf (r, o.level) }, 22, 16);
+                show (wtLevelId, { r.getX() - 6.0f, yOf (r, value (wtLevelId)) }, 22, 16);
                 return;
             }
+            if (shown == 2) // su Sample: la vista general del fichero, sin asas
+                return;
             if (view != osc3 && waveUsesPw (o.wave))
                 show ("pulseWidth", { r.getX() + cycleW * edgeOf (o.wave, o.pw), r.getY() - 2.0f });
             if (o.wave == triangle && o.ratio > 0.0)
@@ -1233,11 +1296,13 @@ private:
         "wave", "osc1Level", "unisonVoices", "unisonDetune", "unisonSpread", "pulseWidth", "pwmDepth", "drift", "osc1TriSym", "osc1TriRound",
         "osc2Wave", "osc2Level", "osc2Octave", "osc2Semi", "osc2Fine", "osc2WtPosition", "osc2WtTable", "osc2TriSym", "osc2TriRound",
         "osc3Wave", "subLevel", "osc3Octave", "osc3Semi", "osc3Fine", "osc3WtPosition", "osc3WtTable", "osc3TriSym", "osc3TriRound", "noiseColor", "noiseLevel",
+        "noiseTone", "noiseBand", "noiseWidth",
         "wtTable", "wtLevel", "wtPosition", "sampleLevel", "sampleStart", "sampleLength", "sampleLoop", "sampleRoot",
         "stringLevel", "stringDecay", "stringBright", "stringPick", "stringPickup", "stringExcite", "stringDamping", "stringHarmonic",
         "stringBowPressure", "stringHammerFelt", "stringEbowDrive", "stringBuzz", "stringStiff", "stringTension", "reedEmbouchure", "reedNoise", "fluteJet", "fluteNoise",
         "brassLip", "brassSlide", "bandedShape", "bandedExcite", "shakerType", "shakerObjects", "shakerShake", "shakerTone", "malletHardness", "malletMass", "malletDamp",
         "osc1Mute", "wtMute", "sampleMute", "stringMute", "osc2Mute", "osc3Mute", "noiseMute",
+        "osc2WtLevel", "osc2SampleLevel", "osc3WtLevel", "osc3SampleLevel", "osc2WtMute", "osc2SampleMute", "osc3WtMute", "osc3SampleMute",
         "filterOn", "filterMode", "cutoff", "resonance", "filterDrive", "filterCleanDrive", "filterSpread", "filterKey", "filterEnv",
         "filterSustain", "velToFilter", "lfoOn", "lfoTarget", "lfoDepth", "lfo2On", "lfo2Target", "lfo2Depth",
         "complexOn", "complexModSource", "modWave", "modRatio", "fmIndex", "amDepth", "timbre", "symmetry", "timbreMod", "modSync", "modLp" };
@@ -1279,6 +1344,7 @@ public:
 
     std::function<void (int source)> onSourcePicked; // Params::SourceIndex
     std::function<void()> onMixer; // ficha Mixer: abre el diálogo Mixer (UI/MixerPanel.h)
+    std::function<void()> onSaturation, onFx, onOut; // Sat: diálogo Saturation...; FX / Out: scroll a efectos / a OUTPUT
     void setRoutes (int n) { if (n != routes) { routes = n; repaint(); } }
 
     float layoutWeight() const override { return 1.3f; }
@@ -1311,8 +1377,8 @@ public:
             const auto w = juce::GlyphArrangement::getStringWidth (font, text) + (led >= 0 ? 26.0f : 16.0f);
             const juce::Rectangle<float> b (x, cy - chipH * 0.5f, w, chipH);
             const auto selected = source >= 0 && source == selectedSource;
-            if (source == mixerChip) // Mixer: botón con relieve (abre su diálogo): sombra, cara en degradado y canto iluminado
-            {
+            if (source <= mixerChip) // fichas de acción (Mixer, Filter, Sat, VCA, FX): botón con relieve (sombra, cara en
+            {                        // degradado y canto iluminado), como RaisedButton de la barra MOD
                 g.setColour (juce::Colours::black.withAlpha (0.45f));
                 g.fillRoundedRectangle (b.translated (0.0f, 1.5f), 3.0f);
                 g.setGradientFill (juce::ColourGradient (Skin::c (0xff59616b), 0.0f, b.getY(), Skin::c (0xff262a30), 0.0f, b.getBottom(), false));
@@ -1367,9 +1433,12 @@ public:
             g.fillPath (dashed);
         };
 
-        static const char* names[] = { "Osc 1", "WT", "Sample", "String", "Osc 2", "Osc 3", "Noise" };
-        static const char* levels[] = { "osc1Level", "wtLevel", "sampleLevel", "stringLevel", "osc2Level", "subLevel", "noiseLevel" };
-        static const char* mutes[] = { "osc1Mute", "wtMute", "sampleMute", "stringMute", "osc2Mute", "osc3Mute", "noiseMute" };
+        // Por Params::SourceIndex (las cuatro últimas, la familia de Osc 2 y Osc 3)
+        static const char* names[] = { "Osc 1", "WT", "Sample", "Math Model", "Osc 2", "Osc 3", "Noise", "Osc 2 WT", "Osc 2 Smp", "Osc 3 WT", "Osc 3 Smp" };
+        static const char* levels[] = { "osc1Level", "wtLevel", "sampleLevel", "stringLevel", "osc2Level", "subLevel", "noiseLevel",
+                                        "osc2WtLevel", "osc2SampleLevel", "osc3WtLevel", "osc3SampleLevel" };
+        static const char* mutes[] = { "osc1Mute", "wtMute", "sampleMute", "stringMute", "osc2Mute", "osc3Mute", "noiseMute",
+                                       "osc2WtMute", "osc2SampleMute", "osc3WtMute", "osc3SampleMute" };
         const auto solo = koni.getParams().soloSource.load();
         const auto sounding = [&] (int k) { return value (levels[k]) > 0.0f && (solo >= 0 ? solo == k : value (mutes[k]) < 0.5f); };
         const auto sourceTip = [] (int k) { return juce::String (names[k]) + ": LED lit while it sounds. Click: its tab and its view on the wave display."; };
@@ -1383,14 +1452,18 @@ public:
             // Mod LP si está puesto) entra por la izquierda
             const auto src = (int) value ("complexModSource");
             const auto lp = value ("modLp") < 19999.0f;
-            const juce::String extName = src == 1 ? "Osc 2" : src == 2 ? "Osc 3" : "Noise";
+            // complexModSource -> fuente (SourceIndex): 1 Osc 2, 2 Osc 3, 3 Noise, 4..7 WT / Sample de Osc 2 y Osc 3
+            static const int modSourceIndex[] = { -1, Params::srcOsc2, Params::srcOsc3, Params::srcNoise,
+                                                  Params::srcOsc2Wt, Params::srcOsc2Sample, Params::srcOsc3Wt, Params::srcOsc3Sample };
+            const auto extSource = modSourceIndex[juce::jlimit (0, 7, src)];
+            const juce::String extName = extSource >= 0 ? names[extSource] : "";
             glyph (back);
             chip ("Complex", 1, -1, "Osc 1 is the complex oscillator: FM / AM / ring and wavefolder on its own carrier, "
                                     "modulated by " + (src == 0 ? juce::String ("its internal modulator") : extName)
                                     + (lp ? " through the Mod LP filter (" + text ("modLp") + ")." : "."));
             glyph (back);
             chip ((src == 0 ? juce::String ("Mod ") + text ("modWave") : extName) + (lp ? " LP" : ""),
-                  -1, src == 1 ? 4 : src == 2 ? 5 : src == 3 ? 6 : -1, "Modulator of the Complex" + juce::String (lp ? ", low-passed by Mod LP." : "."));
+                  -1, extSource, "Modulator of the Complex" + juce::String (lp ? ", low-passed by Mod LP." : "."));
         }
         for (int k = 1; k < 4; ++k) chip (names[k], sounding (k) ? 1 : 0, k, sourceTip (k));
         outline (x0);
@@ -1398,33 +1471,53 @@ public:
         glyph ("+");
         x0 = x + 4.0f;
         x += 4.0f;
-        for (int k = 4; k < 7; ++k) chip (names[k], sounding (k) ? 1 : 0, k, sourceTip (k));
+        // Noise en Post Filter (noisePath): sale del grupo y entra tras el filtro, donde se suma en la voz
+        const auto noisePost = value ("noisePath") > 0.5f;
+        // Cada oscilador con su familia: su WT y su Sample solo si tienen nivel (con todas, la tira no cabría)
+        for (const auto k : { (int) Params::srcOsc2, (int) Params::srcOsc2Wt, (int) Params::srcOsc2Sample,
+                              (int) Params::srcOsc3, (int) Params::srcOsc3Wt, (int) Params::srcOsc3Sample, (int) Params::srcNoise })
+        {
+            if (k == Params::srcNoise && noisePost) continue;
+            const auto member = k >= Params::srcOsc2Wt;
+            if (member && value (levels[k]) <= 0.0f) continue;
+            chip (names[k], sounding (k) ? 1 : 0, k, sourceTip (k));
+        }
         outline (x0);
         x += 4.0f;
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
-        chip ("Mixer", -1, mixerChip, "All sources are summed at their levels. Click: Mixer (faders in dB, meters, mute, solo).", true);
+        chip ("Mixer", -1, mixerChip, "All sources are summed at their levels. Click: Mixer (faders in dB, meters, mute, solo).");
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
-        const auto filterChip = [&] { chip ("Filter " + text ("filterMode"), value ("filterOn") > 0.5f ? 1 : 0, -1,
-                                            "Filter: LED lit when it is on (off = the sound goes straight through)."); };
+        const auto filterChip = [&]
+        {
+            chip ("Filter " + text ("filterMode"), value ("filterOn") > 0.5f ? 1 : 0, filterChipId,
+                  "Filter: LED lit when it is on (off = the sound goes straight through). Click: turn it on or off.");
+            if (noisePost)
+            {
+                glyph ("+");
+                chip (names[6], sounding (6) ? 1 : 0, 6, "Noise, added after the filter (Path: Post Filter): LED lit while it sounds. "
+                                                         "Click: its block and its view on the wave display.");
+            }
+        };
         const auto pre = value ("voiceSatPos") > 0.5f;
-        const auto satChip = [&] { chip ("Sat", value ("voiceSatDrive") > 0.0f ? 1 : 0, -1,
-                                         juce::String ("Per-voice saturation ") + (pre ? "before" : "after") + " the filter "
-                                         "(Saturation... dialog: drive, curve and position): LED lit above 0."); };
+        const auto satChip = [&] { chip ("Sat", value ("voiceSatDrive") > 0.0f ? 1 : 0, satChipId,
+                                         juce::String ("Per-voice saturation ") + (pre ? "before" : "after") + " the filter: LED lit "
+                                         "above 0. Click: Saturation dialog (drive, curve and position)."); };
         if (pre) { satChip(); glyph (arrow); filterChip(); }
         else     { filterChip(); glyph (arrow); satChip(); }
         glyph (arrow);
-        chip ("VCA " + text ("envCurve"), -1, -1, "Amplifier with the Amp Envelope (curve shown).");
+        chip ("VCA " + text ("envCurve"), -1, vcaChipId, "Amplifier with the Amp Envelope (curve shown). Click: switch the curve "
+                                                         "(Linear / Analog RC).");
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
         {
             static const char* groups[] = { "COLOR", "AMP", "DYNAMICS", "MOD FX", "ENSEMBLE", "SPACE" };
             juce::StringArray chain;
             for (const auto grp : koni.getFxOrder()) chain.add (groups[grp]);
             chain.add ("OUTPUT");
-            chip ("FX", -1, -1, "The effects chain, in this order: " + chain.joinIntoString (" " + arrow + " ")
-                                + ". Drag an effects block tab (or right-click it) to change the order.");
+            chip ("FX", -1, fxChipId, "The effects chain, in this order: " + chain.joinIntoString (" " + arrow + " ")
+                                      + ". Click: scroll to the effects row. Drag an effects block tab (or right-click it) to change the order.");
         }
         glyph (juce::String::fromUTF8 ("\xe2\x86\x92"));
-        chip ("Out", -1, -1, "Plugin output.");
+        chip ("Out", -1, outChipId, "Plugin output. Click: scroll to the OUTPUT block (media, master and limiter).");
 
         // Modulaciones activas, a la derecha (se recortan si no caben)
         juce::StringArray mods;
@@ -1444,8 +1537,16 @@ public:
     void mouseUp (const juce::MouseEvent& e) override
     {
         for (const auto& c : chips)
-            if (c.source == mixerChip && c.bounds.contains (e.position) && onMixer)
-                onMixer();
+        {
+            if (! c.bounds.contains (e.position))
+                continue;
+            if (c.source == mixerChip && onMixer) onMixer();
+            else if (c.source == satChipId && onSaturation) onSaturation();
+            else if (c.source == fxChipId && onFx) onFx();
+            else if (c.source == outChipId && onOut) onOut();
+            else if (c.source == filterChipId) toggle ("filterOn");
+            else if (c.source == vcaChipId) toggle ("envCurve"); // 2 opciones: Linear <-> Analog RC
+        }
         for (const auto& c : chips)
             if (c.source >= 0 && c.bounds.contains (e.position) && onSourcePicked)
             {
@@ -1476,6 +1577,18 @@ public:
     void setSelectedSource (int k) { if (k != selectedSource) { selectedSource = k; repaint(); } }
 
 private:
+    // Un clic = un paso de deshacer: de 0 a 1 o de 1 a 0 en la posición normalizada (bool o elección de dos opciones)
+    void toggle (const char* id)
+    {
+        if (auto* p = s.getParameter (id))
+        {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (p->getValue() > 0.5f ? 0.0f : 1.0f);
+            p->endChangeGesture();
+        }
+    }
+
+private:
     float value (const char* id) const { return s.getRawParameterValue (id)->load(); }
     juce::String text (const char* id) const { auto* p = s.getParameter (id); return p != nullptr ? p->getCurrentValueAsText() : juce::String(); }
 
@@ -1484,7 +1597,9 @@ private:
         // Repinta si cambia algo de lo que se muestra
         static const char* ids[] = { "osc1Level", "wtLevel", "sampleLevel", "stringLevel", "osc2Level", "subLevel", "noiseLevel",
                                      "osc1Mute", "wtMute", "sampleMute", "stringMute", "osc2Mute", "osc3Mute", "noiseMute",
-                                     "complexOn", "complexModSource", "modWave", "modLp", "filterOn", "filterMode", "voiceSatDrive", "voiceSatPos",
+                                     "osc2WtLevel", "osc2SampleLevel", "osc3WtLevel", "osc3SampleLevel",
+                                     "osc2WtMute", "osc2SampleMute", "osc3WtMute", "osc3SampleMute",
+                                     "complexOn", "complexModSource", "modWave", "modLp", "filterOn", "filterMode", "voiceSatDrive", "voiceSatPos", "noisePath",
                                      "envCurve", "filterEnv",
                                      "lfoOn", "lfoDepth", "lfoTarget", "lfo2On", "lfo2Depth", "lfo2Target", "pwmDepth" };
         std::uint64_t h = (std::uint64_t) (koni.getParams().soloSource.load() + 2);
@@ -1495,7 +1610,8 @@ private:
     }
 
     struct Chip { juce::Rectangle<float> bounds; int source; juce::String tip; };
-    static constexpr int mixerChip = -2; // "source" de la ficha Mixer (las fuentes son >= 0; el resto, -1)
+    // "source" de las fichas de acción (las fuentes son >= 0; las informativas, -1): todas <= mixerChip
+    static constexpr int mixerChip = -2, filterChipId = -3, satChipId = -4, vcaChipId = -5, fxChipId = -6, outChipId = -7;
     KoniSynthProcessor& koni;
     APVTS& s;
     std::vector<Chip> chips;

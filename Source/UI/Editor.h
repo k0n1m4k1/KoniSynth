@@ -202,10 +202,13 @@ public:
                    .withHeaderButton ("Osc 2 Table...", "Open the wavetable editor of Osc 2 (Wavetable waveform): its own table, "
                                       "independent of the Wavetable tab; see the frames, load your own file.",
                                       [this] { openWavetablePanel (KoniSynthProcessor::wtOsc2); }).withResetSource (panelParams ([this] { return std::make_unique<WavetablePanel> (koni, KoniSynthProcessor::wtOsc2, [] {}); }))
+                   // Familia: el nivel de su WT y de su Sample, al final de cada fila (formato 8)
                    .withKnob (s, "osc2Level", "Level").withKnob (s, "osc2Semi", "Semi").withKnob (s, "osc2WtPosition", "WT Pos")
+                   .withKnob (s, "osc2WtLevel", "WT Lvl")
                    .withKnob (s, "osc2Octave", "Oct").withKnob (s, "osc2Fine", "Fine")
                    .withKnob (s, "osc2TriSym", "Tri Sym").withKnob (s, "osc2TriRound", "Tri Rnd")
-                   .withControlRows (2); // 4 + 3 perillas
+                   .withKnob (s, "osc2SampleLevel", "Smp Lvl")
+                   .withControlRows (2); // 5 + 4 perillas
         osc3Section.withCombo (s, "osc3Wave")
                    .withHeaderButton ("Osc 3 Sample...", "Open the sample editor of Osc 3 (Sample waveform): load its own file, see its waveform, "
                                       "set Root, Start, Length and Loop.", [this] { openSamplePanel (KoniSynthProcessor::osc3Sample); }).withResetSource (panelParams ([this] { return std::make_unique<SamplePanel> (koni, SampleIds::of (KoniSynthProcessor::osc3Sample), [] {}); }))
@@ -214,11 +217,19 @@ public:
                                       [this] { openWavetablePanel (KoniSynthProcessor::wtOsc3); }).withResetSource (panelParams ([this] { return std::make_unique<WavetablePanel> (koni, KoniSynthProcessor::wtOsc3, [] {}); }))
                    // Mismo orden que Osc 2 (las perillas con el mismo nombre, en el mismo sitio)
                    .withKnob (s, "subLevel", "Level").withKnob (s, "osc3Semi", "Semi").withKnob (s, "osc3WtPosition", "WT Pos")
+                   .withKnob (s, "osc3WtLevel", "WT Lvl")
                    .withKnob (s, "osc3Octave", "Oct").withKnob (s, "osc3Fine", "Fine")
                    .withKnob (s, "osc3TriSym", "Tri Sym").withKnob (s, "osc3TriRound", "Tri Rnd")
-                   .withControlRows (2); // 4 + 3 perillas
+                   .withKnob (s, "osc3SampleLevel", "Smp Lvl")
+                   .withControlRows (2); // 5 + 4 perillas
         // Noise: bloque propio junto a las pestañas Osc 2 / Osc 3 (su Mute y su Solo, en el Mixer)
-        noiseSection.withCombo (s, "noiseColor").withKnob (s, "noiseLevel", "Level");
+        // Dos filas: Level, Tone, Band, Width / Attack, Decay y la palanca Path (Knob::asLever: POST arriba, PRE abajo)
+        noiseSection.withCombo (s, "noiseColor").withKnob (s, "noiseLevel", "Level").withKnob (s, "noiseTone", "Tone")
+                    .withKnob (s, "noiseBand", "Band").withKnob (s, "noiseWidth", "Width")
+                    .withKnob (s, "noiseAttack", "Attack").withKnob (s, "noiseDecay", "Decay").withKnob (s, "noisePath", "Path")
+                    .withControlRows (2); // 4 + 3
+        if (auto* k = noiseSection.knobFor ("noisePath"))
+            k->asLever();
         mixerTabs = std::make_unique<SourceTabs> (s, std::vector<SourceTabs::Source> {
             { "Osc 2", &osc2Section, "osc2Level", "osc2Mute" }, { "Osc 3", &osc3Section, "subLevel", "osc3Mute" } },
             Params::srcOsc2, koni.getParams().soloSource);
@@ -246,7 +257,7 @@ public:
                      .withHeaderButton ("Formula...", "Show the formula of the selected model, the published model it is based on, "
                                         "what KoniSynth adapts and the wave it gives with the current settings; with Modal, "
                                         "edit its modes.",
-                                        [this] { openPanel ("Math Models: formulation", std::make_unique<MathModelPanel> (koni), 1100, 600); })
+                                        [this] { openPanel ("Math Model: formulation", std::make_unique<MathModelPanel> (koni), 1100, 600); })
                      .withKnob (s, "stringLevel", "Level").withKnob (s, "stringDecay", "Decay")
                      .withKnob (s, "stringBright", "Bright").withKnob (s, "stringPick", "Position")
                      .withKnob (s, "stringDamping", "Damping").withKnob (s, "stringPickup", "Pickup")
@@ -266,7 +277,7 @@ public:
         // Fuentes en pestañas: suenan sumadas; cada una con su nivel, LED y Mute/Solo
         sourceTabs = std::make_unique<SourceTabs> (s, std::vector<SourceTabs::Source> {
             { "Osc 1", &osc, "osc1Level", "osc1Mute" }, { "Wavetable", &wavetableSection, "wtLevel", "wtMute" },
-            { "Sample", &sampleSection, "sampleLevel", "sampleMute" }, { "Math Models", &stringSection, "stringLevel", "stringMute" } },
+            { "Sample", &sampleSection, "sampleLevel", "sampleMute" }, { "Math Model", &stringSection, "stringLevel", "stringMute" } },
             Params::srcOsc1, koni.getParams().soloSource);
         // Display de onda: muestra la fuente de la pestaña elegida (vistas en el orden de Params::SourceIndex) y sus etiquetas
         // eligen la pestaña. 420 px de ancho mínimo: dos ciclos legibles y la lectura de una línea
@@ -284,8 +295,22 @@ public:
         sourceTabs->onSelect = [pickSource] (int k) { pickSource (Params::srcOsc1 + k); };
         mixerTabs->onSelect = [pickSource] (int k) { pickSource (Params::srcOsc2 + k); };
         waveView.onViewPicked = pickSource;
-        signalStrip.onSourcePicked = pickSource;
-        signalStrip.onMixer = [this] { openPanel ("Mixer", std::make_unique<MixerPanel> (koni), 860, 460); };
+        signalStrip.onSourcePicked = [this, pickSource] (int src)
+        {
+            // WT y Sample de Osc 2 / Osc 3: la pestaña y la vista de su oscilador (la ficha elegida sigue siendo la suya)
+            const auto v = src == Params::srcOsc2Wt || src == Params::srcOsc2Sample ? (int) Params::srcOsc2
+                         : src == Params::srcOsc3Wt || src == Params::srcOsc3Sample ? (int) Params::srcOsc3 : src;
+            pickSource (v);
+            if (v != src)
+                signalStrip.setSelectedSource (src);
+            // Desde la tira, además, el área con scroll sube (o baja) hasta las pestañas o el bloque de esa fuente
+            scrollIntoView (v < Params::srcOsc2 ? static_cast<juce::Component*> (sourceTabs.get())
+                          : v < Params::srcNoise ? static_cast<juce::Component*> (mixerTabs.get()) : &noiseSection);
+        };
+        signalStrip.onMixer = [this] { openPanel ("Mixer", std::make_unique<MixerPanel> (koni), 1180, 460); };
+        signalStrip.onSaturation = [this] { if (auto* b = filter.headerButton (0)) b->triggerClick(); }; // Saturation... de Filter
+        signalStrip.onFx = [this] { scrollToFx(); };
+        signalStrip.onOut = [this] { scrollToFx ("OUTPUT"); };
 
         // 2. Forma: filtro + envolventes (sliders verticales, como en un panel de hardware)
         qualitySelector.addItemList ({ "Classic", "Balanced", "High Quality" }, 1);
@@ -301,9 +326,12 @@ public:
               .withHeaderButton ("Saturation...", "Saturation: clean filter input (Drive 0 % linear) and per-voice saturation after or "
                                            "before the filter (curve Soft, Diode, Hard, Fold, drive and position).", paramDialog ("Saturation", [this] (ParamPanel& p, APVTS& st)
                   {
-                      p.add ("Filter Input").withToggle (st, "filterCleanDrive").withKnob (st, "filterDrive", "Drive");
-                      p.add ("Voice Saturation").withCombo (st, "voiceSatMode").withKnob (st, "voiceSatDrive", "Drive")
-                                                .withKnob (st, "voiceSatPos", "Position").withSideBody (voiceSatView, 150, true);
+                      // Solo el interruptor: Drive es la perilla del bloque Filter (aquí era un duplicado del mismo parámetro)
+                      p.add ("Clean Filter Input").withToggle (st, "filterCleanDrive");
+                      auto& voice = p.add ("Voice Saturation").withCombo (st, "voiceSatMode").withKnob (st, "voiceSatDrive", "Drive")
+                                                              .withKnob (st, "voiceSatPos", "Position").withSideBody (voiceSatView, 150, true);
+                      if (auto* k = voice.knobFor ("voiceSatPos"))
+                          k->asLever(); // PRE arriba, POST abajo
                   }))
               .withHeaderControl ("Ladder quality", qualitySelector, 190)
               .withKnob (s, "cutoff", "Cutoff").withKnob (s, "resonance", "Reso").withKnob (s, "filterDrive", "Drive")
@@ -1170,6 +1198,29 @@ private:
         panelWindows.emplace_back (raw);
     }
 
+    // Fichas FX y Out de la tira SIGNAL: llevan el área con scroll a la línea de efectos o al bloque OUTPUT (la sección más
+    // alta de esos bloques que esté a la vista en el panel; plegados y flotantes no cuentan). Si no hay ninguna, no hace nada
+    void scrollToFx (const char* onlyBlock = nullptr)
+    {
+        int top = -1;
+        for (const auto& block : blocks)
+            if (block.fx && (onlyBlock == nullptr || juce::String (block.name) == onlyBlock))
+                for (auto* sec : block.sections)
+                    if (sec->isVisible() && sec->getParentComponent() == &rows && (top < 0 || sec->getY() < top))
+                        top = sec->getY();
+        if (top >= 0)
+            rowsView.setViewPosition (0, juce::jmax (0, top - 8));
+    }
+
+    // Si el componente está en el área con scroll y no se ve entero, la mueve para que quede arriba (8 px de margen)
+    void scrollIntoView (juce::Component* c)
+    {
+        if (c == nullptr || c->getParentComponent() != &rows)
+            return;
+        if (! rowsView.getViewArea().contains (c->getBounds()))
+            rowsView.setViewPosition (0, juce::jmax (0, c->getY() - 8));
+    }
+
     void openSamplePanel (int which)
     {
         const auto ids = SampleIds::of (which);
@@ -1569,7 +1620,13 @@ private:
         const auto noiseSounds = v ("noiseLevel") > 0.0f || targeted (ModMatrix::dstNoiseLevel) || (complexOn && (int) v ("complexModSource") == 3);
         dim (complexSection.knobFor ("modRatio"), externalMod);
         dim (&complexSection.comboComponent(), externalMod);
-        const auto osc2Wave = osc2WaveFromChoice ((int) v ("osc2Wave")); // código del motor: 4 Wavetable, 5 Sample
+        const auto osc2Wave = osc2WaveFromChoice ((int) v ("osc2Wave")); // código del motor
+        // Familias de Osc 2 / Osc 3: su WT y su Sample suenan con su nivel o como modulador del Complex (Mod Src 4..7); la
+        // afinación (Oct, Semi, Fine) cuenta si suena cualquiera de la familia
+        const auto modSrc = complexOn ? (int) v ("complexModSource") : 0;
+        const auto wt2 = v ("osc2WtLevel") > 0.0f || modSrc == 4, smp2 = v ("osc2SampleLevel") > 0.0f || modSrc == 5;
+        const auto wt3 = v ("osc3WtLevel") > 0.0f || modSrc == 6, smp3 = v ("osc3SampleLevel") > 0.0f || modSrc == 7;
+        const auto family2 = osc2Sounds || wt2 || smp2, family3 = osc3Sounds || wt3 || smp3;
         const auto pwUsed = (waveUsesPw (waveFromChoice ((int) v ("wave"))) && osc1Sounds)
                          || (complexOn && ! externalMod && waveUsesPw (waveFromChoice ((int) v ("modWave"))))
                          || (waveUsesPw (osc2Wave) && osc2Sounds);
@@ -1580,15 +1637,24 @@ private:
         dim (osc.knobFor ("unisonSpread"), ! unison);
         dim (osc.knobFor ("pitchEnvDecay"), std::abs (v ("pitchEnvAmount")) < 1.0e-4f);
         for (auto* id : { "osc2Octave", "osc2Semi", "osc2Fine" })
-            dim (osc2Section.knobFor (id), ! osc2Sounds);
+            dim (osc2Section.knobFor (id), ! family2);
         dim (&osc2Section.comboComponent(), ! osc2Sounds);
         for (const auto* id : { "osc3Octave", "osc3Semi", "osc3Fine" })
-            dim (osc3Section.knobFor (id), ! osc3Sounds);
+            dim (osc3Section.knobFor (id), ! family3);
         dim (&osc3Section.comboComponent(), ! osc3Sounds);
-        dim (&noiseSection.comboComponent(), ! noiseSounds);
-        const auto osc3Wave = osc2WaveFromChoice ((int) v ("osc3Wave")); // mismos códigos que Osc 2: 4 Wavetable, 5 Sample
-        dim (osc2Section.knobFor ("osc2WtPosition"), osc2Wave != 4 || ! osc2Sounds); // solo con la forma Wavetable
-        dim (osc3Section.knobFor ("osc3WtPosition"), osc3Wave != 4 || ! osc3Sounds);
+        // Noise: el color cuenta también si la matriz usa la fuente Noise; Tone, Band, envolvente y Path, solo si el ruido suena
+        auto noiseSource = false;
+        for (int i = 0; i < ModMatrix::numSlots; ++i)
+            noiseSource = noiseSource || ((int) koni.getParams().mtxSrc[(size_t) i]->load() == ModMatrix::srcNoise
+                                          && std::abs (koni.getParams().mtxAmt[(size_t) i]->load()) > 1.0e-5f);
+        dim (&noiseSection.comboComponent(), ! noiseSounds && ! noiseSource);
+        const auto noiseHeard = v ("noiseLevel") > 0.0f || targeted (ModMatrix::dstNoiseLevel);
+        for (const auto* id : { "noiseTone", "noiseBand", "noiseAttack", "noiseDecay", "noisePath" })
+            dim (noiseSection.knobFor (id), ! noiseHeard);
+        dim (noiseSection.knobFor ("noiseWidth"), ! noiseHeard || v ("noiseBand") < -24.5f); // Width, solo con Band
+        const auto osc3Wave = osc2WaveFromChoice ((int) v ("osc3Wave")); // mismos códigos que Osc 2
+        dim (osc2Section.knobFor ("osc2WtPosition"), ! wt2); // solo si su WT suena
+        dim (osc3Section.knobFor ("osc3WtPosition"), ! wt3);
         // Forma del triángulo: solo con la forma Triangle (índice 1 en las tres listas); en Osc 1, no con el oscilador complejo
         const auto tri1 = (int) v ("wave") == 1 && osc1Sounds && ! complexOn;
         const auto tri2 = osc2Wave == triangle && osc2Sounds;
@@ -1596,10 +1662,10 @@ private:
         dim (osc.knobFor ("osc1TriSym"), ! tri1);         dim (osc.knobFor ("osc1TriRound"), ! tri1);
         dim (osc2Section.knobFor ("osc2TriSym"), ! tri2); dim (osc2Section.knobFor ("osc2TriRound"), ! tri2);
         dim (osc3Section.knobFor ("osc3TriSym"), ! tri3); dim (osc3Section.knobFor ("osc3TriRound"), ! tri3);
-        dim (osc2Section.headerButton (0), osc2Wave != 5); // Osc 2 Sample... (fichero de Osc 2): solo con la forma Sample
-        dim (osc2Section.headerButton (1), osc2Wave != 4); // Osc 2 Table... (tabla de Osc 2): solo con la forma Wavetable
-        dim (osc3Section.headerButton (0), osc3Wave != 5); // Osc 3 Sample...
-        dim (osc3Section.headerButton (1), osc3Wave != 4); // Osc 3 Table...
+        dim (osc2Section.headerButton (0), ! smp2); // Osc 2 Sample... (su fichero): atenuado si su Sample no suena
+        dim (osc2Section.headerButton (1), ! wt2);  // Osc 2 Table... (su tabla)
+        dim (osc3Section.headerButton (0), ! smp3); // Osc 3 Sample...
+        dim (osc3Section.headerButton (1), ! wt3);  // Osc 3 Table...
         const auto theremin = engine == 1; // el Theremin usa LFO 1 con seno fijo y su propia velocidad (sin Shape ni Sync)
         dim (lfo.knobFor ("lfoRate"), ! theremin && v ("lfoSync") > 0.5f);
         dim (lfo.knobFor ("lfoShape"), theremin);
@@ -2704,7 +2770,12 @@ private:
     {
         const auto top = sourceTabs->getBounds();
         complexSection.setBounds (complexSection.getBounds().withX (top.getX()).withWidth (top.getWidth()));
-        const auto noiseW = juce::roundToInt (noiseSection.naturalWidth()) - 14; // sin el margen de celda (layoutRow)
+        // Noise: su ancho natural, o su parte del hueco por peso si no cabe con las pestañas Osc 2 / Osc 3 (las dos con 4 mandos
+        // por fila: se reparten a medias)
+        const auto room = top.getX() - 14 - mixerTabs->getX() - 14;
+        const auto wNoise = noiseSection.layoutWeight(), wTabs = mixerTabs->layoutWeight();
+        const auto noiseW = juce::jmin (juce::roundToInt (noiseSection.naturalWidth()) - 14, // sin el margen de celda (layoutRow)
+                                        juce::roundToInt ((float) room * wNoise / juce::jmax (0.01f, wNoise + wTabs)));
         noiseSection.setBounds (noiseSection.getBounds().withX (top.getX() - 14 - noiseW).withWidth (noiseW));
         mixerTabs->setBounds (mixerTabs->getBounds().withRight (noiseSection.getX() - 14));
     }
@@ -3365,7 +3436,7 @@ private:
             osc2Section { "Osc 2" }, osc3Section { "Osc 3" }, noiseSection { "Noise" }, vl1Section { "Casio VL-1" }, vl1RhythmSection { "VL-1 Rhythm" },
             sampleSection { "Sample" }, vocoderSection { "Vocoder" }, inputSection { "Input" },
             filterEnvSection { "Filter Envelope" }, ampEnvSection { "Amp Envelope" }, controllerSection { "Voice" },
-            stringSection { "Math Models" }, arpSection { "Arpeggiator" }, wavetableSection { "Wavetable" },
+            stringSection { "Math Model" }, arpSection { "Arpeggiator" }, wavetableSection { "Wavetable" },
             seqSection { "Sequencer" }, macroSection { "Macros" }, styloSection { "Stylophone" }, genxOscSection { "Gen X-2 Osc / Envelope (experimental)" }, genxFxSection { "Gen X-2 LFO / Filter / Delay" }, omniSection { "Omnichord" },
             omniRhythmSection { "Omnichord Rhythm" }, drumSection { "Drum Kit" }, drumPatternSection { "Pattern" },
             fmSection { "FM 6-Op" }, fmLfoSection { "FM LFO" }, chipSection { "8-Bit/DPCM" }, chipDriverSection { "8-Bit/DPCM Driver" }, chipStereoSection { "GB Stereo" }, chipVrc6Section { "Famicom Expansion" },

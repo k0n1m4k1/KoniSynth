@@ -63,6 +63,10 @@ struct Params
         osc1TriSym = get ("osc1TriSym"); osc1TriRound = get ("osc1TriRound"); osc2TriSym = get ("osc2TriSym"); osc2TriRound = get ("osc2TriRound");
         osc3TriSym = get ("osc3TriSym"); osc3TriRound = get ("osc3TriRound");
         noiseLevel = get ("noiseLevel"); noiseColor = get ("noiseColor");
+        noiseTone = get ("noiseTone"); noiseBand = get ("noiseBand"); noiseWidth = get ("noiseWidth");
+        noiseAttack = get ("noiseAttack"); noiseDecay = get ("noiseDecay"); noisePath = get ("noisePath");
+        osc2WtLevel = get ("osc2WtLevel"); osc2SampleLevel = get ("osc2SampleLevel"); osc2WtMute = get ("osc2WtMute"); osc2SampleMute = get ("osc2SampleMute");
+        osc3WtLevel = get ("osc3WtLevel"); osc3SampleLevel = get ("osc3SampleLevel"); osc3WtMute = get ("osc3WtMute"); osc3SampleMute = get ("osc3SampleMute");
         wtLevel = get ("wtLevel"); wtTable = get ("wtTable"); wtPosition = get ("wtPosition");
         stringLevel = get ("stringLevel"); stringDecay = get ("stringDecay"); stringBright = get ("stringBright"); stringPick = get ("stringPick");
         sampleLevel = get ("sampleLevel"); sampleLength = get ("sampleLength"); sampleRoot = get ("sampleRoot"); sampleStart = get ("sampleStart"); sampleLoop = get ("sampleLoop");
@@ -291,19 +295,22 @@ struct Params
     std::atomic<float> *arpOn {}, *arpMode {}, *arpRate {}, *arpOctaves {}, *arpGate {}, *arpLatch {}, *arpBpm {}, *arpOneShot {};
     std::atomic<float> *monoOut {}, *mdOutput {}, *snesOutput {}, *chipOutput {};
     std::atomic<float> *osc1Mute {}, *wtMute {}, *sampleMute {}, *stringMute {}, *osc2Mute {}, *osc3Mute {}, *noiseMute {};
-    // Solo de las pestañas de fuentes, compartido por los dos grupos: -1 ninguno; 0 Osc 1, 1 Wavetable, 2 Sample, 3 String,
-    // 4 Osc 2, 5 Osc 3, 6 Noise. Transitorio: no es un parámetro, no se guarda y no toca los Mute (el motor lo combina con ellos)
+    // Fuentes del mezclador del Synth (Solo, medidores, tira SIGNAL). Las cuatro últimas, la familia de Osc 2 y Osc 3 (formato 8)
+    enum SourceIndex { srcOsc1 = 0, srcWavetable, srcSample, srcString, srcOsc2, srcOsc3, srcNoise,
+                       srcOsc2Wt, srcOsc2Sample, srcOsc3Wt, srcOsc3Sample, numSourceIndices };
+    // Solo de las fuentes, compartido por las pestañas y el Mixer: -1 ninguno; si no, su SourceIndex. Transitorio: no es un
+    // parámetro, no se guarda y no toca los Mute (el motor lo combina con ellos)
     mutable std::atomic<int> soloSource { -1 };
     // Medidores del Mixer (UI/MixerPanel.h): pico de cada fuente (índice SourceIndex) en la voz, tras su nivel y antes del
     // filtro, el máximo entre voces. Las voces lo suben (máximo) y la UI lo lee y lo pone a 0
-    mutable std::array<std::atomic<float>, 7> sourcePeak {};
-    enum SourceIndex { srcOsc1 = 0, srcWavetable, srcSample, srcString, srcOsc2, srcOsc3, srcNoise };
+    mutable std::array<std::atomic<float>, numSourceIndices> sourcePeak {};
     std::atomic<float> *n64Source {}, *n64SourceRate {}, *n64OutputRate {}, *n64Adpcm {}, *n64Dac {}, *n64Attack {}, *n64Decay {}, *n64Release {},
                        *n64AttackVolume {}, *n64DecayVolume {}, *n64Volume {}, *n64Pan {}, *n64Spread {}, *n64Fx {}, *n64FxMix {}, *n64Velocity {};
     std::atomic<float> *gain {}, *wave {}, *attack {}, *decay {}, *sustain {}, *release {}, *envCurve {}, *drift {},
                        *unisonVoices {}, *unisonDetune {}, *unisonSpread {}, *voicePan {}, *voicePanMode {},
                        *osc1Level {}, *pulseWidth {}, *pwmDepth {}, *osc2Wave {}, *osc2Octave {}, *osc2Semi {}, *osc2Fine {},
-                       *osc2Level {}, *osc2Sync {}, *subLevel {}, *osc3Octave {}, *noiseLevel {}, *noiseColor {}, *osc2WtPosition {}, *osc2WtTable {}, *osc3Wave {}, *osc3Semi {}, *osc3Fine {},
+                       *osc2Level {}, *osc2Sync {}, *subLevel {}, *osc3Octave {}, *noiseLevel {}, *noiseColor {}, *noiseTone {}, *noiseBand {}, *noiseWidth {}, *noiseAttack {}, *noiseDecay {}, *noisePath {}, *osc2WtLevel {}, *osc2SampleLevel {}, *osc2WtMute {}, *osc2SampleMute {},
+                       *osc3WtLevel {}, *osc3SampleLevel {}, *osc3WtMute {}, *osc3SampleMute {}, *osc2WtPosition {}, *osc2WtTable {}, *osc3Wave {}, *osc3Semi {}, *osc3Fine {},
                        *osc1TriSym {}, *osc1TriRound {}, *osc2TriSym {}, *osc2TriRound {}, *osc3TriSym {}, *osc3TriRound {},
                        *wtLevel {}, *wtTable {}, *wtPosition {},
                        *stringLevel {}, *stringDecay {}, *stringBright {}, *stringPick {},

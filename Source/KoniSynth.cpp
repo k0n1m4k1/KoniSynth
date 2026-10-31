@@ -1341,6 +1341,26 @@ public:
                         xml->removeChildElement (sub, true);
                 }
 
+                // Estados anteriores al formato 8 (sin osc2WtLevel): Wavetable / Sample de Osc 2 y Osc 3 eran formas de onda
+                // (osc2Wave / osc3Wave 10 y 11); pasan a fuentes con su nivel (PresetManager::splitOscFamilies)
+                if (xml->getChildByAttribute ("id", "osc2WtLevel") == nullptr)
+                    PresetManager::splitOscFamilies (
+                        [&xml] (const char* id, float def)
+                        {
+                            const auto* e = xml->getChildByAttribute ("id", id);
+                            return e != nullptr ? (float) e->getDoubleAttribute ("value") : def;
+                        },
+                        [&xml] (const char* id, float v)
+                        {
+                            auto* e = xml->getChildByAttribute ("id", id);
+                            if (e == nullptr)
+                            {
+                                e = xml->createNewChildElement ("PARAM");
+                                e->setAttribute ("id", id);
+                            }
+                            e->setAttribute ("value", (double) v);
+                        });
+
                 apvts.replaceState (juce::ValueTree::fromXml (*xml));
                 presetManager.invalidateSnapshot();
                 perfMacros.update();

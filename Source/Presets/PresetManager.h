@@ -42,15 +42,18 @@ public:
     {
         if (juce::roundToInt (get ("engine", 0.0f)) != 0)
             return;
+        // Sample de Osc 2 / Osc 3: su nivel (formato 8) o, en ficheros anteriores sin migrar, la forma Sample con el nivel del oscilador
         p.sampleSource = (get ("sampleLevel", 0.0f) > 0.0f && samplePath.isNotEmpty())
-                      || (juce::roundToInt (get ("osc2Wave", 2.0f)) == osc2WaveSample && get ("osc2Level", 0.0f) > 0.0f
+                      || ((get ("osc2SampleLevel", 0.0f) > 0.0f
+                           || (juce::roundToInt (get ("osc2Wave", 2.0f)) == legacyWaveSample && get ("osc2Level", 0.0f) > 0.0f))
                           && osc2SamplePath.isNotEmpty())
-                      || (juce::roundToInt (get ("osc3Wave", 3.0f)) == osc3WaveSample && get ("subLevel", 0.0f) > 0.0f
+                      || ((get ("osc3SampleLevel", 0.0f) > 0.0f
+                           || (juce::roundToInt (get ("osc3Wave", 3.0f)) == legacyWaveSample && get ("subLevel", 0.0f) > 0.0f))
                           && osc3SamplePath.isNotEmpty());
         p.mathSource = get ("stringLevel", 0.0f) > 0.0f;
     }
-    static constexpr int osc2WaveSample = 11; // osc2Wave: Sample, la última opción (formato 4)
-    static constexpr int osc3WaveSample = 11; // osc3Wave: Sample, la última opción (1.0.1)
+    // osc2Wave / osc3Wave hasta el formato 7: Wavetable y Sample eran las opciones 10 y 11 (splitOscFamilies)
+    static constexpr int legacyWaveTable = 10, legacyWaveSample = 11;
 
     // Cómo tocar el preset actual: propiedades del estado (no son parámetros). Las fija la carga de un preset, se pueden
     // editar desde el teclado en pantalla (cuentan como cambio sin guardar, "*") y las escribe Save / Save As
@@ -64,8 +67,9 @@ public:
     // Sin cambio de formato (1.0.1): Osc 3 con Wavetable y Sample al final de osc3Wave (los índices anteriores no cambian),
     // osc3Sync / osc3WtPosition / osc3WtTable / osc3Sample* (ausentes: su valor por defecto) y los ficheros osc3SamplePath y
     // osc3WtPath (ausentes: sin fichero); complexModSource con Noise al final. 7 (1.0.1): Osc 3 con Oct -2..+2 (osc3Octave) en vez
-    // de subOctave ("-1 oct" / "-2 oct") y Semi ±12 en vez de ±24 (osc3FromSub)
-    static constexpr int formatVersion = 7;
+    // de subOctave ("-1 oct" / "-2 oct") y Semi ±12 en vez de ±24 (osc3FromSub). 8 (1.0.1): Wavetable y Sample de Osc 2 / Osc 3
+    // dejan de ser formas de onda y pasan a fuentes con su nivel (splitOscFamilies)
+    static constexpr int formatVersion = 8;
 
     explicit PresetManager (APVTS& s) : apvts (s)
     {
@@ -652,7 +656,36 @@ private:
             real["osc3Semi"] = (float) semi;
             real.erase ("subOctave");
         }
+        if (from < 8) // 7 -> 8: Wavetable / Sample de Osc 2 y Osc 3, de forma de onda a fuente con su nivel
+            splitOscFamilies ([&real] (const char* id, float def) { const auto it = real.find (id); return it != real.end() ? it->second : def; },
+                              [&real] (const char* id, float v) { real[id] = v; });
     }
+
+public:
+    // Formato 7 -> 8: si osc2Wave (u osc3Wave) era Wavetable (10) o Sample (11), esa fuente toma el nivel del oscilador, el
+    // oscilador queda a 0 con su forma por defecto (Saw / Square) y, si era el modulador del Complex (Osc 2 / Osc 3), el
+    // modulador pasa a la fuente (Osc 2 WT 4, Osc 2 Sample 5, Osc 3 WT 6, Osc 3 Sample 7): suena igual. get (id, por defecto) y
+    // set (id, valor), en valores reales. También lo usa KoniSynthProcessor::setStateInformation con los proyectos anteriores
+    template <typename Get, typename Set>
+    static void splitOscFamilies (Get&& get, Set&& set)
+    {
+        struct Family { const char* wave; float defaultWave; const char* level; const char* wtLevel; const char* sampleLevel;
+                        int modSource, wtModSource; };
+        for (const auto& f : { Family { "osc2Wave", 2.0f, "osc2Level", "osc2WtLevel", "osc2SampleLevel", 1, 4 },
+                               Family { "osc3Wave", 3.0f, "subLevel", "osc3WtLevel", "osc3SampleLevel", 2, 6 } })
+        {
+            const auto wave = juce::roundToInt (get (f.wave, f.defaultWave));
+            if (wave != legacyWaveTable && wave != legacyWaveSample)
+                continue;
+            const auto sampled = wave == legacyWaveSample;
+            set (sampled ? f.sampleLevel : f.wtLevel, get (f.level, 0.0f)); // osc2Level y subLevel valen 0 por defecto
+            set (f.level, 0.0f);
+            set (f.wave, f.defaultWave);
+            if (juce::roundToInt (get ("complexModSource", 0.0f)) == f.modSource)
+                set ("complexModSource", (float) (f.wtModSource + (sampled ? 1 : 0)));
+        }
+    }
+private:
 
 public:
     // Osc 3 hasta la 1.0.0-beta (subOctave 0 = -1 oct, 1 = -2 oct; Semi -24..+24, lo que pasara se acotaba ahí) -> Oct -2..+2 y

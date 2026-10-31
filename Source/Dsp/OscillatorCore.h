@@ -35,11 +35,11 @@ static float polyBlep (double t, double dt)
 }
 
 // Formas mezcla, códigos 6..11 (konisimd::kWaveMix): en las listas de formas (wave, osc2Wave, osc3Wave, modWave) son las
-// opciones 4..9 (waveFromChoice). Los códigos 4 y 5 son Wavetable y Sample de Osc 2 y Osc 3 (SynthVoice::wavetableWave /
-// sampleWave), que en osc2Wave y osc3Wave son las opciones 10 y 11 (osc2WaveFromChoice, para las dos)
+// opciones 4..9 (waveFromChoice). Los códigos 4 y 5 quedan libres: eran Wavetable y Sample de Osc 2 y Osc 3, fuentes propias
+// desde el formato de preset 8 (osc2WtLevel, osc2SampleLevel...); osc2WaveFromChoice es ya la misma correspondencia
 enum Wave { sine, triangle, saw, square, triSaw = 6, sawPulse, sawTri, triPulse, sawTriPulse, sawPulseJuno };
 static int waveFromChoice (int choice) { return choice >= 4 ? choice + 2 : choice; }
-static int osc2WaveFromChoice (int choice) { return choice == 10 ? 4 : choice == 11 ? 5 : waveFromChoice (choice); }
+static int osc2WaveFromChoice (int choice) { return waveFromChoice (choice); }
 static bool isMixWave (int wave) { return wave >= konisimd::kFirstMixWave && wave <= konisimd::kLastMixWave; }
 static const konisimd::WaveMix& waveMix (int wave) { return konisimd::kWaveMix[wave - konisimd::kFirstMixWave]; }
 // La forma sigue al mando Pulse Width (cuadrada o mezcla con pulso)

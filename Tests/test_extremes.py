@@ -35,8 +35,8 @@ control = render(SYNTH, 1.0, ['69:0.0:0.8:100']).max()
 for name, args in (('Sierra, nota 127, Pitch Env +48 st 2 s', ['--param=wave=2', '--param=pitchEnvAmount=48', '--param=pitchEnvDecay=2000']),
                    ('Complejo: Saw Ratio 16, AM 100 %', ['--param=complexOn=1', '--param=modWave=2', '--param=modRatio=16',
                                                         '--param=fmIndex=0', '--param=amDepth=1']),
-                   ('Osc 2 wavetable con sync > fs', ['--param=osc2Wave=10', '--param=osc2WtTable=0', '--param=osc2Octave=2',
-                                                     '--param=osc2Semi=12', '--param=osc2Sync=1', '--param=osc2Level=1',
+                   ('Osc 2 wavetable con sync > fs', ['--param=osc2WtTable=0', '--param=osc2Octave=2',
+                                                     '--param=osc2Semi=12', '--param=osc2Sync=1', '--param=osc2WtLevel=1',
                                                      '--param=pitchEnvAmount=48', '--param=pitchEnvDecay=2000'])):
     x = render(SYNTH + args, 1.0, ['127:0.0:0.8:100'])
     p = x.max()

@@ -6,7 +6,7 @@ Model D units. It does not emulate a specific instrument: it is a subtractive de
 four summed sources (a minBLEP oscillator with unison, a wavetable, a
 sample player and Math Models, physical models such as plucked and bowed strings, winds, bars and shakers), a Buchla 259-style complex oscillator, a second oscillator
 (classic and mixed waves, its own wavetable or its own sample file), a third oscillator that grows from the classic sub,
-noise (white, pink and the 8-bit LFSR), 14 filter modes, per-voice saturation before or after the filter, analog RC or
+noise (white, pink, the 8-bit LFSR and crackle, with tone, a tuned band and its own envelope), 14 filter modes, per-voice saturation before or after the filter, analog RC or
 linear envelopes, two tempo-synced LFOs, an 8-slot modulation matrix (11 sources, 15 destinations), MPE and polyphonic
 aftertouch, and an analog-style drift model with per-note or per-voice-card tolerances. Unison runs on AVX2 where the
 processor has it. Use it for basses, leads, pads, keys, plucks, sound effects and anything the emulated engines do not cover.
@@ -22,7 +22,7 @@ for the **User File** wavetable.
 
 ## Controls
 
-The Synth fills three rows: the wave display and the sources (Osc 1 / Wavetable / Sample / Math Models), then Osc 2 /
+The Synth fills three rows: the wave display and the sources (Osc 1 / Wavetable / Sample / Math Model), then Osc 2 /
 Osc 3 / Noise and the Complex Oscillator, right under the Osc 1 tabs; Filter, Filter Envelope, Amp Envelope; Voice, LFO,
 LFO 2. Voice, LFO 2 and the matrix act only in the Synth. The panel scrolls with its scroll bar or the mouse wheel;
 dragging the background does not scroll it.
@@ -31,6 +31,10 @@ The **SIGNAL** strip above the sources draws the path the sound takes right now:
 Osc 1 and its modulator when the complex oscillator is on, marked *LP* when Mod LP filters it), the mixer, filter and
 saturation in their current order, the amp, the effects (their order is in the FX tooltip) and the output. LEDs show what
 sounds or is on; on the right, the active modulations. Clicking a source opens its tab and its view on the wave display.
+The raised steps are buttons: **Mixer** opens the Mixer, **Filter** turns the filter on or off, **Sat** opens the
+Saturation dialog, **VCA** switches the envelope curve (Linear / Analog RC), **FX** scrolls to the effects row and **Out**
+to the OUTPUT block. A source also scrolls the panel back to its tabs if they are out of sight. The
+**Matrix...** button of the MOD bar has the same look.
 Double-clicking **MIX** on the wave display pins it (a dot marks it): the final wave stays on screen while you switch tabs
 or pick sources in the strip; double-click it again, or click another view label, to release it.
 
@@ -39,10 +43,11 @@ or pick sources in the strip; double-click it again, or click another view label
 The four sources sound summed; each tab has its own level and LED. Right-click a tab for **Mute / Solo** (Mute
 silences the source without changing its level; mutes are off by default and presets do not change them).
 
-**Mixer** (click the Mixer step of the signal strip): one strip per source in two groups, as in the signal strip (OSC 1
-SOURCES: Osc 1, Wavetable, Sample, Math; then Osc 2, Osc 3, Noise) and Master. Under each name, what it plays: the wave,
-the table or the file. When Osc 2 or Osc 3 plays its own wavetable or sample, the line says "own WT" / "own sample" in
-the accent colour: it is not the Wavetable or Sample source of the first group. Each fader is the source's Level shown in dB (20·log10 of the level: 100 % =
+**Mixer** (click the Mixer step of the signal strip): one strip per source, grouped by family (OSC 1: Osc 1, Wavetable,
+Sample, Math Model; OSC 2: Osc 2, its WT and its Sample; OSC 3: the same; NOISE) and Master. Under each name, what it plays:
+the wave, the table or the file (the own table and file of Osc 2 and Osc 3 in the accent colour). **LINK** (one per
+oscillator family, next to its caption) moves the whole group together: dragging one fader moves the others by the same
+amount in dB; faders at -inf stay. LINK is saved with the project, not in presets. Each fader is the source's Level shown in dB (20·log10 of the level: 100 % =
 0 dB, 50 % = -6.0 dB, bottom = silent; fader law linear in dB from -60 to 0 dB), with M (Mute) and S (Solo, the same as
 the tabs). The meter is the peak of that source inside the voice in dBFS (after its level, before the filter and the
 saturation; the loudest voice), not the fader's gain: lowering a source changes how hard it drives the filter and the
@@ -148,7 +153,7 @@ the ones with triangle alias like the triangle (its corners are not corrected).
 
 Buchla 259-style modulation of Osc 1 by a modulator oscillator. Runs at 2x oversampling. With the Complex on, the OSC 1 view
 of the wave display draws its output (the first two cycles of a note: FM, AM / ring, sync and the wavefolder), with the
-modulator faint underneath; an Osc 2 or Osc 3 modulator in Wavetable or Sample mode, and the Noise modulator, are not drawn.
+modulator faint underneath; the WT and Sample modulators of Osc 2 / Osc 3 and the Noise modulator are not drawn.
 
 **PATCH panel.** The right side of the section is a small patch panel that shows and sets where the signals come from.
 Outputs (top row): **OSC 1**, **OSC 2**, **OSC 3** and **INT** (the internal modulator: Mod Wave and Ratio). Inputs
@@ -168,7 +173,7 @@ is off (they have no effect then).
 | Control | What it does | Range / default |
 |---|---|---|
 | On (header) | Turns the complex oscillator on for oscillator 1. | Off / On / Off |
-| Mod Src (PATCH: MOD) | Which source is the modulator: the internal one (Mod Wave and Ratio), Osc 2 / Osc 3 exactly as tuned in their tabs (wave, table or sample, Oct, Semi, Fine, drift, WT Pos, and their sync), or Noise (the voice's noise with its Color, held over the two oversampled steps; FM Index scaled by the note frequency; Sync has no effect). With any of them Mod Wave and Ratio are dimmed. See the notes below. | Internal, Osc 2, Osc 3, Noise / Internal |
+| Mod Src (PATCH: MOD) | Which source is the modulator: the internal one (Mod Wave and Ratio), the oscillator of Osc 2 / Osc 3 exactly as tuned in its tab (wave, Oct, Semi, Fine, drift, and its sync), Noise (the voice's noise with its Color, held over the two oversampled steps; FM Index scaled by the note frequency; Sync has no effect), or the wavetable or the sample of Osc 2 / Osc 3 (with the tuning of their oscillator and WT Pos). All of them modulate even at level 0 or muted. With any of them Mod Wave and Ratio are dimmed. See the notes below. | Internal, Osc 2, Osc 3, Noise, Osc 2 WT, Osc 2 Sample, Osc 3 WT, Osc 3 Sample / Internal |
 | Mod Wave menu | Modulator waveform. | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Sine |
 | Sync (PATCH: SYNC) | Hard-syncs the main oscillator to the modulator. | Off / On / Off |
 | Ratio | Modulator/main frequency ratio: whole numbers harmonic, others bell-like. | 0.125x-16x / 1.000x |
@@ -209,20 +214,29 @@ another source's solo).
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Oscillator 2 waveform. Wavetable plays its own table (Osc 2 Table...), independent of the Wavetable tab, with the tuning, drift and phase of Osc 2 and its own position (WT Pos). Sync works with it too (with bright positions it aliases more than Saw or Square: like Sine and Triangle, the reset leaves a corner that is not corrected). Sample plays its own audio file: see **Osc 2 Sample** below. | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno), Wavetable, Sample / Saw |
-| Osc 2 Sample... (header) | Opens the sample editor of Osc 2 (Sample waveform only; dimmed otherwise). | - |
-| Osc 2 Table... (header) | Opens the wavetable editor of Osc 2: its own table (built-in or your file, Load), Level and Position (Wavetable waveform only; dimmed otherwise). | - |
+| Wave menu | Oscillator 2 waveform. | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Saw |
+| Osc 2 Sample... (header) | Opens the sample editor of Osc 2: its own file, Smp Lvl, Root, Start, Length, Loop (dimmed while its sample is silent). | - |
+| Osc 2 Table... (header) | Opens the wavetable editor of Osc 2: its own table (built-in or your file, Load), WT Lvl and Position (dimmed while its wavetable is silent). | - |
 | Sync (PATCH: OSC 1 -> SYNC 2) | Hard-syncs oscillator 2 to oscillator 1: raise its tuning for the sync lead. Set in the PATCH panel of the Complex Oscillator, not in this tab. | Off / On / Off |
 | Level | Oscillator 2 level. | 0-100 % / 0 % |
 | Oct | Octave relative to oscillator 1. | -2 to +2 / 0 |
 | Semi | Offset in semitones (7 = fifth, 12 = octave). | -12 to +12 / 0 |
 | Fine | Fine detune; a few cents give beating. | -50 to +50 ct / 0 ct |
-| WT Pos | Position of Osc 2 in its own wavetable (Wavetable waveform only). | 0-100 % / 0 % |
+| WT Lvl | Level of the wavetable of Osc 2: its own table (Osc 2 Table...), independent of the Wavetable tab, played with the tuning, drift, phase and Sync of Osc 2, together with the oscillator. With bright positions Sync aliases more than Saw or Square (the reset leaves a corner that is not corrected, as with Sine and Triangle). | 0-100 % / 0 % |
+| WT Pos | Position in the wavetable of Osc 2. | 0-100 % / 0 % |
+| Smp Lvl | Level of the sample of Osc 2: see **Osc 2 Sample** below. | 0-100 % / 0 % |
 | Tri Sym / Tri Rnd | Analog triangle of Osc 2 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
 
-**Osc 2 Sample** (Wave = Sample). A second sample player with its own file, independent of the Sample tab: two different
-files can sound at once. It uses the Level, Oct, Semi, Fine, drift and Mute of Osc 2; Osc 2 Sample... opens the same sample
-editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loop), working on the Osc 2 file.
+Osc 2, its wavetable and its sample are one **family**: they share the tuning (Oct, Semi, Fine), drift, phase and Sync of
+Osc 2 and sound together, each at its own level, with its own Mute and Solo in the Mixer, its own meter and its own step in
+the signal strip (the WT and Sample steps appear while their level is above 0). Up to 1.0.0 (preset format 7), Wavetable
+and Sample were the last two options of the Wave menu; presets and projects saved that way load with that level moved to
+WT Lvl or Smp Lvl, Osc 2 at 0 and its wave back to Saw, so they sound the same. Host automation of the Osc 2 Wave recorded
+before 1.0.1 shifts.
+
+**Osc 2 Sample** (Smp Lvl). A second sample player with its own file, independent of the Sample tab: two different
+files can sound at once. It uses the Oct, Semi, Fine and drift of Osc 2 with its own level and Mute; Osc 2 Sample... opens
+the same sample editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loop), working on the Osc 2 file.
 
 | Control | What it does | Range / default |
 |---|---|---|
@@ -237,7 +251,7 @@ editor as the Sample tab (waveform, Load, Clear, Level, Root, Start, Length, Loo
   restart is corrected; the corner left by the change of slope is not, as with the Wavetable waveform. Measured with a
   harmonic test file (Oct +1, Semi +5, loop on), energy outside the harmonics of the note: C4 -49.0 dB at 44.1 kHz and
   -53.8 dB at 48 kHz (without the correction: -33.7 and -34.4 dB; a synced Saw: -103.8 and -111.8 dB).
-- As the **Complex Mod Source** (Osc 2), the file itself modulates oscillator 1, read at the doubled rate with the
+- As the **Complex Mod Source** (Osc 2 Sample), the file itself modulates oscillator 1, read at the doubled rate with the
   same cursor that plays it (it keeps moving at level 0 or muted, and follows the end, the loop and Sync). FM Index is
   scaled by the nominal frequency of Osc 2 (the note with Oct, Semi and Fine), not by any pitch found in the file; Mod
   Sync follows that nominal frequency too. A file without a clear pitch gives inharmonic, noisy FM: the 2x step does
@@ -256,34 +270,48 @@ Oct -1, it is the classic sub-oscillator)
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Wave menu | Waveform; the square and the pulse of the mixes stay at 50 % (they do not follow PW). By default it is the classic sub (square one octave down); the Init preset sets Sine, and presets saved before Osc 3 keep the Square. Wavetable plays its own table (Osc 3 Table...), independent of the Wavetable tab and of Osc 2, at its own position (WT Pos). Sample plays its own audio file (Osc 3 Sample...), as **Osc 2 Sample** below, with the Level, Oct, Semi, Fine and Mute of Osc 3. | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno), Wavetable, Sample / Square |
-| Osc 3 Sample... (header) | Opens the sample editor of Osc 3 (Sample waveform only; dimmed otherwise): Load, Clear, Level, Root, Start, Length, Loop. | - |
-| Osc 3 Table... (header) | Opens the wavetable editor of Osc 3: its own table (built-in or your file, Load), Level and Position (Wavetable waveform only; dimmed otherwise). | - |
+| Wave menu | Waveform; the square and the pulse of the mixes stay at 50 % (they do not follow PW). By default it is the classic sub (square one octave down); the Init preset sets Sine, and presets saved before Osc 3 keep the Square. | Sine, Triangle, Saw, Square, Tri-Saw, Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse, Saw+Pulse (Juno) / Square |
+| Osc 3 Sample... (header) | Opens the sample editor of Osc 3: Load, Clear, Smp Lvl, Root, Start, Length, Loop (dimmed while its sample is silent). | - |
+| Osc 3 Table... (header) | Opens the wavetable editor of Osc 3: its own table (built-in or your file, Load), WT Lvl and Position (dimmed while its wavetable is silent). | - |
 | Sync (PATCH: OSC 1 -> SYNC 3) | Hard-syncs oscillator 3 to oscillator 1, as Sync of Osc 2 (also with Wavetable and Sample). Set in the PATCH panel of the Complex Oscillator. | Off / On / Off |
 | Level | Oscillator 3 level. Matrix destination: Osc 3 Level. | 0-100 % / 0 % |
 | Oct | Octave relative to Osc 1. -1 is the classic sub; above 0 it suits Sync (SYNC 3) and the Complex modulator (OSC 3 -> MOD). | -2 to +2 / -1 |
 | Semi | Semitones (7 = fifth, 12 = octave). Matrix destination: Osc 3 Pitch (+/-24 st). | -12 to +12 / 0 |
 | Fine | Fine detune. | -50 to +50 ct / 0 ct |
-| WT Pos | Position of Osc 3 in its own wavetable (Wavetable waveform only). Matrix destination: Osc 3 WT Position. | 0-100 % / 0 % |
+| WT Lvl | Level of the wavetable of Osc 3 (its own table, independent of the Wavetable tab and of Osc 2), with the tuning, phase and Sync of Osc 3. | 0-100 % / 0 % |
+| WT Pos | Position in the wavetable of Osc 3. Matrix destination: Osc 3 WT Position. | 0-100 % / 0 % |
+| Smp Lvl | Level of the sample of Osc 3 (its own file, Osc 3 Sample...), as **Osc 2 Sample**, with the tuning of Osc 3. | 0-100 % / 0 % |
 | Tri Sym / Tri Rnd | Analog triangle of Osc 3 (Triangle waveform only), as in Oscillator 1. | 0-100 % / 0 % |
 
 Osc 3 has no drift of its own (it follows the drift of Osc 1) and its Sample root sounds at its octave: with Oct -1,
 Semi 0 and Root C4, C4 plays the file one octave down. Up to 1.0.0-beta, Osc 3 had a base octave of -1 or -2 and
 Semi +/-24; older presets and projects load with the same tuning in Oct and Semi (from -36 to +12 semitones every
 value is kept; below -36, it stays at -36). Presets save the paths of the Osc 3 file and table
-(attributes osc3SamplePath, osc3WtPath); older presets load with no Osc 3 file. Wavetable and Sample were added at the end
-of the Wave list: presets keep their meaning, but host automation of the Osc 3 Wave recorded before 1.0.1 shifts.
+(attributes osc3SamplePath, osc3WtPath); older presets load with no Osc 3 file. Osc 3 is a family like Osc 2: its
+wavetable and its sample sound together with it at their own levels (WT Lvl, Smp Lvl), migrated in the same way from the
+Wave menu of format 7.
 
 **Noise**
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Color menu | White, pink, or LFSR digital noise of 8-bit chips (Short = metallic, tonal, follows the key). | White, Pink, LFSR, LFSR Short / White |
+| Color menu | White, pink, LFSR digital noise of 8-bit chips (Short = metallic, tonal, follows the key) or Crackle (random clicks, like dust on a record). | White, Pink, LFSR, LFSR Short, Crackle / White |
 | Level | Noise level. | 0-100 % / 0 % |
+| Tone | Below 0 darker: a 1-pole low-pass sweeping down to 50 Hz (a deep, "brown" rumble); above 0 brighter: a 1-pole high-pass sweeping up to 5 kHz (thin hiss). The audible level is compensated (within 0.5 dB, calculated). With Crackle it sets the clicks per second instead. | -100..+100 % / 0 % |
+| Band | A resonant band-pass tuned to the played note plus this interval; it follows pitch bend, glide and vibrato: whistling wind, pitched air, metallic hats. Level compensated (0 to -2.5 dB, calculated). | Off, -24..+36 st / Off |
+| Width | Q of the band: low = wide and airy, high = almost a whistle. Only with Band on. | Q 0.5-30 / Q 2 |
+| Attack | Fade-in of the noise at each note. | 0-5 s / 0 |
+| Decay | The noise fades out on its own in this time (to -60 dB): a burst at the start of the note (flute chiff, snare). Off = it lasts as long as the note (the Amp Envelope still applies). | 1 ms-10 s, Off / Off |
+| Path lever | PRE: the noise goes through the filter like the oscillators. POST: it is added after the filter, so the hiss stays bright in a dark patch (it still goes through post-filter saturation and the VCA); the SIGNAL strip then shows Noise right after Filter. | Pre Filter, Post Filter / Pre Filter |
+
+With everything at its default the noise sounds exactly as before. The level of white noise and Crackle no longer drops
+at high sample rates (before 1.0.1 it was 3 dB lower at 96 kHz and 6 dB lower at 192 kHz than at 48 kHz). Crackle was
+added at the end of the Color list: presets keep their meaning, but host automation of Noise Color recorded before 1.0.1
+shifts.
 
 ### Filter
 
-The **Saturation...** header button opens the **Saturation** dialog: *Filter Input* (Clean Drive switch and Drive) and *Voice
+The **Saturation...** header button opens the **Saturation** dialog: *Clean Filter Input* (a lever switch; it changes how the Drive knob of the Filter block behaves) and *Voice
 Saturation* (curve menu, Drive and Position, with the transfer curve of the chosen curve and drive: drag its point for the
 drive). The **Ladder quality** selector next to it chooses how the ladder modes are processed; see
 *Ladder quality* below.
@@ -393,7 +421,10 @@ envelope.
 
 | Sources | Destinations (reach at 100 %) |
 |---|---|
-| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note; fixed during the note, or fading with Random Fade), Pitch Bend | Pitch, Osc 2 Pitch and Osc 3 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Osc 3 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position, Osc 3 WT Position |
+| LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note; fixed during the note, or fading with Random Fade), Pitch Bend, Noise (the noise generator with its Color, at audio rate: roughness on the cutoff, pitch or pulse width) | Pitch, Osc 2 Pitch and Osc 3 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Osc 3 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position, Osc 3 WT Position |
+
+The Noise source was added at the end of the source list in 1.0.1: presets keep their routes, but host automation of a
+Matrix Source recorded before 1.0.1 shifts.
 
 **Random Fade** (bottom of the dialog, default 0 %) makes the Random source fade with the filter envelope: the slot gets
 random × (1 − fade + fade × filter envelope). At 100 % with filter sustain 0, each note starts off target and settles
@@ -417,7 +448,7 @@ Recipe, sync lead:
 2. LFO 2 or the matrix (Mod Wheel -> Osc 2 Pitch) to sweep the sync.
 
 Recipe, plucked harpsichord:
-1. Math Models tab: Pick, Level 100 %, Decay 4 s, Bright 90 %, Position 10 %; Osc 1 Level 0 %.
+1. Math Model tab: Pick, Level 100 %, Decay 4 s, Bright 90 %, Position 10 %; Osc 1 Level 0 %.
 2. Amp envelope: Attack 1 ms, Sustain 100 %, Release 0.25 s. These are the values of the factory preset
    **Baroque Harpsichord**; try Excite = Pick for the triangle-shaped pluck.
 

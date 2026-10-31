@@ -92,7 +92,7 @@ public:
         const auto osc2 = which == KoniSynthProcessor::wtOsc2, osc3 = which == KoniSynthProcessor::wtOsc3;
         controls.withCombo (s, osc2 ? "osc2WtTable" : osc3 ? "osc3WtTable" : "wtTable")
                 .withHeaderButton ("Load", "Load a wavetable file: WAV with 2048 samples per frame (Serum format) or a single cycle.", std::move (chooseFile))
-                .withKnob (s, osc2 ? "osc2Level" : osc3 ? "subLevel" : "wtLevel", "Level").withKnob (s, WavetableView::positionId (which), "Position");
+                .withKnob (s, osc2 ? "osc2WtLevel" : osc3 ? "osc3WtLevel" : "wtLevel", "Level").withKnob (s, WavetableView::positionId (which), "Position");
         lfoHint.setText (osc2 ? "Osc 2 plays this table with its Wave set to Wavetable. Tip: a matrix slot with destination 'Osc 2 WT Position' sweeps it."
                        : osc3 ? "Osc 3 plays this table with its Wave set to Wavetable. Tip: a matrix slot with destination 'Osc 3 WT Position' sweeps it."
                               : "Tip: patch LFO 2 to WT POS in Mod Patch to sweep the table.", juce::dontSendNotification);

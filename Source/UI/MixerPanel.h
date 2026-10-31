@@ -10,26 +10,54 @@
 //   Medidor: pico en dBFS de la señal de la fuente en la voz (tras su nivel, antes del filtro y la saturación; la voz más
 //   fuerte), no la ganancia del fader. Bajar una fuente cambia cuánto excita el filtro y la saturación (el timbre);
 //   Master (Gain, al final de la cadena) solo cambia el volumen de salida, y su medidor es el pico de la salida.
-//   Dos grupos, como la tira SIGNAL: las fuentes de Osc 1 (Osc 1, Wavetable, Sample, Math) y Osc 2 / Osc 3 / Noise. Bajo el
-//   nombre, lo que toca cada tira: la tabla de la fuente Wavetable, el fichero de la fuente Sample y, en Osc 2 y Osc 3, su
-//   forma o, en modo Wavetable / Sample, su tabla o su fichero propios (resaltado: no son las fuentes del grupo de Osc 1)
+//   Grupos por familia: Osc 1 (Osc 1, Wavetable, Sample, Math Model), Osc 2 (Osc 2, su WT y su Sample), Osc 3 (igual) y Noise.
+//   Bajo el nombre, lo que toca cada tira: forma, tabla o fichero (los de Osc 2 y Osc 3, propios: en el acento).
+//   LINK (por familia de oscilador): mover un fader mueve los demás de su grupo lo mismo en dB (en posición del fader), al
+//   unísono; los que están en -inf no se mueven. Se guarda con el proyecto (propiedad mixerLinks del estado, bits 0..2), no
+//   en los presets ni como parámetro
 class MixerPanel : public juce::Component, private juce::Timer
 {
 public:
     explicit MixerPanel (KoniSynthProcessor& p) : processor (p)
     {
-        struct Def { const char* name; const char* levelId; const char* muteId; int source; };
-        static const Def defs[] = { { "Osc 1", "osc1Level", "osc1Mute", Params::srcOsc1 }, { "Wavetable", "wtLevel", "wtMute", Params::srcWavetable },
-                                    { "Sample", "sampleLevel", "sampleMute", Params::srcSample }, { "Math", "stringLevel", "stringMute", Params::srcString },
-                                    { "Osc 2", "osc2Level", "osc2Mute", Params::srcOsc2 }, { "Osc 3", "subLevel", "osc3Mute", Params::srcOsc3 },
-                                    { "Noise", "noiseLevel", "noiseMute", Params::srcNoise } };
+        struct Def { const char* name; const char* levelId; const char* muteId; int source; int group; };
+        static const Def defs[] = {
+            { "Osc 1", "osc1Level", "osc1Mute", Params::srcOsc1, 0 }, { "Wavetable", "wtLevel", "wtMute", Params::srcWavetable, 0 },
+            { "Sample", "sampleLevel", "sampleMute", Params::srcSample, 0 }, { "Math Model", "stringLevel", "stringMute", Params::srcString, 0 },
+            { "Osc 2", "osc2Level", "osc2Mute", Params::srcOsc2, 1 }, { "Osc 2 WT", "osc2WtLevel", "osc2WtMute", Params::srcOsc2Wt, 1 },
+            { "Osc 2 Sample", "osc2SampleLevel", "osc2SampleMute", Params::srcOsc2Sample, 1 },
+            { "Osc 3", "subLevel", "osc3Mute", Params::srcOsc3, 2 }, { "Osc 3 WT", "osc3WtLevel", "osc3WtMute", Params::srcOsc3Wt, 2 },
+            { "Osc 3 Sample", "osc3SampleLevel", "osc3SampleMute", Params::srcOsc3Sample, 2 },
+            { "Noise", "noiseLevel", "noiseMute", Params::srcNoise, 3 } };
         for (const auto& d : defs)
-            strips.push_back (std::make_unique<Strip> (*this, d.name, d.levelId, d.muteId, d.source));
-        strips.push_back (std::make_unique<Strip> (*this, "Master", "gain", nullptr, -1));
+            strips.push_back (std::make_unique<Strip> (*this, d.name, d.levelId, d.muteId, d.source, d.group));
+        strips.push_back (std::make_unique<Strip> (*this, "Master", "gain", nullptr, -1, numGroups));
         for (auto& s : strips) addAndMakeVisible (*s);
+
+        const auto links = (int) processor.apvts.state.getProperty (linksProp, 0);
+        for (int g = 0; g < numLinkable; ++g)
+        {
+            auto& b = linkButtons[(size_t) g];
+            b.setButtonText ("LINK");
+            b.setClickingTogglesState (true);
+            b.setToggleState ((links >> g) & 1, juce::dontSendNotification);
+            b.setColour (juce::TextButton::buttonOnColourId, Skin::accent().withAlpha (0.8f));
+            b.setTooltip ("Link: moving any fader of this group moves the others by the same amount in dB (faders at -inf stay). "
+                          "Saved with the project.");
+            b.onClick = [this]
+            {
+                auto mask = 0;
+                for (int k = 0; k < numLinkable; ++k)
+                    mask |= linkButtons[(size_t) k].getToggleState() ? 1 << k : 0;
+                processor.apvts.state.setProperty (linksProp, mask, nullptr);
+            };
+            addAndMakeVisible (b);
+        }
+
         hint.setText ("Faders in dB (gain of each source before the filter; Master = output volume). Meters: peak in dBFS. "
-                      "M = mute, S = solo (not saved). Double-click a fader: default.", juce::dontSendNotification);
+                      "M = mute, S = solo (not saved). LINK: the group moves together. Double-click a fader: default.", juce::dontSendNotification);
         hint.setColour (juce::Label::textColourId, Skin::white().withAlpha (0.6f));
+        hint.setMinimumHorizontalScale (0.7f);
         addAndMakeVisible (hint);
         startTimerHz (30);
     }
@@ -38,26 +66,32 @@ public:
     {
         auto r = getLocalBounds().reduced (8);
         hint.setBounds (r.removeFromBottom (22));
-        r.removeFromTop (groupH); // rótulos de grupo
-        const auto w = (r.getWidth() - groupGap) / ((int) strips.size() + 1); // Master con el ancho de dos tiras de separación
+        r.removeFromTop (groupH + 4); // rótulos de grupo y LINK
+        // Master con el ancho de una tira más media de separación; groupGap entre grupos
+        const auto w = (r.getWidth() - numGroups * groupGap) * 2 / (2 * (int) strips.size() + 1);
         for (size_t k = 0; k + 1 < strips.size(); ++k)
         {
-            if (k == firstOfGroupB)
+            if (k > 0 && strips[k]->group != strips[k - 1]->group)
                 r.removeFromLeft (groupGap);
             strips[k]->setBounds (r.removeFromLeft (w).reduced (3, 0));
         }
-        r.removeFromLeft (w / 2);
+        r.removeFromLeft (groupGap + w / 2);
         strips.back()->setBounds (r.removeFromLeft (w).reduced (3, 0));
+        for (int g = 0; g < numLinkable; ++g) // LINK a la derecha del rótulo de su grupo
+        {
+            const auto [from, to] = groupRange (g);
+            linkButtons[(size_t) g].setBounds (strips[to]->getRight() - 44, 8, 44, groupH);
+        }
     }
 
     void paint (juce::Graphics& g) override
     {
         if (strips.size() < 2)
             return;
-        // Rótulos de grupo con su línea, y separadores entre grupos y antes de Master
-        const auto caption = [&] (size_t from, size_t to, const juce::String& text)
+        // Rótulos de grupo con su línea (sin el hueco del LINK), y separadores entre grupos y antes de Master
+        const auto caption = [&] (size_t from, size_t to, const juce::String& text, bool link)
         {
-            const auto x0 = (float) strips[from]->getX(), x1 = (float) strips[to]->getRight();
+            const auto x0 = (float) strips[from]->getX(), x1 = (float) strips[to]->getRight() - (link ? 50.0f : 0.0f);
             const auto y = 8.0f + (float) groupH * 0.5f;
             g.setColour (Skin::white().withAlpha (0.55f));
             g.setFont (juce::Font (juce::FontOptions (11.0f, juce::Font::bold)).withExtraKerningFactor (0.12f));
@@ -68,15 +102,19 @@ public:
             g.drawHorizontalLine (juce::roundToInt (y), x0, cx - tw * 0.5f);
             g.drawHorizontalLine (juce::roundToInt (y), cx + tw * 0.5f, x1);
         };
-        caption (0, firstOfGroupB - 1, "OSC 1 SOURCES");
-        caption (firstOfGroupB, strips.size() - 2, juce::String::fromUTF8 ("OSC 2 Â· OSC 3 Â· NOISE"));
-        caption (strips.size() - 1, strips.size() - 1, "OUT");
-        g.setColour (Skin::white().withAlpha (0.15f));
-        for (const auto k : { firstOfGroupB, strips.size() - 1 })
+        static const char* names[] = { "OSC 1", "OSC 2", "OSC 3", "NOISE", "OUT" };
+        for (int grp = 0; grp <= numGroups; ++grp)
         {
-            const auto x = (float) (strips[k - 1]->getRight() + strips[k]->getX()) * 0.5f;
-            g.drawVerticalLine (juce::roundToInt (x), 8.0f + (float) groupH, (float) getHeight() - 30.0f);
+            const auto [from, to] = groupRange (grp);
+            caption (from, to, names[grp], grp < numLinkable);
         }
+        g.setColour (Skin::white().withAlpha (0.15f));
+        for (size_t k = 1; k < strips.size(); ++k)
+            if (strips[k]->group != strips[k - 1]->group)
+            {
+                const auto x = (float) (strips[k - 1]->getRight() + strips[k]->getX()) * 0.5f;
+                g.drawVerticalLine (juce::roundToInt (x), 8.0f + (float) groupH, (float) getHeight() - 30.0f);
+            }
     }
 
     // Posición del fader (0..1) <-> ganancia lineal. dB = 60·(p - 1) para p > 0; p = 0 = silencio
@@ -85,6 +123,9 @@ public:
     static juce::String dbText (float g) { return g <= 0.0f ? juce::String ("-inf") : juce::String (20.0f * std::log10 (g), 1) + " dB"; }
 
 private:
+    static constexpr int numGroups = 4, numLinkable = 3; // Osc 1, Osc 2, Osc 3 (con LINK) y Noise; Master aparte (grupo 4)
+    static inline const juce::Identifier linksProp { "mixerLinks" };
+
     // Medidor vertical: -60..0 dBFS, verde hasta -12, ámbar hasta -3, rojo arriba; pico con caída de 20 dB/s
     struct Meter : juce::Component
     {
@@ -111,8 +152,8 @@ private:
 
     struct Strip : juce::Component, private juce::Slider::Listener
     {
-        Strip (MixerPanel& o, const char* label, const char* levelId, const char* muteId, int src)
-            : owner (o), source (src), name (label)
+        Strip (MixerPanel& o, const char* label, const char* levelId, const char* muteId, int src, int grp)
+            : owner (o), source (src), group (grp), name (label)
         {
             auto& apvts = owner.processor.apvts;
             param = apvts.getParameter (levelId);
@@ -123,14 +164,15 @@ private:
             fader.setTooltip (juce::String (label) + (src >= 0 ? ": level of this source in dB (before the filter and saturation)."
                                                                : ": output volume in dB (Gain, last in the chain)."));
             fader.addListener (this);
-            fader.onDragStart = [this] { dragging = true; attachment->beginGesture(); };
-            fader.onDragEnd = [this] { attachment->endGesture(); dragging = false; };
+            fader.onDragStart = [this] { dragging = true; attachment->beginGesture(); owner.beginLinked (*this); };
+            fader.onDragEnd = [this] { attachment->endGesture(); dragging = false; owner.endLinked (*this); };
             addAndMakeVisible (fader);
             attachment = std::make_unique<juce::ParameterAttachment> (*param, [this] (float v) { fader.setValue (posFromGain (v), juce::dontSendNotification); update(); });
             attachment->sendInitialUpdate();
             title.setText (label, juce::dontSendNotification);
             title.setJustificationType (juce::Justification::centred);
             title.setFont (juce::FontOptions (13.0f, juce::Font::bold));
+            title.setMinimumHorizontalScale (0.7f);
             addAndMakeVisible (title);
             playing.setJustificationType (juce::Justification::centred);
             playing.setFont (juce::FontOptions (11.0f));
@@ -157,13 +199,17 @@ private:
 
         void sliderValueChanged (juce::Slider*) override
         {
-            // Arrastre: dentro del gesto; doble clic o rueda: un paso de deshacer completo
+            // Arrastre: dentro del gesto; doble clic o rueda: un paso de deshacer completo. Con LINK, el grupo le sigue
+            const auto before = posFromGain (param->convertFrom0to1 (param->getValue()));
             if (dragging) attachment->setValueAsPartOfGesture (gainFromPos (fader.getValue()));
             else attachment->setValueAsCompleteGesture (gainFromPos (fader.getValue()));
+            owner.followLinked (*this, fader.getValue(), before);
             update();
         }
 
         void update() { value.setText (dbText (param->convertFrom0to1 (param->getValue())), juce::dontSendNotification); }
+
+        double position() const { return posFromGain (param->convertFrom0to1 (param->getValue())); }
 
         void resized() override
         {
@@ -182,10 +228,11 @@ private:
         }
 
         MixerPanel& owner;
-        const int source;
+        const int source, group;
         juce::String name;
         juce::RangedAudioParameter* param = nullptr;
         bool dragging = false;
+        double linkStart = 0.0; // posición al empezar el arrastre de otra tira del grupo enlazado (-1: no la sigue, en -inf)
         juce::Slider fader;
         std::unique_ptr<juce::ParameterAttachment> attachment;
         juce::Label title, value, playing; // playing: lo que toca la tira (MixerPanel::describe)
@@ -193,6 +240,54 @@ private:
         juce::TextButton mute, solo;
         std::unique_ptr<APVTS::ButtonAttachment> muteAttachment;
     };
+
+    // Tiras [from, to] de un grupo (el orden de defs los deja contiguos)
+    std::pair<size_t, size_t> groupRange (int grp) const
+    {
+        size_t from = strips.size(), to = 0;
+        for (size_t k = 0; k < strips.size(); ++k)
+            if (strips[k]->group == grp) { from = std::min (from, k); to = k; }
+        return { from, to };
+    }
+
+    bool linked (int grp) const { return grp < numLinkable && linkButtons[(size_t) grp].getToggleState(); }
+
+    // LINK: al empezar un arrastre, las demás tiras del grupo guardan su posición y abren su gesto (un solo paso de deshacer por
+    // parámetro); durante el arrastre se mueven lo mismo que la arrastrada desde el comienzo (sin acumular el recorte en 0..1)
+    void beginLinked (Strip& dragged)
+    {
+        dragStart = dragged.fader.getValue();
+        if (! linked (dragged.group)) return;
+        for (auto& s : strips)
+            if (s.get() != &dragged && s->group == dragged.group)
+            {
+                s->linkStart = s->position() > 0.0 ? s->position() : -1.0;
+                if (s->linkStart >= 0.0) s->attachment->beginGesture();
+            }
+    }
+    void endLinked (Strip& dragged)
+    {
+        if (! linked (dragged.group)) return;
+        for (auto& s : strips)
+            if (s.get() != &dragged && s->group == dragged.group && s->linkStart >= 0.0)
+                s->attachment->endGesture();
+    }
+    void followLinked (Strip& moved, double now, double before)
+    {
+        if (! linked (moved.group) || following) return;
+        const juce::ScopedValueSetter<bool> guard (following, true); // los cambios de las demás no rebotan
+        for (auto& s : strips)
+        {
+            if (s.get() == &moved || s->group != moved.group) continue;
+            if (moved.dragging)
+            {
+                if (s->linkStart < 0.0) continue;
+                s->attachment->setValueAsPartOfGesture (gainFromPos (juce::jlimit (0.0, 1.0, s->linkStart + now - dragStart)));
+            }
+            else if (const auto p = s->position(); p > 0.0) // doble clic o rueda: el mismo paso, como un cambio completo
+                s->attachment->setValueAsCompleteGesture (gainFromPos (juce::jlimit (0.0, 1.0, p + now - before)));
+        }
+    }
 
     void timerCallback() override
     {
@@ -229,8 +324,8 @@ private:
         }
     }
 
-    // Lo que toca cada tira. Osc 2 / Osc 3 en modo Wavetable o Sample: su tabla o fichero propios, en el acento y con la
-    // marca "own" (no son las fuentes Wavetable / Sample del grupo de Osc 1); si no, su forma
+    // Lo que toca cada tira: su forma, su tabla o su fichero. Los de Osc 2 y Osc 3 son propios (no las fuentes Wavetable /
+    // Sample de Osc 1): en el acento
     void describe (Strip& s)
     {
         auto& apvts = processor.apvts;
@@ -238,23 +333,20 @@ private:
         const auto fileName = [] (const juce::String& info) { return info.isNotEmpty() ? info : juce::String ("no file"); };
         juce::String what;
         auto own = false;
-        if (s.source == Params::srcWavetable)
-            what = processor.getWavetableName (KoniSynthProcessor::wtMain);
-        else if (s.source == Params::srcSample)
-            what = fileName (processor.getSampleInfo (KoniSynthProcessor::sourceSample));
-        else if (s.source == Params::srcOsc2 || s.source == Params::srcOsc3)
+        switch (s.source)
         {
-            const auto osc2 = s.source == Params::srcOsc2;
-            const auto wave = osc2WaveFromChoice ((int) apvts.getRawParameterValue (osc2 ? "osc2Wave" : "osc3Wave")->load());
-            own = wave == 4 || wave == 5; // códigos del motor: 4 Wavetable, 5 Sample
-            what = wave == 4 ? "own WT: " + processor.getWavetableName (osc2 ? KoniSynthProcessor::wtOsc2 : KoniSynthProcessor::wtOsc3)
-                 : wave == 5 ? "own sample: " + fileName (processor.getSampleInfo (osc2 ? KoniSynthProcessor::osc2Sample : KoniSynthProcessor::osc3Sample))
-                             : text (osc2 ? "osc2Wave" : "osc3Wave");
+            case Params::srcWavetable:  what = processor.getWavetableName (KoniSynthProcessor::wtMain); break;
+            case Params::srcSample:     what = fileName (processor.getSampleInfo (KoniSynthProcessor::sourceSample)); break;
+            case Params::srcOsc1:       what = text ("wave"); break;
+            case Params::srcOsc2:       what = text ("osc2Wave"); break;
+            case Params::srcOsc3:       what = text ("osc3Wave"); break;
+            case Params::srcNoise:      what = text ("noiseColor"); break;
+            case Params::srcOsc2Wt:     own = true; what = processor.getWavetableName (KoniSynthProcessor::wtOsc2); break;
+            case Params::srcOsc3Wt:     own = true; what = processor.getWavetableName (KoniSynthProcessor::wtOsc3); break;
+            case Params::srcOsc2Sample: own = true; what = fileName (processor.getSampleInfo (KoniSynthProcessor::osc2Sample)); break;
+            case Params::srcOsc3Sample: own = true; what = fileName (processor.getSampleInfo (KoniSynthProcessor::osc3Sample)); break;
+            default: break;
         }
-        else if (s.source == Params::srcOsc1)
-            what = text ("wave");
-        else if (s.source == Params::srcNoise)
-            what = text ("noiseColor");
         if (s.playing.getText() != what)
         {
             s.playing.setText (what, juce::dontSendNotification);
@@ -264,9 +356,11 @@ private:
     }
 
     static constexpr int groupH = 18, groupGap = 14;
-    static constexpr size_t firstOfGroupB = 4; // Osc 2: primera tira del segundo grupo (defs)
     int describeTick = 6;
+    double dragStart = 0.0;
+    bool following = false;
     KoniSynthProcessor& processor;
     std::vector<std::unique_ptr<Strip>> strips;
+    std::array<juce::TextButton, numLinkable> linkButtons;
     juce::Label hint;
 };

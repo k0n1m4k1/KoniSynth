@@ -21,8 +21,8 @@ struct SampleIds
         using K = KoniSynthProcessor;
         switch (which)
         {
-            case K::osc2Sample: return { which, "osc2Level", "osc2SampleRoot", "osc2SampleStart", "osc2SampleLength", "osc2SampleLoop", "Osc 2 Sample" };
-            case K::osc3Sample: return { which, "subLevel", "osc3SampleRoot", "osc3SampleStart", "osc3SampleLength", "osc3SampleLoop", "Osc 3 Sample" };
+            case K::osc2Sample: return { which, "osc2SampleLevel", "osc2SampleRoot", "osc2SampleStart", "osc2SampleLength", "osc2SampleLoop", "Osc 2 Sample" };
+            case K::osc3Sample: return { which, "osc3SampleLevel", "osc3SampleRoot", "osc3SampleStart", "osc3SampleLength", "osc3SampleLoop", "Osc 3 Sample" };
             case K::dpcmSample: return { which, nullptr, nullptr, "dpcmSampleStart", "dpcmSampleLength", "chipDpcmLoop", "8-Bit/DPCM Sample" };
             case K::mdSample:   return { which, nullptr, "mdSampleRoot", "mdSampleStart", "mdSampleLength", "mdSampleLoop", "Mega Drive Sample" };
             case K::snesSample: return { which, nullptr, "snesSampleRoot", "snesSampleStart", "snesSampleLength", "snesSampleLoop", "SNES Sample" };
