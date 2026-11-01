@@ -84,6 +84,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Engines/Snes.h"
 #include "Engines/N64.h"
 #include "Engines/Opll.h"
+#include "Engines/OplGmBank.h" // banco GM de DMXOPL3 (modo GM del OPL)
 #include "Engines/Opl.h"
 #include "Engines/Mt32.h"
 #include "Engines/Gus.h"

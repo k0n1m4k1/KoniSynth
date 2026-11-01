@@ -149,7 +149,7 @@ struct Params
         midiInChannel = get ("midiInChannel");
         chipExpansion = get ("chipExpansion"); chipVrc6Duty = get ("chipVrc6Duty"); chipVrc6Overdrive = get ("chipVrc6Overdrive");
         opllInstrument = get ("opllInstrument"); opllVolume = get ("opllVolume"); opllSustain = get ("opllSustain"); opllRhythm = get ("opllRhythm");
-        oplModel = get ("oplModel"); oplFourOp = get ("oplFourOp"); oplAlgorithm = get ("oplAlgorithm"); oplFeedback = get ("oplFeedback");
+        oplModel = get ("oplModel"); oplFourOp = get ("oplFourOp"); oplGm = get ("oplGm"); oplAlgorithm = get ("oplAlgorithm"); oplFeedback = get ("oplFeedback");
         oplDeepTremolo = get ("oplDeepTremolo"); oplDeepVibrato = get ("oplDeepVibrato"); oplVelocity = get ("oplVelocity");
         oplPan = get ("oplPan"); oplOutput = get ("oplOutput");
         mt32Model = get ("mt32Model"); mt32Mode = get ("mt32Mode"); mt32Multi = get ("mt32Multi"); mt32Program = get ("mt32Program"); mt32Reverb = get ("mt32Reverb");
@@ -294,7 +294,7 @@ struct Params
     std::atomic<float> *midiInChannel {};
     std::atomic<float> *chipExpansion {}, *chipVrc6Duty {}, *chipVrc6Overdrive {};
     std::atomic<float> *opllInstrument {}, *opllVolume {}, *opllSustain {}, *opllRhythm {};
-    std::atomic<float> *oplModel {}, *oplFourOp {}, *oplAlgorithm {}, *oplFeedback {}, *oplDeepTremolo {}, *oplDeepVibrato {},
+    std::atomic<float> *oplModel {}, *oplFourOp {}, *oplGm {}, *oplAlgorithm {}, *oplFeedback {}, *oplDeepTremolo {}, *oplDeepVibrato {},
                        *oplVelocity {}, *oplPan {}, *oplOutput {},
                        *mt32Model {}, *mt32Mode {}, *mt32Multi {}, *mt32Program {}, *mt32Reverb {}, *mt32Dac {}, *mt32Queue {}, *mt32NiceAmp {}, *mt32NicePan {}, *mt32NiceMix {}, *mt32MidiDelay {};
     std::atomic<float> *gusModel {}, *gusRam {}, *gusVoices {}, *gusMode {}, *gusMulti {}, *gusProgram {}, *gusPatchBits {};

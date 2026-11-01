@@ -9,8 +9,9 @@ The KoniSynth binaries (VST3, CLAP, standalone) also contain the third-party
 components listed below, each under its own licence, all compatible with the
 AGPLv3: JUCE (used under the AGPLv3), Nuked-OPLL (GPL-2.0 or later), Munt
 mt32emu (LGPL-2.1 or later), formulas from msfa (Apache-2.0) and from STK
-(MIT-STK), the MTS-ESP client (0BSD) and ScummVM's General MIDI to MT-32
-program table (GPL-3.0 or later). Their licence texts are reproduced verbatim in this file, as
+(MIT-STK), the MTS-ESP client (0BSD), ScummVM's General MIDI to MT-32
+program table (GPL-3.0 or later), the DMXOPL3 General MIDI bank (MIT) and the
+DMX driver tables as documented by Chocolate Doom (GPL-2.0 or later). Their licence texts are reproduced verbatim in this file, as
 their terms require.
 
 Component                                       Licence
@@ -39,6 +40,8 @@ MTS-ESP client (ODDSound Ltd)                   0BSD
 Munt mt32emu 2.8.3 (Roland MT-32 / CM-32L)      LGPL-2.1-or-later
 STK (Perry R. Cook, Gary P. Scavone)            MIT-STK
 ScummVM GM to MT-32 program table               GPL-3.0-or-later
+DMXOPL3 GM bank for OPL3 (sneakernets)          MIT
+Chocolate Doom DMX driver tables (OPL GM)       GPL-2.0-or-later
 
 Acknowledgements (reference data, tables and formulas taken from these sources):
 - Casio VL-1 waves, envelope and rhythms: VL1 emulator by PolyValens (github.com/linuxmao-org/VL1-emulator).
@@ -3087,3 +3090,44 @@ may consider it more useful to permit linking proprietary applications with
 the library.  If this is what you want to do, use the GNU Lesser General
 Public License instead of this License.  But first, please read
 <https://www.gnu.org/licenses/why-not-lgpl.html>.
+
+===============================================================================
+DMXOPL3 - General MIDI instrument bank for the OPL3 (GENMIDI.op2), by sneakernets
+https://github.com/sneakernets/DMXOPL (branch DMXOPL3). Converted to
+Source/Engines/OplGmBank.h (OPL engine, GM mode); the instrument data is
+unchanged. Credit as requested by the author: "DMXOPL3".
+===============================================================================
+
+MIT License
+
+Copyright (c) 2017
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+===============================================================================
+Chocolate Doom - the DMX OPL music driver as reconstructed in src/i_oplmusic.c
+(frequency_curve and volume_mapping_table, voice allocation, volume, panning and
+pitch rules), used in Source/Engines/Opl.h (GM mode). The tables are reproduced;
+the rest is re-implemented from the code (not verbatim).
+Copyright (C) 2005-2014 Simon Howard and the Chocolate Doom contributors
+https://github.com/chocolate-doom/chocolate-doom
+Licensed under the GNU General Public License, version 2 or (at your option)
+any later version. Full text: see the GNU GPL version 2 in the Nuked-OPLL
+section above.
+===============================================================================

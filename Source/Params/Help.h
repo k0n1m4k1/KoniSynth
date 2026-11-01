@@ -712,6 +712,9 @@ static juce::String paramHelp (const juce::String& id)
         { "opllRhythm", "YM2413 rhythm mode: channels 7-9 become bass drum, snare, tom, cymbal and hi-hat, played on MIDI channel 10 (General MIDI drum notes); 6 melodic voices remain. The VRC7 has no rhythm output." },
         { "oplModel", "OPL2 = Yamaha YM3812 (AdLib, Sound Blaster 1-2): 9 two-operator voices, 4 waveforms, mono, and the YM3014 floating-point DAC that drops the low bits of loud signals (its typical grit). OPL3 = YMF262 (Sound Blaster Pro 2, 16): 18 voices or 6 four-operator voices, 8 waveforms, stereo. OPLL = YM2413 (Japanese Master System FM, MSX-MUSIC): 9 voices, 15 ROM instruments + 1 user, optional drums. VRC7 = Konami's OPLL in Lagrange Point: 6 voices, its own ROM set. OPLL and VRC7 are cycle-accurate (Nuked-OPLL)." },
         { "oplFourOp", "OPL3 only: pairs of channels become 4-operator voices (6 voices) with 4 algorithms." },
+        { "oplGm", "OPL3 only. Off (default): one sound, set by the controls. On: General MIDI on 16 channels, the way games played "
+                   "MIDI on an OPL3 with the DMX driver (Doom and others), with the DMXOPL3 bank: each channel has its own "
+                   "instrument (Program Change), channel 10 is drums, CC 7 volume and CC 10 pan. The operator controls are not used." },
         { "oplAlgorithm", "How the operators connect. 2 operators: 0 = FM (1 modulates 2), 1 = AM (1 + 2 added). 4 operators (OPL3): 0 = 1->2->3->4, 1 = (1->2)+(3->4), 2 = 1+(2->3->4), 3 = 1+(2->3)+4." },
         { "oplFeedback", "Self-modulation of OP1 (register C0h): 0 = off, 7 = most (noisy)." },
         { "oplDeepTremolo", "Register BDh bit 7 (DAM): tremolo depth 4.8 dB instead of 1 dB, for operators with Tremolo on." },

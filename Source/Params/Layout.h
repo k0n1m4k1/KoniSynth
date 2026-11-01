@@ -771,6 +771,7 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "opllSustain", 1 }, "OPLL Sustain (SUS)", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "opllRhythm", 1 },  "OPLL Rhythm (YM2413)", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplFourOp", 1 },    "OPL 4-Op", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplGm", 1 },        "OPL GM", false)); // OPL3: driver DMX + DMXOPL3
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "oplAlgorithm", 1 }, "OPL Algorithm", 0, 3, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "oplFeedback", 1 },  "OPL Feedback", 0, 7, 0));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplDeepTremolo", 1 }, "OPL Deep Tremolo", false));

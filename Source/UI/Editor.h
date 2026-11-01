@@ -495,6 +495,7 @@ public:
                   .withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             oplSection.withKnob (s, "opl" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");
+        oplSection.withKnob (s, "oplGm", "GM"); // tecla: General MIDI multitímbrico (OPL3)
         opllSection.withCombo (s, "opllInstrument").withExtraToggle (s, "opllRhythm", "Rhythm")
                    .withKnob (s, "opllVolume", "Volume").withKnob (s, "opllSustain", "SUS");
         oplLfoSection.withExtraToggle (s, "oplVelocity", "Velocity")
@@ -1830,6 +1831,12 @@ private:
         dim (gusSection.knobFor ("gusMode"), gusMulti);
         dim (gusSection.listFor ("gusProgram"), gusMulti || (int) v ("gusMode") == 1);
         dim (gusSection.knobFor ("gusRam"), (int) v ("gusModel") == 2);
+        // OPL: GM solo con el OPL3; con GM, el banco pone los operadores y el driver el volumen y el paneo
+        const auto oplGm = (int) v ("oplModel") == 1 && v ("oplGm") > 0.5f;
+        dim (oplSection.knobFor ("oplGm"), (int) v ("oplModel") != 1);
+        for (const char* id : { "oplAlgorithm", "oplFeedback", "opl1Tl", "opl2Tl", "opl3Tl", "opl4Tl" })
+            dim (oplSection.knobFor (id), oplGm);
+        dim (oplLfoSection.knobFor ("oplPan"), oplGm);
         // Synth.h: sin V.Pan no hay paneo que repartir (Pan Mode está en el diálogo Voice Pan... de Amp Envelope)
         dim (paramPanel != nullptr ? paramPanel->knobFor ("voicePanMode") : nullptr, std::abs (v ("voicePan")) < 1.0e-4f);
     }

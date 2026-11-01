@@ -19,6 +19,8 @@
 //  - OPL2: solo 4 formas de onda (en el chip, con el bit WSE del registro de test, que activaban los juegos). Mono.
 // No verificado: la escala de la mezcla del YM3812 (ymfm la marca como "pendiente de verificar"); aquí, la de Nuked.
 // Sin modo de percusión (rítmico) ni CSM en esta versión. Remuestreo a la tasa del host con SincResampler.
+// Modo GM (OPL3): el chip tocado por el driver DMX (Doom, Heretic, Hexen, Raptor...), multitímbrico, con el banco DMXOPL3
+// (Engines/OplGmBank.h): ver la sección "Modo GM" más abajo.
 // Modelos OPLL (YM2413) y VRC7: Engines/Opll.h (Nuked-OPLL).
 struct OplEngine
 {
@@ -39,6 +41,7 @@ struct OplEngine
         timer = 0; egTimer = 0; egState = 0; egAdd = 0; egTimerLo = 0;
         tremoloPos = 0; tremolo = 0; vibPos = 0;
         age = 0;
+        gmInit();
         resampler.reset();
         opll.reset();
     }
@@ -56,14 +59,15 @@ struct OplEngine
         readParams (p);
         bendSmoothed += 0.2f * (p.pitchBend.load() - bendSmoothed);
         tuneCents = (double) p.fineTune->load() + 100.0 * bendSmoothed;
-        for (auto& v : voices)
-            if (v.note >= 0) setPitch (v);
+        if (! gm) // en GM la frecuencia la pone el driver (gmUpdateFrequency)
+            for (auto& v : voices)
+                if (v.note >= 0) setPitch (v);
 
         auto it = midi.cbegin();
         for (int i = 0; i < out.getNumSamples(); ++i)
         {
             for (; it != midi.cend() && (*it).samplePosition <= i; ++it)
-                handleMidi ((*it).getMessage());
+                gm ? gmHandleMidi ((*it).getMessage()) : handleMidi ((*it).getMessage());
             auto lr = resampler.nextStereo ([this] { return chipSample(); });
             if (model == opl2 || monoOutput)
                 lr[0] = lr[1] = 0.5f * (lr[0] + lr[1]);
@@ -107,6 +111,12 @@ private:
         int note = -1, velocityTl = 0, channel = 0, prevAccLeft = 0, prevAccRight = 0;
         bool gate = false;
         long long age = 0;
+        // Modo GM: el instrumento cargado en el canal del chip (registros ya decodificados), el canal MIDI del driver (numeración
+        // MUS: la percusión es el 15), la tecla, la voz del instrumento (0 o 1), el volumen de la nota y el registro de frecuencia
+        std::array<OpRegs, 2> gmOp {};
+        int gmFeedback = 0, gmChannel = -1, gmKey = 0, gmInstrVoice = 0, gmNoteVolume = 0, gmFreq = 0, gmPan = 0x30;
+        bool gmAdditive = false;
+        const OplGmBank::Instrument* gmInstr = nullptr;
     };
 
     // ---- Tablas de la ROM (Nuked-OPL3)
@@ -191,12 +201,15 @@ private:
     {
         const auto newModel = juce::jlimit (0, 1, (int) p.oplModel->load());
         if (model >= opllYm2413) opll.reset(); // al volver de OPLL, el chip OPLL queda en silencio
-        const auto newFour = newModel == opl3 && p.oplFourOp->load() > 0.5f;
-        if (newModel != model || newFour != fourOp)
+        const auto newGm = newModel == opl3 && p.oplGm->load() > 0.5f;
+        const auto newFour = newModel == opl3 && ! newGm && p.oplFourOp->load() > 0.5f;
+        if (newModel != model || newFour != fourOp || newGm != gm)
         {
             for (auto& v : voices) v = {};
             model = newModel;
             fourOp = newFour;
+            gm = newGm;
+            gmInit();
         }
         alg = juce::jlimit (0, 3, (int) p.oplAlgorithm->load());
         if (! fourOp) alg &= 1;
@@ -219,7 +232,7 @@ private:
         }
     }
 
-    int numVoices() const { return model == opl2 ? 9 : fourOp ? 6 : 18; }
+    int numVoices() const { return model == opl2 ? 9 : fourOp ? 6 : 18; } // GM: 18 (OPL3, 2 operadores)
 
     // Canal real del chip de cada voz (para el retardo de canal del OPL3): 2 operadores 0..17; 4 operadores, los pares
     // (0,3) (1,4) (2,5) (9,12) (10,13) (11,14), cuya salida sale por el segundo canal del par
@@ -385,29 +398,34 @@ private:
         {
             auto& v = voices[(size_t) k];
             const auto opCount = fourOp ? 4 : 2;
+            // GM: cada canal del chip con su instrumento (conexión FM = solo la segunda es portadora; AM = las dos)
+            const auto voiceCarriers = gm ? (v.gmAdditive ? 0b11 : 0b10) : carrierMask;
+            const auto voiceFeedback = gm ? v.gmFeedback : feedback;
             int acc = 0;
             int prevOut = 0;
             for (int j = 0; j < opCount; ++j)
             {
                 auto& s = v.slot[(size_t) j];
-                const auto& o = ops[(size_t) j];
+                const auto& o = gm ? v.gmOp[(size_t) j] : ops[(size_t) j];
                 // Entrada de modulación: el primero, su realimentación; los demás, el anterior si el algoritmo lo encadena
                 int mod = 0;
                 if (j == 0)
-                    mod = feedback ? (s.prout + s.out) >> (9 - feedback) : 0;
-                else if (chains (j))
+                    mod = voiceFeedback ? (s.prout + s.out) >> (9 - voiceFeedback) : 0;
+                else if (gm ? ! v.gmAdditive : chains (j))
                     mod = prevOut;
                 s.prout = s.out;
-                envelope (s, o, v, ((carrierMask >> j) & 1) ? v.velocityTl : 0);
+                envelope (s, o, v, (! gm && ((carrierMask >> j) & 1)) ? v.velocityTl : 0); // GM: el volumen va en el TL
                 phase (s, o, v);
                 s.out = waveform (o.wf, s.phaseOut + mod, s.egOut);
                 prevOut = s.out;
-                if ((carrierMask >> j) & 1) acc += s.out;
+                if ((voiceCarriers >> j) & 1) acc += s.out;
             }
             acc = (int) (int16_t) acc;
-            // Paneo (registro C0h, bits 4-5: A = izquierda, B = derecha), según el modo del driver de KoniSynth
+            // Paneo (registro C0h, bits 4-5: A = izquierda, B = derecha), según el modo del driver de KoniSynth; en GM, el del
+            // driver DMX (CC 10)
             const auto pan = panMode == 1 ? 1 : panMode == 2 ? 2 : panMode == 3 ? 1 + (k & 1) : 0;
-            const auto onL = model == opl2 || pan != 2, onR = model == opl2 || pan != 1;
+            const auto onL = model == opl2 || (gm ? (v.gmPan & 0x10) != 0 : pan != 2);
+            const auto onR = model == opl2 || (gm ? (v.gmPan & 0x20) != 0 : pan != 1);
             // Retardo de canal del OPL3: la mezcla de un lado se toma antes de procesar el último operador de esos canales
             const auto lateL = model == opl3 && v.channel >= 6 && v.channel <= 8;
             const auto lateR = model == opl3 && v.channel >= 15;
@@ -462,6 +480,281 @@ private:
         egState ^= 1;
     }
 
+    //==========================================================================================================================
+    // Modo GM: el driver DMX de Digital Expressions (Paul Radek), el de Doom 1.9 y otros juegos de 1993-1996, tal como lo
+    // reconstruye Chocolate Doom (src/i_oplmusic.c, GPL-2.0+; comportamiento comprobado contra el original por sus autores).
+    // Banco GENMIDI de DMXOPL3. Lo que hace el driver:
+    //  - 18 canales del chip en una lista libre (FIFO) y una de ocupados; una nota toma el primero libre y, al soltarse, el
+    //    canal vuelve al final de la libre. Sin canales libres se roba: el último ocupado que sea segunda voz o de canal MIDI
+    //    mayor o igual (ReplaceExistingVoice de la v1.9). Los instrumentos de dos voces ocupan dos canales del chip.
+    //  - Canal 10 = percusión: notas 35-81 -> instrumentos 128-174, tocados en la nota 60 (o su nota fija). Para el driver,
+    //    el canal de percusión es el 15 (formato MUS) y el 16 el 10: cuenta en el orden de robo.
+    //  - Frecuencia por tabla propia (frequency_curve, 1/32 de semitono): índice 64 + 32·nota + bend, nota con su
+    //    desplazamiento y plegada a 0-95; la segunda voz se desafina (afinación fina / 2 - 64)/32 semitonos. No sigue la
+    //    afinación de KoniSynth (Scala, Fine Tune): la tabla es la del driver.
+    //  - Volumen: TL de la portadora = 63 - tabla[vel] · 2·(tabla[vol CC 7] + 1) / 512 (volume_mapping_table); el nivel de la
+    //    portadora del banco no se usa. En conexión AM el modulador baja con él (máximo de su nivel y el de la portadora).
+    //  - Pitch bend: solo el MSB, ±64 = ±2 semitonos. CC 7 volumen (100 al empezar), CC 10 paneo en 3 posiciones con los
+    //    lados cambiados (fallo del DMX que Chocolate Doom conserva por defecto), CC 123 apagar notas. Nada más (ni sustain).
+    struct GmChannel { int program = 0, volume = 100, pan = 0x30, bend = 0; };
+
+    void gmInit()
+    {
+        gmFreeCount = 18;
+        gmAllocCount = 0;
+        for (int k = 0; k < 18; ++k) gmFree[(size_t) k] = k;
+        for (auto& c : gmChannels) c = {};
+    }
+
+    static int gmMusChannel (int midiChannel0) { return midiChannel0 == 9 ? 15 : midiChannel0 == 15 ? 9 : midiChannel0; }
+
+    void gmHandleMidi (const juce::MidiMessage& m)
+    {
+        if (m.getChannel() < 1) return;
+        const auto ch0 = m.getChannel() - 1;
+        const auto mus = gmMusChannel (ch0);
+        auto& chan = gmChannels[(size_t) mus];
+        if (m.isNoteOn())
+        {
+            const auto key = m.getNoteNumber();
+            int instrument = chan.program, note = key;
+            if (ch0 == 9)
+            {
+                if (key < 35 || key > 81) return;
+                instrument = OplGmBank::kMelodic + key - 35;
+                note = 60;
+            }
+            const auto& instr = OplGmBank::get (instrument);
+            if (gmFreeCount == 0)
+                gmReplaceExistingVoice();
+            gmVoiceKeyOn (mus, instr, 0, note, key, m.getVelocity());
+            if (instr.flags & 0x04)
+                gmVoiceKeyOn (mus, instr, 1, note, key, m.getVelocity());
+        }
+        else if (m.isNoteOff()) // también nota con velocidad 0
+        {
+            for (int i = 0; i < gmAllocCount; ++i)
+            {
+                const auto& v = voices[(size_t) gmAlloc[(size_t) i]];
+                if (v.gmChannel == mus && v.gmKey == m.getNoteNumber())
+                    gmReleaseVoice (i--);
+            }
+        }
+        else if (m.isProgramChange())
+            chan.program = m.getProgramChangeNumber();
+        else if (m.isControllerOfType (7))
+        {
+            chan.volume = m.getControllerValue();
+            for (int k = 0; k < 18; ++k)
+                if (voices[(size_t) k].gmChannel == mus) gmSetVolume (voices[(size_t) k]);
+        }
+        else if (m.isControllerOfType (10))
+        {
+            const auto value = m.getControllerValue();
+            chan.pan = value >= 96 ? 0x10 : value <= 48 ? 0x20 : 0x30; // lados cambiados, como el DMX
+            for (auto& v : voices)
+                if (v.gmChannel == mus) v.gmPan = chan.pan;
+        }
+        else if (m.isAllNotesOff() || m.isAllSoundOff())
+        {
+            for (int i = 0; i < gmAllocCount; ++i)
+                if (m.isAllSoundOff() || voices[(size_t) gmAlloc[(size_t) i]].gmChannel == mus)
+                    gmReleaseVoice (i--);
+            if (m.isAllSoundOff())
+                for (auto& v : voices)
+                    for (auto& s : v.slot) { s.egRout = 0x1ff; s.gen = release; }
+        }
+        else if (m.isPitchWheel())
+        {
+            chan.bend = (m.getPitchWheelValue() >> 7) - 64; // solo el MSB
+            // Las voces del canal se reafinan y pasan al final de la lista de ocupadas (orden de robo, como el driver)
+            std::array<int, 18> updated {}, others {};
+            int nu = 0, no = 0;
+            for (int i = 0; i < gmAllocCount; ++i)
+            {
+                const auto k = gmAlloc[(size_t) i];
+                if (voices[(size_t) k].gmChannel == mus) { gmUpdateFrequency (voices[(size_t) k]); updated[(size_t) nu++] = k; }
+                else others[(size_t) no++] = k;
+            }
+            for (int i = 0; i < no; ++i) gmAlloc[(size_t) i] = others[(size_t) i];
+            for (int i = 0; i < nu; ++i) gmAlloc[(size_t) (no + i)] = updated[(size_t) i];
+        }
+    }
+
+    void gmVoiceKeyOn (int mus, const OplGmBank::Instrument& instr, int instrVoice, int note, int key, int velocity)
+    {
+        if (gmFreeCount == 0) return;
+        const auto k = gmFree[0];
+        for (int i = 1; i < gmFreeCount; ++i) gmFree[(size_t) (i - 1)] = gmFree[(size_t) i];
+        --gmFreeCount;
+        gmAlloc[(size_t) gmAllocCount++] = k;
+
+        auto& v = voices[(size_t) k];
+        v.gmChannel = mus;
+        v.gmKey = key;
+        v.note = (instr.flags & 0x01) ? instr.fixedNote : note;
+        v.gmPan = gmChannels[(size_t) mus].pan;
+        v.channel = k;
+        if (v.gmInstr != &instr || v.gmInstrVoice != instrVoice) // el driver no recarga un instrumento que ya está
+        {
+            v.gmInstr = &instr;
+            v.gmInstrVoice = instrVoice;
+            const auto& d = instr.voice[instrVoice];
+            v.gmAdditive = (d.feedback & 0x01) != 0;
+            v.gmFeedback = (d.feedback >> 1) & 7;
+            gmDecodeOp (d.mod, v.gmOp[0]);
+            gmDecodeOp (d.car, v.gmOp[1]);
+            v.gmOp[1].tl = 63;                                  // la portadora, al mínimo hasta fijar el volumen
+            if (v.gmAdditive) v.gmOp[0].tl = 63;                // en AM, también el modulador
+        }
+        v.gmNoteVolume = velocity;
+        gmSetVolume (v);
+        v.gmFreq = 0;
+        gmUpdateFrequency (v);
+        v.gate = true;
+        v.age = ++age;
+        for (auto& s : v.slot) s.key = true;                    // bit 5 de B0h (key on) al escribir la frecuencia
+    }
+
+    void gmReleaseVoice (int index)
+    {
+        const auto k = gmAlloc[(size_t) index];
+        auto& v = voices[(size_t) k];
+        v.gate = false;
+        for (auto& s : v.slot) s.key = false;
+        v.gmChannel = -1;
+        v.note = 0;
+        for (int i = index; i < gmAllocCount - 1; ++i) gmAlloc[(size_t) i] = gmAlloc[(size_t) (i + 1)];
+        --gmAllocCount;
+        gmFree[(size_t) gmFreeCount++] = k; // al final de la libre, como el driver
+    }
+
+    void gmReplaceExistingVoice()
+    {
+        if (gmAllocCount == 0) return;
+        int result = 0;
+        for (int i = 0; i < gmAllocCount; ++i)
+        {
+            const auto& v = voices[(size_t) gmAlloc[(size_t) i]];
+            if (v.gmInstrVoice != 0 || v.gmChannel >= voices[(size_t) gmAlloc[(size_t) result]].gmChannel)
+                result = i;
+        }
+        gmReleaseVoice (result);
+    }
+
+    // Registros de un operador del banco: 20h (AM VIB EGT KSR MULT), 60h (AR DR), 80h (SL RR), E0h, KSL y nivel de 40h
+    static void gmDecodeOp (const OplGmBank::Op& b, OpRegs& o)
+    {
+        o.am = (b.tremolo & 0x80) != 0; o.vib = (b.tremolo & 0x40) != 0; o.egt = (b.tremolo & 0x20) != 0; o.ksr = (b.tremolo & 0x10) != 0;
+        o.mult = b.tremolo & 0x0f;
+        o.ar = b.attack >> 4; o.dr = b.attack & 0x0f;
+        const auto sl = b.sustain >> 4;
+        o.sl = sl == 15 ? 0x1f : sl;
+        o.rr = b.sustain & 0x0f;
+        o.wf = b.waveform & 7;
+        static const int kslIndex[4] = { 0, 2, 1, 3 }; // registro -> índice en dB (0, 3, 1,5, 6 dB/oct), ver envelope()
+        o.ksl = kslIndex[(b.scale >> 6) & 3];
+        o.tl = b.level & 0x3f;
+    }
+
+    // Volumen de la nota (SetVoiceVolume del driver)
+    void gmSetVolume (Voice& v)
+    {
+        static const int volumeTable[128] = {
+            0, 1, 3, 5, 6, 8, 10, 11, 13, 14, 16, 17, 19, 20, 22, 23, 25, 26, 27, 29, 30, 32, 33, 34, 36, 37, 39, 41, 43, 45, 47, 49,
+            50, 52, 54, 55, 57, 59, 60, 61, 63, 64, 66, 67, 68, 69, 71, 72, 73, 74, 75, 76, 77, 79, 80, 81, 82, 83, 84, 84, 85, 86,
+            87, 88, 89, 90, 91, 92, 92, 93, 94, 95, 96, 96, 97, 98, 99, 99, 100, 101, 101, 102, 103, 103, 104, 105, 105, 106, 107,
+            107, 108, 109, 109, 110, 110, 111, 112, 112, 113, 113, 114, 114, 115, 115, 116, 117, 117, 118, 118, 119, 119, 120,
+            120, 121, 121, 122, 122, 123, 123, 123, 124, 124, 125, 125, 126, 126, 127, 127 };
+        if (v.gmInstr == nullptr || v.gmChannel < 0) return;
+        const auto& d = v.gmInstr->voice[v.gmInstrVoice];
+        const auto midiVolume = 2 * (volumeTable[juce::jlimit (0, 127, gmChannels[(size_t) v.gmChannel].volume)] + 1);
+        const auto full = (volumeTable[juce::jlimit (0, 127, v.gmNoteVolume)] * midiVolume) >> 9;
+        const auto car = 0x3f - full;
+        if (car == v.gmOp[1].tl) return; // el driver solo escribe si cambia
+        v.gmOp[1].tl = car;
+        if (v.gmAdditive && (d.mod.level & 0x3f) != 0x3f)
+            v.gmOp[0].tl = std::max ((int) (d.mod.level & 0x3f), car);
+    }
+
+    // Frecuencia de la voz (FrequencyForVoice / UpdateVoiceFrequency del driver)
+    void gmUpdateFrequency (Voice& v)
+    {
+        if (v.gmInstr == nullptr || v.gmChannel < 0) return;
+        const auto& d = v.gmInstr->voice[v.gmInstrVoice];
+        auto note = v.note;
+        if ((v.gmInstr->flags & 0x01) == 0) note += d.noteOffset;
+        while (note < 0) note += 12;
+        while (note > 95) note -= 12;
+        auto index = 64 + 32 * note + gmChannels[(size_t) v.gmChannel].bend;
+        if (v.gmInstrVoice != 0) index += v.gmInstr->fineTune / 2 - 64;
+        index = std::max (0, index);
+        int freq;
+        if (index < 284) freq = gmFrequencyCurve (index);
+        else freq = gmFrequencyCurve (284 + (index - 284) % 384) | (std::min (7, (index - 284) / 384) << 10);
+        if (freq == v.gmFreq) return;
+        v.gmFreq = freq;
+        v.fnum = freq & 0x3ff;
+        v.block = (freq >> 10) & 7;
+        v.ksv = (v.block << 1) | ((v.fnum >> 9) & 1); // NTS = 0
+        static const int kslrom[16] = { 0, 32, 40, 45, 48, 51, 53, 55, 56, 58, 59, 60, 61, 62, 63, 64 };
+        v.kslBase = std::max (0, (kslrom[v.fnum >> 6] << 2) - ((8 - v.block) << 5));
+    }
+
+    // frequency_curve del driver (Chocolate Doom): 668 valores de F-number en 1/32 de semitono; desde el 284 se repite por
+    // octavas. El último es un desbordamiento del original (0x36c) y se conserva
+    static int gmFrequencyCurve (int index)
+    {
+        static const std::uint16_t curve[668] = {
+            0x133, 0x133, 0x134, 0x134, 0x135, 0x136, 0x136, 0x137, 0x137, 0x138, 0x138, 0x139, 0x139, 0x13a, 0x13b, 0x13b,
+            0x13c, 0x13c, 0x13d, 0x13d, 0x13e, 0x13f, 0x13f, 0x140, 0x140, 0x141, 0x142, 0x142, 0x143, 0x143, 0x144, 0x144,
+            0x145, 0x146, 0x146, 0x147, 0x147, 0x148, 0x149, 0x149, 0x14a, 0x14a, 0x14b, 0x14c, 0x14c, 0x14d, 0x14d, 0x14e,
+            0x14f, 0x14f, 0x150, 0x150, 0x151, 0x152, 0x152, 0x153, 0x153, 0x154, 0x155, 0x155, 0x156, 0x157, 0x157, 0x158,
+            0x158, 0x159, 0x15a, 0x15a, 0x15b, 0x15b, 0x15c, 0x15d, 0x15d, 0x15e, 0x15f, 0x15f, 0x160, 0x161, 0x161, 0x162,
+            0x162, 0x163, 0x164, 0x164, 0x165, 0x166, 0x166, 0x167, 0x168, 0x168, 0x169, 0x16a, 0x16a, 0x16b, 0x16c, 0x16c,
+            0x16d, 0x16e, 0x16e, 0x16f, 0x170, 0x170, 0x171, 0x172, 0x172, 0x173, 0x174, 0x174, 0x175, 0x176, 0x176, 0x177,
+            0x178, 0x178, 0x179, 0x17a, 0x17a, 0x17b, 0x17c, 0x17c, 0x17d, 0x17e, 0x17e, 0x17f, 0x180, 0x181, 0x181, 0x182,
+            0x183, 0x183, 0x184, 0x185, 0x185, 0x186, 0x187, 0x188, 0x188, 0x189, 0x18a, 0x18a, 0x18b, 0x18c, 0x18d, 0x18d,
+            0x18e, 0x18f, 0x18f, 0x190, 0x191, 0x192, 0x192, 0x193, 0x194, 0x194, 0x195, 0x196, 0x197, 0x197, 0x198, 0x199,
+            0x19a, 0x19a, 0x19b, 0x19c, 0x19d, 0x19d, 0x19e, 0x19f, 0x1a0, 0x1a0, 0x1a1, 0x1a2, 0x1a3, 0x1a3, 0x1a4, 0x1a5,
+            0x1a6, 0x1a6, 0x1a7, 0x1a8, 0x1a9, 0x1a9, 0x1aa, 0x1ab, 0x1ac, 0x1ad, 0x1ad, 0x1ae, 0x1af, 0x1b0, 0x1b0, 0x1b1,
+            0x1b2, 0x1b3, 0x1b4, 0x1b4, 0x1b5, 0x1b6, 0x1b7, 0x1b8, 0x1b8, 0x1b9, 0x1ba, 0x1bb, 0x1bc, 0x1bc, 0x1bd, 0x1be,
+            0x1bf, 0x1c0, 0x1c0, 0x1c1, 0x1c2, 0x1c3, 0x1c4, 0x1c4, 0x1c5, 0x1c6, 0x1c7, 0x1c8, 0x1c9, 0x1c9, 0x1ca, 0x1cb,
+            0x1cc, 0x1cd, 0x1ce, 0x1ce, 0x1cf, 0x1d0, 0x1d1, 0x1d2, 0x1d3, 0x1d3, 0x1d4, 0x1d5, 0x1d6, 0x1d7, 0x1d8, 0x1d8,
+            0x1d9, 0x1da, 0x1db, 0x1dc, 0x1dd, 0x1de, 0x1de, 0x1df, 0x1e0, 0x1e1, 0x1e2, 0x1e3, 0x1e4, 0x1e5, 0x1e5, 0x1e6,
+            0x1e7, 0x1e8, 0x1e9, 0x1ea, 0x1eb, 0x1ec, 0x1ed, 0x1ed, 0x1ee, 0x1ef, 0x1f0, 0x1f1, 0x1f2, 0x1f3, 0x1f4, 0x1f5,
+            0x1f6, 0x1f6, 0x1f7, 0x1f8, 0x1f9, 0x1fa, 0x1fb, 0x1fc, 0x1fd, 0x1fe, 0x1ff, 0x200, 0x201, 0x201, 0x202, 0x203,
+            0x204, 0x205, 0x206, 0x207, 0x208, 0x209, 0x20a, 0x20b, 0x20c, 0x20d, 0x20e, 0x20f, 0x210, 0x210, 0x211, 0x212,
+            0x213, 0x214, 0x215, 0x216, 0x217, 0x218, 0x219, 0x21a, 0x21b, 0x21c, 0x21d, 0x21e, 0x21f, 0x220, 0x221, 0x222,
+            0x223, 0x224, 0x225, 0x226, 0x227, 0x228, 0x229, 0x22a, 0x22b, 0x22c, 0x22d, 0x22e, 0x22f, 0x230, 0x231, 0x232,
+            0x233, 0x234, 0x235, 0x236, 0x237, 0x238, 0x239, 0x23a, 0x23b, 0x23c, 0x23d, 0x23e, 0x23f, 0x240, 0x241, 0x242,
+            0x244, 0x245, 0x246, 0x247, 0x248, 0x249, 0x24a, 0x24b, 0x24c, 0x24d, 0x24e, 0x24f, 0x250, 0x251, 0x252, 0x253,
+            0x254, 0x256, 0x257, 0x258, 0x259, 0x25a, 0x25b, 0x25c, 0x25d, 0x25e, 0x25f, 0x260, 0x262, 0x263, 0x264, 0x265,
+            0x266, 0x267, 0x268, 0x269, 0x26a, 0x26c, 0x26d, 0x26e, 0x26f, 0x270, 0x271, 0x272, 0x273, 0x275, 0x276, 0x277,
+            0x278, 0x279, 0x27a, 0x27b, 0x27d, 0x27e, 0x27f, 0x280, 0x281, 0x282, 0x284, 0x285, 0x286, 0x287, 0x288, 0x289,
+            0x28b, 0x28c, 0x28d, 0x28e, 0x28f, 0x290, 0x292, 0x293, 0x294, 0x295, 0x296, 0x298, 0x299, 0x29a, 0x29b, 0x29c,
+            0x29e, 0x29f, 0x2a0, 0x2a1, 0x2a2, 0x2a4, 0x2a5, 0x2a6, 0x2a7, 0x2a9, 0x2aa, 0x2ab, 0x2ac, 0x2ae, 0x2af, 0x2b0,
+            0x2b1, 0x2b2, 0x2b4, 0x2b5, 0x2b6, 0x2b7, 0x2b9, 0x2ba, 0x2bb, 0x2bd, 0x2be, 0x2bf, 0x2c0, 0x2c2, 0x2c3, 0x2c4,
+            0x2c5, 0x2c7, 0x2c8, 0x2c9, 0x2cb, 0x2cc, 0x2cd, 0x2ce, 0x2d0, 0x2d1, 0x2d2, 0x2d4, 0x2d5, 0x2d6, 0x2d8, 0x2d9,
+            0x2da, 0x2dc, 0x2dd, 0x2de, 0x2e0, 0x2e1, 0x2e2, 0x2e4, 0x2e5, 0x2e6, 0x2e8, 0x2e9, 0x2ea, 0x2ec, 0x2ed, 0x2ee,
+            0x2f0, 0x2f1, 0x2f2, 0x2f4, 0x2f5, 0x2f6, 0x2f8, 0x2f9, 0x2fb, 0x2fc, 0x2fd, 0x2ff, 0x300, 0x302, 0x303, 0x304,
+            0x306, 0x307, 0x309, 0x30a, 0x30b, 0x30d, 0x30e, 0x310, 0x311, 0x312, 0x314, 0x315, 0x317, 0x318, 0x31a, 0x31b,
+            0x31c, 0x31e, 0x31f, 0x321, 0x322, 0x324, 0x325, 0x327, 0x328, 0x329, 0x32b, 0x32c, 0x32e, 0x32f, 0x331, 0x332,
+            0x334, 0x335, 0x337, 0x338, 0x33a, 0x33b, 0x33d, 0x33e, 0x340, 0x341, 0x343, 0x344, 0x346, 0x347, 0x349, 0x34a,
+            0x34c, 0x34d, 0x34f, 0x350, 0x352, 0x353, 0x355, 0x357, 0x358, 0x35a, 0x35b, 0x35d, 0x35e, 0x360, 0x361, 0x363,
+            0x365, 0x366, 0x368, 0x369, 0x36b, 0x36c, 0x36e, 0x370, 0x371, 0x373, 0x374, 0x376, 0x378, 0x379, 0x37b, 0x37c,
+            0x37e, 0x380, 0x381, 0x383, 0x384, 0x386, 0x388, 0x389, 0x38b, 0x38d, 0x38e, 0x390, 0x392, 0x393, 0x395, 0x397,
+            0x398, 0x39a, 0x39c, 0x39d, 0x39f, 0x3a1, 0x3a2, 0x3a4, 0x3a6, 0x3a7, 0x3a9, 0x3ab, 0x3ac, 0x3ae, 0x3b0, 0x3b1,
+            0x3b3, 0x3b5, 0x3b7, 0x3b8, 0x3ba, 0x3bc, 0x3bd, 0x3bf, 0x3c1, 0x3c3, 0x3c4, 0x3c6, 0x3c8, 0x3ca, 0x3cb, 0x3cd,
+            0x3cf, 0x3d1, 0x3d2, 0x3d4, 0x3d6, 0x3d8, 0x3da, 0x3db, 0x3dd, 0x3df, 0x3e1, 0x3e3, 0x3e4, 0x3e6, 0x3e8, 0x3ea,
+            0x3ec, 0x3ed, 0x3ef, 0x3f1, 0x3f3, 0x3f5, 0x3f6, 0x3f8, 0x3fa, 0x3fc, 0x3fe, 0x36c };
+        return curve[juce::jlimit (0, 667, index)];
+    }
+
+    std::array<GmChannel, 16> gmChannels {};
+    std::array<int, 18> gmFree {}, gmAlloc {};
+    int gmFreeCount = 18, gmAllocCount = 0;
+
     static constexpr float kGain = 2.0f / 32768.0f; // un canal a fondo de escala (±4084) ≈ ±0,25
 
     double sampleRate = 44100.0;
@@ -470,7 +763,7 @@ private:
     std::array<Voice, 18> voices {};
     std::array<OpRegs, 4> ops {};
     int model = 0, alg = 0, feedback = 0, tremoloShift = 4, vibShift = 1, panMode = 0;
-    bool fourOp = false, velocityOn = true, monoOutput = false, pgReset = false;
+    bool fourOp = false, velocityOn = true, monoOutput = false, pgReset = false, gm = false;
     uint32_t timer = 0;
     uint64_t egTimer = 0;
     int egState = 0, egAdd = 0, egTimerLo = 0, tremoloPos = 0, tremolo = 0, vibPos = 0;

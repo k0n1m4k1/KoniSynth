@@ -155,13 +155,14 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
             if (auto* param = find (plugin, arg.upToFirstOccurrenceOf ("=", false, false)))
                 param->setValue (param->getValueForText (arg.fromFirstOccurrenceOf ("=", false, false)));
         }
-        else if (arg.startsWith ("pb:") || arg.startsWith ("cc:") || arg.startsWith ("cp:") || arg.startsWith ("pat:"))
+        else if (arg.startsWith ("pb:") || arg.startsWith ("cc:") || arg.startsWith ("cp:") || arg.startsWith ("pat:") || arg.startsWith ("pc:"))
         {
             const auto p = juce::StringArray::fromTokens (arg, ":", "");
             const auto t = p[1].getDoubleValue();
             if (p[0] == "pb")       events.push_back ({ t, juce::MidiMessage::pitchWheel (p[3].getIntValue(), juce::jlimit (0, 16383, p[2].getIntValue() + 8192)) });
             else if (p[0] == "cc")  events.push_back ({ t, juce::MidiMessage::controllerEvent (p[4].getIntValue(), p[2].getIntValue(), p[3].getIntValue()) });
             else if (p[0] == "cp")  events.push_back ({ t, juce::MidiMessage::channelPressureChange (p[3].getIntValue(), p[2].getIntValue()) });
+            else if (p[0] == "pc")  events.push_back ({ t, juce::MidiMessage::programChange (p[3].getIntValue(), p[2].getIntValue()) }); // pc:<s>:<programa 0-127>:<canal>
             else                    events.push_back ({ t, juce::MidiMessage::aftertouchChange (p[4].getIntValue(), p[2].getIntValue(), p[3].getIntValue()) });
         }
         else
