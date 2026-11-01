@@ -2,7 +2,7 @@
 // compilación; usa las declaraciones previas de KoniSynth.cpp (JUCE, Params, utilidades). No es una cabecera independiente.
 #pragma once
 
-// Editor FM: cabecera (algoritmo, feedback, ajustes de la voz, envolvente de tono y el diagrama en texto) y una columna por
+// Editor FM: cabecera (algoritmo, feedback, ajustes de la voz, envolvente de tono y el diagrama del algoritmo) y una columna por
 // operador, OP1 a OP6
 class FmPanel : public juce::Component, private juce::Timer
 {
@@ -18,8 +18,10 @@ public:
         for (int k = 1; k <= 4; ++k) pitchEg.withSlider (s, "fmPL" + juce::String (k), "L" + juce::String (k));
         addAndMakeVisible (pitchEg);
         diagram.setJustificationType (juce::Justification::centredLeft);
-        diagram.setFont (juce::FontOptions (17.0f));
+        diagram.setFont (juce::FontOptions (13.0f));
+        diagram.setMinimumHorizontalScale (0.7f);
         addAndMakeVisible (diagram);
+        addAndMakeVisible (algorithm);
 
         for (int i = 0; i < 6; ++i)
         {
@@ -67,7 +69,9 @@ public:
         header.setBounds (top.removeFromLeft (220));
         voice.setBounds (top.removeFromLeft (190).withTrimmedLeft (8));
         pitchEg.setBounds (top.removeFromLeft (440).withTrimmedLeft (8));
-        diagram.setBounds (top.reduced (16, 0));
+        top.reduce (16, 0);
+        diagram.setBounds (top.removeFromBottom (18)); // conexiones en texto bajo el diagrama
+        algorithm.setBounds (top);
         r.removeFromTop (8);
         grid = r;
         for (int i = 0; i < 6; ++i)
@@ -106,6 +110,7 @@ private:
             return;
         shownAlgorithm = alg;
         diagram.setText ("Algorithm " + juce::String (alg) + ":   " + FmAlgorithms::describe (alg - 1), juce::dontSendNotification);
+        algorithm.setGraph (AlgorithmGraph::dx7 (alg - 1));
         for (int k = 0; k < 6; ++k) // flags en orden OP6..OP1
             carrier[(size_t) (5 - k)] = (FmAlgorithms::flags[alg - 1][k] & 3) == 0;
         repaint();
@@ -123,6 +128,7 @@ private:
     KoniSynthProcessor& koni;
     Section header { "FM 6-Op (DX7)" }, voice { "Voice" }, pitchEg { "Pitch EG" };
     juce::Label diagram;
+    AlgorithmDiagram algorithm; // cajas y conexiones del algoritmo (UI/AlgorithmDiagram.h)
     std::array<Column, 6> columns;
     std::array<bool, 6> carrier {};
     juce::Rectangle<int> grid;

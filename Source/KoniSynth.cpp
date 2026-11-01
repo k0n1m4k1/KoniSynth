@@ -2497,6 +2497,7 @@ private:
 
 #include "UI/RhythmEditor.h"
 
+#include "UI/AlgorithmDiagram.h" // diagrama de algoritmo de FmPanel y OplPanel
 #include "UI/FmPanel.h"
 
 #include "UI/MdPanel.h"

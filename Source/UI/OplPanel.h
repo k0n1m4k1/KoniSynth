@@ -12,8 +12,10 @@ public:
         header.withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         addAndMakeVisible (header);
         diagram.setJustificationType (juce::Justification::centredLeft);
-        diagram.setFont (juce::FontOptions (17.0f));
+        diagram.setFont (juce::FontOptions (13.0f));
+        diagram.setMinimumHorizontalScale (0.7f);
         addAndMakeVisible (diagram);
+        addAndMakeVisible (algorithm);
         for (int i = 0; i < 4; ++i)
         {
             auto& c = columns[(size_t) i];
@@ -65,7 +67,9 @@ public:
         auto r = getLocalBounds();
         auto top = r.removeFromTop (130);
         header.setBounds (top.removeFromLeft (260));
-        diagram.setBounds (top.reduced (16, 0));
+        top.reduce (16, 0);
+        diagram.setBounds (top.removeFromBottom (18)); // conexiones en texto bajo el diagrama
+        algorithm.setBounds (top);
         r.removeFromTop (8);
         grid = r;
         for (int i = 0; i < 4; ++i)
@@ -112,6 +116,7 @@ private:
         fourOp = four;
         diagram.setText ((four ? "4-operator algorithm " : "2-operator connection ") + juce::String (alg) + ":   "
                          + OplEngine::describe (four, alg) + "   (feedback on OP1)", juce::dontSendNotification);
+        algorithm.setGraph (AlgorithmGraph::opl (four, alg));
         const auto mask = OplEngine::carrierMask (four, alg);
         for (int k = 0; k < 4; ++k)
         {
@@ -139,6 +144,7 @@ private:
     KoniSynthProcessor& koni;
     Section header { "OPL" };
     juce::Label diagram;
+    AlgorithmDiagram algorithm; // cajas y conexiones del algoritmo (UI/AlgorithmDiagram.h)
     std::array<Column, 4> columns;
     std::array<bool, 4> carrier {};
     juce::Rectangle<int> grid;

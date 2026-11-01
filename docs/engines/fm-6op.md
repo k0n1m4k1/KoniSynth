@@ -75,6 +75,10 @@ voice:
 
 The pitch envelope affects only operators in ratio mode (Fixed operators keep their frequency), as on the DX7.
 
+At the top right, a diagram of the current algorithm: numbered boxes for the operators, lines from each modulator to the
+operator it modulates, the carriers (highlighted) on the output line at the bottom and the feedback loop in the accent
+colour; the connections are also written out below it.
+
 Below are six columns, OP1 to OP6; the columns of the carriers (the operators you hear with the current algorithm) are
 highlighted.
 

@@ -32,7 +32,8 @@ Default patch: 2 operators in FM, the modulator silent (TL 63) and the carrier a
 In the OPL editor (Operators...), each operator column shows its envelope with the chip's times (at C4, with KSR), drawn
 from the chip's own envelope generator; drag its points for AR, DR and SL, and RR.
 
-**OPL editor (Operators...).** Columns OP1-OP4 with the chip's own registers, carriers highlighted, algorithm written out;
+**OPL editor (Operators...).** Columns OP1-OP4 with the chip's own registers, carriers highlighted, the algorithm drawn as
+a diagram (operator boxes, modulation lines, output line and the feedback loop on OP1) and written out;
 OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 
 | Control | What it does | Range / default |
