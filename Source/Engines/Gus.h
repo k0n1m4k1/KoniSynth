@@ -346,6 +346,15 @@ struct GusEngine
             substitutedCount = 0;
         }
         const auto multi = p.gusMulti->load() > 0.5f;
+        if (multi != lastMulti)
+        {
+            // Cambio de modo: sin Multitimbral los 16 canales caen en uno, así que los CC de un .mid (CC 7 = 0 de otra pista,
+            // expresión, pedal) se quedaban en el canal del teclado y lo dejaban mudo antes y después de conmutar (medido:
+            // -74,9 dBFS frente a -34,2). Se apagan las voces y los canales vuelven a su estado inicial, como tras un reset GM
+            lastMulti = multi;
+            for (auto& v : voices) v = Voice {};
+            for (auto& c : channels) c = Channel {};
+        }
         const auto mode = juce::jlimit (0, 1, juce::roundToInt (p.gusMode->load()));
         const auto keysProgram = juce::jlimit (0, 127, juce::roundToInt (p.gusProgram->load()));
         const auto n = out.getNumSamples();
@@ -1012,6 +1021,7 @@ private:
     int substitutedCount = 0;           // de ellos, los que suenan con otro patch
     std::array<juce::uint32, maxVoices> stealCount {}; // robos por voz (el display destella al cambiar)
     const GusBank* lastBank = nullptr;
+    bool lastMulti = false;
     ZohResampler resampler;
     double hostRate = 48000.0, chipRate = 44100.0;
     int activeVoices = 24, nextVoice = 0;

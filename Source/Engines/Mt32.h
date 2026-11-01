@@ -199,7 +199,24 @@ struct Mt32Engine
                                                              MT32Emu::MIDIDelayMode_DELAY_ALL };
             synth.setMIDIDelayMode (delays[delay]);
         }
-        const auto mode = p.mt32Multi->load() > 0.5f ? 2 : juce::jlimit (0, 1, (int) p.mt32Mode->load());
+        const auto multi = p.mt32Multi->load() > 0.5f;
+        if (multi != lastMulti)
+        {
+            // Cambio de modo: sin Multitimbral todos los canales van a la parte 1 (o al ritmo), así que los CC de un .mid (CC 7
+            // = 0 de otra pista, expresión, pedal) se quedaban en la parte del teclado y la dejaban muda al conmutar. Se apagan
+            // las notas y cada canal vuelve a sus controladores de arranque: Reset All Controllers (expresión 100, bend,
+            // modulación, pedal: Part::resetAllControllers) y volumen 102, que da el nivel de arranque 80 (102 · 100 / 127 =
+            // 80,3 -> 80: Part::setVolume y Synth::open). El paneo no se toca: el de arranque sale de la ROM de control
+            lastMulti = multi;
+            synth.flushMIDIQueue();
+            for (juce::uint32 ch = 0; ch < 16; ++ch)
+            {
+                synth.playMsgNow (0xB0 | ch | (123u << 8));             // All Notes Off
+                synth.playMsgNow (0xB0 | ch | (121u << 8));             // Reset All Controllers
+                synth.playMsgNow (0xB0 | ch | (7u << 8) | (102u << 16)); // volumen
+            }
+        }
+        const auto mode = multi ? 2 : juce::jlimit (0, 1, (int) p.mt32Mode->load());
         const auto program = juce::jlimit (1, 128, (int) p.mt32Program->load());
         if (mode == 0 && program != lastProgram)
         {
@@ -338,6 +355,7 @@ private:
     std::vector<float> interleaved;
     const Mt32Machine* lastMachine = nullptr;
     int lastReverb = -1, lastDac = -1, lastProgram = -1, lastNice = -1, lastDelay = -1, lcdCountdown = 0;
+    bool lastMulti = false;
     bool silencePending = false;
     bool gated = false;    // salida cerrada tras un panic, hasta la siguiente nota
     int namesRefreshes = 0; // lecturas pendientes de los nombres de programa (máquina nueva o SysEx)
