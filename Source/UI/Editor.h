@@ -547,7 +547,7 @@ public:
                            p.add ("MIDI Queue").withKnob (st, "mt32Queue", "Events"); // 4 posiciones: conmutador por pasos
                            p.add ("MIDI Delay").withKnob (st, "mt32MidiDelay", "Cable");
                        }))
-                   .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb")
+                   .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 3.0f).withKnob (s, "mt32Reverb", "Reverb")
                    .withKnob (s, "mt32Dac", "DAC"); // 5 posiciones: conmutador por pasos (Knob con detents)
         gusSection.withCombo (s, "gusModel").withExtraToggle (s, "gusMulti", "Multi")
                   .withHeaderButton ("Patches...", "The Gravis patch set is not included: put your .PAT files (with Gravis' ULTRAMID.INI, "
@@ -558,6 +558,7 @@ public:
                   .withRowBreak (1).withRightBody (gusDisplay, 560); // a la derecha, el mapa de voces (4 columnas desde 560 px)
         gusSection.stretchToFill = true; // el display se queda con el ancho que sobre en la fila
         if (auto* list = gusSection.listFor ("gusProgram")) list->setPhosphor (56); // lista grande, letra de 30 px
+        if (auto* list = mt32Section.listFor ("mt32Program")) list->setPhosphor (48); // igual, en la fila de perillas: 3 de ancho
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
         fmDisplaySection.withBody (dx7Display, 0, 560); // 16 × 2 caracteres y el LED de 2 dígitos a ~4,6 px por punto
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")

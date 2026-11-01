@@ -1062,7 +1062,7 @@ struct ListControl : juce::Component, private juce::Timer
         float widest = 0.0f;
         for (int i = 0; i < combo.getNumItems(); ++i)
             widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, combo.getItemText (i)));
-        return juce::roundToInt (widest) + (combo.getProperties().contains ("phosphor") ? 52 : 34);
+        return juce::roundToInt (widest) + (combo.getProperties().contains ("phosphor") ? 12 + 50 : 34);
     }
 
     // Peso en la fila: el de 'width' perillas o lo que pide el texto más largo (60 px por unidad, como layoutWeight de Section)
@@ -1500,15 +1500,17 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
     void drawComboBox (juce::Graphics& g, int width, int height, bool down, int buttonX, int buttonY, int buttonW, int buttonH,
                        juce::ComboBox& box) override
     {
-        if (box.getProperties().contains ("phosphor")) // lista grande del Gravis: pantalla oscura con borde y flecha de fósforo
+        if (box.getProperties().contains ("phosphor")) // pantalla oscura con borde y flecha de fósforo (Gravis, MT-32, cabeceras)
         {
             const auto r = juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height).reduced (1.0f);
             const auto lcd = Skin::mono() ? Skin::ramp().bg : juce::Colour (0xff03080c);
+            const auto corner = juce::jmin (5.0f, (float) height * 0.18f);
             g.setColour (lcd);
-            g.fillRoundedRectangle (r, 5.0f);
+            g.fillRoundedRectangle (r, corner);
             g.setColour (Skin::trace().withAlpha (box.isEnabled() ? (down ? 0.9f : 0.45f) : 0.2f));
-            g.drawRoundedRectangle (r, 5.0f, 1.5f);
-            const auto a = juce::Rectangle<float> ((float) width - 34.0f, 0.0f, 22.0f, (float) height).withSizeKeepingCentre (14.0f, 8.0f);
+            g.drawRoundedRectangle (r, corner, height >= 40 ? 1.5f : 1.0f);
+            const auto aw = juce::jmax (8.0f, (float) height * 0.25f), ah = juce::jmax (5.0f, (float) height * 0.14f);
+            const auto a = juce::Rectangle<float> (aw, ah).withCentre ({ (float) width - (float) phosphorArrowWidth (height) * 0.46f, (float) height * 0.5f });
             juce::Path arrow;
             arrow.addTriangle (a.getX(), a.getY(), a.getRight(), a.getY(), a.getCentreX(), a.getBottom());
             g.setColour (Skin::trace().withAlpha (box.isEnabled() ? 0.85f : 0.3f));
@@ -1521,16 +1523,23 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
                              Skin::accent().withMultipliedAlpha (box.isEnabled() ? 1.0f : 0.4f));
     }
 
+    // Desplegable de fósforo: margen izquierdo y franja de la flecha, proporcionales al alto (56 px -> 12 y 50 px; 24 px -> 5 y 22)
+    static int phosphorPad (int height) { return juce::jmax (5, juce::roundToInt ((float) height * 0.21f)); }
+    static int phosphorArrowWidth (int height) { return juce::jmax (20, juce::roundToInt ((float) height * 0.9f)); }
+
     juce::Font getComboBoxFont (juce::ComboBox& box) override
     {
         if (box.getProperties().contains ("phosphor"))
         {
-            // 0,54 del alto, reducida para que el nombre más largo quepa entre el margen (12 px) y la flecha (50 px)
+            // 0,54 del alto. En las listas grandes (40 px o más), reducida para que el nombre más largo quepa entre el margen y
+            // la flecha; en las de cabecera (24 px, 13 px de letra) no: un nombre largo se estrecha o se corta (drawLabel)
             juce::Font font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), (float) box.getHeight() * 0.54f, juce::Font::plain));
+            if (box.getHeight() < 40)
+                return font;
             float widest = 1.0f;
             for (int i = 0; i < box.getNumItems(); ++i)
                 widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, box.getItemText (i)));
-            const auto avail = (float) (box.getWidth() - 62);
+            const auto avail = (float) (box.getWidth() - phosphorPad (box.getHeight()) - phosphorArrowWidth (box.getHeight()));
             if (widest > avail && avail > 0.0f)
                 font = font.withHeight (juce::jmax (12.0f, font.getHeight() * avail / widest));
             return font;
@@ -1542,7 +1551,8 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
     {
         if (box.getProperties().contains ("phosphor"))
         {
-            label.setBounds (12, 1, box.getWidth() - 50, box.getHeight() - 2);
+            const auto pad = phosphorPad (box.getHeight());
+            label.setBounds (pad, 1, box.getWidth() - pad - phosphorArrowWidth (box.getHeight()), box.getHeight() - 2);
             label.setFont (getComboBoxFont (box));
             return;
         }
