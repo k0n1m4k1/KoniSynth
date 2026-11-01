@@ -1840,6 +1840,14 @@ struct Section : juce::Component
         return *this;
     }
 
+    // Desplegable de la cabecera con aspecto de pantalla de fósforo (KoniLookAndFeel, propiedad "phosphor"), como la lista
+    // Program del Gravis: para listas de nombres (patrones, ritmos)
+    Section& withPhosphorCombo()
+    {
+        combo.getProperties().set ("phosphor", true);
+        return *this;
+    }
+
     // Orden en que el desplegable muestra las opciones (índices del parámetro): solo presentación, el valor no cambia
     Section& withItemOrder (std::vector<int> order)
     {
