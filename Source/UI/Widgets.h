@@ -610,6 +610,7 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
             keyValue.setBounds (valueArea.withSizeKeepingCentre (juce::jmin (valueArea.getWidth() - 4, 70), 18));
         }
     }
+
     static constexpr int maxDial = 64;
 
     // Tecla de dos opciones como interruptor de palanca (p. ej. Position de la saturación por voz): rótulos de la placa con la
@@ -1500,7 +1501,7 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
     void drawComboBox (juce::Graphics& g, int width, int height, bool down, int buttonX, int buttonY, int buttonW, int buttonH,
                        juce::ComboBox& box) override
     {
-        if (box.getProperties().contains ("phosphor")) // pantalla oscura con borde y flecha de fósforo (Gravis, MT-32, cabeceras)
+        if (phosphorStyle (box)) // pantalla oscura con borde y flecha de fósforo: todos salvo los marcados "classic"
         {
             const auto r = juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height).reduced (1.0f);
             const auto lcd = Skin::mono() ? Skin::ramp().bg : juce::Colour (0xff03080c);
@@ -1515,6 +1516,10 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
             arrow.addTriangle (a.getX(), a.getY(), a.getRight(), a.getY(), a.getCentreX(), a.getBottom());
             g.setColour (Skin::trace().withAlpha (box.isEnabled() ? 0.85f : 0.3f));
             g.fillPath (arrow);
+            if (box.getProperties().contains ("waveGlyphs")) // icono de la forma de onda, en el color del texto
+                WaveGlyph::draw (g, box.getText(), juce::Rectangle<float> ((float) phosphorPad (height), 0.0f, 22.0f, (float) height)
+                                                     .reduced (0.0f, (float) height * 0.3f),
+                                 Skin::trace().withMultipliedAlpha (box.isEnabled() ? 1.0f : 0.4f));
             return;
         }
         LookAndFeel_V4::drawComboBox (g, width, height, down, buttonX, buttonY, buttonW, buttonH, box);
@@ -1523,17 +1528,22 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
                              Skin::accent().withMultipliedAlpha (box.isEnabled() ? 1.0f : 0.4f));
     }
 
+    // Todos los desplegables tienen aspecto de pantalla de fósforo salvo los marcados con la propiedad "classic" (barra
+    // superior y barra de escala)
+    static bool phosphorStyle (const juce::Component& c) { return ! c.getProperties().contains ("classic"); }
+
     // Desplegable de fósforo: margen izquierdo y franja de la flecha, proporcionales al alto (56 px -> 12 y 50 px; 24 px -> 5 y 22)
     static int phosphorPad (int height) { return juce::jmax (5, juce::roundToInt ((float) height * 0.21f)); }
     static int phosphorArrowWidth (int height) { return juce::jmax (20, juce::roundToInt ((float) height * 0.9f)); }
 
     juce::Font getComboBoxFont (juce::ComboBox& box) override
     {
-        if (box.getProperties().contains ("phosphor"))
+        if (phosphorStyle (box))
         {
-            // 0,54 del alto. En las listas grandes (40 px o más), reducida para que el nombre más largo quepa entre el margen y
+            // 0,54 del alto (11 px como mínimo). En las listas grandes (40 px o más), reducida para que el nombre más largo quepa entre el margen y
             // la flecha; en las de cabecera (24 px, 13 px de letra) no: un nombre largo se estrecha o se corta (drawLabel)
-            juce::Font font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), (float) box.getHeight() * 0.54f, juce::Font::plain));
+            juce::Font font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), juce::jmax (11.0f, (float) box.getHeight() * 0.54f),
+                                                juce::Font::plain));
             if (box.getHeight() < 40)
                 return font;
             float widest = 1.0f;
@@ -1549,9 +1559,9 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
 
     void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
     {
-        if (box.getProperties().contains ("phosphor"))
+        if (phosphorStyle (box))
         {
-            const auto pad = phosphorPad (box.getHeight());
+            const auto pad = phosphorPad (box.getHeight()) + (box.getProperties().contains ("waveGlyphs") ? 26 : 0); // tras el icono
             label.setBounds (pad, 1, box.getWidth() - pad - phosphorArrowWidth (box.getHeight()), box.getHeight() - 2);
             label.setFont (getComboBoxFont (box));
             return;
@@ -1591,7 +1601,7 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
     void drawLabel (juce::Graphics& g, juce::Label& label) override
     {
         if (auto* box = dynamic_cast<juce::ComboBox*> (label.getParentComponent());
-            box != nullptr && box->getProperties().contains ("phosphor") && ! label.isBeingEdited())
+            box != nullptr && phosphorStyle (*box) && ! label.isBeingEdited())
         {
             // Texto de fósforo con un halo tenue (el trazo de las pantallas del skin)
             const auto ink = Skin::trace().withMultipliedAlpha (box->isEnabled() ? 1.0f : 0.4f);
@@ -1836,15 +1846,6 @@ struct Section : juce::Component
     {
         for (int i = 0; i < labels.size(); ++i)
             combo.changeItemText (i + 1, labels[i]);
-        combo.getProperties().set ("fitText", true); // etiquetas largas: el desplegable se ensancha hasta leer la más larga
-        return *this;
-    }
-
-    // Desplegable de la cabecera con aspecto de pantalla de fósforo (KoniLookAndFeel, propiedad "phosphor"), como la lista
-    // Program del Gravis: para listas de nombres (patrones, ritmos)
-    Section& withPhosphorCombo()
-    {
-        combo.getProperties().set ("phosphor", true);
         return *this;
     }
 
@@ -1855,23 +1856,23 @@ struct Section : juce::Component
         return *this;
     }
 
-    // Ancho del desplegable de la cabecera: 110 px (140 con icono de onda); con withItemLabels, el texto más largo + 34 px de
-    // flecha y márgenes, sin quitar el sitio de los botones y el conmutador de la cabecera. La fuente es la que el LookAndFeel
-    // da a un desplegable de 24 px de alto (LookAndFeel_V4: min(16, 0,85·alto) = 16 px): con getComboBoxFont del propio
-    // desplegable, en la primera maquetación su alto aún es 0 y el texto medía casi nada (se quedaba en 110 px)
+    // Ancho del desplegable de la cabecera: el del texto más largo (se lee entero) con margen, icono de onda y flecha, al
+    // menos 110 px (140 con icono), sin quitar el sitio de los botones y el conmutador de la cabecera: si no cabe, lo que
+    // quede. La fuente es la de fósforo de un desplegable de 24 px (monoespaciada, 0,54 × 24 = 13 px): con getComboBoxFont
+    // del propio desplegable, en la primera maquetación su alto aún es 0 y el texto medía casi nada
     int comboHeaderWidth (int headerWidth) const
     {
-        const auto base = combo.getProperties().contains ("waveGlyphs") ? 140 : 110; // +30: icono
-        if (! combo.getProperties().contains ("fitText"))
-            return base;
-        const juce::Font font (juce::FontOptions (juce::jmin (16.0f, 24.0f * 0.85f)));
+        const auto glyph = combo.getProperties().contains ("waveGlyphs");
+        const auto base = glyph ? 140 : 110; // +30: icono
+        const juce::Font font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 24.0f * 0.54f, juce::Font::plain));
         float widest = 0.0f;
         for (int i = 0; i < combo.getNumItems(); ++i)
             widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, combo.getItemText (i)));
         auto reserved = extraToggle.isVisible() ? 80 : 0;
         for (const auto& b : headerButtons)
             reserved += buttonWidth (*b);
-        return juce::jlimit (base, juce::jmax (base, headerWidth - reserved), juce::roundToInt (widest) + 34);
+        const auto needed = juce::roundToInt (widest) + 5 + 22 + 8 + (glyph ? 26 : 0); // margen 5, flecha 22, holgura 8
+        return juce::jlimit (base, juce::jmax (base, headerWidth - reserved), needed);
     }
 
     // Tooltip por opción del desplegable de la cabecera (en el orden de sus items)

@@ -74,6 +74,7 @@ public:
         engineComboAttachment = std::make_unique<PickComboAttachment> (*s.getParameter ("engine"), engineCombo,
                                                                          [this] (int e) { loadRepresentative (e, -1); });
         engineMenu = std::make_unique<ParamMenu> (s, "engine", engineCombo);
+        engineCombo.getProperties().set ("classic", true); // barra superior: aspecto V4 (el fósforo es para los bloques)
         content.addAndMakeVisible (engineCombo);
         panicButton.setTooltip ("Panic: silences everything at once (all notes off and effect tails cleared). Also MIDI CC 120. "
                                 "Right-click: MIDI Learn (any button of your controller).");
@@ -392,14 +393,14 @@ public:
                                             "automatic bass (root, low root, 5th, 3rd of the chord you hold). Each one is a MIDI file "
                                             "you can also edit elsewhere (drums on channel 10, bass on channel 2).",
                                             [this] { openPanel ("Omnichord Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::omnichord), 1300, 560); })
-                         .withSortedCombo (s, "omniRhythm").withPhosphorCombo().withKnob (s, "omniTempo", "Tempo").withKnob (s, "omniRhythmLevel", "Level");
+                         .withSortedCombo (s, "omniRhythm").withKnob (s, "omniTempo", "Tempo").withKnob (s, "omniRhythmLevel", "Level");
         drumSection.withCombo (s, "drumKit").withExtraToggle (s, "drumVelocity", "Velocity")
                    .withKnob (s, "drumTune", "Tune").withKnob (s, "drumDecay", "Decay").withKnob (s, "drumTone", "Tone")
                    .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent");
         drumPatternSection.withHeaderButton ("Edit Rhythms...", "Open the rhythm editor: draw your own rhythms (User 1-8) on a grid of "
                                              "instrument lanes and steps. Each one is a MIDI file you can also edit elsewhere.",
                                              [this] { openPanel ("Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::drums), 1300, 560); })
-                          .withSortedCombo (s, "drumPattern").withPhosphorCombo().withKnob (s, "drumPattern2", "+ Pattern")
+                          .withSortedCombo (s, "drumPattern").withKnob (s, "drumPattern2", "+ Pattern")
                           .withKnob (s, "drumTempo", "Tempo").withKnob (s, "drumSwing", "Swing")
                           .withBody (drumLeds, 12, 0); // fila de LED de los pasos sobre las perillas
         fmSection.withHeaderButton ("Operators...", "Open the FM editor: ratio, level, envelope and keyboard scaling of the 6 operators.",
@@ -414,7 +415,6 @@ public:
                  .withKnob (s, "fmMode", "Mode").withKnob (s, "fmAlgorithm", "Algorithm").withKnob (s, "fmFeedback", "Feedback");
         for (int op = 1; op <= 6; ++op)
             fmSection.withKnob (s, "fm" + juce::String (op) + "Level", "OP" + juce::String (op));
-        dx7VoiceBox.getProperties().set ("phosphor", true); // pantalla de fósforo, como la lista Program del Gravis
         dx7VoiceBox.onChange = [this] { if (const auto id = dx7VoiceBox.getSelectedId(); id > 0) koni.selectDx7Voice (id - 1); };
         refreshDx7Voices();
         fmLfoSection.withCombo (s, "fmLfoWave").withExtraToggle (s, "fmLfoSync", "Sync")

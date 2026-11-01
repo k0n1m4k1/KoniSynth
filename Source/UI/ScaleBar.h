@@ -13,6 +13,7 @@ public:
         transposeAttachment = std::make_unique<APVTS::SliderAttachment> (s, "keyTranspose", transpose);
         decorate ("keyTranspose", transpose);
         addAndMakeVisible (transpose);
+        for (auto* c : { &root, &type, &mode, &rounding }) c->getProperties().set ("classic", true); // barra de escala: aspecto V4
         addCombo (root, "scaleRoot", rootAttachment);
         addCombo (type, "scaleType", typeAttachment);
         addCombo (mode, "scaleMode", modeAttachment);

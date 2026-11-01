@@ -10,6 +10,7 @@ public:
     explicit PresetBar (PresetManager& pm) : presets (pm)
     {
         combo.setTextWhenNothingSelected ("(no preset)");
+        for (auto* c : { &combo, &filterCombo }) c->getProperties().set ("classic", true); // barra superior: aspecto V4
         combo.onChange = [this]
         {
             if (const auto id = combo.getSelectedId(); id > 0)
