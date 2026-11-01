@@ -48,6 +48,7 @@ struct FmEngine
         lastKey = 0;
         portaTickPhase = 0.0;
         portaHalf = false;
+        pitchEgToggle = false;
     }
 
     void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p)
@@ -382,9 +383,10 @@ private:
     // Envolvente de tono del DX7 (pitchenv.cc de msfa): nivel en unidades de 2^-24 octava, 4 etapas como la EG de amplitud
     struct PitchEnv
     {
-        double level = 0.0, target = 0.0, inc = 0.0;
-        int ix = 0;
-        bool rising = false, down = true;
+        // PITCH_EG_PROCESS: nivel de 16 bits en 1/4096 de octava (0x4000 = sin desviación), etapa 0-2 hacia L1-L3, 3 = sostiene
+        // L3 con la tecla pulsada, 4 = hacia L4 tras soltarla, 5 = fin. loaded: el nivel que tiene el EGS (se carga en la
+        // pasada de PORTA_PROCESS de la voz)
+        int level = 0x4000, step = 0, loaded = 0x4000;
     };
 
     struct Voice
@@ -427,7 +429,6 @@ private:
                                                 : (expData[std::min (group, 32)] * depth * 329) >> 15; // exponencial
         return curve < 2 ? -scale : scale; // 0 -LIN, 1 -EXP, 2 +EXP, 3 +LIN
     }
-
     static int scaleLevel (int note, const OpPatch& op)
     {
         const auto offset = note - op.breakPoint - 17;
@@ -595,10 +596,9 @@ private:
                 lanesOf (vi).phase[k][laneOf (vi)] = 0.0f;
             advance (op, pk, 0);
         }
-        // Envolvente de tono: empieza en L4 y va hacia L1 (PitchEnv::set en cada Dx7Note::init)
+        // Envolvente de tono (VOICE_ADD): empieza en L4, etapa 0
         v.pitchEnv = {};
-        v.pitchEnv.level = pitchEnvTab[pitchLevels[3]] * 524288.0; // << 19
-        pitchAdvance (v.pitchEnv, 0);
+        v.pitchEnv.level = v.pitchEnv.loaded = pitchEgLevel (3);
         updateFrequencies (v);
     }
 
@@ -711,7 +711,16 @@ private:
             const auto first = portaHalf ? 8 : 0;
             portaHalf = ! portaHalf;
             for (int i = first; i < first + 8; ++i)
-                portaStep (voices[(size_t) i]);
+            {
+                auto& v = voices[(size_t) i];
+                portaStep (v);
+                v.pitchEnv.loaded = v.pitchEnv.level; // PORTA_PROCESS suma el nivel de la envolvente de tono al cargar el EGS
+            }
+            // PITCH_EG_PROCESS: en ticks alternos (M_PITCH_EG_UPDATE_TOGGLE), las 16 voces
+            pitchEgToggle = ! pitchEgToggle;
+            if (pitchEgToggle)
+                for (auto& v : voices)
+                    pitchEgTick (v.pitchEnv);
             // MOD_PITCH_LOAD_TO_EGS: T = sat(controladores PITCH + fade·sc(PMD)/256); l = s·PMS/256 (truncado hacia 0);
             // registro = (l·T) >> 1, en 1/16384 de octava (el pitch bend de 12 semitonos llega a 0x3FFF)
             const auto t = std::min (255, pitchFactor + ((lfoFade * pmdSc) >> 8));
@@ -841,7 +850,7 @@ private:
         v.portaOut = v.glissPitch;
     }
 
-    // Tablas de pitchenv.cc (msfa): velocidad por rate 0..99 y nivel por level 0..99 (en 2^-5 octava; 50 = 0)
+    // Tablas de pitchenv.cc (msfa), idénticas a TABLE_PITCH_EG_RATE y TABLE_PITCH_EG_LEVEL - 128 del firmware (comprobado entrada a entrada)
     static constexpr std::uint8_t pitchEnvRate[100] = {
         1, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13, 14, 14, 15, 16, 16, 17, 18, 18, 19, 20,
         21, 22, 23, 24, 25, 26, 27, 28, 30, 31, 33, 34, 36, 37, 38, 39, 41, 42, 44, 46, 47, 49, 51, 53, 54, 56, 58, 60, 62, 64,
@@ -853,37 +862,38 @@ private:
         -2, -1, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
         30, 31, 32, 33, 34, 35, 38, 40, 43, 46, 49, 53, 58, 65, 73, 82, 92, 103, 115, 127 };
 
-    // PitchEnv::advance: objetivo y velocidad de la etapa ix (0..3; 4 = fin). Velocidad por muestra de operador:
-    // pitchenv_rate · 2^24 / (21,3 · fs) (msfa la aplica cada 64 muestras con unit_ = 64 · 2^24 / (21,3 · fs))
-    void pitchAdvance (PitchEnv& e, int ix) const
+    // Nivel de la tabla TABLE_PITCH_EG_LEVEL (= pitchEnvTab + 128) en las unidades de PITCH_EG_PROCESS: valor · 128
+    int pitchEgLevel (int stage) const { return (pitchEnvTab[pitchLevels[(size_t) stage]] + 128) * 128; }
+
+    // PITCH_EG_PROCESS para una voz (cada 2 ticks): suma o resta la velocidad de TABLE_PITCH_EG_RATE (= pitchEnvRate);
+    // la etapa acaba cuando el byte alto alcanza el del objetivo (o al bajar de 0), y entonces el nivel salta al objetivo.
+    // Velocidad: R · 184,85 / 4096 = R / 22,16 octavas por segundo, en escalones de 5,41 ms
+    void pitchEgTick (PitchEnv& e) const
     {
-        e.ix = ix;
-        if (ix >= 4)
+        if (e.step == 3 || e.step >= 5)
             return;
-        e.target = pitchEnvTab[pitchLevels[(size_t) ix]] * 524288.0;
-        e.rising = e.target > e.level;
-        e.inc = pitchEnvRate[pitchRates[(size_t) ix]] * 16777216.0 / (21.3 * opRate);
-    }
-
-    // PitchEnv::getsample avanzando n muestras; devuelve octavas
-    double pitchStep (PitchEnv& e, int n) const
-    {
-        if (e.ix < 3 || (e.ix < 4 && ! e.down))
+        const auto stage = std::min (e.step, 3);
+        const auto inc = (int) pitchEnvRate[pitchRates[(size_t) stage]];
+        const auto next = pitchEgLevel (stage);
+        bool finished = e.level == next;
+        if (! finished && e.level < next)
         {
-            if (e.rising)
-            {
-                e.level += e.inc * n;
-                if (e.level >= e.target) { e.level = e.target; pitchAdvance (e, e.ix + 1); }
-            }
-            else
-            {
-                e.level -= e.inc * n;
-                if (e.level <= e.target) { e.level = e.target; pitchAdvance (e, e.ix + 1); }
-            }
+            const auto d = (e.level + inc) & 0xFFFF;
+            if ((d >> 8) < (next >> 8)) e.level = d;
+            else                        finished = true;
         }
-        return e.level / 16777216.0;
+        else if (! finished)
+        {
+            const auto d = (e.level - inc) & 0xFFFF;
+            if ((d & 0x8000) == 0 && (d >> 8) > (next >> 8)) e.level = d;
+            else                                             finished = true;
+        }
+        if (finished)
+        {
+            e.level = next;
+            e.step = e.step + 1 == 6 ? 0 : e.step + 1;
+        }
     }
-
     // Frecuencia de cada operador (dx7note.cc osc_freq): ratio = coarse (0 = 0,5) · (1 + fine/100) con detune empírico de Dexed;
     // fixed = 10^(coarse%4 + fine/100) Hz. Por bloque y en cada nota: el patch puede cambiar mientras suena
     void updateFrequencies (Voice& v)
@@ -906,11 +916,7 @@ private:
     {
         for (int k = 0; k < 6; ++k)
             advance (v.ops[(size_t) k], patch[(size_t) k], 3);
-        if (v.pitchEnv.down) // PitchEnv::keydown (false): a la etapa 4
-        {
-            v.pitchEnv.down = false;
-            pitchAdvance (v.pitchEnv, 3);
-        }
+        v.pitchEnv.step = 4; // la envolvente de tono va hacia L4
     }
 
     // env.cc advance(): objetivo y velocidad de la etapa ix (0..3); ix 4 = fin
@@ -966,7 +972,7 @@ private:
         // El portamento desplaza el tono respecto a la nota de la voz (en mono, la primera tecla del legato); como la envolvente
         // de tono, solo en los operadores en modo razón
         const auto portaOct = (v.portaOut - dxPitch (v.playNote)) / 4096.0;
-        const auto pitchMul = (float) std::exp2 (pitchStep (v.pitchEnv, n) + portaOct);
+        const auto pitchMul = (float) std::exp2 ((v.pitchEnv.loaded - 0x4000) / 4096.0 + portaOct);
         for (int k = 0; k < 6; ++k)
             lanesOf (vi).inc[k][laneOf (vi)] = patch[(size_t) k].fixed ? v.baseInc[(size_t) k] : v.baseInc[(size_t) k] * pitchMul;
         bool anyAudible = false;
@@ -1008,7 +1014,8 @@ private:
     bool sustainPedal = false;
     std::array<int, 4> ctlValue {}; // últimos valores (0-127) de rueda, foot, breath y aftertouch; persisten tras reset()
     // Mono y portamento (ver monoNoteOn / portaStep)
-    bool mono = false, legatoUp = false, glissando = false, portaPedalParam = false, portaPedalCc = false, portaHalf = false;
+    bool mono = false, legatoUp = false, glissando = false, portaPedalParam = false, portaPedalCc = false, portaHalf = false,
+         pitchEgToggle = false;
     int monoCount = 0, lastKey = 0, lastPitch = 0x2EA8, portaRate = 0xFF, portaMode = 0, portaTimeParam = -1, midiPortaTime = -1;
     std::array<int, kVoices> monoKeys {};
     double portaTickPhase = 0.0;
