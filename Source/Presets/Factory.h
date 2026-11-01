@@ -403,7 +403,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
                           { "md4Tl", 10 }, { "md4Ar", 14 }, { "md4Dr", 2 }, { "md4Sl", 2 }, { "md4Rr", 5 }, { "md4Mul", 1 }, { "md4Dt", 3 },
                           { "ambientOn", 1 }, { "ambientMix", 0.35f }, { "reverbDecay", 4.0f } }, {}, "Slow chords, C3-C5", 48, 72 },
         // N64: sierra propia a 22 kHz, envolvente lenta, Big Room de libultra. Diseño propio
-        { "N64 Saw Pad", "Pad", { { "gain", 0.43f }, { "engine", 12 }, { "n64Source", 1 }, { "n64Attack", 600.0f }, { "n64Release", 1500.0f }, { "n64Spread", 0.6f },
+        { "N64 Saw Pad", "Pad", { { "gain", 0.43f }, { "engine", 12 }, { "n64Source", 1 }, { "n64SourceRate", 4 }, { "n64Attack", 600.0f }, { "n64Release", 1500.0f }, { "n64Spread", 0.6f },
                           { "n64Fx", 2 }, { "n64FxMix", 70 } }, {}, "Slow chords, C3-C5", 48, 72 },
         // Pizzicato sintético: sierra, LP12 con envolvente de filtro de 120 ms, sin sostenido. Diseño propio
         { "Synth Pizzicato", "Strings", { { "gain", 0.805f }, { "wave", 2 }, { "unisonVoices", 2 }, { "unisonDetune", 6.0f }, { "attack", 0.002f }, { "decay", 0.25f }, { "sustain", 0.0f },
@@ -770,14 +770,14 @@ static const std::vector<FactoryPreset>& factoryPresets()
         { "VRC7 Patch 1", "8-Bit", { { "engine", 13 }, { "oplModel", 3 }, { "opllInstrument", 1 }, { "gain", 0.127f } }, {}, "Melody, C4-C6", 60, 84 },
         // N64: samples propios de KoniSynth a 22 kHz en VADPCM; efectos de libultra con sus ajustes de fábrica. Big Room es el
         // efecto por defecto del reproductor de música de libultra (manual de N64, "Audio Effects")
-        { "N64 Big Room Choir", "Pad", { { "engine", 12 }, { "n64Source", 4 }, { "n64Attack", 40.0f }, { "n64Release", 700.0f },
+        { "N64 Big Room Choir", "Pad", { { "gain", 0.471f }, { "engine", 12 }, { "n64Source", 4 }, { "n64SourceRate", 4 }, { "n64Attack", 40.0f }, { "n64Release", 700.0f },
                           { "n64Fx", 2 }, { "n64FxMix", 60 } }, {}, "Slow chords, C3-C5", 48, 72 },
-        { "N64 Small Room Strings", "Strings", { { "gain", 0.554f }, { "engine", 12 }, { "n64Source", 3 }, { "n64Attack", 120.0f }, { "n64Release", 500.0f },
+        { "N64 Small Room Strings", "Strings", { { "gain", 0.554f }, { "engine", 12 }, { "n64Source", 3 }, { "n64SourceRate", 4 }, { "n64Attack", 120.0f }, { "n64Release", 500.0f },
                           { "n64Fx", 1 }, { "n64FxMix", 50 }, { "n64Spread", 0.4f } }, {}, "Sustained chords, C3-C5", 48, 72 },
-        { "N64 Echo Lead", "Lead", { { "gain", 0.347f }, { "engine", 12 }, { "n64Source", 1 }, { "n64SourceRate", 2 }, { "n64Decay", 400.0f }, { "n64DecayVolume", 90 },
+        { "N64 Echo Lead", "Lead", { { "gain", 0.347f }, { "engine", 12 }, { "n64Source", 1 }, { "n64SourceRate", 4 }, { "n64Decay", 400.0f }, { "n64DecayVolume", 90 },
                           { "n64Release", 300.0f }, { "n64Fx", 3 }, { "n64FxMix", 50 } }, {}, "Melody, C4-C6", 60, 84 },
-        { "N64 Chorus Square", "Lead", { { "gain", 0.204f }, { "engine", 12 }, { "n64Source", 0 }, { "n64Release", 250.0f }, { "n64Fx", 4 }, { "n64FxMix", 70 } }, {}, "Melody, C4-C6", 60, 84 },
-        { "N64 Flange Bass", "Bass", { { "gain", 0.32f }, { "engine", 12 }, { "n64Source", 5 }, { "n64SourceRate", 1 }, { "n64Decay", 600.0f }, { "n64DecayVolume", 70 },
+        { "N64 Chorus Square", "Lead", { { "gain", 0.204f }, { "engine", 12 }, { "n64Source", 0 }, { "n64SourceRate", 4 }, { "n64Release", 250.0f }, { "n64Fx", 4 }, { "n64FxMix", 70 } }, {}, "Melody, C4-C6", 60, 84 },
+        { "N64 Flange Bass", "Bass", { { "gain", 0.32f }, { "engine", 12 }, { "n64Source", 5 }, { "n64SourceRate", 4 }, { "n64Decay", 600.0f }, { "n64DecayVolume", 70 },
                           { "n64Release", 150.0f }, { "n64Fx", 5 }, { "n64FxMix", 45 } }, {}, "Bass line, C1-C3", 24, 48 },
         { "SNES Noise Wind", "Machines", { { "engine", 11 }, { "snesNoise", 1 }, { "snesNoiseRate", 24 }, { "snesAttack", 6 }, { "snesEcho", 1 },
                           { "snesEdl", 7 }, { "snesEfb", 96 }, { "snesEvol", 56 }, { "snesFir", 1 } }, {}, "Hold any note" },
