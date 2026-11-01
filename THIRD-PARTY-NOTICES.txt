@@ -42,7 +42,7 @@ ScummVM GM to MT-32 program table               GPL-3.0-or-later
 
 Acknowledgements (reference data, tables and formulas taken from these sources):
 - Casio VL-1 waves, envelope and rhythms: VL1 emulator by PolyValens (github.com/linuxmao-org/VL1-emulator).
-- FM 6-Op: formulas and algorithm tables from msfa (Apache-2.0, licence below; float re-implementation, not verbatim code); DX7 ROM analysis by Ken Shirriff.
+- FM 6-Op (DX7): formulas and algorithm tables from msfa (Apache-2.0, licence below; float re-implementation, not verbatim code); DX7 ROM analysis by Ken Shirriff.
 - Omnichord voicing data: Chordian emulator.
 - TR-808 / CR-78 / Mini Pops 7: Roland service notes and published schematics (Tubbutec, DAFx-14).
 - Spring reverb: Välimäki et al.; frequency shifter all-pass coefficients: Olli Niemitalo.

@@ -44,7 +44,7 @@ the Roland MT-32 and the Gravis UltraSound. It runs as a **VST3** and **CLAP** p
 | Stylophone | The 1968 stylus organ (20 keys) and the experimental Gen X-2, with a gold-plate pad | [stylophone.md](docs/engines/stylophone.md) |
 | Omnichord | Suzuki Omnichord: chord buttons, strum plate and rhythms | [omnichord.md](docs/engines/omnichord.md) |
 | Drum Machine | Mini Pops 7, CR-78 and TR-808 voices with patterns and step lights | [drum-machine.md](docs/engines/drum-machine.md) |
-| FM 6-Op | Yamaha DX7 (OPS chip arithmetic) with its 32 algorithms, pitch envelope and display; loads DX7 SysEx banks | [fm-6op.md](docs/engines/fm-6op.md) |
+| FM 6-Op (DX7) | Yamaha DX7 (OPS chip arithmetic) with its 32 algorithms, pitch envelope and display; loads DX7 SysEx banks | [fm-6op.md](docs/engines/fm-6op.md) |
 | 8-Bit/DPCM | 2A03 (NTSC/PAL), Famicom with VRC6, Game Boy / Color, with frame macros | [chip-8bit.md](docs/engines/chip-8bit.md) |
 | Polivoks | The Soviet Polivoks synthesizer | [polivoks.md](docs/engines/polivoks.md) |
 | ANS | The photoelectronic ANS synthesizer: draw the score | [ans.md](docs/engines/ans.md) |
@@ -171,7 +171,7 @@ Not available yet: building requires a Mac with Xcode. See [docs/BUILDING.md](do
 ## Getting started
 
 1. **Engine** (top bar): pick an engine; it loads its most representative preset (for example *808 Kit* for the Drum
-   Machine, *FM E.Piano* for FM 6-Op). The Synth only switches engine; on 8-Bit, the Model menu loads its own preset.
+   Machine, *FM E.Piano* for FM 6-Op (DX7)). The Synth only switches engine; on 8-Bit, the Model menu loads its own preset.
 2. **Play:** the KEYS tab (on-screen keyboard), the PAD tab (Theremin and Stylophone), or any MIDI keyboard.
    In the standalone, *Options → Audio/MIDI config...* selects the audio device and MIDI inputs. The computer keyboard
    plays the on-screen keyboard too: A row = white keys, Q row = black keys, Z / X = octave, C / V = velocity.

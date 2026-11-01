@@ -51,7 +51,7 @@ TIMEOUT_S = 10.0
 
 INSTRUCTIONS = """\
 KoniSynth is an experimental 70s/80s synthesizer (VST3/CLAP/standalone) with several engines selected by the
-parameter `engine` (Synth, Theremin, Casio VL-1, Stylophone, Omnichord, Drum Machine, FM 6-Op, 8-Bit/DPCM (NES/Game Boy),
+parameter `engine` (Synth, Theremin, Casio VL-1, Stylophone, Omnichord, Drum Machine, FM 6-Op (DX7), 8-Bit/DPCM (NES/Game Boy),
 Polivoks, ANS, Mega Drive, SNES, N64, OPL, Roland MT-32 with the user's ROMs). It values fidelity to the original hardware, quirks included.
 
 How to work with it:

@@ -80,7 +80,7 @@ static APVTS::ParameterLayout createLayout()
 
     // Motor de sonido (excluyentes). Sustituye a thereminOn: estados (setStateInformation) y presets de usuario
     // (PresetManager::targetValues) antiguos se migran
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "engine", 1 }, "Engine", StringArray { "Synth", "Theremin", "Casio VL-1", "Stylophone", "Omnichord", "Drum Machine", "FM 6-Op", "8-Bit/DPCM", "Polivoks", "ANS", "Mega Drive", "SNES", "N64", "OPL (AdLib / Sound Blaster)", "Roland MT-32", "Gravis UltraSound" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "engine", 1 }, "Engine", StringArray { "Synth", "Theremin", "Casio VL-1", "Stylophone", "Omnichord", "Drum Machine", "FM 6-Op (DX7)", "8-Bit/DPCM", "Polivoks", "ANS", "Mega Drive", "SNES", "N64", "OPL (AdLib / Sound Blaster)", "Roland MT-32", "Gravis UltraSound" }, 0));
 
     // Oscilador + envolvente. Drift: deriva 1/f por voz, común y de Osc 2 (modelo y cifras: Synth.h, comentario de updateDrift)
     // Tri-Saw (triángulo/sierra del Minimoog) y después las mezclas Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse (Prophet-5) y

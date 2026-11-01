@@ -10,7 +10,7 @@ CASES = {
     'theremin': ['Engine=Theremin', 'Theremin Volume=0.8', 'Theremin Pitch=0.5'],
     'vl1': ['Engine=Casio VL-1', 'VL-1 Rhythm=Rock 1'],
     'stylo': ['Engine=Stylophone'], 'omni': ['Engine=Omnichord', 'Omnichord Rhythm=Rock 1'],
-    'drums': ['Engine=Drum Machine', 'Drum Pattern=Rock 1'], 'fm': ['Engine=FM 6-Op', 'FM OP2 Level=80'],
+    'drums': ['Engine=Drum Machine', 'Drum Pattern=Rock 1'], 'fm': ['Engine=FM 6-Op (DX7)', 'FM OP2 Level=80'],
     'chip': ['Engine=8-Bit/DPCM', '8-Bit/DPCM Voice=Poly'], 'polivoks': ['Engine=Polivoks'], 'ans': ['Engine=ANS'],
     'md': ['Engine=Mega Drive', 'MD OP3 Total Level=30', 'MD Algorithm=4'], 'snes': ['Engine=SNES', 'SNES Echo=1', 'SNES Source=Strings'],
 }

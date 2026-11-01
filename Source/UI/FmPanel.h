@@ -121,7 +121,7 @@ private:
     };
 
     KoniSynthProcessor& koni;
-    Section header { "FM 6-Op" }, voice { "Voice" }, pitchEg { "Pitch EG" };
+    Section header { "FM 6-Op (DX7)" }, voice { "Voice" }, pitchEg { "Pitch EG" };
     juce::Label diagram;
     std::array<Column, 6> columns;
     std::array<bool, 6> carrier {};

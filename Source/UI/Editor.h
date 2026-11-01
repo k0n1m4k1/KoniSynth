@@ -1433,7 +1433,7 @@ private:
         midi.addItem ("Controller: Yamaha reface YC...", [this] { openControllerPanel (yamahaRefaceYc()); });
         return midi;
     }
-    void openFmPanel()         { openPanel ("FM 6-Op", std::make_unique<FmPanel> (koni), 1480, 880); }
+    void openFmPanel()         { openPanel ("FM 6-Op (DX7)", std::make_unique<FmPanel> (koni), 1480, 880); }
     void openMdPanel()         { openPanel ("Mega Drive", std::make_unique<MdPanel> (koni), 1180, 820); }
     void openOplPanel()        { openPanel ("OPL", std::make_unique<OplPanel> (koni), 1180, 820); }
     void openAnsPanel()        { openPanel ("ANS", std::make_unique<AnsPanel> (koni), 1480, 900); }
@@ -3516,7 +3516,7 @@ private:
             stringSection { "Math Model" }, arpSection { "Arpeggiator" }, wavetableSection { "Wavetable" },
             seqSection { "Sequencer" }, macroSection { "Macros" }, styloSection { "Stylophone" }, genxOscSection { "Gen X-2 Osc / Envelope (experimental)" }, genxFxSection { "Gen X-2 LFO / Filter / Delay" }, omniSection { "Omnichord" },
             omniRhythmSection { "Omnichord Rhythm" }, drumSection { "Drum Kit" }, drumPatternSection { "Pattern" },
-            fmSection { "FM 6-Op" }, fmLfoSection { "FM LFO" }, chipSection { "8-Bit/DPCM" }, chipDriverSection { "8-Bit/DPCM Driver" }, chipStereoSection { "GB Stereo" }, chipVrc6Section { "Famicom Expansion" },
+            fmSection { "FM 6-Op (DX7)" }, fmLfoSection { "FM LFO" }, chipSection { "8-Bit/DPCM" }, chipDriverSection { "8-Bit/DPCM Driver" }, chipStereoSection { "GB Stereo" }, chipVrc6Section { "Famicom Expansion" },
             pvOscSection { "Polivoks VCO" }, pvFilterSection { "Polivoks Mixer / VCF" }, pvFEnvSection { "Polivoks Filter EG" },
             pvAEnvSection { "Polivoks Amp EG" }, pvLfoSection { "Polivoks LFO" }, ansSection { "ANS" },
             mdSection { "Mega Drive" }, mdLfoSection { "MD LFO" }, mdVoiceSection { "MD Voice" }, mdPsgSection { "MD PSG (SN76489)" }, snesSection { "SNES" }, snesEnvSection { "SNES Envelope" },

@@ -1,6 +1,6 @@
-# FM 6-Op
+# FM 6-Op (DX7)
 
-FM 6-Op is a six-operator FM engine modelled on the Yamaha DX7, with the DX7's 32 algorithms and its parameter ranges
+FM 6-Op (DX7) is a six-operator FM engine modelled on the Yamaha DX7, with the DX7's 32 algorithms and its parameter ranges
 (0-99 levels and rates, detune -7..+7, keyboard level scaling curves). In the default **DX7** mode it reproduces the
 original chip arithmetic: log-sine and exponential ROMs, 12-bit phase, the 49,096 Hz internal rate and the
 floating-point 12-bit DAC. It loads DX7 SysEx voices and banks. Use it for electric pianos, bells, FM basses, brass and
@@ -15,10 +15,10 @@ Nothing extra. Optional: Yamaha DX7 SysEx files (`.syx`) if you want to load ori
 
 ## Controls
 
-Select **FM 6-Op** in the Engine menu. Choosing it from that menu loads the preset **FM E.Piano**. The engine shows three
-sections side by side: **FM 6-Op**, **FM LFO** and **Display**.
+Select **FM 6-Op (DX7)** in the Engine menu. Choosing it from that menu loads the preset **FM E.Piano**. The engine shows three
+sections side by side: **FM 6-Op (DX7)**, **FM LFO** and **Display**.
 
-### FM 6-Op
+### FM 6-Op (DX7)
 
 | Control | What it does | Range / default |
 |---|---|---|
