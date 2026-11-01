@@ -423,7 +423,7 @@ envelope.
 |---|---|
 | LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note; fixed during the note, or fading with Random Fade), Pitch Bend, Noise (the noise generator with its Color, at audio rate: roughness on the cutoff, pitch or pulse width) | Pitch, Osc 2 Pitch and Osc 3 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Osc 3 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position, Osc 3 WT Position |
 
-The Noise source was added at the end of the source list in 1.0.1: presets keep their routes, but host automation of a
+The Noise source was added at the end of the source list in 1.0.0: presets keep their routes, but host automation of a
 Matrix Source recorded in 1.0.0-beta or earlier shifts.
 
 **Random Fade** (bottom of the dialog, default 0 %) makes the Random source fade with the filter envelope: the slot gets
@@ -504,14 +504,20 @@ These are the Synth's own design choices, not an emulation of a particular unit.
 
 ## Factory presets
 
-308 factory presets have no "engine" value and therefore use the Synth; none of them uses a sample. In the preset list and
+324 of the 464 factory presets use the Synth; none of them uses a sample. In the preset list and
 the browser, `(s)` after a name means a user preset plays a sample of its own, and `(π)` that the preset uses the Math
-Models source (any of its models, Modal included). The 77 added in 1.0.1 and the new categories are described in [Synth preset bank](../preset-bank-2026-10-28.md). Those recreated from a reference recording went
+Models source (any of its models, Modal included). The 77 added in 1.0.0 and the new categories are described in [Synth preset bank](../preset-bank-2026-10-28.md).
+
+Those recreated from a reference recording went
 through A/B/C listening tests (two or three candidates on the same notes and level as the reference, chosen by ear; the
-measurements of the chosen one are noted in the code). Presets whose sound depends on the note or on how
+measurements of the chosen one are noted in the code).
+
+Presets whose sound depends on the note or on how
 they are played (nature sounds, one-voice drums, sequences, chip effects) say so: the display shows the hint for a few
 seconds when the preset loads (for example "Hold E6 (or C6 for the 'meow')" for Gull Long Call), and the preset browser
-shows it on hover and when the preset is selected. Most presets also carry a recommended range: the on-screen keyboard
+shows it on hover and when the preset is selected.
+
+Most presets also carry a recommended range: the on-screen keyboard
 greys out the keys outside it (a single key when the sound needs one note, such as the 808-style kick on G1). To find a
 note, hover over the on-screen keyboard: it names the key under the mouse (C4 = MIDI 60, the convention of all the
 manuals). Right-click a key to set the range (Range starts at / Range ends at / Only this key / Clear range) or to edit

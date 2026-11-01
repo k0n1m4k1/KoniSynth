@@ -1,6 +1,6 @@
-# Synth preset bank (1.0.1-beta, 2026-10-28)
+# Synth preset bank (1.0.0, 2026-10-28)
 
-87 Synth-engine presets, prepared as user presets during the 1.0.1 beta, were curated into the factory bank: **77 new factory presets**, **2 updates** of existing ones and **8 not shipped** (duplicates or superseded versions, listed below as aliases of the preset that replaces them). All of them use the Synth engine.
+87 Synth-engine presets, prepared as user presets during the beta, were curated into the factory bank: **77 new factory presets**, **2 updates** of existing ones and **8 not shipped** (duplicates or superseded versions, listed below as aliases of the preset that replaces them). All of them use the Synth engine.
 
 ## How they were integrated
 

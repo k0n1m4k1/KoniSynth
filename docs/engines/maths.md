@@ -301,11 +301,15 @@ f·4^(2·Lip - 1)) moves between them, and Slide scales the tube from 0.5 to 1.5
 The static gain of that filter from the mouth to the lips is g·M/(1 - 2r·cos ω + r²), and the denominator falls roughly as
 ω² at low frequencies: below a lip frequency of about 650 Hz the breath alone holds the lips wide open (area saturated at 1,
 so the opening no longer changes with the pressure) and the model does not oscillate. Measured: silent from C2 to C4, and
-+16 cents at C5, +27 cents at C6. KoniSynth keeps the lip Q at 15 on every note and sets the gain so the static opening is
++16 cents at C5, +27 cents at C6.
+
+KoniSynth keeps the lip Q at 15 on every note and sets the gain so the static opening is
 the same everywhere (0.7 for a breath of M = 0.24, velocity 0.8), and tunes the lip 3.5 % below f (0.965·f, -62 cents): a lip
 that opens outwards sounds above its resonance. The tube is two exact periods with the DC blocker's phase taken out (STK:
 2·f_s/f + 3). Measured in the prototype: within ±3 cents from C4 to C6 and ±21 cents from C2 to C3 (the dialog's summary:
-within 17 cents from C2 to C6). STK outputs the pressure inside the tube; the sound of a trumpet is what leaves the bell,
+within 17 cents from C2 to C6).
+
+STK outputs the pressure inside the tube; the sound of a trumpet is what leaves the bell,
 which lets the highs out, so a second-order high-pass at 1.5 kHz follows: at C4 mf, centroid 4.70·f0 against 5.12·f0 for a
 trumpet (University of Iowa MIS), 2.05·f0 without it; brightness within 8 % at mf and ff. The level, +7 dB per octave from C2
 to C6 (measured), is evened out by (261.63 Hz / f)^1.15, limited to x1/16-x16.
@@ -381,18 +385,26 @@ out. Collisions use the voice's seeded random generator.
 
 *Origin.* Federico Avanzini and Davide Rocchesso, "Modeling collision sounds: non-linear contact force", Proceedings of the
 COST G-6 Conference on Digital Audio Effects (DAFx-01), Limerick, Ireland, 6-8 December 2001
-([PDF](https://avanzini.di.unimi.it/downloads/publications/avanzini_dafx01_revised.pdf)). A lumped hammer strikes a
+([PDF](https://avanzini.di.unimi.it/downloads/publications/avanzini_dafx01_revised.pdf)).
+
+A lumped hammer strikes a
 resonator made of second-order oscillators, one per partial, through the contact force
-f(x, ẋ) = -k·x^α - λ·x^α·ẋ = -k·x^α·(1 + μ·ẋ), where x is the compression of the felt and μ = λ/k. The force law was
+f(x, ẋ) = -k·x^α - λ·x^α·ẋ = -k·x^α·(1 + μ·ẋ), where x is the compression of the felt and μ = λ/k.
+
+The force law was
 proposed by David W. Marhefka and David E. Orin for the simulation of robotic systems ("A compliant contact model with
 nonlinear damping for simulation of robotic systems", IEEE Transactions on Systems, Man, and Cybernetics, Part A, 29(6),
 1999, pp. 566-572); its damping term, proportional to x^n·ẋ, was introduced by K. H. Hunt and F. R. E. Crossley,
 "Coefficient of restitution interpreted as damping in vibroimpact", Journal of Applied Mechanics 42(2), 1975,
 pp. 440-445. The paper chooses α = 2.8, "close to values found in piano hammer felts". The dissipative term is zero at zero
-compression, and the force never turns inward (sticky) on a strike that starts at the surface. The contact time shapes the
+compression, and the force never turns inward (sticky) on a strike that starts at the surface.
+
+The contact time shapes the
 attack: a short contact gives a rich spectrum and a bright attack, a long one a smooth attack. The paper solves the
 delay-free loop between force and motion with the K method of Borin et al. and computes f each sample by Newton-Raphson
-iteration (never more than four iterations). The work was supported by the EU project SOb, "the Sounding Object"
+iteration (never more than four iterations).
+
+The work was supported by the EU project SOb, "the Sounding Object"
 (IST-2000-25287). The Sound Design Toolkit (SDT, GPL-3.0, [github.com/SkAT-VG/SDT](https://github.com/SkAT-VG/SDT)),
 developed with SOb (2001-2003) and later EU projects, implements this impact as `SDTImpact_MarhefkaOrin`: the force is
 computed explicitly from the state of the previous sample, and the resonators are modal, each mode a damped oscillator.

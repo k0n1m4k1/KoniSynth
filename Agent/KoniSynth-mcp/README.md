@@ -27,7 +27,7 @@ environment is ready.
 
 - **Download it automatically:** click *Copy install command* and paste it in a terminal (cmd, PowerShell or bash). It is
   a single Python line that downloads this folder from the release tag of your KoniSynth version (for example
-  `v1.0.0-beta`) to the bridge folder, creates its Python environment (`.venv`), installs `requirements.txt` and writes the
+  `v1.0.0`) to the bridge folder, creates its Python environment (`.venv`), installs `requirements.txt` and writes the
   version to `version.txt`. KoniSynth itself never connects to the internet: the command you run does.
 - **Copy it:** copy the `KoniSynth-mcp` folder of the release zip (the same version as your KoniSynth) into the bridge
   folder above, for example to use it offline. KoniSynth detects it there. Then run *Copy install command* as well: with
