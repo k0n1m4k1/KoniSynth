@@ -128,3 +128,38 @@ private:
     juce::Rectangle<int> grid;
     int shownAlgorithm = -1;
 };
+
+// Modo Function del DX7 para el motor FM: una sección por controlador (rueda, foot, breath, aftertouch) con su rango y sus
+// destinos PITCH / AMP / EG BIAS (owner's manual del DX7). IDs escritos enteros: Tests/test_ui_reach.py los busca así
+class FmFunctionPanel : public juce::Component
+{
+public:
+    explicit FmFunctionPanel (KoniSynthProcessor& p)
+    {
+        auto& s = p.apvts;
+        wheel.withKnob (s, "fmWheelRange", "Range").withKnob (s, "fmWheelPitch", "Pitch")
+             .withKnob (s, "fmWheelAmp", "Amp").withKnob (s, "fmWheelEg", "EG Bias");
+        foot.withKnob (s, "fmFootRange", "Range").withKnob (s, "fmFootPitch", "Pitch")
+            .withKnob (s, "fmFootAmp", "Amp").withKnob (s, "fmFootEg", "EG Bias");
+        breath.withKnob (s, "fmBreathRange", "Range").withKnob (s, "fmBreathPitch", "Pitch")
+              .withKnob (s, "fmBreathAmp", "Amp").withKnob (s, "fmBreathEg", "EG Bias");
+        aftertouch.withKnob (s, "fmAtRange", "Range").withKnob (s, "fmAtPitch", "Pitch")
+                  .withKnob (s, "fmAtAmp", "Amp").withKnob (s, "fmAtEg", "EG Bias");
+        for (auto* sec : { &wheel, &foot, &breath, &aftertouch })
+            addAndMakeVisible (*sec);
+    }
+
+    void resized() override
+    {
+        // Rejilla de 2 × 2
+        auto r = getLocalBounds();
+        auto top = r.removeFromTop (r.getHeight() / 2);
+        wheel.setBounds (top.removeFromLeft (top.getWidth() / 2).reduced (4));
+        foot.setBounds (top.reduced (4));
+        breath.setBounds (r.removeFromLeft (r.getWidth() / 2).reduced (4));
+        aftertouch.setBounds (r.reduced (4));
+    }
+
+private:
+    Section wheel { "Mod Wheel (CC 1)" }, foot { "Foot (CC 4)" }, breath { "Breath (CC 2)" }, aftertouch { "Aftertouch" };
+};

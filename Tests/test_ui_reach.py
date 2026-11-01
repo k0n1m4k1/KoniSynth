@@ -16,9 +16,14 @@ for prefix, n in (('chipPan', 4), ('mdCh3Op', 3), ('macro', 8)):
         ids.update('%s%d' % (prefix, k) for k in range(1, n + 1))
 for d in re.findall(r'Digit \{ "(\w+)"', lay):
     ids.add(d)
-for pre in re.findall(r'for \(const auto\* pre : \{ ([^}]*) \}', lay):
-    for p in re.findall(r'"(\w+)"', pre):
-        for suf in re.findall(r'ParameterID \{ id \+ "(\w+)"', lay):
+# Bucles 'for (const auto* pre : { ... })': cada lista de prefijos con los sufijos 'id + "..."' de su propio cuerpo
+for m in re.finditer(r'for \(const auto\* pre : \{ ([^}]*) \}\s*\{', lay):
+    depth, i = 1, m.end()
+    while depth and i < len(lay):
+        depth += {'{': 1, '}': -1}.get(lay[i], 0)
+        i += 1
+    for p in re.findall(r'"(\w+)"', m.group(1)):
+        for suf in re.findall(r'ParameterID \{ id \+ "(\w+)"', lay[m.end():i]):
             ids.add(p + suf)
 dynamic_ok = {'macro%d' % k for k in range(1, 9)}  # la UI los crea con PerfMacros::paramId (m)
 missing = sorted(i for i in ids if '"%s"' % i not in ui and i not in dynamic_ok)

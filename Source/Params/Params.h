@@ -134,6 +134,12 @@ struct Params
             fmPitchRate[(size_t) k] = get ("fmPR" + juce::String (k + 1));
             fmPitchLevel[(size_t) k] = get ("fmPL" + juce::String (k + 1));
         }
+        for (size_t c = 0; c < fmCtl.size(); ++c)
+        {
+            const juce::String id = fmCtlIds[c];
+            fmCtl[c].range = get (id + "Range"); fmCtl[c].pitch = get (id + "Pitch");
+            fmCtl[c].amp = get (id + "Amp"); fmCtl[c].eg = get (id + "Eg");
+        }
         mdModel = get ("mdModel"); mdAlgorithm = get ("mdAlgorithm"); mdFeedback = get ("mdFeedback"); mdLfo = get ("mdLfo");
         mdPms = get ("mdPms"); mdAms = get ("mdAms"); mdVelocity = get ("mdVelocity"); mdPan = get ("mdPan");
         styloRange = get ("styloRange"); styloRegister = get ("styloRegister");
@@ -272,6 +278,9 @@ struct Params
     std::array<FmOp, 6> fmOp {}; // índice 0 = OP1
     std::atomic<float> *fmTranspose {}, *fmOscSync {}, *fmLfoSync {};
     std::array<std::atomic<float>*, 4> fmPitchRate {}, fmPitchLevel {}; // pitch EG del DX7
+    // Modo Function del DX7: rueda, pedal (foot), soplido (breath) y aftertouch, cada uno con rango y destinos
+    struct FmCtl { std::atomic<float> *range {}, *pitch {}, *amp {}, *eg {}; };
+    std::array<FmCtl, 4> fmCtl {}; // orden de fmCtlIds (Layout.h): 0 rueda, 1 foot, 2 breath, 3 aftertouch
     struct MdOp { std::atomic<float> *tl {}, *ar {}, *dr {}, *sr {}, *sl {}, *rr {}, *mul {}, *dt {}, *ks {}, *am {}, *ssg {}; };
     std::array<MdOp, 4> mdOp {}; // índice 0 = OP1
     std::atomic<float> *mdModel {}, *mdAlgorithm {}, *mdFeedback {}, *mdLfo {}, *mdPms {}, *mdAms {}, *mdVelocity {}, *mdPan {};

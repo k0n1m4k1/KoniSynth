@@ -101,6 +101,18 @@ struct FmEngine
             a &= 0xff80;
             delayInc2 = unit * std::max (0x80, a);
         }
+        // Modo Function (msfa controllers.h): total = valor del controlador (0-127) · rango / 100, truncado; varios
+        // controladores sobre el mismo destino se combinan por máximo. Sin ningún EG BIAS asignado, eg = 127 (sin efecto)
+        std::array<int, 4> ctlRange {};
+        std::array<bool, 4> ctlPitch {}, ctlAmp {}, ctlEg {};
+        for (size_t c = 0; c < 4; ++c)
+        {
+            ctlRange[c] = juce::jlimit (0, 99, juce::roundToInt (p.fmCtl[c].range->load()));
+            ctlPitch[c] = p.fmCtl[c].pitch->load() > 0.5f;
+            ctlAmp[c] = p.fmCtl[c].amp->load() > 0.5f;
+            ctlEg[c] = p.fmCtl[c].eg->load() > 0.5f;
+        }
+        const auto anyEg = ctlEg[0] || ctlEg[1] || ctlEg[2] || ctlEg[3];
         const auto tune = (double) p.fineTune->load();
         for (auto& v : voices)
             if (v.active)
@@ -139,10 +151,23 @@ struct FmEngine
             if (lfoDelay < 4294967296.0)
                 lfoDelay += (lfoDelay < 2147483648.0 ? delayInc1 : delayInc2) * n;
             const auto delayGain = lfoDelay < 2147483648.0 ? 0.0 : std::min (1.0, (lfoDelay - 2147483648.0) / 2147483648.0);
-            // Tono: Δoct = PMD·PMS·retardo·(lfo - 0,5)/2^15 (máximo ≈ 0,99 oct)
-            const auto pitchOct = pmd * pms * delayGain * (lfo - 0.5) / 32768.0;
-            // Amplitud: profundidad 0..1 (AMD·retardo·LFO); prepareVoice la convierte en ganancia lineal (ver amModDepth)
-            ampDepth = amd / 255.0 * delayGain * (1.0 - lfo);
+            int pitchCtl = 0, ampCtl = 0, egCtl = anyEg ? 0 : 127;
+            for (size_t c = 0; c < 4; ++c)
+            {
+                const auto total = (int) (ctlValue[c] * (0.01f * (float) ctlRange[c]));
+                if (ctlPitch[c]) pitchCtl = std::max (pitchCtl, total);
+                if (ctlAmp[c])   ampCtl = std::max (ampCtl, total);
+                if (ctlEg[c])    egCtl = std::max (egCtl, total);
+            }
+            // Tono: Δoct = PMD·PMS·retardo·(lfo - 0,5)/2^15 (máximo ≈ 0,99 oct). Los controladores PITCH suben la profundidad
+            // sin pasar por el retardo: equivalen a 2·total (dx7note.cc: pmod_2 = pitch_mod·senslfo >> 14, frente a pmod_1
+            // >> 39 con PMD en Q32), y gana la mayor
+            const auto pitchOct = std::max (pmd * delayGain, 2.0 * pitchCtl) * pms * (lfo - 0.5) / 32768.0;
+            // Amplitud: profundidad 0..1 (AMD·retardo·LFO); prepareVoice la convierte en ganancia lineal (ver amModDepth).
+            // Controladores AMP: total/128 por el LFO, sin retardo; EG BIAS: atenuación fija 1 - (total + 1)/128 (con el
+            // controlador a 0, casi completa). Gana la mayor (dx7note.cc: amod_1, amod_2, amod_3)
+            ampDepth = std::max ({ amd / 255.0 * delayGain * (1.0 - lfo), ampCtl / 128.0 * (1.0 - lfo),
+                                   1.0 - (egCtl + 1) / 128.0 });
             bendSmoothed += (1.0f - std::pow (1.0f - bendCoef, (float) n)) * (p.pitchBend.load() - bendSmoothed);
             pitchMul = std::exp2 (pitchOct + (tune + 100.0 * bendSmoothed) / 1200.0);
         };
@@ -458,6 +483,16 @@ private:
                     else              keyUp (v);
                 }
         }
+        else if (m.isController() && (m.getControllerNumber() == 1 || m.getControllerNumber() == 2 || m.getControllerNumber() == 4))
+        {
+            // Controladores del modo Function: rueda (CC 1), breath (CC 2), foot (CC 4)
+            const auto cc = m.getControllerNumber();
+            ctlValue[cc == 1 ? 0 : cc == 4 ? 1 : 2] = m.getControllerValue();
+        }
+        else if (m.isChannelPressure())
+        {
+            ctlValue[3] = m.getChannelPressureValue();
+        }
         else if (m.isSustainPedalOn())
         {
             sustainPedal = true;
@@ -699,6 +734,7 @@ private:
     bool oscSync = true, lfoSync = true;
     std::array<int, 4> pitchRates { 99, 99, 99, 99 }, pitchLevels { 50, 50, 50, 50 };
     bool sustainPedal = false;
+    std::array<int, 4> ctlValue {}; // últimos valores (0-127) de rueda, foot, breath y aftertouch; persisten tras reset()
     std::uint64_t ageCounter = 0;
     std::array<Voice, kVoices> voices;
     std::array<OpPatch, 6> patch;

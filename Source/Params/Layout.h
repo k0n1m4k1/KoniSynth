@@ -19,6 +19,9 @@ static int midiNoteFromText (const juce::String& text)
     return juce::jlimit (0, 127, (t.substring (i).getIntValue() + 1) * 12 + pc);
 }
 
+// Prefijos de los controladores del modo Function del DX7 (motor FM): rueda (CC 1), foot (CC 4), breath (CC 2), aftertouch
+static constexpr const char* fmCtlIds[4] = { "fmWheel", "fmFoot", "fmBreath", "fmAt" };
+
 static APVTS::ParameterLayout createLayout()
 {
     using namespace juce;
@@ -680,6 +683,18 @@ static APVTS::ParameterLayout createLayout()
         l.add (std::make_unique<AudioParameterInt> (id ("RDepth"),    nm ("Right Depth"), 0, 99, 0));
         l.add (std::make_unique<AudioParameterChoice> (id ("LCurve"), nm ("Left Curve"), StringArray { "-LIN", "-EXP", "+EXP", "+LIN" }, 0));
         l.add (std::make_unique<AudioParameterChoice> (id ("RCurve"), nm ("Right Curve"), StringArray { "-LIN", "-EXP", "+EXP", "+LIN" }, 0));
+    }
+    // Modo Function del DX7 (owner's manual: MODULATION WHEEL, FOOT CONTROL, BREATH CONTROL, AFTER TOUCH; rango 0-99 y
+    // asignación a PITCH / AMPLITUDE / EG BIAS). No son parámetros de voz. Por defecto, rango 99 y solo la rueda a PITCH
+    // (mismos prefijos y orden que fmCtlIds)
+    for (const auto* pre : { "fmWheel", "fmFoot", "fmBreath", "fmAt" })
+    {
+        const String id (pre);
+        const String nm = id == "fmWheel" ? "FM Mod Wheel" : id == "fmFoot" ? "FM Foot" : id == "fmBreath" ? "FM Breath" : "FM Aftertouch";
+        l.add (std::make_unique<AudioParameterInt>  (ParameterID { id + "Range", 1 }, nm + " Range", 0, 99, 99));
+        l.add (std::make_unique<AudioParameterBool> (ParameterID { id + "Pitch", 1 }, nm + " Pitch", id == "fmWheel"));
+        l.add (std::make_unique<AudioParameterBool> (ParameterID { id + "Amp", 1 },   nm + " Amp", false));
+        l.add (std::make_unique<AudioParameterBool> (ParameterID { id + "Eg", 1 },    nm + " EG Bias", false));
     }
 
     // Mega Drive (YM2612 / YM3438): rangos nativos de los registros (plutiedev.com "YM2612 registers"). Por defecto, el

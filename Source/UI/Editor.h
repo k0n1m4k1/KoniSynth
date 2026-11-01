@@ -404,6 +404,9 @@ public:
                           .withBody (drumLeds, 12, 0); // fila de LED de los pasos sobre las perillas
         fmSection.withHeaderButton ("Operators...", "Open the FM editor: ratio, level, envelope and keyboard scaling of the 6 operators.",
                                     [this] { openFmPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<FmPanel> (koni); }))
+                 .withHeaderButton ("Function...", "DX7 Function mode: route the mod wheel, foot controller, breath controller "
+                                    "and aftertouch to LFO vibrato (Pitch), LFO tremolo (Amp) or EG Bias, each with its range.",
+                                    [this] { openPanel ("FM Function", std::make_unique<FmFunctionPanel> (koni), 760, 380); })
                  .withHeaderButton ("Load .syx...", "Load a Yamaha DX7 voice or 32-voice bank (SysEx .syx file): operators, "
                                     "algorithm, LFO, pitch envelope, transpose and key sync, as stored in the voice.",
                                     [this] { chooseDx7Syx(); })

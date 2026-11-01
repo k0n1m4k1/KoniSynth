@@ -30,6 +30,7 @@ sections side by side: **FM 6-Op**, **FM LFO** and **Display**.
 Header buttons:
 
 - **Operators...** opens the FM editor (see below).
+- **Function...** opens the DX7 Function settings for the performance controllers (see below).
 - **Load .syx...** loads a DX7 voice or a 32-voice bank into the 6 operators.
 
 ### FM LFO
@@ -96,6 +97,28 @@ highlighted.
 The defaults form the DX7 **INIT VOICE**: algorithm 1, OP1 at level 99 and the rest at 0, envelope 99/99/99/99 -
 99/99/99/0, ratio 1, break point C3 (Yamaha) = MIDI 60, a flat pitch envelope (levels 50), transpose 0 and both key
 syncs on.
+
+### FM Function (Function...)
+
+The DX7's Function mode for its performance controllers. These settings are not part of the voice: on the DX7 they
+belong to the instrument, so loading a .syx voice does not change them. One block per controller:
+
+| Block | MIDI | Range | Pitch | Amp | EG Bias |
+|---|---|---|---|---|---|
+| Mod Wheel | CC 1 | 0-99 / 99 | on | off | off |
+| Foot | CC 4 | 0-99 / 99 | off | off | off |
+| Breath | CC 2 | 0-99 / 99 | off | off | off |
+| Aftertouch | Channel pressure | 0-99 / 99 | off | off | off |
+
+- **Range:** how far the controller reaches. At 99, a controller at its maximum equals depth 99.
+- **Pitch:** the controller adds LFO vibrato, like raising PMD; the voice's PMS scales it.
+- **Amp:** the controller adds LFO tremolo, like raising AMD, on operators with AMS above 0.
+- **EG Bias:** the controller opens operators with AMS above 0. With it assigned and the controller at zero, they are
+  attenuated: voices made for a breath controller (named "BC") stay quiet without one, as on the DX7.
+
+Each controller only adds depth: when several act on the same target, or together with the voice's PMD / AMD, the largest
+one wins. Controller modulation does not wait for the LFO delay. These rules follow msfa (`controllers.h`,
+`dx7note.cc`); they are not measured on a DX7.
 
 ## Playing it
 
