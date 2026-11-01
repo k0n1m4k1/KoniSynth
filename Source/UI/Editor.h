@@ -60,7 +60,7 @@ public:
             const std::pair<const char*, std::vector<int>> groups[] = { { "Synthesizers", { 0, 6, 8, 9 } },
                                                                         { "Instruments", { 1, 2, 3, 4, 5 } },
                                                                         { "Consoles", { 7, 10, 11, 12 } },
-                                                                        { "Computers", { 13, 14 } } };
+                                                                        { "Computers", { 13, 14, 15 } } };
             for (const auto& [heading, items] : groups)
             {
                 engineCombo.addSectionHeading (heading);
@@ -532,16 +532,22 @@ public:
                                       "here. They are recognised by size and SHA-1 (MT-32 v1.04-2.07, CM-32L, LAPC-I; halves are merged).",
                                       [this] { mt32RomMenu(); })
                    .withHeaderButton ("Options...", "Optional Munt beautifications, all off by default (the real unit as it is): "
-                                      "nice amp ramp, nice panning, nice partial mixing; and the size of the MIDI queue.", paramDialog ("MT-32 Options", [] (ParamPanel& p, APVTS& st)
+                                      "nice amp ramp, nice panning, nice partial mixing; and the size of the MIDI queue and the MIDI cable delay.", paramDialog ("MT-32 Options", [] (ParamPanel& p, APVTS& st)
                        {
                            // Reverb y DAC están en el panel (perillas)
                            p.add ("Amp Ramp").withToggle (st, "mt32NiceAmp");
                            p.add ("Panning").withToggle (st, "mt32NicePan");
                            p.add ("Partial Mixing").withToggle (st, "mt32NiceMix");
                            p.add ("MIDI Queue").withKnob (st, "mt32Queue", "Events"); // 4 posiciones: conmutador por pasos
+                           p.add ("MIDI Delay").withKnob (st, "mt32MidiDelay", "Cable");
                        }))
                    .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb")
                    .withKnob (s, "mt32Dac", "DAC"); // 5 posiciones: conmutador por pasos (Knob con detents)
+        gusSection.withCombo (s, "gusModel").withExtraToggle (s, "gusMulti", "Multi")
+                  .withHeaderButton ("Patches...", "The Gravis patch set is not included: put your .PAT files (with their timidity.cfg or "
+                                     "DEFAULT.CFG) in a folder and choose it here.", [this] { gusPatchMenu(); })
+                  .withKnob (s, "gusMode", "Keys").withList (s, "gusProgram", "Program", 1.0f).withKnob (s, "gusRam", "RAM")
+                  .withKnob (s, "gusVoices", "Voices");
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
         fmDisplaySection.withBody (dx7Display, 0, 560); // 16 × 2 caracteres y el LED de 2 dígitos a ~4,6 px por punto
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")
@@ -700,7 +706,7 @@ public:
         content.addChildComponent (modBar);
         for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, &filter, &complexSection, &noiseSection, &thereminSection,
                                                                  &vl1Section, &vl1RhythmSection, &vl1DisplaySection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
-                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &pvOscSection, &pvFilterSection,
+                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &gusSection, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
                                                                  &ampEnvSection })
             rows.addChildComponent (*c);
@@ -847,7 +853,7 @@ private:
         }
         static const char* names[] = { "", "Etheric Theremin", "VL-1 Piano", "Stylophone", "Omnichord Strum", "808 Kit",
                                        "FM E.Piano", "", "Polivoks Scream", "ANS Cluster", "MD Green Hill Bass", "SNES Echo Strings", "N64 Big Room Choir",
-                                       "OPL2 E.Piano", "MT-32 Piano 1" };
+                                       "OPL2 E.Piano", "MT-32 Piano 1", "GUS Piano" };
         return juce::isPositiveAndBelow (engineIndex, (int) std::size (names)) ? names[engineIndex] : "";
     }
 
@@ -891,8 +897,8 @@ private:
         const auto status = tuning.mtsHasMaster() ? "MTS-ESP: " + tuning.mtsScaleName()
                           : tuning.hasScala() ? "Scala: " + tuning.getScaleName() : juce::String ("12-TET (standard)");
         t.addItem (status, false, false, [] {});
-        // Theremin, Drum Machine, ANS y MT-32 no aplican la microafinación (Visualizer::engineTunes)
-        if (const auto e = (int) koni.apvts.getRawParameterValue ("engine")->load(); e == 1 || e == 5 || e == 9 || e == 14)
+        // Theremin, Drum Machine, ANS, MT-32 y Gravis no aplican la microafinación (Visualizer::engineTunes)
+        if (const auto e = (int) koni.apvts.getRawParameterValue ("engine")->load(); e == 1 || e == 5 || e == 9 || e == 14 || e == 15)
             t.addItem (koni.apvts.getParameter ("engine")->getCurrentValueAsText() + " ignores microtuning", false, false, [] {});
         t.addSeparator();
         t.addItem ("Load Scala scale (.scl)...", [this] { chooseTuning (false); });
@@ -925,6 +931,27 @@ private:
         m.addItem ("Open ROM folder", [] { const auto f = mt32RomFolder(); f.createDirectory(); f.startAsProcess(); });
         m.addItem ("Rescan", [this] { koni.rebuildMt32(); });
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&mt32Section));
+    }
+
+    // Patches del Gravis UltraSound: carpeta (global para todas las instancias), abrirla, volver a leerla y el estado
+    void gusPatchMenu()
+    {
+        juce::PopupMenu m;
+        const auto status = koni.getGusStatus();
+        m.addSectionHeader (status.isEmpty() ? juce::String ("Not read yet") : status);
+        m.addItem ("Choose patch folder...", [this]
+        {
+            fileChooser = std::make_unique<juce::FileChooser> ("Gravis UltraSound patch folder (.PAT + timidity.cfg or DEFAULT.CFG)", gusPatchFolder());
+            fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
+                {
+                    if (safe != nullptr && fc.getResult() != juce::File())
+                        safe->koni.setGusFolder (fc.getResult());
+                });
+        });
+        m.addItem ("Open patch folder", [] { const auto f = gusPatchFolder(); f.createDirectory(); f.startAsProcess(); });
+        m.addItem ("Rescan", [this] { koni.rebuildGus(); });
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gusSection));
     }
 
     // Skin (UI/Skin.h): ajuste global; se aplica al momento en esta ventana y en las flotantes (las demás instancias, al repintar)
@@ -1122,6 +1149,7 @@ private:
         shownOplModel = (int) koni.apvts.getRawParameterValue ("oplModel")->load();
         mt32Section.setVisible (engine == 14);
         mt32DisplaySection.setVisible (engine == 14);
+        gusSection.setVisible (engine == 15);
         keyboard.setVisible (keyboardMode() == 0); // el piano en todos los motores (el Theremin y el Stylophone lo doblan a su rango)
         styloPad.setVisible (engine == 3 && padMode() == 0);
         padTab->setVisible (engine == 1 || engine == 3);
@@ -1759,6 +1787,10 @@ private:
         const auto mt32Multi = v ("mt32Multi") > 0.5f; // MT-32: con Multi el teclado no se enruta; Program solo en Part 1
         dim (mt32Section.knobFor ("mt32Mode"), mt32Multi);
         dim (mt32Section.listFor ("mt32Program"), mt32Multi || (int) v ("mt32Mode") == 1);
+        const auto gusMulti = v ("gusMulti") > 0.5f; // Gravis: igual que el MT-32; la Extreme lleva 1 MB fijo (RAM sin efecto)
+        dim (gusSection.knobFor ("gusMode"), gusMulti);
+        dim (gusSection.listFor ("gusProgram"), gusMulti || (int) v ("gusMode") == 1);
+        dim (gusSection.knobFor ("gusRam"), (int) v ("gusModel") == 2);
         // Synth.h: sin V.Pan no hay paneo que repartir (Pan Mode está en el diálogo Voice Pan... de Amp Envelope)
         dim (paramPanel != nullptr ? paramPanel->knobFor ("voicePanMode") : nullptr, std::abs (v ("voicePan")) < 1.0e-4f);
     }
@@ -1868,6 +1900,8 @@ private:
                     resized(); // el ancho natural de la sección sigue al nombre más largo
                 }
         }
+        if (engine == 15) // Gravis: por qué no suena
+            gusSection.setInfo (koni.hasGusBank() ? juce::String() : juce::String ("no patches: see Patches..."));
         refreshCabIrInfo();
         for (int m = 0; m < PerfMacros::numMacros; ++m) // nombres de las macros (editados en su diálogo o al cargar un preset)
             if (auto* k = macroSection.knob ((size_t) m)) k->name = koni.perfMacros.name (m);
@@ -2029,6 +2063,7 @@ private:
                          return { { 1.0f, { &oplSection, &opllSection, &oplLfoSection }, 1 } };
                      return { { 1.0f, { &oplSection, &oplLfoSection }, 1 } };
             case 14: return { { 1.0f, { &mt32Section, &mt32DisplaySection }, 1 } }; // controles y, a la derecha, el LCD
+            case 15: return { { 1.0f, { &gusSection }, 1 } };
             default: return { { 1.0f, { &ansSection }, 1 } };
         }
     }
@@ -3479,7 +3514,7 @@ private:
             pvOscSection { "Polivoks VCO" }, pvFilterSection { "Polivoks Mixer / VCF" }, pvFEnvSection { "Polivoks Filter EG" },
             pvAEnvSection { "Polivoks Amp EG" }, pvLfoSection { "Polivoks LFO" }, ansSection { "ANS" },
             mdSection { "Mega Drive" }, mdLfoSection { "MD LFO" }, mdVoiceSection { "MD Voice" }, mdPsgSection { "MD PSG (SN76489)" }, snesSection { "SNES" }, snesEnvSection { "SNES Envelope" },
-            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, fmDisplaySection { "Display" }, vl1DisplaySection { "Display" },
+            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, gusSection { "Gravis UltraSound" }, fmDisplaySection { "Display" }, vl1DisplaySection { "Display" },
             flangerSection { "Flanger" }, fshiftSection { "Freq Shifter" }, leslieSection { "Leslie" }, springSection { "Spring Reverb" }, eqSection { "EQ" },
             transSection { "Transient" }, compSection { "Compressor" }, limiterSection { "Limiter" },
             ampSection { "Amp" }, waveSection { "Wave" };

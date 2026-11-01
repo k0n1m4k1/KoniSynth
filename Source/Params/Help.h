@@ -702,6 +702,23 @@ static juce::String paramHelp (const juce::String& id)
                        "takes powers of 2). 1024 (default, the emulator's own) is enough for playing and for .mid files; 2048 and "
                        "4096 leave room for very dense streams (bursts of controllers or aftertouch), where a full queue could drop "
                        "notes; 512 uses less memory. Changing it restarts the MT-32 (patches loaded by SysEx are lost). Default: 1024." },
+        { "gusModel", "Gravis UltraSound model. All of them use the same GF1 wavetable chip; the model sets the card memory: "
+                      "Classic (1992) 256 KB to 1 MB, MAX (1994) 512 KB to 1 MB, Extreme (1996) 1 MB soldered. Default: Classic." },
+        { "gusRam", "Memory on the card for the patches. The driver loads the patches a song uses; when one does not fit, another "
+                    "patch of the same family plays instead, as on a card with little memory (the substitution is an estimate). "
+                    "Default: 1 MB." },
+        { "gusVoices", "Active voices of the GF1. The chip serves one voice every 1.6 us, so more voices lower the output rate: "
+                       "44.1 kHz with 14, 30.9 kHz with 20, 19.3 kHz with 32 (more aliasing). Default: 24 (an estimate of the driver's "
+                       "setting)." },
+        { "gusMode", "What your keyboard plays: the program chosen in the list, or the drum kit (one sound per key). Default: Program." },
+        { "gusMulti", "Multi: the 16 MIDI channels play as a General MIDI module (drums on channel 10), for .mid files and DAW "
+                      "tracks. Off: your keyboard plays the Keys setting. Default: off." },
+        { "gusProgram", "General MIDI program your keyboard plays (Keys = Program, Multi off). The sound comes from your patch set. "
+                        "Default: 1 - Acoustic Grand Piano." },
+        { "mt32MidiDelay", "Delay of the emulated MIDI cable (31,250 baud: about 1 ms per 3-byte message). Short Messages "
+                           "(default, the emulator's own): notes and controllers arrive at cable speed, so a chord of simultaneous "
+                           "notes is spread as on the real unit; SysEx is applied at once. All: SysEx is delayed too, as on a real "
+                           "cable. Off: everything at once (no cable timing; a full queue no longer adds delay). Default: Short Messages." },
         { "mt32NiceAmp", "Munt beautification, off = as the real unit: amp ramps may jump to their target (small clicks). On: "
                          "always gradual." },
         { "mt32NicePan", "Munt beautification, off = as the real unit: the LA32 only gets 3-bit panning (no exact centre for a "

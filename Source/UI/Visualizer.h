@@ -156,11 +156,11 @@ private:
            annMidi, annLearn, annPlay, annRec };
 
     // Motores que ignoran la microafinación (Dsp/Tuning.h): Theremin (sin notas), Drum Machine (la tecla elige el
-    // instrumento), ANS y MT-32 (Munt afina por su cuenta)
+    // instrumento), ANS, MT-32 (Munt afina por su cuenta) y Gravis UltraSound (el GF1 cuantiza el tono a su paso)
     bool engineTunes() const
     {
         const auto e = (int) processor.apvts.getRawParameterValue ("engine")->load();
-        return e != 1 && e != 5 && e != 9 && e != 14;
+        return e != 1 && e != 5 && e != 9 && e != 14 && e != 15;
     }
     bool param (const char* id) const { return processor.apvts.getRawParameterValue (id)->load() > 0.5f; }
     bool engineIs (int e) const { return (int) processor.apvts.getRawParameterValue ("engine")->load() == e; }

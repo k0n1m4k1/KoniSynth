@@ -686,6 +686,9 @@ static const std::vector<FactoryPreset>& factoryPresets()
                           { "fm3Coarse", 4 }, { "fm3Level", 60 }, { "fm3RateScale", 3 }, { "fm3R2", 75 }, { "fm3L2", 0 }, { "fm3R3", 75 }, { "fm3L3", 0 }, { "fm3R4", 75 } }, {}, "Single notes and rolls, C3-C6", 48, 84 },
         // MT-32 (Munt, ROM del usuario): parte 1 con el programa 1 del banco de fábrica (el piano acústico con el que arranca)
         { "MT-32 Piano 1", "Keys", { { "engine", 14 }, { "mt32Mode", 0 }, { "mt32Program", 1 } }, {}, "Needs your MT-32 ROMs (see the MT-32 manual)" },
+        // Gravis UltraSound (GF1, patches del usuario): programa GM 1, el piano acústico, con los valores por defecto (Classic, 1 MB,
+        // 24 voces)
+        { "GUS Piano", "Keys", { { "engine", 15 }, { "gusMode", 0 }, { "gusProgram", 0 } }, {}, "Needs your GUS patches (see the Gravis UltraSound manual)" },
         // OPLL: instrumento 7 "Trumpet" de la ROM del YM2413 (volcado del silicio, Nuked-OPLL) con SUS
         { "OPLL Trumpet", "Brass", { { "gain", 0.189f }, { "engine", 13 }, { "oplModel", 2 }, { "opllInstrument", 7 }, { "opllSustain", 1 } }, {}, "Mono melody, C4-C6", 60, 84 },
         // Stab de metales polifónico: 2 sierras + sub-octava del Osc 2, filtro que abre en 40 ms. Diseño propio

@@ -77,7 +77,7 @@ static APVTS::ParameterLayout createLayout()
 
     // Motor de sonido (excluyentes). Sustituye a thereminOn: estados (setStateInformation) y presets de usuario
     // (PresetManager::targetValues) antiguos se migran
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "engine", 1 }, "Engine", StringArray { "Synth", "Theremin", "Casio VL-1", "Stylophone", "Omnichord", "Drum Machine", "FM 6-Op", "8-Bit/DPCM", "Polivoks", "ANS", "Mega Drive", "SNES", "N64", "OPL (AdLib / Sound Blaster)", "Roland MT-32" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "engine", 1 }, "Engine", StringArray { "Synth", "Theremin", "Casio VL-1", "Stylophone", "Omnichord", "Drum Machine", "FM 6-Op", "8-Bit/DPCM", "Polivoks", "ANS", "Mega Drive", "SNES", "N64", "OPL (AdLib / Sound Blaster)", "Roland MT-32", "Gravis UltraSound" }, 0));
 
     // Oscilador + envolvente. Drift: deriva 1/f por voz, común y de Osc 2 (modelo y cifras: Synth.h, comentario de updateDrift)
     // Tri-Saw (triángulo/sierra del Minimoog) y después las mezclas Saw+Pulse, Saw+Tri, Tri+Pulse, Saw+Tri+Pulse (Prophet-5) y
@@ -1042,5 +1042,21 @@ static APVTS::ParameterLayout createLayout()
         l.add (std::make_unique<AudioParameterBool>  (ParameterID { String (o) + "WtMute", 1 },      n + " WT Mute", false));
         l.add (std::make_unique<AudioParameterBool>  (ParameterID { String (o) + "SampleMute", 1 },  n + " Sample Mute", false));
     }
+
+    // MT-32: retardo del cable MIDI emulado por Munt (MIDIDelayMode: IMMEDIATE, DELAY_SHORT_MESSAGES_ONLY, DELAY_ALL). Por
+    // defecto el de Munt (Short Messages): los mensajes cortos llegan al ritmo de un cable de 31 250 baudios y el SysEx al instante
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32MidiDelay", 1 }, "MT-32 MIDI Delay", StringArray { "Off", "Short Messages", "All" }, 1));
+
+    // Gravis UltraSound (Engines/Gus.h): modelo (acota la RAM), RAM de la tarjeta, voces activas del GF1 (frecuencia de salida),
+    // teclado como el MT-32 (Keys con el programa del panel / Rhythm) y Multi (16 canales GM)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusModel", 1 }, "GUS Model", StringArray { "Classic", "MAX", "Extreme" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusRam", 1 }, "GUS RAM", StringArray { "256 KB", "512 KB", "768 KB", "1 MB" }, 3));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "gusVoices", 1 }, "GUS Voices", 14, 32, 24,
+        AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int)
+            { return String (v) + " (" + String (1.0e6 / (1.619695497 * v) / 1000.0, 1) + " kHz)"; })));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusMode", 1 }, "GUS Keys", StringArray { "Program", "Rhythm" }, 0));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "gusMulti", 1 }, "GUS Multi", false));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusProgram", 1 }, "GUS Program", [] { StringArray names; for (int k = 0; k < 128; ++k)
+        names.add (String (k + 1) + " - " + GeneralMidi::programName (k)); return names; }(), 0));
     return l;
 }

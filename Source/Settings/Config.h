@@ -65,3 +65,18 @@ static juce::File mt32RomFolder()
 }
 
 static void setMt32RomFolder (const juce::File& folder) { setConfigText ("mt32Roms", folder.getFullPathName()); }
+
+// Carpeta de patches del Gravis UltraSound (.PAT con timidity.cfg o DEFAULT.CFG): la elegida (clave gusPatches) o
+// Documentos/KoniSynth/Patches/GUS. KONI_GUS_PATCHES (pruebas y KoniBench) la sustituye sin tocar el ajuste del usuario
+static juce::File gusPatchFolder()
+{
+    if (const auto env = juce::SystemStats::getEnvironmentVariable ("KONI_GUS_PATCHES", {}); env.isNotEmpty())
+        return juce::File (env);
+    auto config = openConfig();
+    const auto path = config != nullptr ? config->getValue ("gusPatches").trim() : juce::String();
+    return path.isNotEmpty() && juce::File::isAbsolutePath (path)
+               ? juce::File (path)
+               : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("KoniSynth/Patches/GUS");
+}
+
+static void setGusPatchFolder (const juce::File& folder) { setConfigText ("gusPatches", folder.getFullPathName()); }

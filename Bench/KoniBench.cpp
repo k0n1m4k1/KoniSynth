@@ -528,7 +528,9 @@ int transportTest()
             t.processAudio (out);
             for (const auto m : midi)
             {
-                sysexCount += m.getMessage().isSysEx() ? 1 : 0;
+                // El del fichero (texto al LCD, dirección 20 00 00). Además llega el reset del MT-32 (7F 00 00): el .mid anterior,
+                // sin SysEx del MT-32, activó GM -> MT-32 y este lo desactiva
+                sysexCount += m.getMessage().isSysEx() && m.getMessage().getSysExDataSize() > 4 && m.getMessage().getSysExData()[4] == 0x20 ? 1 : 0;
                 notes += m.getMessage().isNoteOn() ? 1 : 0;
             }
         }
@@ -743,6 +745,46 @@ int practiceTest()
         check (n[1] == 3 && n[2] == 4, "Sin mute ni solo: " + juce::String (n[1]) + " de melodía (3), " + juce::String (n[2]) + " de bajo (4)");
     }
     t.stop();
+    // GM -> MT-32: un .mid sin SysEx del MT-32 lo activa. Al tocar: SysEx de partes en los canales 1-8 y ritmo en el 10 (suma
+    // 3E, la misma que el controlador de ScummVM), programa GM 25 -> 60 del MT-32, paneo 100 -> 27 y RPN 0 = 2 semitonos.
+    // Al desactivarlo, reset del MT-32 (7F 00 00)
+    {
+        juce::MidiMessageSequence seq;
+        seq.addEvent (juce::MidiMessage::programChange (1, 25), 0.0);
+        seq.addEvent (juce::MidiMessage::controllerEvent (1, 10, 100), 0.0);
+        seq.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), 960.0);
+        seq.addEvent (juce::MidiMessage::noteOff (1, 64), 1920.0);
+        juce::MidiFile mf;
+        mf.setTicksPerQuarterNote (960);
+        mf.addTrack (seq);
+        const auto gm = dir.getChildFile ("gm.mid");
+        { juce::FileOutputStream os (gm); mf.writeTo (os, 1); }
+        check (t.loadMidi (gm).isEmpty() && t.getGmToMt32(), "GM -> MT-32 activado al cargar un .mid sin SysEx del MT-32");
+        t.play();
+        juce::MidiBuffer midi;
+        t.injectMidi (midi, bs);
+        const juce::uint8 assign[] = { 0xF0, 0x41, 0x10, 0x16, 0x12, 0x10, 0x00, 0x0D, 0, 1, 2, 3, 4, 5, 6, 7, 9, 0x3E, 0xF7 };
+        bool sysexOk = false, programOk = false, panOk = false, rpnOk = false;
+        for (const auto m : midi)
+        {
+            const auto* d = m.data;
+            if (m.numBytes == (int) sizeof (assign) && std::equal (assign, assign + sizeof (assign), d)) sysexOk = true;
+            if (m.numBytes == 2 && d[0] == 0xC0 && d[1] == 60) programOk = true;
+            if (m.numBytes == 3 && d[0] == 0xB0 && d[1] == 10 && d[2] == 27) panOk = true;
+            if (m.numBytes == 3 && d[0] == 0xB0 && d[1] == 6 && d[2] == 2) rpnOk = true;
+        }
+        check (sysexOk && programOk && panOk && rpnOk, juce::String ("GM -> MT-32 al tocar: SysEx de canales ") + (sysexOk ? "sí" : "no") + ", programa 25 -> 60 "
+                   + (programOk ? "sí" : "no") + ", paneo 100 -> 27 " + (panOk ? "sí" : "no") + ", RPN 2 semitonos " + (rpnOk ? "sí" : "no"));
+        t.setGmToMt32 (false);
+        juce::MidiBuffer after;
+        t.injectMidi (after, bs);
+        const juce::uint8 reset[] = { 0xF0, 0x41, 0x10, 0x16, 0x12, 0x7F, 0x00, 0x00, 0x01, 0x00, 0xF7 };
+        bool resetOk = false;
+        for (const auto m : after)
+            resetOk |= m.numBytes == (int) sizeof (reset) && std::equal (reset, reset + sizeof (reset), m.data);
+        check (resetOk, juce::String ("GM -> MT-32 desactivado: reset del MT-32 ") + (resetOk ? "sí" : "no"));
+        t.stop();
+    }
     std::printf ("%d fallos\n", fails);
     return fails;
 }

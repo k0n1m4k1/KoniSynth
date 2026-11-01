@@ -15,6 +15,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Engines/UserRhythms.h"
 
 #include "Dsp/ModMatrix.h"
+#include "Midi/GeneralMidi.h" // nombres de los programas GM (motor Gravis, reproductor MIDI)
 #include "Params/Layout.h"
 
 #include "Params/Help.h"
@@ -85,6 +86,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Engines/Opll.h"
 #include "Engines/Opl.h"
 #include "Engines/Mt32.h"
+#include "Engines/Gus.h"
 
 #include "Engines/Polivoks.h"
 
@@ -268,6 +270,21 @@ public:
         mt32Status = report;
     }
     void setMt32Folder (const juce::File& folder) { setMt32RomFolder (folder); rebuildMt32(); }
+
+    // Gravis UltraSound (cualquier hilo salvo el de audio): lee los patches de la carpeta y publica el juego. Una vez al elegir
+    // el motor; "Rescan" o una carpeta nueva lo repiten
+    void rebuildGus()
+    {
+        gusBuilt = true;
+        juce::String report;
+        auto bank = GusBank::load (gusPatchFolder(), report);
+        gusEngine.slot.replace (std::move (bank));
+        const juce::ScopedLock sl (sampleInfoLock);
+        gusStatus = report;
+    }
+    void setGusFolder (const juce::File& folder) { setGusPatchFolder (folder); rebuildGus(); }
+    juce::String getGusStatus() const { const juce::ScopedLock sl (sampleInfoLock); return gusStatus; }
+    bool hasGusBank() const { bool has = false; gusEngine.slot.withCurrent ([&has] (const GusBank* b) { has = b != nullptr; }); return has; }
     juce::String getMt32Status() const { const juce::ScopedLock sl (sampleInfoLock); return mt32Status; }
     juce::String getMt32Lcd() const { return mt32Engine.lcdText(); }
     bool getMt32Led() const { return mt32Engine.lcdLed(); }
@@ -324,8 +341,11 @@ public:
         n64Engine.prepare (sampleRate, samplesPerBlock);
         oplEngine.prepare (sampleRate, samplesPerBlock);
         mt32Engine.prepare (sampleRate, samplesPerBlock);
+        gusEngine.prepare (sampleRate, samplesPerBlock);
         if ((int) params.engine->load() == 14 && sampleRate != mt32Rate) // la conversión de Munt depende de la frecuencia
             rebuildMt32();
+        if ((int) params.engine->load() == 15 && ! gusBuilt) // Gravis: los patches, la primera vez (también sin editor: KoniBench)
+            rebuildGus();
         updateAnsScore(); // la partitura existe antes del primer bloque (no espera al temporizador)
         updateBuiltInWavetable();
         updateMacros();
@@ -463,6 +483,7 @@ public:
         int userNoteOns = agentInControl ? noteOns() : 0;
         // Práctica sobre un .mid (Transport/PlayAlong.h): lo que hay ahora en midi es tuyo (controlador); va al canal de tu pista
         // y se compara con sus notas. Sin pista elegida, no cambia nada
+        sessionTransport.setTargetMt32 ((int) params.engine->load() == 14); // GM -> MT-32 solo con el motor MT-32
         sessionTransport.routeUserMidi (midi);
         // Transporte: eventos del .mid en reproducción (antes de leer bend, rueda y CC) y notas que deja al parar
         sessionTransport.injectMidi (midi, numSamples);
@@ -528,7 +549,7 @@ public:
             // Transpose y escala (Midi/ScaleQuantizer.h). En la Drum Machine y la parte de ritmo del MT-32 la nota elige el
             // sonido: ahí no se transpone ni se ajusta
             const auto eng = (int) params.engine->load();
-            const auto noteIsSound = eng == 5 || (eng == 14 && params.mt32Mode->load() > 0.5f);
+            const auto noteIsSound = eng == 5 || (eng == 14 && params.mt32Mode->load() > 0.5f) || (eng == 15 && params.gusMode->load() > 0.5f);
             noteScale.process (midi, (int) params.keyTranspose->load(), (int) params.scaleMode->load(), (int) params.scaleRoot->load(),
                            (int) params.scaleType->load(), (int) params.scaleRound->load(), noteIsSound);
         }
@@ -597,6 +618,7 @@ public:
         const auto n64On = engine == 12;
         const auto oplOn = engine == 13;
         const auto mt32On = engine == 14;
+        const auto gusOn = engine == 15;
         if (thereminOn)
         {
             if (! thereminWasOn)
@@ -687,6 +709,15 @@ public:
             }
             mt32Engine.render (buffer, midi, params);
         }
+        else if (gusOn)
+        {
+            if (! gusWasOn)
+            {
+                allVoicesOff();
+                gusEngine.reset();
+            }
+            gusEngine.render (buffer, midi, params);
+        }
         else if (n64On)
         {
             if (! n64WasOn)
@@ -759,6 +790,7 @@ public:
         n64WasOn = n64On;
         oplWasOn = oplOn;
         mt32WasOn = mt32On;
+        gusWasOn = gusOn;
 
         // Captura "engine" del agente: la salida del motor con sus efectos propios, antes de todo lo añadido (Agent/AudioTap.h)
         if (auto* tap = agentTapActive.load (std::memory_order_acquire))
@@ -1140,6 +1172,7 @@ public:
         osc2WavetableSlot.blocksDone.fetch_add (1, std::memory_order_release);
         osc3WavetableSlot.blocksDone.fetch_add (1, std::memory_order_release);
         mt32Engine.slot.blocksDone.fetch_add (1, std::memory_order_release);
+        gusEngine.slot.blocksDone.fetch_add (1, std::memory_order_release);
     }
 
     // Ring buffer mono para el osciloscopio: escribe el hilo de audio, lee el de UI (lock-free).
@@ -1829,6 +1862,7 @@ private:
         n64Engine.reset();
         oplEngine.reset();
         mt32Engine.reset();
+        gusEngine.reset();
         flanger.reset();
         freqShifter.reset();
         leslie.reset();
@@ -1963,11 +1997,14 @@ private:
     bool snesWasOn = false;
     N64Engine n64Engine;
     OplEngine oplEngine;
-    bool n64WasOn = false, oplWasOn = false, mt32WasOn = false;
+    bool n64WasOn = false, oplWasOn = false, mt32WasOn = false, gusWasOn = false;
     Mt32Engine mt32Engine;
+    GusEngine gusEngine;
+    bool gusBuilt = false; // se intentó leer la carpeta de patches (una vez; Rescan lo repite)
     double mt32Rate = 0.0;
     int mt32BuiltModel = -1, mt32BuiltQueue = 0; // con qué se construyó la máquina: si cambian, se reconstruye
     juce::String mt32Status; // protegido por sampleInfoLock
+    juce::String gusStatus;  // protegido por sampleInfoLock
     AnsSlot ansSlot;
     MacroSlot chipMacroSlot, mdMacroSlot, snesMacroSlot;
     std::array<juce::int64, 3> macroHash { -1, -1, -1 };
@@ -2145,6 +2182,7 @@ private:
         mdMacroSlot.collect();
         snesMacroSlot.collect();
         mt32Engine.slot.collect();
+        gusEngine.slot.collect();
         for (auto& b : rhythmBanks) b.slot.collect();
         if (++rhythmPollTicks >= 10) // ficheros de ritmos de usuario: una vez por segundo
         {
@@ -2154,6 +2192,8 @@ private:
         if ((int) params.engine->load() == 14 && ((int) params.mt32Model->load() != mt32BuiltModel || (int) params.mt32Queue->load() != mt32BuiltQueue
                                                   || getSampleRate() != mt32Rate))
             rebuildMt32(); // solo con el motor elegido: desactivado no carga ROM ni ocupa memoria
+        if ((int) params.engine->load() == 15 && ! gusBuilt)
+            rebuildGus(); // igual: los patches solo se leen con el Gravis elegido
         updateMacros();
         perfMacros.update();
         updateBuiltInWavetable();

@@ -14,6 +14,8 @@
 // - Bucle A-B: SET A y SET B en la posición actual, CLEAR lo quita.
 // - Lista de partes: "All tracks" (suena todo) o una pista lógica, que pasa a ser tuya (Transport/PlayAlong.h); en cada
 //   fila, M (mute) y S (solo).
+// - GM>MT-32: convierte un .mid de General MIDI para el MT-32 (SessionTransport::setGmToMt32); el transporte lo activa al
+//   cargar un fichero sin SysEx del MT-32.
 // - Posición, imán, línea, lista, volumen y los 8 ficheros recientes se guardan en config.settings (claves midiPlayer*).
 // Todo pintado a mano (sin ListBox, cuyo paint recibe filas fuera de rango); tooltips propios por zona.
 class MidiMusicPlayer : public juce::Component, public juce::TooltipClient, private juce::Timer
@@ -159,6 +161,8 @@ public:
             auto list = r.reduced (pad, 0).withTrimmedBottom (pad);
             listHeader = list.removeFromTop (18);
             buttons.push_back ({ bRecent, listHeader.removeFromRight (64).reduced (0, 2) });
+            listHeader.removeFromRight (4);
+            buttons.push_back ({ bGm, listHeader.removeFromRight (74).reduced (0, 2) });
             listArea = list;
         }
     }
@@ -277,6 +281,10 @@ public:
                     case bClear: return "Remove the loop.";
                     case bList:  return "Show or hide the list of parts.";
                     case bRecent: return "The last 8 MIDI files you opened.";
+                    case bGm:    return "GM to MT-32: plays a General MIDI file on the Roland MT-32 engine (turn its Multi on). Programs are "
+                                        "mapped to MT-32 patches, panning is flipped and the MT-32 is set up like a GM module (parts on "
+                                        "channels 1-8, rhythm on 10; channels 9 and 11-16 stay silent). On by default for files without "
+                                        "MT-32 SysEx.";
                     default: break;
                 }
         if (closeBox.expanded (2).contains (p)) return "Close the player.";
@@ -297,7 +305,7 @@ public:
     }
 
 private:
-    enum ButtonId { bPlay = 1, bPause, bStop, bEject, bModePlay, bModeWait, bModeFollow, bSetA, bSetB, bClear, bList, bRecent };
+    enum ButtonId { bPlay = 1, bPause, bStop, bEject, bModePlay, bModeWait, bModeFollow, bSetA, bSetB, bClear, bList, bRecent, bGm };
     struct Button { int id; juce::Rectangle<int> area; };
     enum Drag { none, window, volume, tempo, seek, resizeList };
 
@@ -472,7 +480,14 @@ private:
         const auto multi = koni.apvts.getRawParameterValue ("mt32Multi")->load() > 0.5f;
         if (song != nullptr)
             chips.add (juce::String (song->bpmAt (juce::jmax (0.0, currentSeconds())) * transport.getTempoScale(), 1) + " BPM");
-        chips.add (engine == 14 ? (multi ? "MT-32 MULTI" : "MT-32 SINGLE") : "ONE SOUND");
+        const auto gusMulti = koni.apvts.getRawParameterValue ("gusMulti")->load() > 0.5f;
+        chips.add (engine == 14 ? (multi ? "MT-32 MULTI" : "MT-32 SINGLE") : engine == 15 ? (gusMulti ? "GUS MULTI" : "GUS SINGLE") : "ONE SOUND");
+        if (engine == 14 && song != nullptr && transport.getGmToMt32())
+        {
+            int silent = 0; // con GM>MT-32 el MT-32 escucha los canales 1-8 y 10
+            for (const auto& tr : song->tracks) silent += tr.channel == 9 || tr.channel > 10 ? 1 : 0;
+            if (silent > 0) chips.add (juce::String (silent) + " SILENT");
+        }
         if (song != nullptr && transport.getSelectedTrack() >= 0)
         {
             int hits = 0, done = 0;
@@ -604,6 +619,7 @@ private:
             case bModeFollow: return transport.getPracticeMode() == SessionTransport::practiceFollow;
             case bSetA:       return loopStart >= 0.0 || loopActive();
             case bSetB:       return loopActive();
+            case bGm:         return transport.getGmToMt32();
             case bList:       return showList;
             case bPlay:       return transport.isPlaying();
             default:          return false;
@@ -631,7 +647,7 @@ private:
         paintCap (g, r, over, down);
         const auto on = isOn (b.id);
         const auto rr = down ? r.translated (0.0f, 1.0f) : r;
-        if (on && (b.id == bModePlay || b.id == bModeWait || b.id == bModeFollow || b.id == bSetA || b.id == bSetB || b.id == bList)) // contorno de acento
+        if (on && (b.id == bModePlay || b.id == bModeWait || b.id == bModeFollow || b.id == bSetA || b.id == bSetB || b.id == bList || b.id == bGm)) // contorno de acento
         {
             g.setColour (pal.accent.withAlpha (0.9f));
             g.drawRoundedRectangle (rr.reduced (0.5f), 3.0f, 1.2f);
@@ -656,7 +672,7 @@ private:
             g.setColour (ink);
         }
         const auto label = b.id == bModePlay ? "PLAY" : b.id == bModeWait ? "WAIT" : b.id == bModeFollow ? "FOLLOW" : b.id == bList ? "PL"
-                         : b.id == bRecent ? "RECENT" : b.id == bSetA ? "SET A" : b.id == bSetB ? "SET B" : "CLEAR";
+                         : b.id == bRecent ? "RECENT" : b.id == bGm ? "GM>MT-32" : b.id == bSetA ? "SET A" : b.id == bSetB ? "SET B" : "CLEAR";
         g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
         g.drawText (label, text, juce::Justification::centred, false);
     }
@@ -768,6 +784,7 @@ private:
             case bStop:  transport.stop(); break;
             case bEject: chooseFile(); break;
             case bRecent: showRecent(); break;
+            case bGm:    transport.setGmToMt32 (! transport.getGmToMt32()); break;
             case bModePlay:   transport.setPracticeMode (SessionTransport::practicePlay); break;
             case bModeWait:   transport.setPracticeMode (SessionTransport::practiceWait); break;
             case bModeFollow: transport.setPracticeMode (SessionTransport::practiceFollow); break;

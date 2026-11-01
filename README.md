@@ -4,10 +4,10 @@
 
 [![M8ven Score](https://m8ven.ai/badge/mcp/k0n1m4k1-konisynth-knlbk4?v=1c9d31871080c40a85dd776478b0d476)](https://m8ven.ai/mcp/k0n1m4k1-konisynth-knlbk4?s=readme)
 
-KoniSynth is an experimental synthesizer laboratory for the sounds of the 60s to the 90s: fifteen engines, from an analog-style
+KoniSynth is an experimental synthesizer laboratory for the sounds of the 60s to the 90s: sixteen engines, from an analog-style
 synth of its own to faithful emulations of the Casio VL-1, the Stylophone, the Omnichord, classic drum machines, the Yamaha
-DX7, the NES and Game Boy, the Polivoks, the ANS, the Mega Drive, the SNES, the N64, the AdLib/Sound Blaster OPL chips and
-the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalone** application on **Windows** and **Linux**.
+DX7, the NES and Game Boy, the Polivoks, the ANS, the Mega Drive, the SNES, the N64, the AdLib/Sound Blaster OPL chips,
+the Roland MT-32 and the Gravis UltraSound. It runs as a **VST3** and **CLAP** plugin and as a **standalone** application on **Windows** and **Linux**.
 
 ![KoniSynth](assets/cover.png)
 
@@ -53,6 +53,7 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
 | N64 | RSP + libultra: VADPCM, resampling and its effects | [n64.md](docs/engines/n64.md) |
 | OPL | YM3812 (OPL2), YMF262 (OPL3), YM2413 (OPLL) and Konami VRC7 | [opl.md](docs/engines/opl.md) |
 | Roland MT-32 | MT-32 / CM-32L through Munt, with **your own ROMs**; its LCD and named patch list | [mt32.md](docs/engines/mt32.md) |
+| Gravis UltraSound | GF1 wavetable chip (Classic, MAX, Extreme) with **your own patches**: output rate set by the active voices, logarithmic volume ramps, card memory | [gravis-ultrasound.md](docs/engines/gravis-ultrasound.md) |
 
 ## Features
 
@@ -103,9 +104,11 @@ the Roland MT-32. It runs as a **VST3** and **CLAP** plugin and as a **standalon
   last 8 files. Its parts list has mute (M) and solo (S) for each track. Pick one track in the list as your part: it is muted, your notes go to its channel, and the display shows it as
   a staff scrolling from right to left (diatonic lines, the view follows the melody up and down), with the next note
   to play in large letters on the right. Modes: Play (the file keeps its tempo), Wait (it stops at each of your notes
-  until you play it) and Follow (if you play ahead, the file jumps with you). One-bar count-in. Only the MT-32 engine
-  with Multi on plays the other tracks with their own instruments.
-- **Presets:** 445 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
+  until you play it) and Follow (if you play ahead, the file jumps with you). One-bar count-in. The Roland MT-32 and Gravis
+  UltraSound engines with Multi on play the other tracks with their own instruments (the others play every track with the
+  current sound); for the MT-32, General MIDI files are converted on the fly (GM>MT-32: program mapping, flipped panning
+  and a GM-like set-up of the unit).
+- **Presets:** 446 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
   favorites in your own order (keys 1-9 load the first nine) and a searchable browser with filters by category and engine.
   Presets say how to play them (on the display and in the browser) and grey out the keys outside their recommended range.
   Presets that use your own files tell you when one is missing. User presets can be exported (one as `.xml`, all as a
@@ -248,8 +251,8 @@ offline from the command line, for measurements.
 ## License
 
 KoniSynth is free software under the **GNU Affero General Public License v3.0** ([LICENSE](LICENSE)). Copyright (C) 2026
-@k0n1m4k1. It uses JUCE (under the AGPLv3), Nuked-OPLL (GPL-2.0+), Munt mt32emu (LGPL-2.1+), formulas from msfa (Apache-2.0)
-and the MTS-ESP client (0BSD); their notices and licence texts are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+@k0n1m4k1. It uses JUCE (under the AGPLv3), Nuked-OPLL (GPL-2.0+), Munt mt32emu (LGPL-2.1+), formulas from msfa (Apache-2.0),
+the MTS-ESP client (0BSD) and ScummVM's General MIDI to MT-32 program table (GPL-3.0+); their notices and licence texts are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
 Trademarks (Roland, Yamaha, Casio, Nintendo, Sega, Dubreq, Suzuki...) belong to their owners and are used only to describe what
 each engine emulates. No ROM, sample or recording from those products is included.
 

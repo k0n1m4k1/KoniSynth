@@ -199,6 +199,9 @@ public:
             loopA.store (-1.0);
             loopB.store (-1.0);
             leadIn.store (analysed->firstBarSeconds);
+            // GM -> MT-32 por defecto si el fichero no trae SysEx del MT-32 (música GM); si ya estaba, se prepara de nuevo al tocar
+            if (const auto gm = ! analysed->hasMt32Sysex; gmToMt32.exchange (gm) != gm || gm)
+                (gm ? gmInitPending : gmResetPending).store (true);
             source.store (Source::midi);
         }
         sourceName = file.getFileName();
@@ -242,6 +245,27 @@ public:
     bool isTrackSilenced (int t) const
     {
         return juce::isPositiveAndBelow (t, maxTracks) && (muted[(size_t) t].load() || (soloCount.load() > 0 && ! soloed[(size_t) t].load()));
+    }
+
+    // GM -> MT-32: toca un .mid de General MIDI en el MT-32 (en Multi). Al activarlo y en cada PLAY desde el principio prepara
+    // la máquina como el controlador GM/MT-32 de ScummVM (audio/mt32gm.cpp, initMT32, "basado en los ajustes GM de Roland para
+    // el MT-32"): reset, reverb Plate (tiempo 3, nivel 4), reserva de parciales como el SC-55 y las partes 1-8 en los canales
+    // 1-8 con el ritmo en el 10. Por el camino: programas por la tabla _gmToMt32 de ScummVM (audio/mididrv.cpp; GPL-3.0+),
+    // paneo invertido (el MT-32 lo tiene al revés que la norma MIDI) y el rango de pitch bend (RPN 0; 2 semitonos, el de GM)
+    // tras cada cambio de programa, porque Munt lo toma del patch al cambiar de programa (Part.h, pitchBenderRange). La
+    // percusión no se traduce (el mapa del MT-32 coincide con GM en las piezas básicas). Al desactivarlo, reset del MT-32
+    void setGmToMt32 (bool on)
+    {
+        if (gmToMt32.exchange (on) == on) return;
+        (on ? gmInitPending : gmResetPending).store (true);
+    }
+    bool getGmToMt32() const { return gmToMt32.load(); }
+    // Hilo de audio, antes de injectMidi: si el motor elegido es el MT-32. La conversión solo actúa con él (el Gravis y los
+    // demás reciben el .mid tal cual); al pasar al MT-32 con la conversión puesta, se prepara la máquina
+    void setTargetMt32 (bool mt32)
+    {
+        if (mt32 && ! targetMt32 && gmToMt32.load()) gmInitPending.store (true);
+        targetMt32 = mt32;
     }
 
     enum PracticeMode { practicePlay = 0, practiceWait, practiceFollow };
@@ -308,12 +332,14 @@ public:
     void injectMidi (juce::MidiBuffer& midi, int numSamples)
     {
         const auto fs = deviceRate.load();
+        gmActive = gmToMt32.load() && targetMt32; // GM -> MT-32 en este bloque (también para lo que persigue un salto)
         if (rewind.exchange (false))
         {
             playPos.store (0);
             midiCursor = 0;
             midiPos.store (selectedTrack.load() >= 0 ? -std::round (leadIn.load() * fs) : 0.0); // practicando: cuenta previa
             reseek.store (true);
+            if (gmToMt32.load()) gmInitPending.store (true);
         }
         if (flushNotes.exchange (false))
             releaseHeldNotes (midi, 0);
@@ -324,6 +350,10 @@ public:
         const juce::SpinLock::ScopedTryLockType tl (playLock);
         if (! tl.isLocked())
             return; // el hilo de mensajes cambia la fuente ahora mismo: los eventos salen en el bloque siguiente
+        if (gmResetPending.exchange (false) && targetMt32)
+            addMt32Reset (midi);
+        if (gmActive && gmInitPending.exchange (false))
+            addGmInit (midi);
         const auto* s = song.get();
         const auto sel = selectedTrack.load();
         const auto practice = s != nullptr && sel >= 0 && sel < (int) s->tracks.size();
@@ -375,7 +405,7 @@ public:
             if (e.message.isNoteOn() && isTrackSilenced (e.track))
                 continue; // pista en mute (o fuera del solo)
             const auto offset = (int) juce::jlimit (0.0, (double) (numSamples - 1), std::floor ((t - start) / rate));
-            midi.addEvent (e.message, offset);
+            emitFileEvent (midi, e.message, offset);
             track (e.message);
         }
         // Play: las notas tuyas que pasan de ±hitWindow sin tocar, falladas
@@ -592,7 +622,7 @@ private:
             const auto& m = e.message;
             if (m.isNoteOn() || (e.track == sel && m.isNoteOnOrOff())) continue;
             if (m.isNoteOff() && ! held[(size_t) juce::jlimit (1, 16, m.getChannel()) - 1].test ((size_t) m.getNoteNumber())) continue;
-            midi.addEvent (m, 0);
+            emitFileEvent (midi, m, 0);
             track (m);
         }
     }
@@ -622,15 +652,96 @@ private:
         }
         for (int ch = 0; ch < 16; ++ch)
         {
-            if (chaseProgram[(size_t) ch] >= 0) midi.addEvent (juce::MidiMessage::programChange (ch + 1, chaseProgram[(size_t) ch]), 0);
+            if (chaseProgram[(size_t) ch] >= 0) emitFileEvent (midi, juce::MidiMessage::programChange (ch + 1, chaseProgram[(size_t) ch]), 0);
             for (int cc = 0; cc < 120; ++cc)
                 if (cc != 64 && chaseCc[(size_t) ch][(size_t) cc] >= 0) // el pedal no: soltaría o sostendría notas que no suenan
-                    midi.addEvent (juce::MidiMessage::controllerEvent (ch + 1, cc, chaseCc[(size_t) ch][(size_t) cc]), 0);
-            if (chaseBend[(size_t) ch] >= 0) midi.addEvent (juce::MidiMessage::pitchWheel (ch + 1, chaseBend[(size_t) ch]), 0);
+                    emitFileEvent (midi, juce::MidiMessage::controllerEvent (ch + 1, cc, chaseCc[(size_t) ch][(size_t) cc]), 0);
+            if (chaseBend[(size_t) ch] >= 0) emitFileEvent (midi, juce::MidiMessage::pitchWheel (ch + 1, chaseBend[(size_t) ch]), 0);
         }
         midiPos.store (at);
         playPos.store ((juce::int64) at);
         reseek.store (true);
+    }
+
+    //==========================================================================
+    // GM -> MT-32 (setGmToMt32)
+
+    // Programa GM (0-127) -> patch del MT-32; 128: sin equivalente (el cambio se descarta). Tabla _gmToMt32 de ScummVM
+    // (audio/mididrv.cpp, GPL-3.0-or-later, compatible con la AGPL-3.0 de KoniSynth; THIRD-PARTY-NOTICES.txt)
+    static constexpr juce::uint8 gmToMt32Program[128] = {
+          5,   1,   2,   7,   3,   5,  16,  21,  22, 101, 101,  97, 104, 103, 102,  20,
+          8,   9,  11,  12,  14,  15,  87,  15,  59,  60,  61,  62,  67,  44,  79,  23,
+         64,  67,  66,  70,  68,  69,  28,  31,  52,  54,  55,  56,  49,  51,  57, 112,
+         48,  50,  45,  26,  34,  35,  45, 122,  89,  90,  94,  81,  92,  95,  24,  25,
+         80,  78,  79,  78,  84,  85,  86,  82,  74,  72,  76,  77, 110, 107, 108,  76,
+         47,  44, 111,  45,  44,  34,  44,  30,  32,  33,  88,  34,  35,  35,  38,  33,
+         41,  36, 100,  37,  40,  34,  43,  40,  63,  21,  99, 105, 103,  86,  55,  84,
+        101, 103, 100, 120, 117, 113,  99, 128, 128, 128, 128, 124, 123, 128, 128, 128 };
+
+    // SysEx DT1 de Roland al MT-32 (41 10 16 12, dirección de 3 bytes, datos, suma): suma = (128 - (dirección + datos) mod 128) mod 128
+    static void addMt32Sysex (juce::MidiBuffer& midi, juce::uint32 address, std::initializer_list<juce::uint8> data, int offset)
+    {
+        juce::uint8 b[32] { 0xF0, 0x41, 0x10, 0x16, 0x12, (juce::uint8) ((address >> 16) & 0x7F), (juce::uint8) ((address >> 8) & 0x7F),
+                            (juce::uint8) (address & 0x7F) };
+        int n = 8, sum = b[5] + b[6] + b[7];
+        for (const auto v : data) { b[n++] = v; sum += v; }
+        b[n++] = (juce::uint8) ((128 - sum % 128) % 128);
+        b[n++] = 0xF7;
+        midi.addEvent (b, n, offset);
+    }
+    static void addMt32Reset (juce::MidiBuffer& midi) { addMt32Sysex (midi, 0x7F0000, { 0x01 }, 0); } // "all parameters reset"
+
+    void addGmInit (juce::MidiBuffer& midi)
+    {
+        addMt32Reset (midi);
+        addMt32Sysex (midi, 0x100001, { 0x02, 0x03, 0x04 }, 0);                                  // reverb: Plate, tiempo 3, nivel 4
+        addMt32Sysex (midi, 0x100004, { 0x08, 0x04, 0x04, 0x03, 0x03, 0x03, 0x03, 0x02, 0x02 }, 0); // reserva de parciales (SC-55)
+        addMt32Sysex (midi, 0x10000D, { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x09 }, 0); // partes 1-8: canales 1-8; ritmo: 10
+        for (int ch = 0; ch < 16; ++ch) { bendRange[(size_t) ch] = 2; rpnMsb[(size_t) ch] = rpnLsb[(size_t) ch] = 127; }
+        for (int ch = 1; ch <= 8; ++ch) // como GM al encender: centro y programa 0
+        {
+            emitFileEvent (midi, juce::MidiMessage::controllerEvent (ch, 10, 64), 0);
+            emitFileEvent (midi, juce::MidiMessage::programChange (ch, 0), 0);
+        }
+    }
+
+    // Un evento del .mid hacia el motor; con GM -> MT-32, traducido (ver setGmToMt32)
+    void emitFileEvent (juce::MidiBuffer& midi, const juce::MidiMessage& m, int offset)
+    {
+        const auto size = m.getRawDataSize();
+        if (! gmActive || size < 2 || size > 3)
+        {
+            midi.addEvent (m, offset);
+            return;
+        }
+        const auto* d = m.getRawData();
+        const auto status = d[0] & 0xF0, ch = d[0] & 0x0F;
+        if (status == 0xC0)
+        {
+            if (ch == 9) return; // el ritmo no cambia de programa en el MT-32
+            const auto p = gmToMt32Program[d[1] & 0x7F];
+            if (p >= 128) return;
+            const juce::uint8 pc[2] { d[0], p };
+            midi.addEvent (pc, 2, offset);
+            // Rango de pitch bend: Munt lo toma del patch al cambiar de programa; se repone el de GM (o el que fijó el .mid)
+            const juce::uint8 cc = (juce::uint8) (0xB0 | ch);
+            const juce::uint8 rpn[6][3] { { cc, 101, 0 }, { cc, 100, 0 }, { cc, 6, bendRange[(size_t) ch] }, { cc, 38, 0 }, { cc, 101, 127 }, { cc, 100, 127 } };
+            for (const auto& r : rpn) midi.addEvent (r, 3, offset);
+            return;
+        }
+        if (status == 0xB0 && size == 3)
+        {
+            if (d[1] == 10) // paneo invertido
+            {
+                const juce::uint8 pan[3] { d[0], 10, (juce::uint8) (127 - d[2]) };
+                midi.addEvent (pan, 3, offset);
+                return;
+            }
+            if (d[1] == 101) rpnMsb[(size_t) ch] = d[2];
+            if (d[1] == 100) rpnLsb[(size_t) ch] = d[2];
+            if (d[1] == 6 && rpnMsb[(size_t) ch] == 0 && rpnLsb[(size_t) ch] == 0) bendRange[(size_t) ch] = (juce::uint8) std::min (24, (int) d[2]);
+        }
+        midi.addEvent (m, offset);
     }
 
     void userNoteOn (const PlayAlongSong& s, int t, int pitch, double when, bool running)
@@ -875,6 +986,9 @@ private:
     std::atomic<double> seekTarget { -1.0 };                 // seekMidi: instante pedido (s), o < 0
     std::array<std::atomic<bool>, maxTracks> muted {}, soloed {}; // mute y solo por pista lógica
     std::atomic<int> soloCount { 0 };
+    std::atomic<bool> gmToMt32 { false }, gmInitPending { false }, gmResetPending { false };
+    bool gmActive = false, targetMt32 = true;               // hilo de audio: GM -> MT-32 en este bloque; motor MT-32 elegido
+    std::array<juce::uint8, 16> bendRange {}, rpnMsb {}, rpnLsb {}; // GM -> MT-32: RPN de cada canal del .mid
     std::array<int, 16> chaseProgram {}, chaseBend {};       // applySeek: estado perseguido por canal (-1: sin dato)
     std::array<std::array<juce::int16, 120>, 16> chaseCc {};
     std::array<bool, 16> sustained {};

@@ -27,7 +27,7 @@ def db(v):
 
 
 ENGINES = ['Synth', 'Theremin', 'Casio VL-1', 'Stylophone', 'Omnichord', 'Drum Machine', 'FM 6-Op', '8-Bit/DPCM',
-           'Polivoks', 'ANS', 'Mega Drive', 'SNES', 'N64', 'OPL (AdLib / Sound Blaster)', 'Roland MT-32']
+           'Polivoks', 'ANS', 'Mega Drive', 'SNES', 'N64', 'OPL (AdLib / Sound Blaster)', 'Roland MT-32', 'Gravis UltraSound']
 for k, name in enumerate(ENGINES):
     base = ['--param=engine=%d' % k] + FX
     held = peak(base, 1.6, ['60:0.1:1.5:100', 'cc:1.0:120:0:1'])

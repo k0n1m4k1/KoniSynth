@@ -19,6 +19,9 @@ struct ZohResampler
         reset();
     }
 
+    // Otra tasa del chip sin reservar memoria (hilo de audio): el escalón siguiente ya cae a la nueva distancia
+    void setRates (double inRate, double outRate) { period = outRate / inRate; }
+
     void reset()
     {
         for (auto& b : blep) b.reset();

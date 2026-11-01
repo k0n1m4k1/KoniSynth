@@ -155,7 +155,7 @@ struct Mt32Engine
         if (m != lastMachine) // máquina nueva: sus ajustes se reenvían y sus nombres de programa se publican
         {
             lastMachine = m;
-            lastReverb = lastDac = lastProgram = lastNice = -1;
+            lastReverb = lastDac = lastProgram = lastNice = lastDelay = -1;
             namesRefreshes = 1;
         }
         if (silencePending)
@@ -190,6 +190,14 @@ struct Mt32Engine
             synth.setNiceAmpRampEnabled ((nice & 1) != 0);
             synth.setNicePanningEnabled ((nice & 2) != 0);
             synth.setNicePartialMixingEnabled ((nice & 4) != 0);
+        }
+        // Retardo del cable MIDI (parámetro mt32MidiDelay): solo afecta a los mensajes que entran desde ahora (Synth.cpp, playMsg)
+        if (const auto delay = juce::jlimit (0, 2, (int) p.mt32MidiDelay->load()); delay != lastDelay)
+        {
+            lastDelay = delay;
+            static const MT32Emu::MIDIDelayMode delays[] = { MT32Emu::MIDIDelayMode_IMMEDIATE, MT32Emu::MIDIDelayMode_DELAY_SHORT_MESSAGES_ONLY,
+                                                             MT32Emu::MIDIDelayMode_DELAY_ALL };
+            synth.setMIDIDelayMode (delays[delay]);
         }
         const auto mode = p.mt32Multi->load() > 0.5f ? 2 : juce::jlimit (0, 1, (int) p.mt32Mode->load());
         const auto program = juce::jlimit (1, 128, (int) p.mt32Program->load());
@@ -244,7 +252,7 @@ struct Mt32Engine
                 continue; // en Part 1 el programa lo fija el panel (Program)
             const auto d1 = size > 1 ? (juce::uint32) raw[1] : 0u, d2 = size > 2 ? (juce::uint32) raw[2] : 0u;
             if (! synth.playMsg (status | (d1 << 8) | (d2 << 16)))
-                synth.playMsgNow (status | (d1 << 8) | (d2 << 16)); // cola llena (1024 o 4096 eventos, mt32Queue)
+                synth.playMsgNow (status | (d1 << 8) | (d2 << 16)); // cola llena (512 a 4096 eventos, mt32Queue)
         }
         renderTo (n);
 
@@ -329,7 +337,7 @@ struct Mt32Engine
 private:
     std::vector<float> interleaved;
     const Mt32Machine* lastMachine = nullptr;
-    int lastReverb = -1, lastDac = -1, lastProgram = -1, lastNice = -1, lcdCountdown = 0;
+    int lastReverb = -1, lastDac = -1, lastProgram = -1, lastNice = -1, lastDelay = -1, lcdCountdown = 0;
     bool silencePending = false;
     bool gated = false;    // salida cerrada tras un panic, hasta la siguiente nota
     int namesRefreshes = 0; // lecturas pendientes de los nombres de programa (máquina nueva o SysEx)
