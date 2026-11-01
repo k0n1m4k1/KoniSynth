@@ -409,16 +409,27 @@ private:
         return ol >= 20 ? 28 + ol : lut[juce::jlimit (0, 19, ol)];
     }
 
-    static int scaleVelocity (int velocity, int sensitivity)
+    // Nivel del operador con la velocidad, como el firmware (MIDI_RX_NOTE_ON, PATCH_ACTIVATE_OPERATOR_KBD_VEL_SENS y
+    // VOICE_ADD_LOAD_OPERATOR_DATA_TO_EGS; tablas comprobadas en la mask ROM YA2138: TABLE_MIDI_VEL en 0xC922,
+    // TABLE_OP_VOLUME_VELOCITY_SCALE en 0xE4B6). El registro de nivel del EGS es una atenuación en medios pasos de OL
+    // (la curva de escalado se guarda como 2·atenuación, ASLA en PATCH_ACTIVATE_OPERATOR_KBD_SCALING_LEVEL):
+    //   t = SCALE[MIDI_VEL[vel >> 2] >> 2], att = 15 - 2k + ((32k · t) >> 8)   (k = sensibilidad 0-7)
+    //   reg = max(4, min(255, 2·(127 - ol) + att))
+    // Con k = 0 la atenuación es 15 y se toma como referencia (= ol << 5, como antes). Unidades de msfa: 16 = medio paso.
+    // Frente a msfa (velocity_data): igual hasta 0,4 dB desde vel 64; en vel 1 con k = 7, -36,8 dB en vez de -78,4 dB;
+    // el tope reg >= 4 limita la subida de vel 127 con k = 6-7 a +4,1 dB
+    static int outLevelWithVelocity (int ol, int velocity, int sensitivity)
     {
-        static constexpr std::uint8_t data[64] = {
-            0, 70, 86, 97, 106, 114, 121, 126, 132, 138, 142, 148, 152, 156, 160, 163,
-            166, 170, 173, 174, 178, 181, 184, 186, 189, 190, 194, 196, 198, 200, 202,
-            205, 206, 209, 211, 214, 216, 218, 220, 222, 224, 225, 227, 229, 230, 232,
-            233, 235, 237, 238, 240, 241, 242, 243, 244, 246, 246, 248, 249, 250, 251,
-            252, 253, 254 };
-        const auto v = (int) data[juce::jlimit (0, 127, velocity) >> 1] - 239;
-        return ((sensitivity * v + 7) >> 3) << 4;
+        static constexpr std::uint8_t midiVel[32] = { 0x6E, 0x64, 0x5A, 0x55, 0x50, 0x4B, 0x46, 0x41, 0x3A, 0x36, 0x32,
+            0x2E, 0x2A, 0x26, 0x22, 0x1E, 0x1C, 0x1A, 0x18, 0x16, 0x14, 0x12, 0x10, 0x0E, 0x0C, 0x0A, 8, 6, 4, 2, 1, 0 };
+        static constexpr std::uint8_t velScale[32] = { 0x00, 0x04, 0x0C, 0x15, 0x1E, 0x28, 0x2E, 0x34, 0x3A, 0x40, 0x46,
+            0x4C, 0x52, 0x58, 0x5E, 0x64, 0x67, 0x6A, 0x6D, 0x70, 0x72, 0x74, 0x76, 0x78, 0x7A, 0x7C, 0x7E, 0x80, 0x82,
+            0x83, 0x84, 0x85 };
+        const auto k = juce::jlimit (0, 7, sensitivity);
+        const auto t = (int) velScale[midiVel[juce::jlimit (0, 127, velocity) >> 2] >> 2];
+        const auto att = 15 - 2 * k + ((32 * k * t) >> 8);
+        const auto reg = std::max (4, std::min (255, 2 * (127 - juce::jlimit (0, 127, ol)) + att));
+        return (269 - reg) << 4; // 269 = 2·127 + 15: con k = 0, (269 - reg) · 16 = ol · 32
     }
 
     // PATCH_ACTIVATE_OPERATOR_KBD_SCALING_LEVEL: valor = min(127, (curva[grupo] · sc(depth)) >> 8), con sc(d) = (660·d) >> 8.
@@ -596,7 +607,7 @@ private:
             auto& op = v.ops[(size_t) k];
             const auto& pk = patch[(size_t) k];
             auto ol = juce::jlimit (0, 127, scaleOutLevel (pk.outLevel) + scaleLevel (v.playNote, pk)); // el firmware limita a 0-127 antes de la velocidad
-            op.outlevel = std::max (0, (ol << 5) + scaleVelocity (velocity, pk.velSens));
+            op.outlevel = outLevelWithVelocity (ol, velocity, pk.velSens);
             op.rateScaling = (pk.rateScale * juce::jlimit (0, 31, v.playNote / 3 - 7)) >> 3;
             if (! wasActive)
             {

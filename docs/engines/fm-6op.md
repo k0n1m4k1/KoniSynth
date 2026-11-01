@@ -182,6 +182,10 @@ the DX7.
 - **Pitch envelope and keyboard level scaling from the firmware.** The pitch envelope moves in the firmware's integer
   steps, every other timer tick (about 5.4 ms per step), and reaches the sound chip when the voice's pitch is updated.
   Keyboard level scaling uses the firmware's curve tables: the exponential curve keeps rising up to the top groups.
+- **Velocity curve from the firmware.** Velocity goes through the firmware's two tables (32 steps of 4 MIDI velocities) in
+  half output-level steps. Soft notes are much less quiet than in msfa and Dexed: velocity 1 with sensitivity 7 is about
+  37 dB below sensitivity 0, not 78 dB. From velocity 64 up the two differ by less than 1.1 dB, and with sensitivity 6-7
+  velocity 127 can only lift an operator by 4.1 dB, because the chip's level register stops at 4.
 - Feedback loops in algorithms 4 and 6 are reproduced.
 - **Amplitude modulation measured on real DX7s.** The LFO tremolo (AMD x AMS) is linear in amplitude: the level stays
   high most of the cycle and dips briefly and deeply, down to -26 dB at AMD 99 and AMS 3. Measured on recordings of
