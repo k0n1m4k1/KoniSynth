@@ -29,7 +29,7 @@ two sections side by side.
 | Tone | Brightness: kick click, snare tone and noise filters. | 0-100 % / 50 % |
 | Snappy | Amount of snare wires (noise) in the snare. | 0-100 % / 50 % |
 | Accent | Level of accented steps and of notes played at full velocity. | 0-100 % / 50 % |
-| Ch 10 | Off: notes on any MIDI channel play the drums. On: only channel 10, the General MIDI drum channel, so a multitrack GM song plays just its drum part. Notes follow the General MIDI drum map (35-81). | Off / On / **Off** |
+| Ch 10 (header switch) | Off: notes on any MIDI channel play the drums. On: only channel 10, the General MIDI drum channel, so a multitrack GM song plays just its drum part. Notes follow the General MIDI drum map (35-81). | Off / On / **Off** |
 
 ### Pattern
 

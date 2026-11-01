@@ -26,7 +26,7 @@ Sections: **OPL** and **OPL LFO / Output**; with Model = OPLL or VRC7, an **OPLL
 | Algorithm | 2 operators: 0 = FM (1 modulates 2), 1 = AM (1 + 2 added). 4 operators (OPL3): 0 = 1->2->3->4, 1 = (1->2)+(3->4), 2 = 1+(2->3->4), 3 = 1+(2->3)+4. | 0-3; 0 |
 | Feedback | Self-modulation of OP1 (register C0h): 0 = off, 7 = most (noisy). | 0-7; 0 |
 | OP1 TL ... OP4 TL | Total level, 0.75 dB steps (63 = -47 dB). On a modulator it sets the brightness. | 0-63; OP1/OP3 63, OP2/OP4 0 |
-| GM | OPL3 only: General MIDI on 16 channels with the DMX driver and the DMXOPL3 bank (see GM mode below). Algorithm, Feedback, the TLs, Pan and the operators are not used. | off |
+| Multitimbral (header switch) | OPL3 only: General MIDI on 16 channels with the DMX driver and the DMXOPL3 bank (see Multitimbral mode below). Algorithm, Feedback, the TLs, Pan and the operators are not used. | off |
 
 Default patch: 2 operators in FM, the modulator silent (TL 63) and the carrier a sine with AR 15, RR 7, EGT on.
 
@@ -71,9 +71,9 @@ OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 | Pan | OPL3 stereo (register C0h bits 4-5). Alternate: voices go left, right, left... The OPL2 is mono. | Center / Left / Right / Alternate L/R; Center |
 | Output | Stereo (OPL3) or both sides summed to mono. | Stereo (OPL3) / Mono; Stereo |
 
-### GM mode
+### Multitimbral mode (General MIDI)
 
-With the OPL3 model and **GM** on, KoniSynth plays General MIDI the way many DOS games did on a Sound Blaster 16: the OPL3
+With the OPL3 model and **Multitimbral** on, KoniSynth plays General MIDI the way many DOS games did on a Sound Blaster 16: the OPL3
 driven by the **DMX** sound library (Doom, Heretic, Hexen, Raptor and others), with the **DMXOPL3** instrument bank
 (sneakernets, MIT licence), made to sound close to a Roland Sound Canvas. Load a multitrack .mid in the MIDI player or
 play it from your DAW.

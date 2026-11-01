@@ -37,7 +37,7 @@ with an exception; it sounds different from the Gravis set).
 | Control | What it does | Default |
 |---|---|---|
 | Model | Classic, MAX or Extreme. All use the same GF1 chip; the model sets the memory: Classic 256 KB to 1 MB, MAX 512 KB to 1 MB, Extreme 1 MB soldered (RAM is dimmed). | Classic |
-| Multi | On: the 16 MIDI channels play as a General MIDI module (drums on channel 10), for .mid files and DAW tracks. Off: your keyboard plays the Keys setting. | off |
+| Multitimbral (switch) | On: the 16 MIDI channels play as a General MIDI module (drums on channel 10), for .mid files and DAW tracks. Off: your keyboard plays the Keys setting. | off |
 | Keys | Program: your keyboard plays the program in the list. Rhythm: the drum kit (one sound per key). | Program |
 | Program | General MIDI program for Keys = Program (the sound comes from your patch set). | 1 - Acoustic Grand Piano |
 | RAM | Memory on the card: 256 KB, 512 KB, 768 KB or 1 MB. With `ULTRAMID.INI`, each program plays the patch that file gives for this size (for example, with 256 KB the organs play the patch of program 3, Electric Grand Piano). Without it, patches load as they are used and one that does not fit is replaced by a loaded patch of the same family. | 1 MB |

@@ -712,7 +712,7 @@ static juce::String paramHelp (const juce::String& id)
         { "opllRhythm", "YM2413 rhythm mode: channels 7-9 become bass drum, snare, tom, cymbal and hi-hat, played on MIDI channel 10 (General MIDI drum notes); 6 melodic voices remain. The VRC7 has no rhythm output." },
         { "oplModel", "OPL2 = Yamaha YM3812 (AdLib, Sound Blaster 1-2): 9 two-operator voices, 4 waveforms, mono, and the YM3014 floating-point DAC that drops the low bits of loud signals (its typical grit). OPL3 = YMF262 (Sound Blaster Pro 2, 16): 18 voices or 6 four-operator voices, 8 waveforms, stereo. OPLL = YM2413 (Japanese Master System FM, MSX-MUSIC): 9 voices, 15 ROM instruments + 1 user, optional drums. VRC7 = Konami's OPLL in Lagrange Point: 6 voices, its own ROM set. OPLL and VRC7 are cycle-accurate (Nuked-OPLL)." },
         { "oplFourOp", "OPL3 only: pairs of channels become 4-operator voices (6 voices) with 4 algorithms." },
-        { "oplGm", "OPL3 only. Off (default): one sound, set by the controls. On: General MIDI on 16 channels, the way games played "
+        { "oplGm", "Multitimbral, OPL3 only. Off (default): one sound, set by the controls. On: General MIDI on 16 channels, the way games played "
                    "MIDI on an OPL3 with the DMX driver (Doom and others), with the DMXOPL3 bank: each channel has its own "
                    "instrument (Program Change), channel 10 is drums, CC 7 volume and CC 10 pan. The operator controls are not used." },
         { "oplAlgorithm", "How the operators connect. 2 operators: 0 = FM (1 modulates 2), 1 = AM (1 + 2 added). 4 operators (OPL3): 0 = 1->2->3->4, 1 = (1->2)+(3->4), 2 = 1+(2->3->4), 3 = 1+(2->3)+4." },
@@ -726,7 +726,7 @@ static juce::String paramHelp (const juce::String& id)
                        "late-80s PC games were written for) or CM-32L (more sound effects, the later DAC). Falls back to the other "
                        "if only that one is present." },
         { "mt32Mode", "What the keyboard plays. Part 1: MIDI channel 2 of the MT-32 with the Program next to it. Rhythm: channel 10, "
-                      "the drum kit. Not used with Multi on." },
+                      "the drum kit. Not used with Multitimbral on." },
         { "mt32Multi", "MIDI channels as they come instead of the keyboard routing, for MT-32 .mid files (parts on channels 2-9, "
                        "rhythm on 10; import them with the transport). SysEx always passes (custom patches and LCD messages)." },
         { "mt32Queue", "Size of the MIDI event queue of the emulation, in events: 512, 1024, 2048 or 4096 (the emulator only "
@@ -742,9 +742,9 @@ static juce::String paramHelp (const juce::String& id)
                        "44.1 kHz with 14, 30.9 kHz with 20, 19.3 kHz with 32 (more aliasing). Default: 24 (an estimate of the driver's "
                        "setting)." },
         { "gusMode", "What your keyboard plays: the program chosen in the list, or the drum kit (one sound per key). Default: Program." },
-        { "gusMulti", "Multi: the 16 MIDI channels play as a General MIDI module (drums on channel 10), for .mid files and DAW "
+        { "gusMulti", "Multitimbral: the 16 MIDI channels play as a General MIDI module (drums on channel 10), for .mid files and DAW "
                       "tracks. Off: your keyboard plays the Keys setting. Default: off." },
-        { "gusProgram", "General MIDI program your keyboard plays (Keys = Program, Multi off). The sound comes from your patch set. "
+        { "gusProgram", "General MIDI program your keyboard plays (Keys = Program, Multitimbral off). The sound comes from your patch set. "
                         "Default: 1 - Acoustic Grand Piano." },
         { "gusPatchBits", "Sample depth the driver loads the patches with. 8-bit: Gravis' ULTRAMID driver by default keeps only the "
                           "high byte of each 16-bit sample (more noise, half the card memory). 16-bit: its -16 option, the patches "

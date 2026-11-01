@@ -1099,6 +1099,20 @@ struct ListControl : juce::Component, private juce::Timer
     int comboHeight = 26; // alto del desplegable (setPhosphor lo agranda)
 };
 
+// Interruptor LED de un parámetro on/off fuera de la cabecera fija de la sección (p. ej. como selector de cabecera con
+// withHeaderControl, cuando el segundo interruptor ya está ocupado): tooltip, menú contextual (Reset, MIDI Learn) y adjunto
+struct ParamToggle : juce::ToggleButton
+{
+    ParamToggle (APVTS& s, const juce::String& id, const juce::String& text)
+        : attachment (s, id, *this), menu (s, id, *this)
+    {
+        setButtonText (text);
+        setTooltip (paramTooltip (s, id));
+    }
+    APVTS::ButtonAttachment attachment;
+    ParamMenu menu;
+};
+
 // UI: aspecto. Interruptores con LED rojo (encendido: rojo con halo; apagado: granate oscuro).
 struct KoniLookAndFeel : juce::LookAndFeel_V4
 {
@@ -1885,7 +1899,7 @@ struct Section : juce::Component
         float widest = 0.0f;
         for (int i = 0; i < combo.getNumItems(); ++i)
             widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, combo.getItemText (i)));
-        auto reserved = extraToggle.isVisible() ? 80 : 0;
+        auto reserved = extraToggle.isVisible() ? extraToggleWidth() : 0;
         for (const auto& b : headerButtons)
             reserved += buttonWidth (*b);
         const auto needed = juce::roundToInt (widest) + 5 + 22 + 8 + (glyph ? 26 : 0); // margen 5, flecha 22, holgura 8
@@ -1969,6 +1983,13 @@ struct Section : juce::Component
     {
         rowBreak = juce::jmax (0, n);
         return *this;
+    }
+
+    // Ancho del segundo interruptor: 80 px, o su texto + LED y márgenes si es más largo ("Multitimbral")
+    int extraToggleWidth() const
+    {
+        const auto text = juce::GlyphArrangement::getStringWidth (juce::Font (juce::FontOptions (14.0f)), extraToggle.getButtonText());
+        return juce::jmax (80, juce::roundToInt (text) + 40);
     }
 
     // Segundo interruptor en la cabecera (Sync, Freeze...)
@@ -2070,7 +2091,7 @@ struct Section : juce::Component
             auto header = r.removeFromTop (24);
             if (toggle.isVisible()) toggle.setBounds (header.removeFromLeft (60));
             if (combo.isVisible())  combo.setBounds (header.removeFromLeft (comboHeaderWidth (header.getWidth())));
-            if (extraToggle.isVisible()) extraToggle.setBounds (header.removeFromLeft (80).withTrimmedLeft (10));
+            if (extraToggle.isVisible()) extraToggle.setBounds (header.removeFromLeft (extraToggleWidth()).withTrimmedLeft (10));
             for (auto& b : headerButtons)
                 b->setBounds (header.removeFromLeft (buttonWidth (*b)).withTrimmedLeft (6));
             if (headerControl != nullptr)

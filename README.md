@@ -107,7 +107,7 @@ the Roland MT-32 and the Gravis UltraSound. It runs as a **VST3** and **CLAP** p
   a staff scrolling from right to left (diatonic lines, the view follows the melody up and down), with the next note
   to play in large letters on the right. Modes: Play (the file keeps its tempo), Wait (it stops at each of your notes
   until you play it) and Follow (if you play ahead, the file jumps with you). One-bar count-in. The Roland MT-32 and Gravis
-  UltraSound engines with Multi on play the other tracks with their own instruments (the others play every track with the
+  UltraSound engines with Multitimbral on play the other tracks with their own instruments (the others play every track with the
   current sound); for the MT-32, General MIDI files are converted on the fly (GM>MT-32: program mapping, flipped panning
   and a GM-like set-up of the unit).
 - **Presets:** 462 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,

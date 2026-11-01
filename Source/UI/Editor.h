@@ -396,7 +396,8 @@ public:
                          .withSortedCombo (s, "omniRhythm").withKnob (s, "omniTempo", "Tempo").withKnob (s, "omniRhythmLevel", "Level");
         drumSection.withCombo (s, "drumKit").withExtraToggle (s, "drumVelocity", "Velocity")
                    .withKnob (s, "drumTune", "Tune").withKnob (s, "drumDecay", "Decay").withKnob (s, "drumTone", "Tone")
-                   .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent").withKnob (s, "drumCh10", "Ch 10");
+                   .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent")
+                   .withHeaderControl ({}, drumCh10Toggle, 80); // LED Ch 10 (solo el canal de percusión GM)
         drumPatternSection.withHeaderButton ("Edit Rhythms...", "Open the rhythm editor: draw your own rhythms (User 1-8) on a grid of "
                                              "instrument lanes and steps. Each one is a MIDI file you can also edit elsewhere.",
                                              [this] { openPanel ("Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::drums), 1300, 560); })
@@ -495,7 +496,7 @@ public:
                   .withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             oplSection.withKnob (s, "opl" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");
-        oplSection.withKnob (s, "oplGm", "GM"); // tecla: General MIDI multitímbrico (OPL3)
+        oplSection.withHeaderControl ({}, oplMultiToggle, 130); // LED Multitimbral (General MIDI, OPL3) tras Operators...
         opllSection.withCombo (s, "opllInstrument").withExtraToggle (s, "opllRhythm", "Rhythm")
                    .withKnob (s, "opllVolume", "Volume").withKnob (s, "opllSustain", "SUS");
         oplLfoSection.withExtraToggle (s, "oplVelocity", "Velocity")
@@ -535,7 +536,7 @@ public:
         pvLfoSection.withCombo (s, "pvLfoWave")
                     .withKnob (s, "pvLfoRate", "Rate").withKnob (s, "pvLfoVco1", "VCO 1").withKnob (s, "pvLfoVco2", "VCO 2")
                     .withKnob (s, "pvLfoVcf", "VCF").withKnob (s, "pvLfoVca", "VCA");
-        mt32Section.withCombo (s, "mt32Model").withExtraToggle (s, "mt32Multi", "Multi")
+        mt32Section.withCombo (s, "mt32Model").withExtraToggle (s, "mt32Multi", "Multitimbral")
                    .withHeaderButton ("ROMs...", "The Roland ROMs (control + PCM) are not included: put yours in a folder and choose it "
                                       "here. They are recognised by size and SHA-1 (MT-32 v1.04-2.07, CM-32L, LAPC-I; halves are merged).",
                                       [this] { mt32RomMenu(); })
@@ -551,7 +552,7 @@ public:
                        }))
                    .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 3.0f).withKnob (s, "mt32Reverb", "Reverb")
                    .withKnob (s, "mt32Dac", "DAC"); // 5 posiciones: conmutador por pasos (Knob con detents)
-        gusSection.withCombo (s, "gusModel").withExtraToggle (s, "gusMulti", "Multi")
+        gusSection.withCombo (s, "gusModel").withExtraToggle (s, "gusMulti", "Multitimbral")
                   .withHeaderButton ("Patches...", "The Gravis patch set is not included: put your .PAT files (with Gravis' ULTRAMID.INI, "
                                      "a timidity.cfg or DEFAULT.CFG) in a folder and choose it here.", [this] { gusPatchMenu(); })
                   .withList (s, "gusProgram", "Program", 4.0f) // fila de arriba, del ancho de las 4 perillas de abajo
@@ -1833,7 +1834,7 @@ private:
         dim (gusSection.knobFor ("gusRam"), (int) v ("gusModel") == 2);
         // OPL: GM solo con el OPL3; con GM, el banco pone los operadores y el driver el volumen y el paneo
         const auto oplGm = (int) v ("oplModel") == 1 && v ("oplGm") > 0.5f;
-        dim (oplSection.knobFor ("oplGm"), (int) v ("oplModel") != 1);
+        oplSection.setHeaderControlAlpha ((int) v ("oplModel") != 1 ? 0.35f : 1.0f);
         for (const char* id : { "oplAlgorithm", "oplFeedback", "opl1Tl", "opl2Tl", "opl3Tl", "opl4Tl" })
             dim (oplSection.knobFor (id), oplGm);
         dim (oplLfoSection.knobFor ("oplPan"), oplGm);
@@ -3547,6 +3548,8 @@ private:
     // Curvas de transferencia: saturación por voz (diálogo Saturation...), Crush y Tube
     ShaperView voiceSatView { koni.apvts, Shapers::voiceSat() }, crushView { koni.apvts, Shapers::crush() }, tubeView { koni.apvts, Shapers::tube() };
     EqCurve eqMiniCurve { koni.apvts, true }; // curva del EQ en su bloque (UI/EqPanel.h)
+    ParamToggle oplMultiToggle { koni.apvts, "oplGm", "Multitimbral" }; // antes que oplSection (componente de su cabecera)
+    ParamToggle drumCh10Toggle { koni.apvts, "drumCh10", "Ch 10" };     // antes que drumSection
     AnsPlateView ansMiniPlate { koni, true }; // placa del ANS en su bloque (UI/AnsPanel.h)
     // Paneles de conexiones (UI/PatchBay.h): el del complejo (dentro de su sección) y el de los destinos de los LFO
     PatchBay complexBay { koni.apvts, complexPatch (koni.apvts) };

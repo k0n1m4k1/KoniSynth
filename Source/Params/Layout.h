@@ -771,7 +771,7 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "opllSustain", 1 }, "OPLL Sustain (SUS)", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "opllRhythm", 1 },  "OPLL Rhythm (YM2413)", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplFourOp", 1 },    "OPL 4-Op", false));
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplGm", 1 },        "OPL GM", false)); // OPL3: driver DMX + DMXOPL3
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplGm", 1 },        "OPL Multitimbral", false)); // OPL3: driver DMX + DMXOPL3
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "oplAlgorithm", 1 }, "OPL Algorithm", 0, 3, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "oplFeedback", 1 },  "OPL Feedback", 0, 7, 0));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplDeepTremolo", 1 }, "OPL Deep Tremolo", false));
@@ -784,7 +784,7 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Model", 1 },   "MT-32 Model", StringArray { "MT-32", "CM-32L" }, 0));
     // Teclado -> parte 1 o ritmo; Multi (enrutado aparte): canales MIDI tal cual, para ficheros .mid
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Mode", 1 },    "MT-32 Keys", StringArray { "Part 1", "Rhythm" }, 0));
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "mt32Multi", 1 },   "MT-32 Multi", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "mt32Multi", 1 },   "MT-32 Multitimbral", false));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "mt32Program", 1 }, "MT-32 Program", 1, 128, 1));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "mt32Reverb", 1 },  "MT-32 Reverb", true));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Dac", 1 },     "MT-32 DAC", StringArray { "Auto", "Nice", "Pure", "Gen 1", "Gen 2" }, 0));
@@ -1079,7 +1079,7 @@ static APVTS::ParameterLayout createLayout()
         AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int)
             { return String (v) + " (" + String (1.0e6 / (1.619695497 * v) / 1000.0, 1) + " kHz)"; })));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusMode", 1 }, "GUS Keys", StringArray { "Program", "Rhythm" }, 0));
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "gusMulti", 1 }, "GUS Multi", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "gusMulti", 1 }, "GUS Multitimbral", false));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusProgram", 1 }, "GUS Program", [] { StringArray names; for (int k = 0; k < 128; ++k)
         names.add (String (k + 1) + " - " + GeneralMidi::programName (k)); return names; }(), 0));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusPatchBits", 1 }, "GUS Patch Bits", StringArray { "8-bit", "16-bit" }, 0));
