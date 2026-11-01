@@ -182,5 +182,7 @@ after a 1990 bleep sound, not a copy of it.
 - Amplitude modulation is linear in amplitude, with a dip to -26 dB at AMD 99 and AMS 3. Both were measured on recordings
   of three original DX7s playing the factory voice TRAIN (ROM 1A); the scale for other AMD and AMS values (msfa's table)
   is not measured.
-- LFO speeds follow msfa's table. On the same three DX7s, speed 39 ran 0.65-1.07 % slower (6.19 Hz on average against
-  6.25 Hz); the table is kept until more speeds are measured.
+- LFO speeds follow msfa's table. Vibrato and tremolo rates measured in factory-voice demos of three original DX7s run
+  slightly slower: speed 21 by 0.2 %, speeds 30 to 50 by 0.6 % +/- 0.3 % (for example, speed 39: 6.19-6.22 Hz against
+  6.25 Hz). The difference is not uniform across speeds, and speeds below 21 and above 50 are not measured, so the table
+  is kept.
