@@ -521,7 +521,7 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
         slider.setSliderStyle (style == Style::rotary ? juce::Slider::RotaryVerticalDrag : juce::Slider::LinearVertical);
         slider.setViewportIgnoreDragFlag (true); // arrastrar un mando no desplaza el panel
         slider.onDragStart = [this] { showBubble (true); };
-        slider.onValueChange = [this] { if (bubble.isShowing()) showBubble (true); };
+        slider.onValueChange = [this] { if (bubble.isShowing()) showBubble (true); fitValueBox(); };
         slider.onDragEnd = [this] { showBubble (false); };
         slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, style == Style::rotary ? 70 : 56, 18);
         slider.setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
@@ -594,6 +594,7 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
             r = r.withSizeKeepingCentre (r.getWidth(), juce::jmin (r.getHeight(), 18 + maxDial + 22));
         label.setBounds (r.removeFromTop (18));
         slider.setBounds (r);
+        fitValueBox();
         layoutLamps();
         if (key.isVisible())
         {
@@ -607,10 +608,25 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
             }
             else
                 key.setBounds (r.withSizeKeepingCentre (juce::jmin (r.getWidth() - 6, 56), juce::jmin (r.getHeight() - 4, 34)));
-            keyValue.setBounds (valueArea.withSizeKeepingCentre (juce::jmin (valueArea.getWidth() - 4, 70), 18));
+            keyValue.setBounds (valueArea.withSizeKeepingCentre (valueBoxWidth (keyValue.getText(), 70, valueArea.getWidth() - 4), 18));
         }
     }
 
+    // Caja de valor: su ancho de siempre (70 px; 56 en los faders) o, si el texto no cabe, el que pide, hasta el ancho del
+    // mando. Así una opción larga ("Stereo (OPL3)", "Kit (keys)") se lee entera si la celda tiene sitio; si no, drawLabel la
+    // estrecha hasta el 60 % y, como último recurso, la corta
+    static int valueBoxWidth (const juce::String& text, int base, int avail)
+    {
+        const auto needed = juce::roundToInt (juce::GlyphArrangement::getStringWidth (juce::Font (juce::FontOptions (14.0f)), text)) + 12;
+        return juce::jlimit (juce::jmin (base, avail), juce::jmax (base, avail), needed);
+    }
+    void fitValueBox()
+    {
+        const auto base = style == Style::rotary ? 70 : 56;
+        const auto w = valueBoxWidth (slider.getTextFromValue (slider.getValue()), base, getWidth() - 2);
+        if (w != slider.getTextBoxWidth())
+            slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, w, 18);
+    }
     static constexpr int maxDial = 64;
 
     // Tecla de dos opciones como interruptor de palanca (p. ej. Position de la saturación por voz): rótulos de la placa con la
@@ -696,6 +712,7 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
         const auto text = paramPtr->getText (key.getToggleState() ? 1.0f : 0.0f, 40);
         keyValue.setText (text, juce::dontSendNotification);
         keyValue.setTooltip (text); // el texto entero si la caja lo recorta
+        resized(); // la caja sigue al texto (valueBoxWidth)
     }
 
     // Burbuja con "Nombre: valor" en 15 px sobre el mando mientras se arrastra (en la ventana de nivel superior, por encima de
@@ -1637,7 +1654,7 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         }
         g.setColour (colour);
         g.setFont (getLabelFont (label));
-        g.drawFittedText (label.getText(), r.reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.8f);
+        g.drawFittedText (label.getText(), r.reduced (3.0f, 0.0f).toNearestInt(), juce::Justification::centred, 1, 0.6f);
     }
 };
 
