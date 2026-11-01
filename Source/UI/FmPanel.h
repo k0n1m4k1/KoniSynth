@@ -154,13 +154,15 @@ public:
         // POLY/MONO, PORTAMENTO MODE / TIME, GLISSANDO y el pedal de portamento (además del CC 65)
         porta.withKnob (s, "fmMono", "Mono").withKnob (s, "fmPortaMode", "Mode").withKnob (s, "fmPortaTime", "Time")
              .withKnob (s, "fmGlissando", "Glissando").withKnob (s, "fmPortaPedal", "Pedal");
-        for (auto* sec : { &wheel, &foot, &breath, &aftertouch, &porta })
+        // PITCH BEND RANGE / STEP (en el modo DX7; en Clean manda Bend Range de KoniSynth)
+        bend.withKnob (s, "fmPbRange", "Range").withKnob (s, "fmPbStep", "Step");
+        for (auto* sec : { &wheel, &foot, &breath, &aftertouch, &porta, &bend })
             addAndMakeVisible (*sec);
     }
 
     void resized() override
     {
-        // Rejilla de 2 × 2 y, debajo, el portamento a lo ancho
+        // Rejilla de 2 × 2 y, debajo, el portamento y el pitch bend
         auto r = getLocalBounds();
         const auto rowH = r.getHeight() / 3;
         auto top = r.removeFromTop (rowH);
@@ -169,10 +171,11 @@ public:
         auto mid = r.removeFromTop (rowH);
         breath.setBounds (mid.removeFromLeft (mid.getWidth() / 2).reduced (4));
         aftertouch.setBounds (mid.reduced (4));
+        bend.setBounds (r.removeFromRight (r.getWidth() / 3).reduced (4));
         porta.setBounds (r.reduced (4));
     }
 
 private:
     Section wheel { "Mod Wheel (CC 1)" }, foot { "Foot (CC 4)" }, breath { "Breath (CC 2)" }, aftertouch { "Aftertouch" },
-            porta { "Mono / Portamento (Time: CC 5, Pedal: CC 65)" };
+            porta { "Mono / Portamento (Time: CC 5, Pedal: CC 65)" }, bend { "Pitch Bend (DX7 mode)" };
 };

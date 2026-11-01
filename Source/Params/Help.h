@@ -155,6 +155,11 @@ static juce::String paramHelp (const juce::String& id)
                          "no pedal needed) or Full Time (always slides while the portamento pedal is on). Default Retain / Fingered." },
         { "fmPortaTime", "Portamento time, 0-99 (0 = off). The slide is faster over large intervals, as on the DX7. MIDI CC 5 also sets it. Default 0." },
         { "fmGlissando", "Glissando: the portamento moves in semitone steps instead of a smooth slide. Default off." },
+        { "fmPbRange", "DX7 mode: pitch bend range, 0-12 semitones, as the DX7 computes it (only the coarse 7 bits of the wheel, a "
+                       "dead zone around the centre, slightly more downwards than upwards: range 2 bends +198 / -200 cents). In Clean "
+                       "mode the smooth KoniSynth Bend Range applies instead. Default 2." },
+        { "fmPbStep", "DX7 mode: pitch bend step. 0 (default) = continuous; 1-12 = the wheel jumps in steps of that many "
+                      "semitones over +-1 octave (Range is then not used)." },
         { "fmPortaPedal", "Holds the portamento footswitch on. Poly and Full Time portamento only work with the footswitch on "
                           "(this switch or MIDI CC 65, any value above 0, as on the DX7). Default off." },
         { "fmPR1", "Pitch envelope rate 1 (0-99): speed towards level 1 when you play." },

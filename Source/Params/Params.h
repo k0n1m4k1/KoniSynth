@@ -141,7 +141,7 @@ struct Params
             fmCtl[c].amp = get (id + "Amp"); fmCtl[c].eg = get (id + "Eg");
         }
         fmMono = get ("fmMono"); fmPortaMode = get ("fmPortaMode"); fmPortaTime = get ("fmPortaTime");
-        fmGlissando = get ("fmGlissando"); fmPortaPedal = get ("fmPortaPedal");
+        fmGlissando = get ("fmGlissando"); fmPortaPedal = get ("fmPortaPedal"); fmPbRange = get ("fmPbRange"); fmPbStep = get ("fmPbStep");
         mdModel = get ("mdModel"); mdAlgorithm = get ("mdAlgorithm"); mdFeedback = get ("mdFeedback"); mdLfo = get ("mdLfo");
         mdPms = get ("mdPms"); mdAms = get ("mdAms"); mdVelocity = get ("mdVelocity"); mdPan = get ("mdPan");
         styloRange = get ("styloRange"); styloRegister = get ("styloRegister");
@@ -287,7 +287,7 @@ struct Params
     // Modo Function del DX7: rueda, pedal (foot), soplido (breath) y aftertouch, cada uno con rango y destinos
     struct FmCtl { std::atomic<float> *range {}, *pitch {}, *amp {}, *eg {}; };
     std::array<FmCtl, 4> fmCtl {}; // orden de fmCtlIds (Layout.h): 0 rueda, 1 foot, 2 breath, 3 aftertouch
-    std::atomic<float> *fmMono {}, *fmPortaMode {}, *fmPortaTime {}, *fmGlissando {}, *fmPortaPedal {};
+    std::atomic<float> *fmMono {}, *fmPortaMode {}, *fmPortaTime {}, *fmGlissando {}, *fmPortaPedal {}, *fmPbRange {}, *fmPbStep {};
     struct MdOp { std::atomic<float> *tl {}, *ar {}, *dr {}, *sr {}, *sl {}, *rr {}, *mul {}, *dt {}, *ks {}, *am {}, *ssg {}; };
     std::array<MdOp, 4> mdOp {}; // índice 0 = OP1
     std::atomic<float> *mdModel {}, *mdAlgorithm {}, *mdFeedback {}, *mdLfo {}, *mdPms {}, *mdAms {}, *mdVelocity {}, *mdPan {};

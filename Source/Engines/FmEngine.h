@@ -61,6 +61,13 @@ struct FmEngine
             hwMode = hw;
         }
         opRate = hwMode ? kDx7Rate : sampleRate;
+        if (const auto r = juce::jlimit (0, 12, (int) p.fmPbRange->load()), st = juce::jlimit (0, 12, (int) p.fmPbStep->load());
+            r != pbRange || st != pbStep)
+        {
+            pbRange = r;
+            pbStep = st;
+            bendReg = dx7Bend (bendInput, pbRange, pbStep);
+        }
         srScale = 44100.0 / opRate;
         bendCoef = 1.0f - (float) std::exp (-1.0 / (0.005 * opRate));
         readPatch (p);
@@ -161,7 +168,9 @@ struct FmEngine
         {
             ampDepth = ampA / 256.0;
             bendSmoothed += (1.0f - std::pow (1.0f - bendCoef, (float) n)) * (p.pitchBend.load() - bendSmoothed);
-            pitchMul = std::exp2 (pitchReg / 16384.0 + (tune + 100.0 * bendSmoothed) / 1200.0);
+            // DX7: el pitch bend del firmware entra en el mismo registro de tono (dx7Bend); Clean: el de KoniSynth, suave
+            pitchMul = hwMode ? std::exp2 ((pitchReg + bendReg) / 16384.0 + tune / 1200.0)
+                              : std::exp2 (pitchReg / 16384.0 + (tune + 100.0 * bendSmoothed) / 1200.0);
         };
         auto midiIt = midi.cbegin();
         const auto numSamples = out.getNumSamples();
@@ -496,6 +505,12 @@ private:
         {
             monoNoteOff (m.getNoteNumber());
         }
+        else if (m.isPitchWheel())
+        {
+            // MIDI_RX: solo el byte alto (7 bits), duplicado (ASLA) en M_PITCH_BEND_INPUT; PITCH_BEND_PARSE lo convierte
+            bendInput = (m.getPitchWheelValue() >> 7) << 1;
+            bendReg = dx7Bend (bendInput, pbRange, pbStep);
+        }
         else if (m.isController() && m.getControllerNumber() == 5)
         {
             // MIDI_RX_CC_5_PORTAMENTO_TIME: el valor llega duplicado (ASLA) y se escala ·100/256 -> 0-99
@@ -716,6 +731,61 @@ private:
     // ciclos (SYSTEM_TICK_PERIOD) y su periodo real se ha medido por la velocidad del LFO, que avanza un paso por tick, en
     // demos de tres DX7 (10 velocidades, 368,8-371,2 Hz)
     static constexpr double kTickHz = 369.7;
+
+    // PITCH_BEND_PARSE (firmware 1.8, 0xE2CC): entrada 0-255 (MSB MIDI · 2 o la rueda) -> incremento del registro de tono en
+    // 1/16384 de octava. TABLE_PITCH_BEND (0xF0E2) da la zona muerta (MSB 63-65 = 64); rango 1-11: por TABLE_PITCH_BEND_CENTS
+    // (0xF0D5), asimétrico (rango 2: +198,4 / -200,0 cents); rango 12: ±1200 exactos; Step 1-12: saltos de N semitonos con
+    // TABLE_PITCH_BEND_STEP (0xF0A5). Aritmética de 8/16 bits del HD6303, línea a línea (validado con el modelo en Python de
+    // User/DX7/Tools/firmware-audit/bend.py). Sin suavizado: el DX7 salta de valor en valor
+    static int dx7Bend (int input, int range, int step)
+    {
+        static const std::uint8_t table[128] = {
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+            32, 33, 34, 35, 36, 37, 38, 39, 40, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62,
+            63, 64, 64, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 88, 89, 90, 91,
+            92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116,
+            117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127 };
+        static const std::uint8_t cents[13] = { 0, 22, 43, 65, 86, 107, 129, 151, 172, 194, 215, 236, 255 };
+        static const std::uint8_t steps[48] = { 0, 0, 0, 25, 5, 85, 13, 10, 170, 9, 16, 0, 7, 21, 85, 5, 26, 170, 5, 32, 0, 3, 37,
+            85, 3, 42, 170, 3, 48, 0, 3, 53, 85, 3, 58, 170, 3, 63, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+        int a = ((table[(input & 0xff) >> 1] << 1) & 0xff) ^ 0x80; // ASLA; EORA #$80: bit 7 = signo (1 = hacia abajo)
+        const auto negative = (a & 0x80) != 0;
+        unsigned d = 0;
+        if (step == 0)
+        {
+            if (range == 12)
+            {
+                if (negative)
+                {
+                    a = (((~a) & 0xff) << 1 | 1) & 0xff;      // COMA; SEC; ROLA
+                    d = (unsigned) (((~a) & 0xff) << 8);      // _RESET_NEGATIVE_BEND_VALUE: COMA (B = 0)
+                }
+                else
+                    d = ((a == 126 ? 0x7fffu : (unsigned) (a << 8)) << 1) & 0xffff; // LSLD
+            }
+            else if (negative)
+            {
+                const auto m = (unsigned) (((((~a) & 0xff) << 1) & 0xff) * cents[range]); // COMA; ASLA; MUL
+                d = ((((~(m >> 8)) & 0xff) << 8) | ((~m) & 0xff));                          // COMB; COMA
+            }
+            else
+                d = (unsigned) (((a << 1) & 0xff) * cents[range]);                          // ASLA; MUL
+            d >>= 2;                                                                      // LSRD; LSRD
+            if (negative) d |= 0xc000;                                                    // ORAA #%11000000
+        }
+        else
+        {
+            const auto k = 3 * (step & 15);
+            const auto mag = negative ? (~a) & 0xff : a;
+            const auto n = (mag * steps[k]) >> 8;
+            if (n != 0)
+            {
+                d = (unsigned) (n * ((steps[k + 1] << 8) | steps[k + 2])) & 0xffff;
+                if (negative) d = (~d) & 0xffff;
+            }
+        }
+        return d > 32767 ? (int) d - 65536 : (int) d;
+    }
 
     void fwTicks (int n)
     {
@@ -1056,6 +1126,7 @@ private:
     }
     // Modo DX7
     bool hwMode = false;
+    int bendInput = 128, bendReg = 0, pbRange = -1, pbStep = -1; // pitch bend del firmware (centro: MSB 64 · 2)
     double opRate = 44100.0, hwNext = 0.0, hwLast = 0.0;
     BlepBuffer hwBlep;
     Biquad hwLpf;

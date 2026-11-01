@@ -711,6 +711,10 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmPortaTime", 1 },  "FM Portamento Time", 0, 99, 0));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmGlissando", 1 },  "FM Glissando", false));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmPortaPedal", 1 }, "FM Portamento Pedal", false));
+    // PITCH BEND RANGE (0-12 semitonos) y STEP (0 = continuo; 1-12 = saltos de N semitonos) del modo Function. El firmware no
+    // trae valores de fábrica (RAM con pila; si no son válidos, 0): 2 y 0, los habituales (supuesto)
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmPbRange", 1 },    "FM Pitch Bend Range", 0, 12, 2));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmPbStep", 1 },     "FM Pitch Bend Step", 0, 12, 0));
 
     // Mega Drive (YM2612 / YM3438): rangos nativos de los registros (plutiedev.com "YM2612 registers"). Por defecto, el
     // equivalente al INIT VOICE: algoritmo 0 con OP1-OP3 en silencio (TL 127) y OP4 = seno, AR 31, RR 15

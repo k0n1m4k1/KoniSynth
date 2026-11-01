@@ -128,7 +128,7 @@ A fifth block, **Mono / Portamento**, holds the DX7's play mode settings (also n
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Mono | One note at a time. A key played while another is held slides in legato without restarting the envelopes; with three or more keys, only a key that continues the direction of the legato counts. Releasing a key returns to the highest (legato upwards) or lowest (downwards) key still held. | Off / On / Off |
+| Mono | **Poly** or **Mono**: one note at a time. A key played while another is held slides in legato without restarting the envelopes; with three or more keys, only a key that continues the direction of the legato counts. Releasing a key returns to the highest (legato upwards) or lowest (downwards) key still held. | Poly / Mono / Poly |
 | Mode | Poly: **Retain** (a new note slides from the last note played) or **Follow** (notes still sounding after their key was released slide to the new note). Mono: **Fingered** (slides only in legato, no pedal needed) or **Full Time** (always slides while the pedal is on). | Retain / Fingered |
 | Time | Portamento time; 0 = off. MIDI CC 5 also sets it. | 0-99 / 0 |
 | Glissando | The slide moves in semitone steps. | Off / On / Off |
@@ -140,6 +140,20 @@ rate times (distance / 3 semitones + 1), so large intervals start fast and every
 last three semitones. The rate comes from the same table as the pitch envelope. Each voice is updated about 185 times per
 second (the DX7's 370 Hz timer, half of the voices per tick). Switching between Poly and Mono silences the notes, as on
 the DX7.
+
+A sixth block, **Pitch Bend (DX7 mode)**, holds the DX7's pitch bend settings:
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Range | Bend range in semitones. | 0-12 / 2 |
+| Step | 0: continuous. 1-12: the wheel jumps in steps of that many semitones over +-1 octave (Range is not used). | 0-12 / 0 |
+
+In DX7 mode the bend is computed as the DX7 firmware does it (`PITCH_BEND_PARSE`, with its three tables checked in the
+mask ROM): only the coarse 7 bits of the wheel count, so it moves in steps (3.1 cents at range 2); a dead zone of three
+steps around the centre; and slightly more range downwards than upwards (range 2: +198.4 / -200.0 cents; range 12:
++-1200). There is no smoothing, as on the DX7. In Clean mode the smooth 14-bit bend of KoniSynth applies instead (Bend
+Range in the MIDI settings). The firmware has no factory value for Range (it lives in battery-backed memory): 2 is an
+assumption.
 
 ## Playing it
 
