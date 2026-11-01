@@ -425,7 +425,7 @@ inline void showResetMenu (APVTS& s, juce::Component& target, const juce::String
 // abajo; lámpara piloto roja junto al rótulo de arriba (rojo fijo, como los LED). Medidas en función del ancho w de la
 // caja (64 px máx.). La usan los on/off de los diálogos de opciones y las teclas de dos opciones en modo palanca (Knob)
 inline void drawLever (juce::Graphics& g, juce::Rectangle<float> box, bool on, bool enabled, bool highlighted,
-                   const juce::String& upText, const juce::String& downText)
+                   const juce::String& upText, const juce::String& downText, bool pilotLamp = true)
 {
     const auto r = box.reduced (2.0f);
     const auto w = r.getWidth();
@@ -442,11 +442,14 @@ inline void drawLever (juce::Graphics& g, juce::Rectangle<float> box, bool on, b
     };
     label (upText, r.getY(), on);
     label (downText, r.getBottom() - w * 0.22f, ! on);
-    // Lámpara piloto junto a ON
-    const auto lamp = juce::Rectangle<float> (w * 0.12f, w * 0.12f).withCentre ({ r.getRight() - w * 0.08f, r.getY() + w * 0.11f });
-    if (on) { g.setColour (juce::Colour (0xffff3030).withAlpha (0.35f)); g.fillEllipse (lamp.expanded (2.5f)); }
-    g.setColour (on ? juce::Colour (0xffff5a4a) : juce::Colour (0xff3a1414));
-    g.fillEllipse (lamp);
+    // Lámpara piloto junto a ON (no en una palanca entre dos opciones con nombre: ninguna es "encendida")
+    if (pilotLamp)
+    {
+        const auto lamp = juce::Rectangle<float> (w * 0.12f, w * 0.12f).withCentre ({ r.getRight() - w * 0.08f, r.getY() + w * 0.11f });
+        if (on) { g.setColour (juce::Colour (0xffff3030).withAlpha (0.35f)); g.fillEllipse (lamp.expanded (2.5f)); }
+        g.setColour (on ? juce::Colour (0xffff5a4a) : juce::Colour (0xff3a1414));
+        g.fillEllipse (lamp);
+    }
     // Tuerca hexagonal y casquillo
     const auto nutR = w * 0.26f;
     juce::Path nut;
@@ -533,11 +536,16 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
         label.setMinimumHorizontalScale (0.7f);
         addAndMakeVisible (label);
 
-        // Elecciones sin valor numérico (AudioParameterChoice, o Bool): 2 opciones = tecla de dos posiciones con LED; de 3 a
-        // 10 = conmutador rotatorio por pasos, con una marca por posición y 28 px de arrastre por paso (antes 250 px el
-        // recorrido entero: con 3 opciones, 83 px por paso y sin sensación de posición). Más de 10, perilla continua
+        // Elecciones sin valor numérico (AudioParameterChoice, o Bool): 2 opciones = tecla de dos posiciones con LED, o palanca
+        // con el nombre de cada opción si no son Off / On (Hold / Smooth, Poly / Mono...); de 3 a 16 = conmutador rotatorio por
+        // pasos, con una marca por posición y 28 px de arrastre por paso (antes 250 px el recorrido entero: con 3 opciones,
+        // 83 px por paso y sin sensación de posición). Los enteros de 3 a 16 valores (Algorithm, Feedback, Octave...) también
+        // van por pasos: son opciones, no un valor continuo. Más de 16, perilla continua
         const auto* choice = dynamic_cast<juce::AudioParameterChoice*> (p);
         options = choice != nullptr ? choice->choices.size() : dynamic_cast<juce::AudioParameterBool*> (p) != nullptr ? 2 : 0;
+        int steps = options;
+        if (const auto* integer = dynamic_cast<juce::AudioParameterInt*> (p))
+            steps = integer->getRange().getLength() + 1;
         if (WaveGlyph::isWaveChoice (p)) // la caja de valor muestra el icono de la forma en vez del nombre
         {
             slider.getProperties().set ("waveGlyphs", true);
@@ -557,12 +565,17 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
             addAndMakeVisible (key);
             addAndMakeVisible (keyValue);
             addChildComponent (slider); // sigue conectado (attachment, anillo de la matriz) pero no se ve
+            if (p->getText (0.0f, 40) != "Off" || p->getText (1.0f, 40) != "On")
+            {
+                asLever();
+                key.pilotLamp = false;
+            }
             return;
         }
-        if (style == Style::rotary && options >= 3 && options <= 10)
+        if (style == Style::rotary && steps >= 3 && steps <= 16)
         {
-            slider.getProperties().set ("detents", options); // KoniLookAndFeel::drawRotarySlider dibuja las marcas
-            slider.setMouseDragSensitivity (28 * (options - 1));
+            slider.getProperties().set ("detents", steps); // KoniLookAndFeel::drawRotarySlider dibuja las marcas
+            slider.setMouseDragSensitivity (28 * (steps - 1));
         }
         addAndMakeVisible (slider);
         lampHit.setTooltip ("Modulation sources moving this knob (pilot lamps, glowing with their signal). Click: their "
@@ -635,8 +648,14 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
     {
         if (options == 2 && paramPtr != nullptr)
         {
-            const auto word = [this] (float v) { return paramPtr->getText (v, 40).upToFirstOccurrenceOf ("-", false, false)
-                                                                    .upToFirstOccurrenceOf (" ", false, false).toUpperCase(); };
+            // Sin el paréntesis ("Stereo (AV)" -> STEREO); la opción entera si es corta ("8-bit", "Gen X-2"), si no su primera
+            // palabra ("Pre-filter" -> PRE, "Full keyboard" -> FULL)
+            const auto word = [this] (float v)
+            {
+                const auto t = paramPtr->getText (v, 40).upToFirstOccurrenceOf (" (", false, false).trim();
+                if (t.length() <= 7) return t.toUpperCase();
+                return t.upToFirstOccurrenceOf ("-", false, false).upToFirstOccurrenceOf (" ", false, false).toUpperCase();
+            };
             key.lever = true;
             key.upText = word (1.0f);
             key.downText = word (0.0f);
@@ -649,12 +668,13 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
     struct KeySwitch : juce::TextButton
     {
         bool lever = false;              // modo palanca (Knob::asLever): drawLever con los rótulos de sus dos opciones
+        bool pilotLamp = true;           // lámpara junto a la opción de arriba (no entre dos opciones con nombre)
         juce::String upText, downText;   // opción 2 arriba (encendida), opción 1 abajo
 
         void paintButton (juce::Graphics& g, bool over, bool down) override
         {
             if (lever)
-                return drawLever (g, getLocalBounds().toFloat(), getToggleState(), isEnabled(), over || down, upText, downText);
+                return drawLever (g, getLocalBounds().toFloat(), getToggleState(), isEnabled(), over || down, upText, downText, pilotLamp);
             const auto on = getToggleState();
             const auto travel = down ? 1.5f : 0.0f; // la tecla baja al pulsarla
             auto r = getLocalBounds().toFloat().reduced (2.0f, 1.0f).withTrimmedBottom (2.0f);

@@ -46,6 +46,13 @@ static APVTS::ParameterLayout createLayout()
     auto decibels = parsing (AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int)
         { return String (v, 1) + " dB"; }));
 
+    // On/off que en realidad elige entre dos modos: el texto de cada valor (la UI los dibuja como palanca con esos nombres;
+    // el valor guardado sigue siendo 0 / 1, presets y automatización intactos)
+    auto twoModes = [] (const String& off, const String& on)
+    {
+        return AudioParameterBoolAttributes().withStringFromValueFunction ([off, on] (bool v, int) { return v ? on : off; })
+                                             .withValueFromStringFunction ([on] (const String& t) { return t.trim().equalsIgnoreCase (on) || t.getIntValue() == 1; });
+    };
     APVTS::ParameterLayout l;
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "gain", 1 }, "Gain", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
     // Suma a mono al final de la cadena (comprobar la compatibilidad mono de la mezcla)
@@ -699,7 +706,7 @@ static APVTS::ParameterLayout createLayout()
     }
     // Modo Function del DX7: POLY/MONO, PORTAMENTO MODE (en poly Retain / Follow, en mono Fingered / Full Time; el firmware
     // usa la misma variable), PORTAMENTO TIME y GLISSANDO. Pedal: el interruptor de portamento enganchado (además del CC 65)
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmMono", 1 },       "FM Mono", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmMono", 1 },       "FM Mono", false, twoModes ("Poly", "Mono")));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "fmPortaMode", 1 },  "FM Portamento Mode", StringArray { "Retain / Fingered", "Follow / Full Time" }, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmPortaTime", 1 },  "FM Portamento Time", 0, 99, 0));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmGlissando", 1 },  "FM Glissando", false));
@@ -774,8 +781,8 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplGm", 1 },        "OPL Multitimbral", false)); // OPL3: driver DMX + DMXOPL3
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "oplAlgorithm", 1 }, "OPL Algorithm", 0, 3, 0));
     l.add (std::make_unique<AudioParameterInt>    (ParameterID { "oplFeedback", 1 },  "OPL Feedback", 0, 7, 0));
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplDeepTremolo", 1 }, "OPL Deep Tremolo", false));
-    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplDeepVibrato", 1 }, "OPL Deep Vibrato", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplDeepTremolo", 1 }, "OPL Deep Tremolo", false, twoModes ("1 dB", "4.8 dB")));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplDeepVibrato", 1 }, "OPL Deep Vibrato", false, twoModes ("7 cents", "14 cents")));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplVelocity", 1 },  "OPL Velocity", true));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplPan", 1 },       "OPL Pan", StringArray { "Center", "Left", "Right", "Alternate L/R" }, 0));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplOutput", 1 },    "OPL Output", StringArray { "Stereo (OPL3)", "Mono" }, 0));
