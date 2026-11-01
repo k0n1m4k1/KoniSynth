@@ -317,15 +317,16 @@ private:
 
 public:
     // Propiedades de estado de texto que forman parte de un preset: macros por frame de cada motor de consola,
-    // asignaciones y nombres de las macros de interpretación (Params/PerfMacros.h) y la voz DX7 cargada de un .syx
-    // ("n|NOMBRE", pantalla del FM 6-Op; vacía en los de fábrica)
+    // asignaciones y nombres de las macros de interpretación (Params/PerfMacros.h), la voz DX7 cargada de un .syx
+    // ("n|NOMBRE", pantalla del FM 6-Op; vacía en los de fábrica) y la ruta de ese .syx ("dx7Bank": su lista de voces en el
+    // bloque FM y el Program Change; si falta al cargar, aviso con Locate... / Ignore)
     // (array estático: un std::initializer_list devuelto por valor apuntaría a un array temporal ya destruido)
     // y el orden de la cadena de efectos ("fxOrder"; vacío = el de siempre) y la receta de Math Models > Modal ("modalRecipe";
     // vacía = Soft Key, Engines/SynthData.h)
-    static const std::array<const char*, 8>& textProperties()
+    static const std::array<const char*, 9>& textProperties()
     {
-        static const std::array<const char*, 8> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder",
-                                                       "modalRecipe" };
+        static const std::array<const char*, 9> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder",
+                                                       "modalRecipe", "dx7Bank" };
         return list;
     }
 

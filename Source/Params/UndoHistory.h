@@ -83,6 +83,17 @@ public:
 
     std::function<void()> onChange; // la UI refresca los botones
 
+    // Cambia propiedades de estado sin crear un paso (la caché sí se actualiza): lo que sigue a un mensaje MIDI, como la
+    // pantalla del DX7 tras un Program Change
+    template <typename Fn>
+    void withoutRecording (Fn&& fn)
+    {
+        const auto was = applying;
+        applying = true;
+        fn();
+        applying = was;
+    }
+
 private:
     struct Change
     {

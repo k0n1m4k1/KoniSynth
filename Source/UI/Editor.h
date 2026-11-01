@@ -410,9 +410,12 @@ public:
                  .withHeaderButton ("Load .syx...", "Load a Yamaha DX7 voice or 32-voice bank (SysEx .syx file): operators, "
                                     "algorithm, LFO, pitch envelope, transpose and key sync, as stored in the voice.",
                                     [this] { chooseDx7Syx(); })
+                 .withHeaderControl ("Voice", dx7VoiceBox, 190) // voces del .syx cargado (no es un parámetro)
                  .withKnob (s, "fmMode", "Mode").withKnob (s, "fmAlgorithm", "Algorithm").withKnob (s, "fmFeedback", "Feedback");
         for (int op = 1; op <= 6; ++op)
             fmSection.withKnob (s, "fm" + juce::String (op) + "Level", "OP" + juce::String (op));
+        dx7VoiceBox.onChange = [this] { if (const auto id = dx7VoiceBox.getSelectedId(); id > 0) koni.selectDx7Voice (id - 1); };
+        refreshDx7Voices();
         fmLfoSection.withCombo (s, "fmLfoWave").withExtraToggle (s, "fmLfoSync", "Sync")
                     .withKnob (s, "fmLfoSpeed", "Speed").withKnob (s, "fmLfoDelay", "Delay").withKnob (s, "fmLfoPmd", "PMD")
                     .withKnob (s, "fmLfoAmd", "AMD").withKnob (s, "fmLfoPms", "PMS");
@@ -1580,36 +1583,62 @@ private:
             {
                 if (safe == nullptr || fc.getResult() == juce::File())
                     return;
-                auto voices = std::make_shared<std::vector<Dx7Syx::Voice>>();
-                if (const auto error = Dx7Syx::loadVoices (fc.getResult(), *voices); error.isNotEmpty())
+                if (const auto error = safe->koni.loadDx7Bank (fc.getResult()); error.isNotEmpty())
                 {
                     safe->overlay = Overlay::create (*safe, "DX7 SysEx", error, std::nullopt, "OK", {},
                                                      [safe] (bool, const juce::String&, int) { if (safe != nullptr) safe->overlay.reset(); });
                     return;
                 }
-                if (voices->size() == 1)
+                const auto& voices = safe->koni.getDx7BankVoices();
+                if (voices.size() == 1)
                 {
-                    safe->applyDx7Voice ((*voices)[0], 0); // voz suelta: sin número en el LED
+                    safe->koni.selectDx7Voice (0); // voz suelta: sin número en el LED
                     return;
                 }
+                safe->refreshDx7Voices();
                 juce::PopupMenu menu;
                 menu.addSectionHeader (fc.getResult().getFileName());
-                for (size_t v = 0; v < voices->size(); ++v)
-                    menu.addItem ((int) v + 1, juce::String ((int) v + 1).paddedLeft ('0', 2) + "  " + (*voices)[v].name);
+                for (size_t v = 0; v < voices.size(); ++v)
+                    menu.addItem ((int) v + 1, dx7VoiceText ((int) v, voices[v]));
                 menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&safe->fmSection),
-                    [safe, voices] (int result)
+                    [safe] (int result)
                     {
-                        if (safe != nullptr && result > 0 && result <= (int) voices->size())
-                            safe->applyDx7Voice ((*voices)[(size_t) result - 1], result);
+                        if (safe != nullptr && result > 0)
+                            safe->koni.selectDx7Voice (result - 1);
                     });
             });
     }
 
-    // number: posición en el banco (1-32) o 0 si era una voz suelta. La pantalla del DX7 la muestra como voz de cartucho
-    void applyDx7Voice (const Dx7Syx::Voice& voice, int number)
+    static juce::String dx7VoiceText (int index, const Dx7Syx::Voice& v)
     {
-        Dx7Syx::apply (voice, koni.apvts);
-        koni.apvts.state.setProperty ("dx7Voice", juce::String (number) + "|" + voice.name, nullptr); // tras los parámetros
+        return juce::String (index + 1).paddedLeft ('0', 2) + "  " + v.name;
+    }
+
+    // Lista Voice del bloque FM: las voces del banco cargado (se rehace si cambia el banco) y la elegida según la pantalla
+    // ("dx7Voice": la elige la lista, el Program Change o el preset). Sin banco, desactivada
+    void refreshDx7Voices()
+    {
+        const auto& voices = koni.getDx7BankVoices();
+        if (koni.getDx7BankVersion() != shownDx7Bank)
+        {
+            shownDx7Bank = koni.getDx7BankVersion();
+            dx7VoiceBox.clear (juce::dontSendNotification);
+            for (size_t v = 0; v < voices.size(); ++v)
+                dx7VoiceBox.addItem (dx7VoiceText ((int) v, voices[v]), (int) v + 1);
+            dx7VoiceBox.setEnabled (! voices.empty());
+            dx7VoiceBox.setTextWhenNothingSelected (voices.empty() ? "Load a .syx" : "-");
+            dx7VoiceBox.setTooltip (voices.empty() ? "Voices of the loaded DX7 bank: load a .syx first."
+                                                   : "Voices of " + juce::File (koni.apvts.state.getProperty (KoniSynthProcessor::dx7BankProp).toString()).getFileName()
+                                                     + ". Pick one to load it (one undo step); MIDI Program Change 0-31 also picks voice 1-32, "
+                                                       "as on the DX7. The preset saves the bank file and the voice.");
+        }
+        const auto shown = koni.apvts.state.getProperty ("dx7Voice").toString();
+        auto id = shown.upToFirstOccurrenceOf ("|", false, false).getIntValue();
+        const auto name = shown.fromFirstOccurrenceOf ("|", false, false);
+        if (id == 0 && voices.size() == 1 && voices[0].name == name) id = 1; // voz suelta
+        if (id < 1 || id > (int) voices.size() || voices[(size_t) id - 1].name != name) id = 0; // otra voz o editada a mano
+        if (dx7VoiceBox.getSelectedId() != id)
+            dx7VoiceBox.setSelectedId (id, juce::dontSendNotification);
     }
 
     // Anillos de modulación (UI/MatrixPanel.h), 30 Hz: rango de cada destino según las ranuras activas y punto en vivo de la
@@ -1905,6 +1934,8 @@ private:
                     resized(); // el ancho natural de la sección sigue al nombre más largo
                 }
         }
+        if (engine == 6)
+            refreshDx7Voices();
         if (engine == 15) // Gravis: por qué no suena
             gusSection.setInfo (koni.hasGusBank() ? juce::String() : juce::String ("no patches: see Patches..."));
         refreshCabIrInfo();
@@ -1941,6 +1972,7 @@ private:
         using Kind = KoniSynthProcessor::MissingFile::Kind;
         const auto sampleWhich = KoniSynthProcessor::sampleWhichFor (m.kind);
         const juce::String what = sampleWhich >= 0 ? juce::String (SampleIds::of (sampleWhich).title)
+                                : m.kind == Kind::dx7Bank ? "DX7 bank"
                                 : m.kind == Kind::cabIr ? "Cabinet IR" : m.kind == Kind::osc2Wavetable ? "Osc 2 wavetable"
                                 : m.kind == Kind::osc3Wavetable ? "Osc 3 wavetable" : "Wavetable";
         const auto heading = what + (m.unreadable ? " file can't be read" : " file not found");
@@ -1957,6 +1989,23 @@ private:
 
     void locateMissing (const KoniSynthProcessor::MissingFile& m)
     {
+        if (m.kind == KoniSynthProcessor::MissingFile::Kind::dx7Bank)
+        {
+            // Solo el banco: los parámetros de la voz ya vienen en el preset
+            const auto start = m.file.getParentDirectory().isDirectory() ? m.file.getParentDirectory()
+                                                                         : juce::File::getSpecialLocation (juce::File::userHomeDirectory);
+            fileChooser = std::make_unique<juce::FileChooser> ("Locate DX7 bank: " + m.file.getFileName(), start, "*.syx");
+            fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
+                {
+                    if (safe == nullptr || fc.getResult() == juce::File())
+                        return;
+                    if (const auto error = safe->koni.loadDx7Bank (fc.getResult()); error.isNotEmpty())
+                        safe->overlay = Overlay::create (*safe, "DX7 SysEx", error, std::nullopt, "OK", {},
+                                                         [safe] (bool, const juce::String&, int) { if (safe != nullptr) safe->overlay.reset(); });
+                });
+            return;
+        }
         if (m.kind == KoniSynthProcessor::MissingFile::Kind::cabIr)
         {
             chooseCabIr (m.file.getParentDirectory());
@@ -3496,6 +3545,8 @@ private:
     LfoView lfoView { koni.apvts, false }, lfo2View { koni.apvts, true }; // ídem, LFO 1 y LFO 2
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
     GusDisplay gusDisplay { koni }; // antes que gusSection (componente de la sección): se destruye después
+    juce::ComboBox dx7VoiceBox; // igual, antes que fmSection
+    int shownDx7Bank = -1;
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
     Vl1Display vl1Display { koni }; // ídem con vl1DisplaySection
     DrumStepLeds drumLeds { koni }; // ídem con drumPatternSection

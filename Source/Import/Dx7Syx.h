@@ -90,19 +90,36 @@ struct Dx7Syx
         return s.trimEnd();
     }
 
-    // Escribe la voz en los parámetros del motor FM. Devuelve lo que el motor no modela (vacío si nada)
+    // Escribe la voz en los parámetros del motor FM (hilo de mensajes, un gesto por parámetro)
     static void apply (const Voice& v, juce::AudioProcessorValueTreeState& apvts)
     {
-        const auto set = [&apvts] (const juce::String& id, int value)
+        for (const auto& [p, value] : normalised (v, apvts))
         {
+            p->beginChangeGesture();
+            p->setValueNotifyingHost (value);
+            p->endChangeGesture();
+        }
+    }
+
+    // Los parámetros de la voz con su valor normalizado: lo que aplica apply() y lo que el Program Change escribe desde el hilo
+    // de audio (KoniSynth.cpp, applyDx7Program), calculado de antemano para no reservar memoria allí
+    static std::vector<std::pair<juce::RangedAudioParameter*, float>> normalised (const Voice& v, juce::AudioProcessorValueTreeState& apvts)
+    {
+        std::vector<std::pair<juce::RangedAudioParameter*, float>> out;
+        for (const auto& [id, value] : values (v))
             if (auto* p = dynamic_cast<juce::RangedAudioParameter*> (apvts.getParameter (id)))
             {
                 const auto& range = p->getNormalisableRange();
-                p->beginChangeGesture();
-                p->setValueNotifyingHost (p->convertTo0to1 (juce::jlimit (range.start, range.end, (float) value)));
-                p->endChangeGesture();
+                out.push_back ({ p, p->convertTo0to1 (juce::jlimit (range.start, range.end, (float) value)) });
             }
-        };
+        return out;
+    }
+
+    // Parámetros del motor FM 6-Op (DX7) con el valor real de la voz
+    static std::vector<std::pair<juce::String, int>> values (const Voice& v)
+    {
+        std::vector<std::pair<juce::String, int>> out;
+        const auto set = [&out] (const juce::String& id, int value) { out.push_back ({ id, value }); };
         const auto& e = v.vced;
         for (int k = 0; k < 6; ++k)
         {
@@ -133,5 +150,6 @@ struct Dx7Syx
         set ("fmOscSync", e[136]);
         set ("fmLfoSync", e[141]);
         set ("fmTranspose", (int) e[144] - 24); // 24 = sin transponer
+        return out;
     }
 };

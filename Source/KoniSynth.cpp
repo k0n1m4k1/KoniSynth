@@ -156,7 +156,7 @@ public:
         monoSynth.setMinimumRenderingSubdivisionSize (1, true);
         perfMacros.attach (apvts);
         undoHistory.attach (*this, apvts, { PerfMacros::mapProp, PerfMacros::namesProp, chipMacrosProp, mdMacrosProp, snesMacrosProp,
-                                            "presetName", "presetFactory", "dx7Voice" });
+                                            "presetName", "presetFactory", "dx7Voice", "dx7Bank" });
         presetManager.onBulkChange = [this] (bool begin) { if (begin) undoHistory.beginGroup(); else undoHistory.endGroup(); };
 
         migrateLegacyConfig(); // .txt de ajustes de versiones anteriores -> config.settings (Settings/Config.h)
@@ -287,6 +287,32 @@ public:
         gusPatchNames = names;
     }
     void setGusFolder (const juce::File& folder) { setGusPatchFolder (folder); rebuildGus(); }
+
+    // Banco DX7 (.syx) del motor FM: la ruta va en la propiedad de estado "dx7Bank" (preset y proyecto). Sus voces, en
+    // dx7BankVoices (hilo de mensajes: lista del bloque FM) y, ya convertidas a parámetros, en dx7ProgramSlot para el Program
+    // Change, que el DX7 usa para elegir voz (0-31 = voz 1-32)
+    static constexpr const char* dx7BankProp = "dx7Bank";
+    juce::String loadDx7Bank (const juce::File& file) // hilo de mensajes; devuelve el error o vacío
+    {
+        std::vector<Dx7Syx::Voice> voices;
+        if (const auto error = Dx7Syx::loadVoices (file, voices); error.isNotEmpty())
+            return error;
+        publishDx7Bank (std::move (voices), file.getFullPathName());
+        apvts.state.setProperty (dx7BankProp, file.getFullPathName(), nullptr);
+        return {};
+    }
+    const std::vector<Dx7Syx::Voice>& getDx7BankVoices() const { return dx7BankVoices; }
+    int getDx7BankVersion() const { return dx7BankVersion; }
+    // Elige una voz del banco desde la UI: un paso de deshacer (parámetros y pantalla)
+    void selectDx7Voice (int index)
+    {
+        if (index < 0 || index >= (int) dx7BankVoices.size())
+            return;
+        undoHistory.beginGroup();
+        Dx7Syx::apply (dx7BankVoices[(size_t) index], apvts);
+        setDx7VoiceProperty (index);
+        undoHistory.endGroup();
+    }
     juce::String getGusStatus() const { const juce::ScopedLock sl (sampleInfoLock); return gusStatus; }
     juce::StringArray getGusPatchNames() const { const juce::ScopedLock sl (sampleInfoLock); return gusPatchNames; }
     const GusEngine::View& getGusView() const { return gusEngine.view; }
@@ -504,6 +530,8 @@ public:
             if (message.isAllSoundOff())
                 panicRequested = true;
             midiLearn.handle (message, getParameters());
+            if (message.isProgramChange() && (int) params.engine->load() == 6)
+                applyDx7Program (message.getProgramChangeNumber());
             const auto mpe = params.mpeOn->load() > 0.5f;
             if (message.isPitchWheel() && ! (mpe && message.getChannel() != 1)) // 0..16383, centro 8192; en MPE solo el maestro
                 params.pitchBend = (float) (message.getPitchWheelValue() - 8192) / 8192.0f * params.bendRange->load();
@@ -1179,6 +1207,7 @@ public:
         osc3WavetableSlot.blocksDone.fetch_add (1, std::memory_order_release);
         mt32Engine.slot.blocksDone.fetch_add (1, std::memory_order_release);
         gusEngine.slot.blocksDone.fetch_add (1, std::memory_order_release);
+        dx7ProgramSlot.blocksDone.fetch_add (1, std::memory_order_release);
     }
 
     // Ring buffer mono para el osciloscopio: escribe el hilo de audio, lee el de UI (lock-free).
@@ -1595,7 +1624,8 @@ public:
     // y los consume el editor, uno a uno
     struct MissingFile
     {
-        enum class Kind { sample, wavetable, cabIr, osc2Sample, osc2Wavetable, dpcmSample, mdSample, snesSample, n64Sample, osc3Sample, osc3Wavetable };
+        enum class Kind { sample, wavetable, cabIr, osc2Sample, osc2Wavetable, dpcmSample, mdSample, snesSample, n64Sample, osc3Sample, osc3Wavetable,
+                          dx7Bank };
         Kind kind;
         juce::File file;
         bool unreadable = false;
@@ -2190,6 +2220,7 @@ private:
         snesMacroSlot.collect();
         mt32Engine.slot.collect();
         gusEngine.slot.collect();
+        updateDx7Bank();
         for (auto& b : rhythmBanks) b.slot.collect();
         if (++rhythmPollTicks >= 10) // ficheros de ritmos de usuario: una vez por segundo
         {
@@ -2228,6 +2259,62 @@ public:
         b.slot.replace (UserRhythms::loadBank (t));
     }
 private:
+    // Banco DX7: si la ruta del estado cambió (preset, proyecto, deshacer), se relee; si falta o no se puede leer, se avisa
+    // (Locate... / Ignore) y la lista queda vacía. Después, la voz elegida por Program Change pasa a la pantalla (dx7Voice)
+    void updateDx7Bank()
+    {
+        dx7ProgramSlot.collect();
+        if (const auto path = apvts.state.getProperty (dx7BankProp).toString(); path != dx7BankLoaded)
+        {
+            std::vector<Dx7Syx::Voice> voices;
+            if (path.isNotEmpty())
+            {
+                const auto file = juce::File::isAbsolutePath (path) ? juce::File (path) : juce::File();
+                if (file == juce::File() || Dx7Syx::loadVoices (file, voices).isNotEmpty())
+                {
+                    voices.clear();
+                    reportMissing (MissingFile::Kind::dx7Bank, file, file.existsAsFile());
+                }
+            }
+            publishDx7Bank (std::move (voices), path);
+        }
+        if (const auto n = dx7ProgramPending.exchange (-1); n >= 0 && n < (int) dx7BankVoices.size())
+            undoHistory.withoutRecording ([this, n] { setDx7VoiceProperty (n); }); // MIDI: no es un paso de deshacer
+    }
+    void publishDx7Bank (std::vector<Dx7Syx::Voice> voices, const juce::String& path)
+    {
+        auto programs = std::make_unique<Dx7Programs>();
+        for (const auto& v : voices)
+            programs->voices.push_back (Dx7Syx::normalised (v, apvts));
+        dx7ProgramSlot.replace (voices.empty() ? nullptr : std::move (programs));
+        dx7BankVoices = std::move (voices);
+        dx7BankLoaded = path;
+        ++dx7BankVersion;
+    }
+    // "n|NOMBRE" de la pantalla del DX7: n = posición en el banco; 0 si el fichero era una voz suelta
+    void setDx7VoiceProperty (int index)
+    {
+        const auto number = dx7BankVoices.size() == 1 ? 0 : index + 1;
+        apvts.state.setProperty ("dx7Voice", juce::String (number) + "|" + dx7BankVoices[(size_t) index].name, nullptr);
+    }
+    // Hilo de audio: Program Change con el motor FM. Escribe los parámetros ya convertidos (sin reservar memoria; como el
+    // MIDI learn, sin gesto: no es un paso de deshacer) antes de que el motor lea el bloque; la pantalla, en el temporizador
+    void applyDx7Program (int program)
+    {
+        const auto* bank = dx7ProgramSlot.current.load (std::memory_order_acquire);
+        if (bank == nullptr || program < 0 || program >= (int) bank->voices.size())
+            return;
+        for (const auto& [p, value] : bank->voices[(size_t) program])
+            p->setValueNotifyingHost (value);
+        dx7ProgramPending.store (program);
+    }
+    struct Dx7Programs { std::vector<std::vector<std::pair<juce::RangedAudioParameter*, float>>> voices; };
+    DataSlot<Dx7Programs> dx7ProgramSlot;
+    std::vector<Dx7Syx::Voice> dx7BankVoices; // hilo de mensajes
+    juce::String dx7BankLoaded;
+    int dx7BankVersion = 0;
+    std::atomic<int> dx7ProgramPending { -1 };
+
     struct RhythmBank { DataSlot<UserRhythms::Bank> slot; juce::String signature; };
     std::array<RhythmBank, (size_t) UserRhythms::Target::count> rhythmBanks;
     int rhythmPollTicks = 0;

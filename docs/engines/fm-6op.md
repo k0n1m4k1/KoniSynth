@@ -32,6 +32,7 @@ Header buttons:
 - **Operators...** opens the FM editor (see below).
 - **Function...** opens the DX7 Function settings: performance controllers, Mono and portamento (see below).
 - **Load .syx...** loads a DX7 voice or a 32-voice bank into the 6 operators.
+- **Voice** lists the voices of the loaded .syx: pick one to load it (one undo step). Greyed out until a .syx is loaded.
 
 ### FM LFO
 
@@ -160,6 +161,10 @@ the DX7.
 4. The voice writes all operator parameters, Algorithm, Feedback, the LFO settings (with LFO key sync), the pitch
    envelope, Transpose and oscillator key sync.
 5. The display shows it as a cartridge voice, with its number in the bank.
+6. The bank stays loaded: the **Voice** list in the block header picks any other voice without loading the file again,
+   and MIDI Program Change 0-31 picks voice 1-32, as on the DX7 (only with the FM engine; not an undo step, like other
+   MIDI). The preset and the project save the bank's path and the voice; if the file has moved, KoniSynth asks to
+   locate it (the voice's settings are already in the preset, so ignoring only leaves the list empty).
 
 ### Building a sound from INIT
 
