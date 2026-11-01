@@ -513,7 +513,8 @@ public:
                    .withKnob (s, "opllVolume", "Volume").withKnob (s, "opllSustain", "SUS");
         oplLfoSection.withExtraToggle (s, "oplVelocity", "Velocity")
                      .withKnob (s, "oplDeepTremolo", "Deep AM").withKnob (s, "oplDeepVibrato", "Deep VIB")
-                     .withKnob (s, "oplPan", "Pan").withKnob (s, "oplOutput", "Output");
+                     .withHeaderControl ({}, oplOutputSwitch, oplOutputSwitch.preferredWidth()) // Mono <-> Stereo
+                     .withKnob (s, "oplPan", "Pan");
         mdLfoSection.withCombo (s, "mdLfo").withExtraToggle (s, "mdVelocity", "Velocity")
                     .withKnob (s, "mdPms", "PMS").withKnob (s, "mdAms", "AMS").withKnob (s, "mdPan", "Pan")
                     .withKnob (s, "mdOutput", "Output");
@@ -1847,19 +1848,29 @@ private:
         dim (gusSection.knobFor ("gusRam"), (int) v ("gusModel") == 2);
         // OPL: GM solo con el OPL3; con GM, el banco pone los operadores y el driver el volumen y el paneo
         const auto oplGm = (int) v ("oplModel") == 1 && v ("oplGm") > 0.5f;
-        const auto opl2 = (int) v ("oplModel") == 0;
+        const auto opl2 = (int) v ("oplModel") == 0, opll = (int) v ("oplModel") >= 2;
         const auto oplFour = (int) v ("oplModel") == 1 && v ("oplFourOp") > 0.5f && ! oplGm;
         const auto oplRhythm = ! oplGm && v ("oplRhythm") > 0.5f;
         oplRhythmSection.setHeaderControlAlpha ((int) v ("oplModel") != 1 ? 0.35f : 1.0f);
         oplRhythmSection.setExtraToggleAlpha (oplGm ? 0.35f : 1.0f); // Rhythm: no con Multitimbral
-        for (const char* id : { "oplAlgorithm", "oplFeedback", "opl1Tl", "opl2Tl" })
+        for (const char* id : { "oplFeedback", "opl1Tl" })
             dim (oplSection.knobFor (id), oplGm);
+        for (const char* id : { "oplAlgorithm", "opl2Tl" }) // OPLL / VRC7: el User es siempre FM y su volumen es Volume
+            dim (oplSection.knobFor (id), oplGm || opll);
+        if (auto* gold = oplSection.headerButton (1)) // Gold...: la AdLib Gold solo llevaba OPL3
+        {
+            gold->setEnabled ((int) v ("oplModel") == 1);
+            gold->setAlpha ((int) v ("oplModel") == 1 ? 1.0f : 0.35f);
+        }
+        for (const char* id : { "oplDeepTremolo", "oplDeepVibrato" }) // OPLL: profundidades fijas
+            dim (oplLfoSection.knobFor (id), opll);
+        oplOutputSwitch.setLock (opl2 || opll ? 0 : -1); // OPL2 y OPLL: mono
         for (const char* id : { "opl3Tl", "opl4Tl" }) // OP3/OP4: solo con 4 operadores
             dim (oplSection.knobFor (id), ! oplFour);
         for (const char* id : { "oplBdTl", "oplSdTl", "oplTomTl", "oplCyTl", "oplHhTl" })
             dim (oplRhythmSection.knobFor (id), ! oplRhythm);
-        dim (oplLfoSection.knobFor ("oplPan"), oplGm || opl2); // el OPL2 es mono
-        dim (oplLfoSection.knobFor ("oplOutput"), opl2);
+        dim (oplLfoSection.knobFor ("oplPan"), oplGm || opl2 || opll); // OPL2 y OPLL: mono
+        opllSection.setExtraToggleAlpha ((int) v ("oplModel") == 3 ? 0.35f : 1.0f); // Rhythm: la VRC7 no tiene ritmo
         // Synth.h: sin V.Pan no hay paneo que repartir (Pan Mode está en el diálogo Voice Pan... de Amp Envelope)
         dim (paramPanel != nullptr ? paramPanel->knobFor ("voicePanMode") : nullptr, std::abs (v ("voicePan")) < 1.0e-4f);
     }
@@ -3571,6 +3582,7 @@ private:
     ShaperView voiceSatView { koni.apvts, Shapers::voiceSat() }, crushView { koni.apvts, Shapers::crush() }, tubeView { koni.apvts, Shapers::tube() };
     EqCurve eqMiniCurve { koni.apvts, true }; // curva del EQ en su bloque (UI/EqPanel.h)
     ParamToggle oplMultiToggle { koni.apvts, "oplGm", "Multitimbral" }; // antes que oplSection (componente de su cabecera)
+    SlideSwitch oplOutputSwitch { koni.apvts, "oplOutput", "Mono", "Stereo", true }; // 1 = Mono: a la izquierda
     ParamToggle drumCh10Toggle { koni.apvts, "drumCh10", "Ch 10" };     // antes que drumSection
     AnsPlateView ansMiniPlate { koni, true }; // placa del ANS en su bloque (UI/AnsPanel.h)
     // Paneles de conexiones (UI/PatchBay.h): el del complejo (dentro de su sección) y el de los destinos de los LFO

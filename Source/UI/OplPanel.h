@@ -9,7 +9,8 @@ public:
     explicit OplPanel (KoniSynthProcessor& p) : koni (p)
     {
         auto& s = p.apvts;
-        header.withExtraToggle (s, "oplFourOp", "4-Op") // OPL3: pares de canales con 4 operadores
+        // Conexión: 2 operadores (FM o AM, con Algorithm) o 4 operadores (OPL3); bloqueado en la que admite el modelo
+        header.withHeaderControl ({}, connection, connection.preferredWidth())
               .withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         addAndMakeVisible (header);
         diagram.setJustificationType (juce::Justification::centredLeft);
@@ -99,9 +100,6 @@ public:
     }
 
 private:
-    // 4-Op atenuado sin efecto: solo el OPL3 y no en el modo Multitimbral
-    void dimExtra (bool inert) { header.setExtraToggleAlpha (inert ? 0.35f : 1.0f); }
-
     juce::Rectangle<int> columnArea (int i) const
     {
         const auto w = grid.getWidth() / 4;
@@ -114,7 +112,11 @@ private:
         const auto four = (int) s.getRawParameterValue ("oplModel")->load() == 1 && s.getRawParameterValue ("oplFourOp")->load() > 0.5f;
         auto alg = juce::jlimit (0, 3, (int) s.getRawParameterValue ("oplAlgorithm")->load());
         if (! four) alg &= 1;
-        dimExtra ((int) s.getRawParameterValue ("oplModel")->load() != 1 || s.getRawParameterValue ("oplGm")->load() > 0.5f);
+        // OPL2 y OPL3 en Multitimbral (driver DMX): solo 2 operadores; OPLL / VRC7: el instrumento User es siempre FM
+        const auto model = (int) s.getRawParameterValue ("oplModel")->load();
+        const auto opll = model >= 2;
+        connection.setTexts (opll ? "FM" : "FM/AM", "4-Op");
+        connection.setLock (model == 1 && s.getRawParameterValue ("oplGm")->load() < 0.5f ? -1 : 0);
         if (alg == shownAlgorithm && four == fourOp)
             return;
         shownAlgorithm = alg;
@@ -147,6 +149,7 @@ private:
     };
 
     KoniSynthProcessor& koni;
+    SlideSwitch connection { koni.apvts, "oplFourOp", "FM/AM", "4-Op" }; // antes que header (componente de su cabecera)
     Section header { "OPL" };
     juce::Label diagram;
     AlgorithmDiagram algorithm; // cajas y conexiones del algoritmo (UI/AlgorithmDiagram.h)

@@ -1113,6 +1113,90 @@ struct ParamToggle : juce::ToggleButton
     ParamMenu menu;
 };
 
+// Conmutador de dos posiciones de un parámetro on/off con el nombre de cada opción a su lado ("FM/AM  o--*  4-Op"): se lee
+// qué hay a cada lado y cuál está elegida (texto encendido). lock (0 / 1) lo bloquea en la única opción que admite el estado
+// actual: la marca, apaga la otra y dibuja un candado; el parámetro conserva su valor (vuelve a contar al desbloquear).
+// inverted: la opción "encendida" del parámetro se dibuja a la izquierda (p. ej. oplOutput: 1 = Mono, a la izquierda de
+// Stereo, que es lo que más da); las posiciones de lock son siempre las dibujadas
+struct SlideSwitch : juce::ToggleButton
+{
+    SlideSwitch (APVTS& s, const juce::String& id, const juce::String& leftText, const juce::String& rightText, bool inverted = false)
+        : attachment (s, id, *this), menu (s, id, *this), texts { leftText, rightText }, invert (inverted)
+    {
+        setTooltip (paramTooltip (s, id));
+    }
+
+    void setTexts (const juce::String& offText, const juce::String& onText)
+    {
+        if (texts[0] == offText && texts[1] == onText) return;
+        texts = { offText, onText };
+        repaint();
+    }
+
+    // -1: libre; 0 / 1: bloqueado en esa posición
+    void setLock (int position)
+    {
+        if (lock == position) return;
+        lock = position;
+        setEnabled (lock < 0);
+        repaint();
+    }
+
+    void paintButton (juce::Graphics& g, bool over, bool) override
+    {
+        const auto pos = lock >= 0 ? lock : (getToggleState() != invert ? 1 : 0);
+        auto r = getLocalBounds().toFloat();
+        const auto font = juce::Font (juce::FontOptions (14.0f));
+        const auto lockW = lock >= 0 ? 16.0f : 0.0f;
+        const auto trackW = 34.0f, trackH = 14.0f;
+        const auto w0 = juce::GlyphArrangement::getStringWidth (font, texts[0]), w1 = juce::GlyphArrangement::getStringWidth (font, texts[1]);
+        const auto total = w0 + 8.0f + trackW + 8.0f + w1 + lockW;
+        auto x = r.getCentreX() - total * 0.5f;
+        const auto on = Skin::white(), off = Skin::white().withAlpha (0.3f);
+        g.setFont (font);
+        g.setColour (pos == 0 ? on : off);
+        g.drawText (texts[0], juce::Rectangle<float> (x, r.getY(), w0 + 1.0f, r.getHeight()), juce::Justification::centredLeft);
+        x += w0 + 8.0f;
+        const juce::Rectangle<float> track (x, r.getCentreY() - trackH * 0.5f, trackW, trackH);
+        g.setColour (Skin::black().withAlpha (0.55f));
+        g.fillRoundedRectangle (track, trackH * 0.5f);
+        g.setColour (Skin::c (0xff42a2c8).withAlpha (lock >= 0 ? 0.35f : over ? 1.0f : 0.8f));
+        g.drawRoundedRectangle (track, trackH * 0.5f, 1.2f);
+        const auto d = trackH - 4.0f;
+        const auto cx = pos == 0 ? track.getX() + 2.0f : track.getRight() - 2.0f - d;
+        g.setColour (lock >= 0 ? Skin::white().withAlpha (0.55f) : Skin::c (0xff42a2c8));
+        g.fillEllipse (cx, track.getY() + 2.0f, d, d);
+        x += trackW + 8.0f;
+        g.setColour (pos == 1 ? on : off);
+        g.drawText (texts[1], juce::Rectangle<float> (x, r.getY(), w1 + 1.0f, r.getHeight()), juce::Justification::centredLeft);
+        if (lock >= 0) // candado: cuerpo y arco
+        {
+            x += w1 + 6.0f;
+            const juce::Rectangle<float> body (x, r.getCentreY() - 2.0f, 9.0f, 7.0f);
+            g.setColour (Skin::white().withAlpha (0.55f));
+            g.fillRoundedRectangle (body, 1.5f);
+            juce::Path arc;
+            arc.addCentredArc (body.getCentreX(), body.getY(), 3.0f, 3.5f, 0.0f, -juce::MathConstants<float>::halfPi,
+                               juce::MathConstants<float>::halfPi, true);
+            g.strokePath (arc, juce::PathStrokeType (1.4f));
+        }
+    }
+
+    // Ancho para la cabecera: los dos textos, la pista y el candado
+    int preferredWidth() const
+    {
+        const auto font = juce::Font (juce::FontOptions (14.0f));
+        return juce::roundToInt (juce::GlyphArrangement::getStringWidth (font, texts[0]) + juce::GlyphArrangement::getStringWidth (font, texts[1])) + 34 + 16 + 16 + 12;
+    }
+
+private:
+    APVTS::ButtonAttachment attachment;
+    ParamMenu menu;
+    std::array<juce::String, 2> texts;
+    bool invert = false;
+    int lock = -1;
+};
+
 // UI: aspecto. Interruptores con LED rojo (encendido: rojo con halo; apagado: granate oscuro).
 struct KoniLookAndFeel : juce::LookAndFeel_V4
 {

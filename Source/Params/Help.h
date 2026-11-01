@@ -711,7 +711,7 @@ static juce::String paramHelp (const juce::String& id)
         { "opllSustain", "OPLL SUS bit: after the key is released, the note fades with a slow fixed release instead of the instrument's own." },
         { "opllRhythm", "YM2413 rhythm mode: channels 7-9 become bass drum, snare, tom, cymbal and hi-hat, played on MIDI channel 10 (General MIDI drum notes); 6 melodic voices remain. The VRC7 has no rhythm output." },
         { "oplModel", "OPL2 = Yamaha YM3812 (AdLib, Sound Blaster 1-2): 9 two-operator voices, 4 waveforms, mono, and the YM3014 floating-point DAC that drops the low bits of loud signals (its typical grit). OPL3 = YMF262 (Sound Blaster Pro 2, 16): 18 voices or 6 four-operator voices, 8 waveforms, stereo. OPLL = YM2413 (Japanese Master System FM, MSX-MUSIC): 9 voices, 15 ROM instruments + 1 user, optional drums. VRC7 = Konami's OPLL in Lagrange Point: 6 voices, its own ROM set. OPLL and VRC7 are cycle-accurate (Nuked-OPLL)." },
-        { "oplFourOp", "OPL3 only: pairs of channels become 4-operator voices (6 voices) with 4 algorithms." },
+        { "oplFourOp", "Connection: FM/AM = 2 operators per voice (FM or AM, set with Algorithm); 4-Op = OPL3 only, pairs of channels become 4-operator voices (6 voices) with 4 algorithms. Locked on FM/AM with the OPL2 and in Multitimbral mode, and on FM with OPLL/VRC7. Default FM/AM." },
         { "oplGm", "Multitimbral, OPL3 only. Off (default): one sound, set by the controls. On: General MIDI on 16 channels, the way games played "
                    "MIDI on an OPL3 with the DMX driver (Doom and others), with the DMXOPL3 bank: each channel has its own "
                    "instrument (Program Change), channel 10 is drums, CC 7 volume and CC 10 pan. The operator controls are not used." },
@@ -721,7 +721,7 @@ static juce::String paramHelp (const juce::String& id)
         { "oplDeepVibrato", "Register BDh bit 6 (DVB): vibrato depth 14 cents instead of 7, for operators with Vibrato on." },
         { "oplVelocity", "Velocity lowers the carriers' Total Level (0.75 dB steps), as a sound driver would; the chip itself has no velocity." },
         { "oplPan", "OPL3 stereo (register C0h bits 4-5: left, right or both). Alternate: voices go left, right, left... The OPL2 is mono." },
-        { "oplOutput", "Stereo (OPL3) or both sides summed to mono." },
+        { "oplOutput", "Stereo (OPL3, default) or both sides summed to mono. Locked on Mono with the OPL2 and OPLL/VRC7, which are mono chips." },
         { "oplRhythm", "Rhythm mode of the OPL2 / OPL3 chip (register BDh): chip channels 6-8 become bass drum, snare, tom, top cymbal "
                        "and hi-hat on MIDI channel 10 (General MIDI drum notes); 6 melodic voices remain on the OPL2, 15 on the OPL3. "
                        "The drum sounds are the defaults of Ad Lib's 1987 Music SDK. Not with Multitimbral. Off by default." },

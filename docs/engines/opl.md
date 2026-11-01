@@ -32,8 +32,10 @@ Default patch: 2 operators in FM, the modulator silent (TL 63) and the carrier a
 In the OPL editor (Operators...), each operator column shows its envelope with the chip's times (at C4, with KSR), drawn
 from the chip's own envelope generator; drag its points for AR, DR and SL, and RR.
 
-**OPL editor (Operators...).** In its header, **4-Op** (OPL3 only: pairs of channels become 4-operator voices, 6 voices, with
-4 algorithms; off by default), Algorithm and Feedback. Columns OP1-OP4 with the chip's own registers, carriers highlighted, the algorithm drawn as
+**OPL editor (Operators...).** In its header, the **FM/AM - 4-Op** switch: 2 operators per voice (FM or AM, chosen with
+Algorithm) or, OPL3 only, 4 operators (pairs of channels become 6 four-operator voices with 4 algorithms). It is locked on
+FM/AM with the OPL2 and in Multitimbral mode, and on FM with OPLL/VRC7 (their User instrument is always FM). Then Algorithm
+and Feedback. Columns OP1-OP4 with the chip's own registers, carriers highlighted, the algorithm drawn as
 a diagram (operator boxes, modulation lines, output line and the feedback loop on OP1) and written out;
 OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 
@@ -82,7 +84,7 @@ one); KoniSynth plays it at the tom-tom's 65.0 Hz.
 | Deep AM | Register BDh bit 7 (DAM): tremolo depth 4.8 dB instead of 1 dB. | off |
 | Deep VIB | Register BDh bit 6 (DVB): vibrato depth 14 cents instead of 7. | off |
 | Pan | OPL3 stereo (register C0h bits 4-5). Alternate: voices go left, right, left... The OPL2 is mono. | Center / Left / Right / Alternate L/R; Center |
-| Output | Stereo (OPL3) or both sides summed to mono. | Stereo (OPL3) / Mono; Stereo |
+| Mono / Stereo (header switch) | OPL3 stereo, or both sides summed to mono. Locked on Mono with the OPL2 and OPLL/VRC7 (mono chips). | Stereo |
 
 ### AdLib Gold (Gold...)
 
