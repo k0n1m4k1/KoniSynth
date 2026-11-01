@@ -16,6 +16,9 @@
 //   fila, M (mute) y S (solo).
 // - GM>MT-32: convierte un .mid de General MIDI para el MT-32 (SessionTransport::setGmToMt32); el transporte lo activa al
 //   cargar un fichero sin SysEx del MT-32.
+// - Multitimbral: con un .mid de varios canales y un motor que puede tocarlos (MT-32, Gravis, OPL3, caja de ritmos), un chip avisa si
+//   su interruptor (Multitimbral, o Ch 10 en la caja de ritmos) está apagado y lo enciende con un clic (un paso de deshacer). No se
+//   enciende solo: el ajuste es del preset.
 // - Posición, imán, línea, lista, volumen y los 8 ficheros recientes se guardan en config.settings (claves midiPlayer*).
 // Todo pintado a mano (sin ListBox, cuyo paint recibe filas fuera de rango); tooltips propios por zona.
 class MidiMusicPlayer : public juce::Component, public juce::TooltipClient, private juce::Timer
@@ -175,6 +178,7 @@ public:
         if (closeBox.expanded (2).contains (p)) { pressed = -2; return; }
         if (shadeBox.expanded (2).contains (p)) { pressed = -3; return; }
         if (gripArea().contains (p)) { dragging = resizeList; dragRows = visibleRows; return; }
+        if (! shade && multiChip.contains (p)) { turnOnMulti(); return; }
         for (const auto& b : buttons)
             if (b.area.contains (p)) { pressed = b.id; repaint(); return; }
         if (! shade && sliderTrack (volumeRow).expanded (0, 4).contains (p)) { dragging = volume; mouseDrag (e); return; }
@@ -281,12 +285,17 @@ public:
                     case bClear: return "Remove the loop.";
                     case bList:  return "Show or hide the list of parts.";
                     case bRecent: return "The last 8 MIDI files you opened.";
-                    case bGm:    return "GM to MT-32: plays a General MIDI file on the Roland MT-32 engine (turn its Multi on). Programs are "
+                    case bGm:    return "GM to MT-32: plays a General MIDI file on the Roland MT-32 engine (turn its Multitimbral on). Programs are "
                                         "mapped to MT-32 patches, panning is flipped and the MT-32 is set up like a GM module (parts on "
                                         "channels 1-8, rhythm on 10; channels 9 and 11-16 stay silent). On by default for files without "
                                         "MT-32 SysEx.";
                     default: break;
                 }
+        if (! shade && multiChip.contains (p))
+            return "This MIDI file uses " + juce::String (songChannels()) + " channels, but the engine plays them as one part "
+                   "(notes of different channels collide and drums play as the melody sound). Click to turn on "
+                   + juce::String (multiSwitch().label) + (koniEngine() == 13 && (int) koni.apvts.getRawParameterValue ("oplModel")->load() != 1
+                                                           ? " (this also switches the OPL model to OPL3, the only one with it)." : ".");
         if (closeBox.expanded (2).contains (p)) return "Close the player.";
         if (gripArea().contains (p)) return "Drag up or down to show fewer or more parts.";
         if (shadeBox.expanded (2).contains (p)) return shade ? "Full player." : "One-line player (also double-click the title).";
@@ -305,6 +314,52 @@ public:
     }
 
 private:
+    // Interruptor multitímbrico del motor elegido: parámetro, si está encendido, textos del chip
+    struct MultiSwitch { const char* id = nullptr; bool on = false; const char* onText = ""; const char* offText = ""; const char* label = ""; };
+    int koniEngine() const { return juce::roundToInt (koni.apvts.getRawParameterValue ("engine")->load()); }
+    MultiSwitch multiSwitch() const
+    {
+        const auto on = [this] (const char* id) { return koni.apvts.getRawParameterValue (id)->load() > 0.5f; };
+        switch (koniEngine())
+        {
+            case 14: return { "mt32Multi", on ("mt32Multi"), "MT-32 MULTITIMBRAL", "MT-32 SINGLE", "MULTITIMBRAL" };
+            case 15: return { "gusMulti", on ("gusMulti"), "GUS MULTITIMBRAL", "GUS SINGLE", "MULTITIMBRAL" };
+            case 13: return { "oplGm", on ("oplGm") && (int) koni.apvts.getRawParameterValue ("oplModel")->load() == 1, "OPL MULTITIMBRAL", "OPL SINGLE", "MULTITIMBRAL" };
+            case 5:  return { "drumCh10", on ("drumCh10"), "DRUMS CH 10", "DRUMS ALL CH", "CH 10" };
+            default: return {};
+        }
+    }
+    // Canales MIDI distintos que usa el .mid
+    int songChannels() const
+    {
+        if (song == nullptr) return 0;
+        std::bitset<17> used;
+        for (const auto& t : song->tracks) used.set ((size_t) juce::jlimit (1, 16, t.channel));
+        return (int) used.count();
+    }
+    // Enciende el interruptor (un paso de deshacer). OPL: Multitimbral solo existe en el OPL3, así que también pasa a ese modelo
+    void turnOnMulti()
+    {
+        const auto sw = multiSwitch();
+        if (sw.id == nullptr) return;
+        const auto set = [this] (const char* id, float real)
+        {
+            if (auto* p = koni.apvts.getParameter (id))
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (p->convertTo0to1 (real));
+                p->endChangeGesture();
+            }
+        };
+        koni.undoHistory.beginGroup();
+        if (koniEngine() == 13) set ("oplModel", 1.0f);
+        set (sw.id, 1.0f);
+        koni.undoHistory.endGroup();
+        repaint();
+    }
+    mutable juce::Rectangle<int> multiChip;
+    mutable int multiChipIndex = -1;
+
     enum ButtonId { bPlay = 1, bPause, bStop, bEject, bModePlay, bModeWait, bModeFollow, bSetA, bSetB, bClear, bList, bRecent, bGm };
     struct Button { int id; juce::Rectangle<int> area; };
     enum Drag { none, window, volume, tempo, seek, resizeList };
@@ -477,11 +532,19 @@ private:
     {
         juce::StringArray chips;
         const auto engine = juce::roundToInt (koni.apvts.getRawParameterValue ("engine")->load());
-        const auto multi = koni.apvts.getRawParameterValue ("mt32Multi")->load() > 0.5f;
         if (song != nullptr)
             chips.add (juce::String (song->bpmAt (juce::jmax (0.0, currentSeconds())) * transport.getTempoScale(), 1) + " BPM");
-        const auto gusMulti = koni.apvts.getRawParameterValue ("gusMulti")->load() > 0.5f;
-        chips.add (engine == 14 ? (multi ? "MT-32 MULTI" : "MT-32 SINGLE") : engine == 15 ? (gusMulti ? "GUS MULTI" : "GUS SINGLE") : "ONE SOUND");
+        // Interruptor multitímbrico del motor: el chip avisa (con acento) si el .mid usa varios canales y está apagado; un clic lo
+        // enciende (multiChip)
+        const auto sw = multiSwitch();
+        multiChipIndex = -1;
+        if (sw.id == nullptr)
+            chips.add ("ONE SOUND");
+        else
+        {
+            if (! sw.on && songChannels() > 1) multiChipIndex = chips.size();
+            chips.add (sw.on ? sw.onText : (songChannels() > 1 ? juce::String (sw.offText) + ": CLICK FOR " + sw.label : juce::String (sw.offText)));
+        }
         if (engine == 14 && song != nullptr && transport.getGmToMt32())
         {
             int silent = 0; // con GM>MT-32 el MT-32 escucha los canales 1-8 y 10
@@ -501,17 +564,21 @@ private:
         const juce::Font font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 9.5f, juce::Font::plain));
         g.setFont (font);
         auto x = (float) chipsArea.getX();
-        for (const auto& c : chips)
+        multiChip = {};
+        for (int i = 0; i < chips.size(); ++i)
         {
+            const auto& c = chips[i];
             const auto w = juce::GlyphArrangement::getStringWidth (font, c) + 8.0f;
             const auto box = juce::Rectangle<float> (x, (float) chipsArea.getY(), w, (float) chipsArea.getHeight());
             if (box.getRight() > (float) chipsArea.getRight()) break;
-            g.setColour (pal.lcd);
+            const auto warn = i == multiChipIndex; // aviso: fondo de acento, se puede pulsar
+            g.setColour (warn ? pal.accent : pal.lcd);
             g.fillRect (box);
-            g.setColour (pal.dim);
+            g.setColour (warn ? pal.accent.brighter (0.4f) : pal.dim);
             g.drawRect (box, 1.0f);
-            g.setColour (pal.ink);
+            g.setColour (warn ? juce::Colours::black : pal.ink);
             g.drawText (c, box, juce::Justification::centred);
+            if (warn) multiChip = box.toNearestInt();
             x += w + 4.0f;
         }
     }
@@ -644,6 +711,18 @@ private:
         const auto r = b.area.toFloat();
         const auto over = isMouseOver (true) && b.area.contains (getMouseXYRelative());
         const auto down = pressed == b.id;
+        if (b.id == bGm) // interruptor: LED rojo y texto, sin tecla (como los interruptores de los bloques)
+        {
+            const auto lit = isOn (b.id);
+            const auto led = juce::Rectangle<float> (7.0f, 7.0f).withCentre ({ r.getX() + 6.0f, r.getCentreY() });
+            if (lit) { g.setColour (juce::Colour (0xffff3030).withAlpha (0.35f)); g.fillEllipse (led.expanded (2.5f)); }
+            g.setColour (lit ? juce::Colour (0xffff5a4a) : juce::Colour (0xff3a1414));
+            g.fillEllipse (led);
+            g.setColour (over ? pal.text : pal.sub);
+            g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
+            g.drawText ("GM>MT-32", r.withTrimmedLeft (14.0f), juce::Justification::centredLeft, false);
+            return;
+        }
         paintCap (g, r, over, down);
         const auto on = isOn (b.id);
         const auto rr = down ? r.translated (0.0f, 1.0f) : r;
