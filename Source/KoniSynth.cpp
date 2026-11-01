@@ -278,12 +278,18 @@ public:
         gusBuilt = true;
         juce::String report;
         auto bank = GusBank::load (gusPatchFolder(), report);
+        juce::StringArray names; // por índice del banco: el display los muestra sin tocar el banco (que se libera en el audio)
+        if (bank != nullptr)
+            for (const auto& p : bank->patches) names.add (p->name);
         gusEngine.slot.replace (std::move (bank));
         const juce::ScopedLock sl (sampleInfoLock);
         gusStatus = report;
+        gusPatchNames = names;
     }
     void setGusFolder (const juce::File& folder) { setGusPatchFolder (folder); rebuildGus(); }
     juce::String getGusStatus() const { const juce::ScopedLock sl (sampleInfoLock); return gusStatus; }
+    juce::StringArray getGusPatchNames() const { const juce::ScopedLock sl (sampleInfoLock); return gusPatchNames; }
+    const GusEngine::View& getGusView() const { return gusEngine.view; }
     bool hasGusBank() const { bool has = false; gusEngine.slot.withCurrent ([&has] (const GusBank* b) { has = b != nullptr; }); return has; }
     juce::String getMt32Status() const { const juce::ScopedLock sl (sampleInfoLock); return mt32Status; }
     juce::String getMt32Lcd() const { return mt32Engine.lcdText(); }
@@ -2005,6 +2011,7 @@ private:
     int mt32BuiltModel = -1, mt32BuiltQueue = 0; // con qué se construyó la máquina: si cambian, se reconstruye
     juce::String mt32Status; // protegido por sampleInfoLock
     juce::String gusStatus;  // protegido por sampleInfoLock
+    juce::StringArray gusPatchNames; // nombres por índice del banco; protegido por sampleInfoLock
     AnsSlot ansSlot;
     MacroSlot chipMacroSlot, mdMacroSlot, snesMacroSlot;
     std::array<juce::int64, 3> macroHash { -1, -1, -1 };

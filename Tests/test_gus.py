@@ -93,4 +93,42 @@ c.check(abs(lfo - lfo_expected) < 0.03 * lfo_expected and 4.5 < swing < 7.5,
 # Percusión (Keys = Rhythm): la tecla 36 del drumset suena
 x, fs = render(['GUS Keys=Rhythm'], 0.6, ['36:0.05:0.4:127'], 'gus.wav', engine='Gravis UltraSound')
 c.check(np.max(np.abs(x)) > 0.05, 'Rhythm, tecla 36 del drumset: suena (pico %.1f dBFS)' % db(np.max(np.abs(x))))
+
+
+def thd(x, fs):
+    """Distorsión armónica (armónicos 2-20 frente al fundamental), en dB, sobre 0,2-0,8 s."""
+    y = x[int(0.2 * fs):int(0.8 * fs)]
+    f0 = pitch(x, fs)
+    spec = np.abs(np.fft.rfft(y * np.blackman(len(y)))) ** 2
+    freqs = np.fft.rfftfreq(len(y), 1 / fs)
+    band = lambda f: spec[(freqs > f - 15) & (freqs < f + 15)].sum()
+    return 10 * np.log10(sum(band(k * f0) for k in range(2, 21) if k * f0 < fs / 2 - 100) / band(f0))
+
+
+# Patches de 8 bits (ULTRAMID sin -16 se queda con el byte alto de cada muestra): el seno de 16 bits (amplitud 16 000) pasa a
+# pasos de 256, con distorsión armónica de unos -44 dB (calculado: 6,02·8 + 1,76 - 20·log10(32 768 / 16 000)); en 16 bits, solo
+# la de la interpolación lineal (por debajo de -70 dB)
+x8, fs = render(['--param=gusVoices=14', '--param=gusPatchBits=0'], 1.0, ['69:0.05:0.9:127'], 'gus.wav', engine='Gravis UltraSound')
+x16, fs = render(['--param=gusVoices=14', '--param=gusPatchBits=1'], 1.0, ['69:0.05:0.9:127'], 'gus.wav', engine='Gravis UltraSound')
+d8, d16 = thd(x8, fs), thd(x16, fs)
+c.check(-55 < d8 < -35 and d16 < d8 - 15,
+        'patches en 8 bits: distorsión armónica %.1f dB (esperado unos -44 dB); en 16 bits %.1f dB' % (d8, d16))
+
+# ULTRAMID.INI: el programa 0 suena con su propio patch con 1 MB y con el del programa 1 (el de vibrato) con 256 KB
+uini = tempfile.mkdtemp(prefix='koni_gus_ultramid_')
+make_patch(os.path.join(uini, 'sine.pat'))
+make_patch(os.path.join(uini, 'vib.pat'), (VIB_SWEEP, VIB_RATE, VIB_DEPTH))
+open(os.path.join(uini, 'ULTRAMID.INI'), 'w').write('# Patch #  256K  512K  768K  1024K  Patch Name\n0, 1, 1, 1, 0, sine\n1, 1, 1, 1, 1, vib\n')
+os.environ['KONI_GUS_PATCHES'] = uini
+
+
+def swing_of(x, fs):
+    inst = fs / np.diff(crossings(x[:int(1.9 * fs)], fs))
+    return 100 * (np.percentile(inst, 99.5) / np.percentile(inst, 0.5) - 1) / 2
+
+
+s1 = swing_of(render(['--param=gusRam=3'], 2.0, ['69:0.05:1.9:127'], 'gus.wav', engine='Gravis UltraSound')[0], fs)
+s0 = swing_of(render(['--param=gusRam=0'], 2.0, ['69:0.05:1.9:127'], 'gus.wav', engine='Gravis UltraSound')[0], fs)
+c.check(s1 < 0.5 and s0 > 3.0,
+        'ULTRAMID.INI: programa 0 con 1 MB sin vibrato (±%.2f %%), con 256 KB el patch del programa 1 (±%.1f %%)' % (s1, s0))
 sys.exit(c.summary())

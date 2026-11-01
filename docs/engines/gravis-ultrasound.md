@@ -11,9 +11,13 @@ early-90s PC music played through the UltraSound's General MIDI driver, and for 
 
 1. Put the `.PAT` files and their map file in `Documents/KoniSynth/Patches/GUS` (the default folder), or press
    **Patches... > Choose patch folder...** and pick another folder. The choice is global for all KoniSynth instances.
-2. The map file can be a `timidity.cfg` (lines `<program> <file.pat>` under `bank 0`, and `<key> <file.pat>` under
-   `drumset 0`) or the Gravis `DEFAULT.CFG` (programs 128-255 are the drums). Patches are searched in the folder and its
-   subfolders.
+2. The map file can be, in this order of preference:
+   - Gravis' `ULTRAMID.INI` (in `ULTRASND\MIDI` of an original installation): the map the ULTRAMID driver used, with the
+     patch each program plays for every card memory size. With it, the RAM control works as on the card.
+   - A `timidity.cfg` (lines `<program> <file.pat>` under `bank 0`, and `<key> <file.pat>` under `drumset 0`).
+   - Gravis' `DEFAULT.CFG` (programs 1-128; the drums in its `begin_multipatch` block).
+
+   Patches are searched in the folder and its subfolders.
 3. Without patches, the section header says `no patches: see Patches...`.
 
 Sources of patches: the `ULTRASND\MIDI` folder of an original installation, or the free FreePats set (GPL-3.0 or later
@@ -36,8 +40,17 @@ with an exception; it sounds different from the Gravis set).
 | Multi | On: the 16 MIDI channels play as a General MIDI module (drums on channel 10), for .mid files and DAW tracks. Off: your keyboard plays the Keys setting. | off |
 | Keys | Program: your keyboard plays the program in the list. Rhythm: the drum kit (one sound per key). | Program |
 | Program | General MIDI program for Keys = Program (the sound comes from your patch set). | 1 - Acoustic Grand Piano |
-| RAM | Memory on the card: 256 KB, 512 KB, 768 KB or 1 MB. The driver loads the patches a song uses; when one does not fit, another patch of the same family plays instead. | 1 MB |
+| RAM | Memory on the card: 256 KB, 512 KB, 768 KB or 1 MB. With `ULTRAMID.INI`, each program plays the patch that file gives for this size (for example, with 256 KB the organs play the patch of program 3, Electric Grand Piano). Without it, patches load as they are used and one that does not fit is replaced by a loaded patch of the same family. | 1 MB |
 | Voices | Active voices of the GF1, 14 to 32. More voices lower the output rate: 44.1 kHz with 14, 30.9 kHz with 20, 19.3 kHz with 32. | 24 |
+| Bits | Sample depth of the loaded patches. 8-bit: ULTRAMID's default, which keeps the high byte of each 16-bit sample (more noise, half the memory). 16-bit: its `-16` option. | 8-bit |
+
+## Display
+
+The card had no display; this one shows what was invisible on it. Each of the 32 GF1 voices shows its note, patch, volume
+level, envelope point (0-5; S held at the sustain point, R released, E playing out to the end of the sample) and pan (the thin
+line under the level). A stolen voice flashes, and voices beyond the active count are faded. The footer gives the active
+voices and the chip rate they give, the card memory in use with a mark every 256 KB, the resident patches, how many programs
+play a substitute, the sample depth, and whether `ULTRAMID.INI` is in use.
 
 ## How it works
 
@@ -72,6 +85,8 @@ been verified.
 | Tremolo | A looping volume ramp around the sustain level. Depth: (depth + 1) / 8 steps of the 8-bit volume (about 0.38 dB each, up to about 12 dB). Speed from the same rate formula and the number of active voices. It only sounds while a note is held at its sustain point. The patch's tremolo sweep is not used by the library. |
 | Voice allocation | Round robin from the voice after the last one used. If none is free, the stolen voice is the released one, else one held by the pedal, else a sounding one (priorities 30 / 15 / 10); the oldest wins ties. The same key twice gets two voices. |
 | Other controllers | CC 64 holds released notes until the pedal is up. CC 121 resets bend, expression and pan only. CC 123-127 release the notes on all channels. CC 1 and the others are ignored. |
+| 8-bit loading (ULTRAMID v1.12) | Without `-16`, ULTRAMID copies only the high byte of each 16-bit sample (truncation, no rounding) and uploads it as 8-bit data; unsigned data is made signed by the card's DMA. |
+| Memory sizes (ULTRAMID v1.12) | `ULTRAMID.INI` lists, for every program and drum (128 + key), the number that plays with 256, 512, 768 and 1024 KB; number 128 is a silent "blank" patch. |
 
 What is an estimate (neither the SDK nor its library settles it):
 
@@ -82,7 +97,7 @@ What is an estimate (neither the SDK nor its library settles it):
 | Sample choice | The library keeps the voice's current sample while the note lies strictly inside its range. Otherwise it scans the first 16 samples and takes the first one that holds the note, unless the next one holds it too (with overlapping ranges the last one wins). With no match, the note is silent. Which sample counts as "current" when a note starts depends on the driver; here it is the last one. |
 | Patches without envelope | They play at the velocity level; the library leaves the previous volume. |
 | Stolen voice | It restarts at once; the library first ramps it down to the minimum. |
-| Memory | Patches load in order of use; one that does not fit is replaced by a loaded patch of the same General MIDI family (the real driver used per-game substitution lists). |
+| Memory without `ULTRAMID.INI` | Patches load in order of use; one that does not fit is replaced by a loaded patch of the same General MIDI family. |
 | Voices default | 24. |
 
 Not implemented yet: the Extreme's FM chip (ESS ES1688, for Sound Blaster compatibility), planned as a second phase.
@@ -96,6 +111,7 @@ engines. Microtuning is not applied.
   operation, volume ramping), chapter 2 (voice registers, timers), appendix F (patch header).
 - The same SDK's library, as linked into its patch editor `ULTRA3D\PATCH.EXE` (driver behaviour: functions such as
   `calculate_vibrato`, `calculate_tremolo`, `_GF1_HERTZ_ON/OFF`, `_GF1_MIDI_PARAMETER`).
+- Advanced Gravis, UltraSound software 4.11 for DOS (1995): `ULTRAMID.EXE` v1.12 (patch loading) and `ULTRAMID.INI`.
 - UltraSound FAQ v1.56 (the voices / playback rate table).
 - Wikipedia, "Gravis Ultrasound" (models, memory).
 - DOSBox Staging, `gus.cpp` (pan law and output filter used as estimates).

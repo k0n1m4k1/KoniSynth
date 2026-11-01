@@ -775,3 +775,184 @@ private:
     std::array<int, 9> cells {};
     std::array<bool, 9> sharps {};
 };
+
+//==============================================================================
+// Display del motor Gravis UltraSound. La tarjeta no tenía pantalla: muestra lo que en ella no se veía y cambia el sonido.
+// - Mapa de voces del GF1 (14-32): por voz, nota, patch, nivel de la rampa de volumen (12 bits), punto de la envolvente
+//   (0-5; S sostenida, R soltada, E acabando con el bucle apagado) y pan (0-15). Un robo de voz destella 300 ms; las voces por
+//   encima de las activas salen atenuadas.
+// - Pie: voces activas y la frecuencia del chip que dan (617,4 kHz / voces), RAM usada con marcas cada 256 KB, patches
+//   residentes, números que suenan con otro patch y profundidad de carga (8/16 bits).
+// Lee GusEngine::View (atómicos que escribe el audio) a 30 Hz; colores del skin, como el MIDI Music Player
+class GusDisplay : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit GusDisplay (KoniSynthProcessor& p) : processor (p)
+    {
+        setTooltip ("What the GF1 is doing: each voice with its note, patch, volume level, envelope point (0-5; S held, R released, "
+                    "E playing out) and pan (thin line). A stolen voice flashes. Footer: active voices and the chip rate they give, "
+                    "card memory in use, resident patches, programs playing a substitute, and the sample depth.");
+        startTimerHz (30);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        const auto ink = Skin::trace();
+        const auto lcd = Skin::mono() ? Skin::ramp().bg : Skin::current() == Skin::vintage ? juce::Colour (0xff040a06) : juce::Colour (0xff03080c);
+        const auto dim = lcd.interpolatedWith (ink, 0.38f), off = lcd.interpolatedWith (ink, 0.14f);
+        const auto hot = Skin::accent(), warn = juce::Colour (0xffff7a59);
+        auto r = getLocalBounds().toFloat().reduced (2.0f);
+        g.setColour (lcd);
+        g.fillRoundedRectangle (r, 4.0f);
+        g.setColour (juce::Colours::black);
+        g.drawRoundedRectangle (r, 4.0f, 1.0f);
+        r = r.reduced (8.0f, 6.0f);
+
+        const auto mono = [] (float h) { return juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), h, juce::Font::plain); };
+        const auto footH = juce::jlimit (16.0f, 22.0f, r.getHeight() * 0.12f);
+        auto foot = r.removeFromBottom (footH);
+        r.removeFromBottom (4.0f);
+        g.setColour (off);
+        g.fillRect (r.getX(), r.getBottom() + 1.0f, r.getWidth(), 1.0f);
+
+        // Mapa de voces: 4 columnas × 8 filas (2 × 16 si no cabe)
+        const auto cols = r.getWidth() >= 560.0f ? 4 : 2, rows = 32 / cols;
+        const auto cellW = r.getWidth() / (float) cols, cellH = r.getHeight() / (float) rows;
+        const auto fontH = juce::jlimit (9.0f, 15.0f, cellH * 0.62f);
+        g.setFont (mono (fontH));
+        const auto now = juce::Time::getMillisecondCounter();
+        for (int i = 0; i < 32; ++i)
+        {
+            const auto& cell = cells[(size_t) i];
+            auto c = juce::Rectangle<float> (r.getX() + cellW * (float) (i / rows), r.getY() + cellH * (float) (i % rows), cellW, cellH)
+                         .reduced (4.0f, 1.0f);
+            const auto inactive = i >= voices;
+            juce::Graphics::ScopedSaveState s (g);
+            if (inactive) g.setOpacity (0.22f);
+            const auto numW = fontH * 1.4f, noteW = fontH * 2.3f, stW = fontH * 0.9f, barW = juce::jmin (64.0f, c.getWidth() * 0.22f);
+            g.setColour (dim);
+            g.drawText (juce::String (i).paddedLeft ('0', 2), c.removeFromLeft (numW), juce::Justification::centredRight);
+            c.removeFromLeft (fontH * 0.4f);
+            auto st = c.removeFromRight (stW);
+            auto bar = c.removeFromRight (barW).withSizeKeepingCentre (barW, juce::jmin (8.0f, cellH * 0.32f));
+            c.removeFromRight (fontH * 0.4f);
+            if (inactive) continue;
+            if (! cell.sounding)
+            {
+                g.setColour (dim);
+                g.drawText ("free", c.withTrimmedLeft (noteW), juce::Justification::centredLeft);
+                continue;
+            }
+            const auto faded = cell.released ? 0.55f : 1.0f;
+            g.setColour (ink.withMultipliedAlpha (faded));
+            g.drawText (juce::MidiMessage::getMidiNoteName (cell.note, true, true, 4), c.removeFromLeft (noteW), juce::Justification::centredLeft);
+            g.setColour ((now < flashUntil[(size_t) i] ? warn : ink).withMultipliedAlpha (faded));
+            g.drawText (cell.patch, c, juce::Justification::centredLeft, true);
+            // Nivel: volumen de 12 bits (escala logarítmica del GF1: la barra va en dB) y, debajo, el pan
+            g.setColour (off);
+            g.fillRect (bar);
+            g.setColour (ink);
+            g.fillRect (bar.withWidth (bar.getWidth() * (float) cell.level / 4095.0f));
+            const auto panY = bar.getBottom() + 2.0f;
+            g.setColour (off);
+            g.fillRect (bar.getX(), panY, bar.getWidth(), 1.0f);
+            g.setColour (hot);
+            g.fillRect (bar.getX() + (bar.getWidth() - 3.0f) * (float) cell.pan / 15.0f, panY - 1.0f, 3.0f, 3.0f);
+            g.setColour (dim);
+            g.drawText (cell.released ? (cell.ending ? "E" : "R") : cell.sustained ? "S" : juce::String (cell.stage), st, juce::Justification::centred);
+        }
+
+        // Pie: chip, RAM y carga
+        g.setFont (mono (juce::jlimit (9.0f, 14.0f, footH * 0.72f)));
+        const auto kHz = 617.4 / juce::jmax (14, voices);
+        const auto chip = juce::String ("GF1 ") + juce::String (voices) + " voices  " + juce::String (kHz, 1) + " kHz";
+        const auto right = juce::String (usedKB) + " / " + juce::String (ramKB) + " KB  " + juce::String (resident) + " patches  "
+                         + juce::String (substituted) + " substituted  " + (eightBit ? "8-bit" : "16-bit") + (table ? "  ULTRAMID.INI" : "");
+        const auto chipW = juce::jmin (foot.getWidth() * 0.32f, fontWidth (chip, footH * 0.72f) + 12.0f);
+        g.setColour (ink);
+        g.drawText (chip, foot.removeFromLeft (chipW), juce::Justification::centredLeft);
+        const auto rightW = juce::jmin (foot.getWidth() * 0.62f, fontWidth (right, footH * 0.72f) + 12.0f);
+        g.setColour (dim);
+        g.drawText (right, foot.removeFromRight (rightW), juce::Justification::centredRight, true);
+        auto ram = foot.reduced (6.0f, 0.0f).withSizeKeepingCentre (foot.getWidth() - 12.0f, juce::jmin (9.0f, footH * 0.45f));
+        g.setColour (off);
+        g.fillRect (ram);
+        g.setColour (substituted > 0 ? hot : ink);
+        g.fillRect (ram.withWidth (ram.getWidth() * juce::jlimit (0.0f, 1.0f, (float) usedKB / (float) juce::jmax (1, ramKB))));
+        g.setColour (dim);
+        for (int k = 1; k * 256 < ramKB; ++k) // marcas cada 256 KB
+            g.fillRect (ram.getX() + ram.getWidth() * (float) (k * 256) / (float) ramKB, ram.getY() - 3.0f, 1.0f, ram.getHeight() + 6.0f);
+
+        if (names.isEmpty())
+        {
+            g.setColour (hot);
+            g.setFont (mono (juce::jlimit (11.0f, 16.0f, r.getHeight() * 0.08f)));
+            g.drawText ("No patches: see Patches...", r, juce::Justification::centred);
+        }
+        Skin::scanlines (g, getLocalBounds().reduced (3));
+    }
+
+private:
+    struct Cell
+    {
+        bool sounding = false, released = false, sustained = false, ending = false;
+        int stage = 0, pan = 7, note = 60, level = 0;
+        juce::String patch;
+        bool operator== (const Cell& o) const
+        {
+            return sounding == o.sounding && released == o.released && sustained == o.sustained && ending == o.ending && stage == o.stage
+                && pan == o.pan && note == o.note && level / 64 == o.level / 64 && patch == o.patch;
+        }
+    };
+
+    static float fontWidth (const juce::String& text, float h)
+    {
+        return juce::GlyphArrangement::getStringWidth (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), h, juce::Font::plain)), text);
+    }
+
+    void timerCallback() override
+    {
+        if (! isShowing()) return;
+        if (++namesAge >= 30) { names = processor.getGusPatchNames(); namesAge = 0; } // una vez por segundo: cambian al leer la carpeta
+        const auto& v = processor.getGusView();
+        bool changed = false;
+        const auto now = juce::Time::getMillisecondCounter();
+        for (int i = 0; i < 32; ++i)
+        {
+            const auto st = v.state[(size_t) i].load (std::memory_order_relaxed);
+            const auto pl = v.patchLevel[(size_t) i].load (std::memory_order_relaxed);
+            Cell c;
+            c.sounding = (st & 1u) != 0;
+            c.released = (st & 2u) != 0;
+            c.sustained = (st & 4u) != 0;
+            c.ending = (st & 8u) != 0;
+            c.stage = (int) ((st >> 4) & 7u);
+            c.pan = (int) ((st >> 8) & 15u);
+            c.note = (int) ((st >> 12) & 127u);
+            c.level = (int) (pl & 0xFFFu);
+            const auto index = (int) (pl >> 12) - 1;
+            c.patch = juce::isPositiveAndBelow (index, names.size()) ? names[index] : juce::String();
+            const auto steals = st >> 20;
+            if (steals != lastSteals[(size_t) i]) { lastSteals[(size_t) i] = steals; flashUntil[(size_t) i] = now + 300; changed = true; }
+            if (! (c == cells[(size_t) i])) { cells[(size_t) i] = c; changed = true; }
+            if (flashUntil[(size_t) i] != 0 && now >= flashUntil[(size_t) i]) { flashUntil[(size_t) i] = 0; changed = true; }
+        }
+        const auto load = [&changed] (int& to, int value) { if (to != value) { to = value; changed = true; } };
+        load (voices, v.voices.load (std::memory_order_relaxed));
+        load (ramKB, v.ramKB.load (std::memory_order_relaxed));
+        load (usedKB, v.usedKB.load (std::memory_order_relaxed));
+        load (resident, v.resident.load (std::memory_order_relaxed));
+        load (substituted, v.substituted.load (std::memory_order_relaxed));
+        if (const auto e = v.eightBit.load (std::memory_order_relaxed); e != eightBit) { eightBit = e; changed = true; }
+        if (const auto t = v.table.load (std::memory_order_relaxed); t != table) { table = t; changed = true; }
+        if (changed) repaint();
+    }
+
+    KoniSynthProcessor& processor;
+    juce::StringArray names;
+    int namesAge = 1000;
+    std::array<Cell, 32> cells {};
+    std::array<juce::uint32, 32> lastSteals {}, flashUntil {};
+    int voices = 24, ramKB = 1024, usedKB = 0, resident = 0, substituted = 0;
+    bool eightBit = true, table = false;
+};

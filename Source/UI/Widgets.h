@@ -1004,6 +1004,7 @@ struct ListControl : juce::Component, private juce::Timer
         label.setText (text, juce::dontSendNotification);
         label.setJustificationType (juce::Justification::centred);
         label.setMinimumHorizontalScale (0.7f);
+        combo.setSize (200, 26); // la fuente del ComboBox sale de su alto: con 0, preferredWidth daba solo la flecha
         addAndMakeVisible (combo);
         addAndMakeVisible (label);
         startTimerHz (5); // refleja asignaciones de MIDI Learn hechas desde el hilo de audio
@@ -1850,6 +1851,24 @@ struct Section : juce::Component
         return *this;
     }
 
+    // Componente a la derecha de los controles, todo el alto bajo la cabecera, con el ancho que sobra de los controles (mínimo
+    // minWidth px): display de la Gravis UltraSound. No es propiedad de la sección
+    Section& withRightBody (juce::Component& c, int minWidth)
+    {
+        if (dryRun) return *this;
+        rightBody = &c;
+        rightBodyMinWidth = minWidth;
+        addAndMakeVisible (c);
+        return *this;
+    }
+
+    // Dos filas de controles: los n primeros en la primera, el resto en la segunda (selector de programa sobre las perillas)
+    Section& withRowBreak (int n)
+    {
+        rowBreak = juce::jmax (0, n);
+        return *this;
+    }
+
     // Segundo interruptor en la cabecera (Sync, Freeze...)
     Section& withExtraToggle (APVTS& s, const juce::String& id, const juce::String& text)
     {
@@ -1924,6 +1943,16 @@ struct Section : juce::Component
             sideBody->setBounds (getLocalBounds().withTrimmedTop (20).withTrimmedBottom (5).withTrimmedLeft (5).withWidth (sideBodyWidth));
             r.setLeft (sideBody->getRight() + 8);
         }
+        // Componente de la derecha (withRightBody): todo el alto de la caja bajo la línea del título, con el ancho que no
+        // necesitan los controles a su unidad máxima (o su mínimo); la cabecera y los controles quedan a su izquierda
+        if (rightBody != nullptr)
+        {
+            const auto controlsPx = juce::roundToInt (juce::jmax (controlsWeight() * maxControlUnit, headerPixels() - 34.0f));
+            const auto w = juce::jmin (r.getWidth(), juce::jmax (rightBodyMinWidth, r.getWidth() - controlsPx - 8));
+            rightBody->setBounds (getLocalBounds().withTrimmedTop (20).withTrimmedBottom (5).withTrimmedRight (5)
+                                      .removeFromRight (w));
+            r.setRight (rightBody->getX() - 8);
+        }
         // Diálogo de opciones con un on/off como único control: interruptor de palanca en todo el cuerpo (classicSwitch, lo
         // dibuja KoniLookAndFeel::drawToggleButton), no el LED de cabecera
         const auto lever = soloSwitch();
@@ -1969,6 +1998,18 @@ struct Section : juce::Component
         if (row.empty())
             return;
         const juce::ScopeGuard placeModFrame { [this] { layoutModFrame(); } }; // tras colocar los mandos, en cualquier salida
+        if (rowBreak > 0) // dos filas partidas por rowBreak, con la misma unidad (la de la fila más ancha)
+        {
+            const auto unit = juce::jmin (maxControlUnit, (float) r.getWidth() / juce::jmax (0.01f, controlsWeight()));
+            const auto rowH = r.getHeight() / 2;
+            auto line = r.removeFromTop (rowH);
+            for (size_t k = 0; k < row.size(); ++k)
+            {
+                if ((int) k == rowBreak) line = r;
+                row[k].component->setBounds (line.removeFromLeft (juce::roundToInt (unit * row[k].weight())));
+            }
+            return;
+        }
 
         // Como mucho maxControlUnit px por unidad: con pocos controles en una sección ancha no se estiran hasta el borde; el
         // hueco queda al final (en las filas llenas la unidad real es ~55-70 px y no cambia nada). Con varias filas
@@ -2113,6 +2154,13 @@ struct Section : juce::Component
     // Peso de los controles: el de su fila (o el de la fila más ancha si hay varias)
     float controlsWeight() const
     {
+        if (rowBreak > 0)
+        {
+            float first = 0.0f, second = 0.0f;
+            for (size_t k = 0; k < row.size(); ++k)
+                if (row[k].component->isVisible()) ((int) k < rowBreak ? first : second) += row[k].weight();
+            return juce::jmax (first, second);
+        }
         if (slotsPerRow > 0)
         {
             float widest = 0.0f;
@@ -2136,7 +2184,9 @@ struct Section : juce::Component
         if (slotsPerRow > 0) return (size_t) slotsPerRow;
         return juce::jmax ((size_t) 1, (row.size() + (size_t) controlRows - 1) / (size_t) controlRows);
     }
-    int controlRows = 1, slotsPerRow = 0;
+    int controlRows = 1, slotsPerRow = 0, rowBreak = 0;
+    juce::Component* rightBody = nullptr;
+    int rightBodyMinWidth = 0;
     // Ancho máximo de cuerpo y controles (px, 0 = todo): lo de su derecha lo ocupa otro componente (panel PATCH, PatchBay)
     int controlsWidth = 0;
     // Elástica: si su fila cabe a ancho natural, se queda con el sobrante (Editor::layoutRow)
@@ -2183,7 +2233,7 @@ struct Section : juce::Component
     virtual float layoutWeight() const
     {
         // Con el componente lateral alto, la cabecera comparte fila con él: su ancho también se suma
-        return juce::jmax (controlsWeight() + sidePixels() / 60.0f, (headerPixels() + (sideBodyTall ? sidePixels() : 0.0f)) / 60.0f,
+        return juce::jmax (controlsWeight() + (sidePixels() + rightPixels()) / 60.0f, (headerPixels() + (sideBodyTall ? sidePixels() : 0.0f)) / 60.0f,
                            ((float) bodyMinWidth + 34.0f) / 60.0f, 1.3f);
     }
 
@@ -2216,10 +2266,12 @@ struct Section : juce::Component
     virtual float naturalWidth() const
     {
         return juce::jmax (headerPixels() + (sideBodyTall ? sidePixels() : 0.0f), (float) bodyMinWidth + 34.0f,
-                           controlsWeight() * maxControlUnit + sidePixels() + 34.0f, 1.3f * 60.0f);
+                           controlsWeight() * maxControlUnit + sidePixels() + rightPixels() + 34.0f, 1.3f * 60.0f);
     }
     // Ancho del componente lateral (withSideBody) con su separación
     float sidePixels() const { return sideBody != nullptr ? (float) sideBodyWidth + 8.0f : 0.0f; }
+    // Ancho mínimo del componente de la derecha (withRightBody) con su separación
+    float rightPixels() const { return rightBody != nullptr ? (float) rightBodyMinWidth + 8.0f : 0.0f; }
 
     // Ancho de un botón de cabecera: 64 px o lo que pida su texto ("Frame Macros...") más el margen izquierdo de 6
     static int buttonWidth (juce::TextButton& b) { return juce::jmax (64, b.getBestWidthForHeight (24) + 6); }

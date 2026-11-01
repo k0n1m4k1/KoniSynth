@@ -544,10 +544,13 @@ public:
                    .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 1.0f).withKnob (s, "mt32Reverb", "Reverb")
                    .withKnob (s, "mt32Dac", "DAC"); // 5 posiciones: conmutador por pasos (Knob con detents)
         gusSection.withCombo (s, "gusModel").withExtraToggle (s, "gusMulti", "Multi")
-                  .withHeaderButton ("Patches...", "The Gravis patch set is not included: put your .PAT files (with their timidity.cfg or "
-                                     "DEFAULT.CFG) in a folder and choose it here.", [this] { gusPatchMenu(); })
-                  .withKnob (s, "gusMode", "Keys").withList (s, "gusProgram", "Program", 1.0f).withKnob (s, "gusRam", "RAM")
-                  .withKnob (s, "gusVoices", "Voices");
+                  .withHeaderButton ("Patches...", "The Gravis patch set is not included: put your .PAT files (with Gravis' ULTRAMID.INI, "
+                                     "a timidity.cfg or DEFAULT.CFG) in a folder and choose it here.", [this] { gusPatchMenu(); })
+                  .withList (s, "gusProgram", "Program", 4.0f) // fila de arriba, del ancho de las 4 perillas de abajo
+                  .withKnob (s, "gusMode", "Keys").withKnob (s, "gusRam", "RAM").withKnob (s, "gusVoices", "Voices")
+                  .withKnob (s, "gusPatchBits", "Bits")
+                  .withRowBreak (1).withRightBody (gusDisplay, 560); // a la derecha, el mapa de voces (4 columnas desde 560 px)
+        gusSection.stretchToFill = true; // el display se queda con el ancho que sobre en la fila
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
         fmDisplaySection.withBody (dx7Display, 0, 560); // 16 × 2 caracteres y el LED de 2 dígitos a ~4,6 px por punto
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")
@@ -569,7 +572,6 @@ public:
                         .withCombo (s, "vl1Rhythm")
                         .withKnob (s, "vl1Tempo", "Tempo").withKnob (s, "vl1Balance", "Balance");
         vl1DisplaySection.withBody (vl1Display, 0, 420); // 9 posiciones de 7 segmentos a ~52 px de alto
-
         // 3. Entrada, vocoder y modulación
         inputSection.withKnob (s, "inputGain", "Gain").withKnob (s, "inputMonitor", "Monitor");
         vocoderSection.withToggle (s, "vocoderOn")
@@ -2063,7 +2065,7 @@ private:
                          return { { 1.0f, { &oplSection, &opllSection, &oplLfoSection }, 1 } };
                      return { { 1.0f, { &oplSection, &oplLfoSection }, 1 } };
             case 14: return { { 1.0f, { &mt32Section, &mt32DisplaySection }, 1 } }; // controles y, a la derecha, el LCD
-            case 15: return { { 1.0f, { &gusSection }, 1 } };
+            case 15: return { { 2.4f, { &gusSection }, 1 } }; // un bloque alto: dos filas de controles y, a su derecha, el mapa de voces
             default: return { { 1.0f, { &ansSection }, 1 } };
         }
     }
@@ -3490,6 +3492,7 @@ private:
     std::array<int, Params::liveVoices> voiceQuiet {};         // fotogramas seguidos sin avanzar
     LfoView lfoView { koni.apvts, false }, lfo2View { koni.apvts, true }; // ídem, LFO 1 y LFO 2
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
+    GusDisplay gusDisplay { koni }; // antes que gusSection (componente de la sección): se destruye después
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
     Vl1Display vl1Display { koni }; // ídem con vl1DisplaySection
     DrumStepLeds drumLeds { koni }; // ídem con drumPatternSection

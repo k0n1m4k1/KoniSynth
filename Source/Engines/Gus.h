@@ -41,6 +41,7 @@ struct GusPatch
         std::array<juce::uint8, 6> envRate {}, envOffset {};
         int tremSweep = 0, tremRate = 0, tremDepth = 0, vibSweep = 0, vibRate = 0, vibDepth = 0;
         juce::uint8 modes = 0;
+        bool is16 = false;                // datos de 16 bits en el .PAT (ULTRAMID los carga en 8 salvo con -16)
         int scaleNote = 60, scaleFactor = 1024; // afinación por tecla: 1024 = un semitono por tecla; 0 = tono fijo (percusión)
         bool looping() const     { return (modes & 0x04) != 0; }
         bool bidir() const       { return (modes & 0x08) != 0; }
@@ -49,8 +50,10 @@ struct GusPatch
         bool fastRelease() const { return (modes & 0x80) != 0; } // PATCH.H no lo documenta; la biblioteca lo usa (ver noteOff)
     };
     juce::String name;
+    int index = -1; // posición en GusBank::patches (el display lo usa para el nombre)
     std::vector<Sample> samples;
-    juce::int64 bytes = 0; // memoria que ocupa en la DRAM de la tarjeta (los datos, como los cargaba el driver)
+    juce::int64 bytes = 0;  // memoria que ocupa en la DRAM de la tarjeta con sus datos tal cual (16 bits: ULTRAMID -16)
+    juce::int64 bytes8 = 0; // la que ocupa cargado en 8 bits (ULTRAMID por defecto: las muestras de 16 bits, a la mitad)
 
     // Muestra para una frecuencia (mHz), como _GF1_HERTZ_ON (16EE:1CDC): se queda la ranura actual si low < f < high
     // (estricto); si no, recorre las ranuras 0-15 y elige la primera que contenga f (low <= f <= high) salvo que la siguiente
@@ -104,6 +107,7 @@ struct GusPatch
             at += 96;
             if (at + waveBytes > size) { error = file.getFileName() + ": truncated sample data"; return nullptr; }
             const auto is16 = (s.modes & 0x01) != 0, isUnsigned = (s.modes & 0x02) != 0;
+            s.is16 = is16;
             const auto bytesPerSample = is16 ? 2 : 1;
             const auto n = waveBytes / bytesPerSample;
             s.data.resize ((size_t) n + 1); // + 1: la vecina de la última muestra (interpolación)
@@ -126,6 +130,7 @@ struct GusPatch
                 s.loopStart = a; s.loopEnd = b;
             }
             patch->bytes += waveBytes;
+            patch->bytes8 += is16 ? waveBytes / 2 : waveBytes;
             patch->samples.push_back (std::move (s));
             at += waveBytes;
         }
@@ -135,29 +140,45 @@ struct GusPatch
 };
 
 //==============================================================================
-// Juego de patches: la carpeta del usuario y su mapa de programas (timidity.cfg, o DEFAULT.CFG de Gravis). Formato de las líneas
-// de mapa: "<número> <fichero> [opciones]" bajo "bank 0" (melódicos) o "drumset 0" (percusión: el número es la tecla). Un
-// número de 128 a 255 fuera de drumset es percusión (tecla = número - 128), como los programas de percusión del driver de Gravis.
+// Juego de patches: la carpeta del usuario y su mapa de programas. Se busca, por este orden:
+// - ULTRAMID.INI (Gravis, drivers 4.11: ULTRASND\MIDI): "<n>, <256K>, <512K>, <768K>, <1024K>, <patch>". n = programa GM de 0
+//   a 127, o 128 + tecla para la percusión (128 = "blank", silencio); las cuatro columnas son el número que suena con esa
+//   memoria en la tarjeta (las librerías "leave 8K+32 bytes after the patches are loaded", según su cabecera). Es la tabla
+//   que usa ULTRAMID: si está, la RAM la decide ella, no un presupuesto en bytes.
+// - timidity.cfg: "<n> <fichero> [opciones]" bajo "bank 0" (melódicos) o "drumset 0" (n = tecla).
+// - DEFAULT.CFG (Gravis, formato de PLAYMIDI, "Release #3 05/05/93"): programas de 1 a 128 (el 0 es el instrumento por
+//   defecto) y la percusión en un bloque "129-256 begin_multipatch default <patch>" con líneas "<tecla> <patch>" hasta
+//   "end_multipatch". Otros bloques (override_patch) no se aplican.
 // Se construye en el hilo de mensajes y se publica por DataSlot: inmutable después
 struct GusBank
 {
     std::vector<std::unique_ptr<GusPatch>> patches;
     std::array<const GusPatch*, 128> melodic {}, drums {};
     std::array<int, 128> drumNote {}; // tecla a la que suena cada percusión ("note=" de timidity.cfg; -1 = la tocada)
+    // Sustituciones de ULTRAMID.INI: para el número n (programa, o 128 + tecla) y la columna de RAM (256/512/768/1024 KB), el
+    // número que suena. Sin ULTRAMID.INI, hasSubstitutions es falso
+    std::array<std::array<juce::uint8, 4>, 256> substitute {};
+    bool hasSubstitutions = false;
     juce::String description;
+
+    // Patch de un número de ULTRAMID (programa 0-127, o 128 + tecla)
+    const GusPatch* byNumber (int n) const
+    {
+        return n < 128 ? melodic[(size_t) juce::jlimit (0, 127, n)] : drums[(size_t) juce::jlimit (0, 127, n - 128)];
+    }
 
     static std::unique_ptr<GusBank> load (const juce::File& folder, juce::String& report)
     {
         auto bank = std::make_unique<GusBank>();
         bank->drumNote.fill (-1);
         juce::File cfg;
-        for (const auto& name : { "timidity.cfg", "default.cfg", "gravis.cfg" })
-            for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, "*.cfg"))
+        for (const auto& name : { "ultramid.ini", "timidity.cfg", "default.cfg", "gravis.cfg" })
+            for (const auto& f : folder.findChildFiles (juce::File::findFiles, false, "*"))
                 if (f.getFileName().equalsIgnoreCase (name) && cfg == juce::File())
                     cfg = f;
         if (cfg == juce::File())
         {
-            report = "No timidity.cfg or DEFAULT.CFG in " + folder.getFullPathName();
+            report = "No ULTRAMID.INI, timidity.cfg or DEFAULT.CFG in " + folder.getFullPathName();
             return nullptr;
         }
         std::map<juce::String, const GusPatch*> loaded;
@@ -174,31 +195,75 @@ struct GusBank
             juce::String error;
             auto p = f.existsAsFile() ? GusPatch::load (f, error) : nullptr;
             const auto* raw = p.get();
-            if (p != nullptr) bank->patches.push_back (std::move (p));
+            if (p != nullptr) { p->index = (int) bank->patches.size(); bank->patches.push_back (std::move (p)); }
             else ++errors;
             loaded[key] = raw;
             return raw;
         };
-        bool drumset = false, skipBank = false;
-        for (auto line : juce::StringArray::fromLines (cfg.loadFileAsString()))
+        const auto lines = juce::StringArray::fromLines (cfg.loadFileAsString());
+        const auto format = cfg.getFileName().toLowerCase();
+        if (format == "ultramid.ini")
         {
-            line = line.upToFirstOccurrenceOf ("#", false, false).trim();
-            if (line.isEmpty()) continue;
-            juce::StringArray t;
-            t.addTokens (line, " \t", "\"");
-            t.removeEmptyStrings();
-            if (t[0].equalsIgnoreCase ("bank"))    { drumset = false; skipBank = t[1].getIntValue() != 0; continue; }
-            if (t[0].equalsIgnoreCase ("drumset")) { drumset = true;  skipBank = t[1].getIntValue() != 0; continue; }
-            if (skipBank || t.size() < 2 || ! t[0].containsOnly ("0123456789")) continue;
-            const auto number = t[0].getIntValue();
-            const auto isDrum = drumset || (number >= 128 && number < 256);
-            const auto index = isDrum && ! drumset ? number - 128 : number;
-            if (! juce::isPositiveAndBelow (index, 128)) continue;
-            const auto* patch = patchFor (t[1].unquoted());
-            (isDrum ? bank->drums : bank->melodic)[(size_t) index] = patch;
-            for (int k = 2; k < t.size(); ++k)
-                if (isDrum && t[k].startsWithIgnoreCase ("note="))
-                    bank->drumNote[(size_t) index] = juce::jlimit (0, 127, t[k].fromFirstOccurrenceOf ("=", false, false).getIntValue());
+            for (int n = 0; n < 256; ++n) bank->substitute[(size_t) n].fill ((juce::uint8) n); // sin línea: suena él mismo
+            for (auto line : lines)
+            {
+                line = line.upToFirstOccurrenceOf ("#", false, false).trim();
+                juce::StringArray t;
+                t.addTokens (line, ",", "\"");
+                t.trim();
+                if (t.size() < 6 || ! t[0].containsOnly ("0123456789")) continue;
+                const auto n = t[0].getIntValue();
+                if (! juce::isPositiveAndBelow (n, 256)) continue;
+                const auto* patch = patchFor (t[5]);
+                (n < 128 ? bank->melodic[(size_t) n] : bank->drums[(size_t) n - 128]) = patch;
+                for (int c = 0; c < 4; ++c)
+                    bank->substitute[(size_t) n][(size_t) c] = (juce::uint8) juce::jlimit (0, 255, t[1 + c].getIntValue());
+                bank->hasSubstitutions = true;
+            }
+        }
+        else if (format == "timidity.cfg")
+        {
+            bool drumset = false, skipBank = false;
+            for (auto line : lines)
+            {
+                line = line.upToFirstOccurrenceOf ("#", false, false).trim();
+                if (line.isEmpty()) continue;
+                juce::StringArray t;
+                t.addTokens (line, " \t", "\"");
+                t.removeEmptyStrings();
+                if (t[0].equalsIgnoreCase ("bank"))    { drumset = false; skipBank = t[1].getIntValue() != 0; continue; }
+                if (t[0].equalsIgnoreCase ("drumset")) { drumset = true;  skipBank = t[1].getIntValue() != 0; continue; }
+                if (skipBank || t.size() < 2 || ! t[0].containsOnly ("0123456789")) continue;
+                const auto index = t[0].getIntValue();
+                if (! juce::isPositiveAndBelow (index, 128)) continue;
+                (drumset ? bank->drums : bank->melodic)[(size_t) index] = patchFor (t[1].unquoted());
+                for (int k = 2; k < t.size(); ++k)
+                    if (drumset && t[k].startsWithIgnoreCase ("note="))
+                        bank->drumNote[(size_t) index] = juce::jlimit (0, 127, t[k].fromFirstOccurrenceOf ("=", false, false).getIntValue());
+            }
+        }
+        else // DEFAULT.CFG de PLAYMIDI
+        {
+            int block = 0; // 0 fuera de bloque, 1 percusión (begin_multipatch), 2 otro bloque (se ignora)
+            for (auto line : lines)
+            {
+                line = line.upToFirstOccurrenceOf ("#", false, false).trim();
+                if (line.isEmpty()) continue;
+                juce::StringArray t;
+                t.addTokens (line, " \t", "\"");
+                t.removeEmptyStrings();
+                if (t[0].equalsIgnoreCase ("end_multipatch")) { block = 0; continue; }
+                if (t.size() >= 2 && t[1].equalsIgnoreCase ("begin_multipatch")) { block = 1; continue; }
+                if (t.size() >= 2 && t[1].equalsIgnoreCase ("override_patch"))   { block = 2; continue; }
+                if (block == 2 || t.size() < 2 || ! t[0].containsOnly ("0123456789")) continue;
+                const auto n = t[0].getIntValue();
+                if (block == 1)
+                {
+                    if (juce::isPositiveAndBelow (n, 128)) bank->drums[(size_t) n] = patchFor (t[1]);
+                }
+                else if (n >= 1 && n <= 128)
+                    bank->melodic[(size_t) n - 1] = patchFor (t[1]);
+            }
         }
         if (bank->patches.empty())
         {
@@ -222,6 +287,19 @@ struct GusEngine
     static constexpr int maxVoices = 32;
     GusSlot slot;
 
+    // Lo que muestra el display (UI/Displays.h, GusDisplay): lo escribe el hilo de audio al final de cada bloque y lo lee la
+    // interfaz a 30 Hz, sin bloqueos. Por voz, dos palabras:
+    // - state: bit 0 sonando, 1 soltada, 2 sostenida (punto 3 con sustain), 3 acabando (bucle apagado), 4-6 punto de la
+    //   envolvente, 8-11 pan, 12-18 nota, 20-31 robos acumulados (el display destella al cambiar)
+    // - patchLevel: bits 0-11 volumen de 12 bits, 12-31 índice del patch en el banco + 1 (0 = ninguno)
+    struct View
+    {
+        std::array<std::atomic<juce::uint32>, maxVoices> state {}, patchLevel {};
+        std::atomic<int> voices { 24 }, ramKB { 1024 }, usedKB { 0 }, resident { 0 }, substituted { 0 };
+        std::atomic<bool> eightBit { true }, table { false };
+    };
+    View view;
+
     void prepare (double sampleRate, int)
     {
         hostRate = sampleRate;
@@ -235,6 +313,8 @@ struct GusEngine
         for (auto& c : channels) c = Channel {};
         resident.clear();
         residentBytes = 0;
+        requested.fill (false);
+        substitutedCount = 0;
         resampler.reset();
         lpState = { 0.0f, 0.0f };
         nextVoice = 0;
@@ -254,11 +334,16 @@ struct GusEngine
         static const juce::int64 ramSizes[] = { 256 * 1024, 512 * 1024, 768 * 1024, 1024 * 1024 };
         const auto model = juce::jlimit (0, 2, juce::roundToInt (p.gusModel->load()));
         const auto ramIndex = model == 2 ? 3 : juce::jlimit (model == 1 ? 1 : 0, 3, juce::roundToInt (p.gusRam->load()));
-        if (const auto ram = ramSizes[ramIndex]; ram != ramBytes)
+        ramColumn = ramIndex;
+        const auto bits8 = juce::roundToInt (p.gusPatchBits->load()) == 0;
+        if (const auto ram = ramSizes[ramIndex]; ram != ramBytes || bits8 != eightBit)
         {
             ramBytes = ram;
+            eightBit = bits8;
             resident.clear(); // otra memoria: el driver vuelve a cargar los patches
             residentBytes = 0;
+            requested.fill (false);
+            substitutedCount = 0;
         }
         const auto multi = p.gusMulti->load() > 0.5f;
         const auto mode = juce::jlimit (0, 1, juce::roundToInt (p.gusMode->load()));
@@ -276,9 +361,33 @@ struct GusEngine
             handle (bank, msg, channel);
         }
         renderTo (out, at, n);
+        publishView (bank);
     }
 
 private:
+    void publishView (const GusBank* bank)
+    {
+        for (int i = 0; i < maxVoices; ++i)
+        {
+            const auto& v = voices[(size_t) i];
+            const auto sounding = v.s != nullptr && ! v.stopped && i < activeVoices;
+            const auto sustained = sounding && ! v.released && v.stage == 3 && v.s->sustain();
+            const auto st = (juce::uint32) (sounding ? 1 : 0) | (v.released ? 2u : 0u) | (sustained ? 4u : 0u) | (v.loopOff ? 8u : 0u)
+                          | ((juce::uint32) juce::jlimit (0, 7, v.stage) << 4) | ((juce::uint32) (v.pan & 15) << 8)
+                          | ((juce::uint32) (juce::jlimit (0, 127, v.note) & 127) << 12) | ((stealCount[(size_t) i] & 0xFFFu) << 20);
+            const auto index = sounding && v.patch != nullptr ? v.patch->index + 1 : 0;
+            view.state[(size_t) i].store (st, std::memory_order_relaxed);
+            view.patchLevel[(size_t) i].store ((juce::uint32) juce::jlimit (0, 4095, v.vol >> 4) | ((juce::uint32) index << 12), std::memory_order_relaxed);
+        }
+        view.voices.store (activeVoices, std::memory_order_relaxed);
+        view.ramKB.store ((int) (ramBytes / 1024), std::memory_order_relaxed);
+        view.usedKB.store ((int) (residentBytes / 1024), std::memory_order_relaxed);
+        view.resident.store ((int) resident.size(), std::memory_order_relaxed);
+        view.substituted.store (substitutedCount, std::memory_order_relaxed);
+        view.eightBit.store (eightBit, std::memory_order_relaxed);
+        view.table.store (bank != nullptr && bank->hasSubstitutions, std::memory_order_relaxed);
+    }
+
     //==========================================================================
     // GF1: una voz, y lo que la biblioteca de Gravis guarda de ella
     struct Voice
@@ -293,6 +402,7 @@ private:
         int vol = 0, rampLow = 0, rampHigh = 0, rampStep = 0, rampEvery = 1, rampCount = 0;
         bool ramping = false, rampDown = false, rampLoop = false, rampIrq = true;
         int pan = 7;
+        juce::uint16 dataMask = 0xFFFF; // 0xFF00: muestra de 16 bits cargada en 8 (byte alto, como ULTRAMID)
         // driver
         int channel = -1, note = -1, stage = 0, pendingStage = -1;
         int velocity = 127, chanVolume = 127, att = 255; // _GF1_VELOCITY, _GF1_CHAN_VOLUME, _GF1_ATTENUATION
@@ -635,16 +745,42 @@ private:
     }
 
     //==========================================================================
-    // Patch residente en la DRAM: el driver carga los que caben en la RAM elegida; si uno no cabe, suena otro ya cargado de la
-    // misma familia GM (8 programas) o, si no hay, el primero cargado. ULTRAMID sustituía según ULTRAMID.INI: estimación
-    const GusPatch* residentPatch (const GusPatch* p, int family)
+    // Patch que suena para un número de ULTRAMID (programa 0-127, o 128 + tecla). Con ULTRAMID.INI, el de su tabla para la
+    // RAM elegida (lo que hace ULTRAMID). Sin él (estimación): el driver carga los que caben en la RAM; si uno no cabe, suena
+    // otro ya cargado de la misma familia GM (8 programas) o, si no hay, el primero cargado
+    const GusPatch* residentPatch (const GusBank& bank, int number)
     {
+        number = juce::jlimit (0, 255, number);
+        const auto* plays = choosePatch (bank, number);
+        if (! requested[(size_t) number]) // el display cuenta los números que suenan con otro patch
+        {
+            requested[(size_t) number] = true;
+            if (plays != bank.byNumber (number)) ++substitutedCount;
+        }
+        return plays;
+    }
+
+    const GusPatch* choosePatch (const GusBank& bank, int number)
+    {
+        if (bank.hasSubstitutions)
+        {
+            const auto* sub = bank.byNumber (bank.substitute[(size_t) number][(size_t) ramColumn]);
+            if (sub != nullptr && std::none_of (resident.begin(), resident.end(), [sub] (const Resident& r) { return r.patch == sub; }))
+            {
+                resident.push_back ({ sub, number < 128 ? number / 8 : 16 });
+                residentBytes += eightBit ? sub->bytes8 : sub->bytes;
+            }
+            return sub;
+        }
+        const auto* p = bank.byNumber (number);
+        const auto family = number < 128 ? number / 8 : 16;
         if (p == nullptr) return nullptr;
         for (const auto& r : resident) if (r.patch == p) return p;
-        if (residentBytes + p->bytes <= ramBytes)
+        const auto size = eightBit ? p->bytes8 : p->bytes;
+        if (residentBytes + size <= ramBytes)
         {
             resident.push_back ({ p, family });
-            residentBytes += p->bytes;
+            residentBytes += size;
             return p;
         }
         for (const auto& r : resident) if (r.family == family) return r.patch;
@@ -708,7 +844,7 @@ private:
     {
         const auto drum = ch == 9;
         const auto& c = channels[(size_t) ch];
-        const auto* patch = residentPatch (drum ? bank.drums[(size_t) note] : bank.melodic[(size_t) c.program], drum ? 16 : c.program / 8);
+        const auto* patch = residentPatch (bank, drum ? 128 + note : c.program);
         if (patch == nullptr || patch->samples.empty()) return;
         const auto playNote = drum && bank.drumNote[(size_t) note] >= 0 ? bank.drumNote[(size_t) note] : note;
         // La muestra se elige con la frecuencia ya escalada por la de la ranura actual (_GF1_HERTZ_ON 16EE:1CAD). La ranura
@@ -732,6 +868,7 @@ private:
         v.vol = vol;
         setPitch (v);
         v.pan = c.pan != 16 ? juce::jlimit (0, 15, c.pan) : s->balance;
+        v.dataMask = eightBit && s->is16 ? 0xFF00 : 0xFFFF; // ULTRAMID sin -16: se queda el byte alto (carga de patches, 5B8A)
         startEnvelope (v);
         computeVibrato (v, true);
         if (s->tremDepth != 0) computeTremolo (v);
@@ -773,7 +910,9 @@ private:
             if (v.s == nullptr || v.stopped) { nextVoice = (i + 1) % activeVoices; return v; }
             if (best == nullptr || v.priority > best->priority || (v.priority == best->priority && v.age < best->age)) best = &v;
         }
-        nextVoice = (int) ((best - voices.data()) + 1) % activeVoices;
+        const auto stolen = (int) (best - voices.data());
+        ++stealCount[(size_t) stolen];
+        nextVoice = (stolen + 1) % activeVoices;
         return *best;
     }
 
@@ -793,7 +932,8 @@ private:
             const auto last = (juce::int64) data.size() - 1;
             const auto idx = juce::jlimit ((juce::int64) 0, last, v.pos >> 9);
             const auto frac = (int) (v.pos & 511);
-            const auto a = (int) data[(size_t) idx], b = (int) data[(size_t) juce::jmin (last, idx + 1)];
+            const auto a = (int) (juce::int16) ((juce::uint16) data[(size_t) idx] & v.dataMask);
+            const auto b = (int) (juce::int16) ((juce::uint16) data[(size_t) juce::jmin (last, idx + 1)] & v.dataMask);
             const auto sample = (float) (a + ((b - a) * frac) / 512) * (1.0f / 32768.0f); // interpolación lineal a 16 bits
             const auto amp = sample * amplitudeOf (v.vol >> 4);
             l += amp * panGain[(size_t) v.pan][0];
@@ -866,6 +1006,11 @@ private:
     std::array<Channel, 16> channels {};
     std::vector<Resident> resident = [] { std::vector<Resident> r; r.reserve (512); return r; }();
     juce::int64 residentBytes = 0, ramBytes = 1024 * 1024;
+    int ramColumn = 3; // columna de ULTRAMID.INI: 256, 512, 768 o 1024 KB
+    bool eightBit = true; // patches cargados en 8 bits (ULTRAMID sin -16)
+    std::array<bool, 256> requested {}; // números ya pedidos desde la última carga (para contar sustituciones)
+    int substitutedCount = 0;           // de ellos, los que suenan con otro patch
+    std::array<juce::uint32, maxVoices> stealCount {}; // robos por voz (el display destella al cambiar)
     const GusBank* lastBank = nullptr;
     ZohResampler resampler;
     double hostRate = 48000.0, chipRate = 44100.0;

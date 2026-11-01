@@ -1058,5 +1058,6 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "gusMulti", 1 }, "GUS Multi", false));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusProgram", 1 }, "GUS Program", [] { StringArray names; for (int k = 0; k < 128; ++k)
         names.add (String (k + 1) + " - " + GeneralMidi::programName (k)); return names; }(), 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusPatchBits", 1 }, "GUS Patch Bits", StringArray { "8-bit", "16-bit" }, 0));
     return l;
 }
