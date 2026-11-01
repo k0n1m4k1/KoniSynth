@@ -232,7 +232,7 @@ Osc 2 and sound together, each at its own level, with its own Mute and Solo in t
 the signal strip (the WT and Sample steps appear while their level is above 0). Up to 1.0.0 (preset format 7), Wavetable
 and Sample were the last two options of the Wave menu; presets and projects saved that way load with that level moved to
 WT Lvl or Smp Lvl, Osc 2 at 0 and its wave back to Saw, so they sound the same. Host automation of the Osc 2 Wave recorded
-before 1.0.1 shifts.
+in 1.0.0-beta or earlier shifts.
 
 **Osc 2 Sample** (Smp Lvl). A second sample player with its own file, independent of the Sample tab: two different
 files can sound at once. It uses the Oct, Semi, Fine and drift of Osc 2 with its own level and Mute; Osc 2 Sample... opens
@@ -305,8 +305,8 @@ Wave menu of format 7.
 | Path lever | PRE: the noise goes through the filter like the oscillators. POST: it is added after the filter, so the hiss stays bright in a dark patch (it still goes through post-filter saturation and the VCA); the SIGNAL strip then shows Noise right after Filter. | Pre Filter, Post Filter / Pre Filter |
 
 With everything at its default the noise sounds exactly as before. The level of white noise and Crackle no longer drops
-at high sample rates (before 1.0.1 it was 3 dB lower at 96 kHz and 6 dB lower at 192 kHz than at 48 kHz). Crackle was
-added at the end of the Color list: presets keep their meaning, but host automation of Noise Color recorded before 1.0.1
+at high sample rates (in 1.0.0-beta or earlier it was 3 dB lower at 96 kHz and 6 dB lower at 192 kHz than at 48 kHz). Crackle was
+added at the end of the Color list: presets keep their meaning, but host automation of Noise Color recorded in 1.0.0-beta or earlier
 shifts.
 
 ### Filter
@@ -424,7 +424,7 @@ envelope.
 | LFO 1, LFO 2, Filter Env, Amp Env, Velocity, Key Track, Mod Wheel, Aftertouch, MPE Timbre, Random (one value per note; fixed during the note, or fading with Random Fade), Pitch Bend, Noise (the noise generator with its Color, at audio rate: roughness on the cutoff, pitch or pulse width) | Pitch, Osc 2 Pitch and Osc 3 Pitch (+/-24 st), Cutoff (+/-5 oct), Resonance (full range), Drive, Pulse Width (+/-0.45), Osc 1 Level, Osc 2 Level, Osc 3 Level, Noise Level, Volume, Pan, FM Index (+/-5), Timbre, WT Position, Osc 2 WT Position, Osc 3 WT Position |
 
 The Noise source was added at the end of the source list in 1.0.1: presets keep their routes, but host automation of a
-Matrix Source recorded before 1.0.1 shifts.
+Matrix Source recorded in 1.0.0-beta or earlier shifts.
 
 **Random Fade** (bottom of the dialog, default 0 %) makes the Random source fade with the filter envelope: the slot gets
 random × (1 − fade + fade × filter envelope). At 100 % with filter sustain 0, each note starts off target and settles

@@ -1,6 +1,6 @@
 # KoniSynth
 
-**Version 1.0.1-beta** · by **@k0n1m4k1** 🇪🇸 · GNU AGPLv3
+**Version 1.0.0** · by **@k0n1m4k1** 🇪🇸 · GNU AGPLv3
 
 **Open-source synth lab with firmware-accurate emulations of the Yamaha DX7, Gravis UltraSound, Roland MT-32 & others.**
 
