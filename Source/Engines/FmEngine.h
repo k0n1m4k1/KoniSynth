@@ -421,12 +421,23 @@ private:
         return ((sensitivity * v + 7) >> 3) << 4;
     }
 
+    // PATCH_ACTIVATE_OPERATOR_KBD_SCALING_LEVEL: valor = min(127, (curva[grupo] · sc(depth)) >> 8), con sc(d) = (660·d) >> 8.
+    // Tablas TABLE_KBD_SCALING_CURVE_EXP (36), _LIN (36) y TABLE_LOG (100), contiguas en la ROM: un grupo de 36 o más lee la
+    // tabla siguiente, como el firmware. La EXP sigue creciendo hasta 255 (msfa: +16 por grupo desde el 24)
     static int scaleCurve (int group, int depth, int curve)
     {
-        static constexpr std::uint8_t expData[33] = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 14, 16, 19, 23, 27, 33, 39, 47, 56, 66,
-                                                       80, 94, 110, 126, 142, 158, 174, 190, 206, 222, 238, 250 };
-        auto scale = (curve == 0 || curve == 3) ? (group * depth * 329) >> 12                          // lineal
-                                                : (expData[std::min (group, 32)] * depth * 329) >> 15; // exponencial
+        static constexpr std::uint8_t tables[172] = {
+            0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 14, 16, 19, 23, 28, 33, 39, 47, 57, 67, 80, 95, 113, 134, 160, 190, 224,       // EXP
+            255, 255, 255, 255, 255, 255, 255, 255,
+            0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120, 128, 136, 144, 152, 160, 168, 178, 184, 192,    // LIN
+            200, 208, 216, 224, 232, 240, 248, 255, 255, 255, 255,
+            127, 122, 118, 114, 110, 107, 104, 102, 100, 98, 96, 94, 92, 90, 88, 86, 85, 84, 82, 81, 79, 78, 77, 76, 75, 74, // LOG
+            73, 72, 71, 70, 69, 68, 67, 66, 65, 64, 63, 62, 61, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46,
+            45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18,
+            17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0 };
+        const auto base = (curve == 0 || curve == 3) ? 36 : 0;
+        const auto value = (int) tables[(size_t) juce::jlimit (0, 171, base + group)];
+        const auto scale = std::min (127, (value * ((660 * juce::jlimit (0, 99, depth)) >> 8)) >> 8);
         return curve < 2 ? -scale : scale; // 0 -LIN, 1 -EXP, 2 +EXP, 3 +LIN
     }
     static int scaleLevel (int note, const OpPatch& op)
@@ -584,7 +595,7 @@ private:
         {
             auto& op = v.ops[(size_t) k];
             const auto& pk = patch[(size_t) k];
-            auto ol = std::min (127, scaleOutLevel (pk.outLevel) + scaleLevel (v.playNote, pk));
+            auto ol = juce::jlimit (0, 127, scaleOutLevel (pk.outLevel) + scaleLevel (v.playNote, pk)); // el firmware limita a 0-127 antes de la velocidad
             op.outlevel = std::max (0, (ol << 5) + scaleVelocity (velocity, pk.velSens));
             op.rateScaling = (pk.rateScale * juce::jlimit (0, 31, v.playNote / 3 - 7)) >> 3;
             if (! wasActive)

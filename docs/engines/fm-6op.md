@@ -179,6 +179,9 @@ the DX7.
   eight-bit waveforms (the sine from its quarter-wave table, S&H sampling at mid-cycle), PMD / AMD / PMS scaling and the
   controllers added together. On every new note in Poly the LFO delay and key sync restart (in Mono, only with the first
   key). The timer runs at 369.7 Hz, measured from the vibrato and tremolo rates of 10 LFO speeds in demos of three DX7s.
+- **Pitch envelope and keyboard level scaling from the firmware.** The pitch envelope moves in the firmware's integer
+  steps, every other timer tick (about 5.4 ms per step), and reaches the sound chip when the voice's pitch is updated.
+  Keyboard level scaling uses the firmware's curve tables: the exponential curve keeps rising up to the top groups.
 - Feedback loops in algorithms 4 and 6 are reproduced.
 - **Amplitude modulation measured on real DX7s.** The LFO tremolo (AMD x AMS) is linear in amplitude: the level stays
   high most of the cycle and dips briefly and deeply, down to -26 dB at AMD 99 and AMS 3. Measured on recordings of
