@@ -557,6 +557,7 @@ public:
                   .withKnob (s, "gusPatchBits", "Bits")
                   .withRowBreak (1).withRightBody (gusDisplay, 560); // a la derecha, el mapa de voces (4 columnas desde 560 px)
         gusSection.stretchToFill = true; // el display se queda con el ancho que sobre en la fila
+        if (auto* list = gusSection.listFor ("gusProgram")) list->setPhosphor (56); // lista grande, letra de 30 px
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
         fmDisplaySection.withBody (dx7Display, 0, 560); // 16 × 2 caracteres y el LED de 2 dígitos a ~4,6 px por punto
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")

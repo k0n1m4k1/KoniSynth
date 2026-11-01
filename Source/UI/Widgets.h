@@ -1039,7 +1039,17 @@ struct ListControl : juce::Component, private juce::Timer
     {
         auto r = getLocalBounds();
         label.setBounds (r.removeFromTop (18));
-        combo.setBounds (r.withSizeKeepingCentre (juce::jmin (r.getWidth() - 8, preferredWidth()), juce::jmin (26, r.getHeight())));
+        combo.setBounds (r.withSizeKeepingCentre (juce::jmin (r.getWidth() - 8, preferredWidth()), juce::jmin (comboHeight, r.getHeight())));
+    }
+
+    // Lista grande con aspecto de pantalla de fósforo (KoniLookAndFeel, propiedad "phosphor"): letra monoespaciada de
+    // ~0,54 del alto (56 px -> 30 px)
+    void setPhosphor (int height)
+    {
+        comboHeight = height;
+        combo.getProperties().set ("phosphor", true);
+        combo.setSize (200, height); // la fuente sale del alto (preferredWidth)
+        resized();
     }
 
     // Ancho del texto más largo de la lista más la flecha y los márgenes del ComboBox (~34 px)
@@ -1049,7 +1059,7 @@ struct ListControl : juce::Component, private juce::Timer
         float widest = 0.0f;
         for (int i = 0; i < combo.getNumItems(); ++i)
             widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, combo.getItemText (i)));
-        return juce::roundToInt (widest) + 34;
+        return juce::roundToInt (widest) + (combo.getProperties().contains ("phosphor") ? 52 : 34);
     }
 
     // Peso en la fila: el de 'width' perillas o lo que pide el texto más largo (60 px por unidad, como layoutWeight de Section)
@@ -1064,6 +1074,7 @@ struct ListControl : juce::Component, private juce::Timer
     int paramIndex;
     juce::String paramId;
     float width;
+    int comboHeight = 26; // alto del desplegable (setPhosphor lo agranda)
 };
 
 // UI: aspecto. Interruptores con LED rojo (encendido: rojo con halo; apagado: granate oscuro).
@@ -1485,14 +1496,42 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
     void drawComboBox (juce::Graphics& g, int width, int height, bool down, int buttonX, int buttonY, int buttonW, int buttonH,
                        juce::ComboBox& box) override
     {
+        if (box.getProperties().contains ("phosphor")) // lista grande del Gravis: pantalla oscura con borde y flecha de fósforo
+        {
+            const auto r = juce::Rectangle<float> (0.0f, 0.0f, (float) width, (float) height).reduced (1.0f);
+            const auto lcd = Skin::mono() ? Skin::ramp().bg : juce::Colour (0xff03080c);
+            g.setColour (lcd);
+            g.fillRoundedRectangle (r, 5.0f);
+            g.setColour (Skin::trace().withAlpha (box.isEnabled() ? (down ? 0.9f : 0.45f) : 0.2f));
+            g.drawRoundedRectangle (r, 5.0f, 1.5f);
+            const auto a = juce::Rectangle<float> ((float) width - 34.0f, 0.0f, 22.0f, (float) height).withSizeKeepingCentre (14.0f, 8.0f);
+            juce::Path arrow;
+            arrow.addTriangle (a.getX(), a.getY(), a.getRight(), a.getY(), a.getCentreX(), a.getBottom());
+            g.setColour (Skin::trace().withAlpha (box.isEnabled() ? 0.85f : 0.3f));
+            g.fillPath (arrow);
+            return;
+        }
         LookAndFeel_V4::drawComboBox (g, width, height, down, buttonX, buttonY, buttonW, buttonH, box);
         if (box.getProperties().contains ("waveGlyphs"))
             WaveGlyph::draw (g, box.getText(), juce::Rectangle<float> (7.0f, 0.0f, 22.0f, (float) height).reduced (0.0f, (float) height * 0.3f),
                              Skin::accent().withMultipliedAlpha (box.isEnabled() ? 1.0f : 0.4f));
     }
 
+    juce::Font getComboBoxFont (juce::ComboBox& box) override
+    {
+        if (box.getProperties().contains ("phosphor"))
+            return juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), (float) box.getHeight() * 0.54f, juce::Font::plain));
+        return LookAndFeel_V4::getComboBoxFont (box);
+    }
+
     void positionComboBoxText (juce::ComboBox& box, juce::Label& label) override
     {
+        if (box.getProperties().contains ("phosphor"))
+        {
+            label.setBounds (12, 1, box.getWidth() - 50, box.getHeight() - 2);
+            label.setFont (getComboBoxFont (box));
+            return;
+        }
         LookAndFeel_V4::positionComboBoxText (box, label);
         if (box.getProperties().contains ("waveGlyphs"))
             label.setBounds (label.getBounds().withTrimmedLeft (28));
@@ -1527,6 +1566,19 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
     // Las demás etiquetas y la caja mientras se edita, como V4
     void drawLabel (juce::Graphics& g, juce::Label& label) override
     {
+        if (auto* box = dynamic_cast<juce::ComboBox*> (label.getParentComponent());
+            box != nullptr && box->getProperties().contains ("phosphor") && ! label.isBeingEdited())
+        {
+            // Texto de fósforo con un halo tenue (el trazo de las pantallas del skin)
+            const auto ink = Skin::trace().withMultipliedAlpha (box->isEnabled() ? 1.0f : 0.4f);
+            g.setFont (label.getFont());
+            g.setColour (ink.withAlpha (0.18f * ink.getFloatAlpha()));
+            for (const auto& d : { juce::Point<int> (-1, 0), juce::Point<int> (1, 0), juce::Point<int> (0, -1), juce::Point<int> (0, 1) })
+                g.drawFittedText (label.getText(), label.getLocalBounds().translated (d.x, d.y), juce::Justification::centredLeft, 1, 0.8f);
+            g.setColour (ink);
+            g.drawFittedText (label.getText(), label.getLocalBounds(), juce::Justification::centredLeft, 1, 0.8f);
+            return;
+        }
         if ((dynamic_cast<juce::Slider*> (label.getParentComponent()) == nullptr && ! label.getProperties().contains ("valueBox"))
             || label.isBeingEdited())
         {
