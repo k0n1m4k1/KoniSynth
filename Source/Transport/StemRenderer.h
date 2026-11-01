@@ -16,6 +16,8 @@
 // - Hilos: las instancias se crean y se destruyen en el hilo de mensajes (llevan Timer); cada pista se renderiza en un hilo
 //   de un ThreadPool de min(pistas, núcleos - 1). El último en acabar iguala las longitudes y cierra los ficheros.
 // - Cancelar: cada bloque mira la bandera; los ficheros a medias se borran.
+// - Mezcla opcional (mixFile): al acabar, suma de todas las pistas a ganancia unidad en otro WAV float de 32 bits (sin recorte
+//   aunque pase de 0 dBFS; el nivel se ajusta en el DAW). Se relee cada pista ya cerrada, por bloques de 4096 muestras.
 class StemRenderer
 {
 public:
@@ -41,7 +43,8 @@ public:
     }
 
     // Hilo de mensajes. Prepara las instancias y arranca. onDone llega en el hilo de mensajes. Devuelve un error vacío si arranca
-    juce::String start (const juce::File& midiFile, std::vector<Stem> stems, double sampleRate, std::function<void (const Result&)> onDone)
+    juce::String start (const juce::File& midiFile, std::vector<Stem> stems, double sampleRate, std::function<void (const Result&)> onDone,
+                        const juce::File& mixTo = {})
     {
         JUCE_ASSERT_MESSAGE_THREAD
         if (running.load())
@@ -54,6 +57,7 @@ public:
         failed.store (false);
         done = std::move (onDone);
         rate = sampleRate;
+        mixFile = mixTo;
         for (auto& s : stems)
         {
             auto job = std::make_unique<Job> (*this);
@@ -197,12 +201,25 @@ private:
             if (j->error.isNotEmpty() && r.message.isEmpty())
                 r.message = j->error;
         }
+        if (r.ok && mixFile != juce::File())
+        {
+            if (mixdown (longest))
+                r.files.add (mixFile);
+            else
+            {
+                mixFile.deleteFile();
+                r.ok = false;
+                r.message = "cannot write the mix " + mixFile.getFullPathName();
+            }
+        }
         r.seconds = (juce::Time::getMillisecondCounterHiRes() - startedAt) / 1000.0;
         if (r.ok)
             r.message = juce::String (jobs.size()) + " track" + (jobs.size() == 1 ? "" : "s") + ", " + juce::String ((double) longest / rate, 1)
                         + " s of audio rendered in " + juce::String (r.seconds, 1) + " s";
         else if (r.cancelled)
             r.message = "render cancelled";
+        if (r.ok && mixFile != juce::File())
+            r.message << " + mix";
         juce::MessageManager::callAsync ([this, r, alive = alive]
         {
             if (! alive->load()) return;
@@ -212,6 +229,39 @@ private:
         });
     }
 
+    // Suma de las pistas (ya cerradas, todas de 'frames' muestras) en mixFile
+    bool mixdown (juce::int64 frames)
+    {
+        juce::WavAudioFormat wav;
+        std::vector<std::unique_ptr<juce::AudioFormatReader>> readers;
+        for (const auto& j : jobs)
+        {
+            std::unique_ptr<juce::AudioFormatReader> reader (wav.createReaderFor (j->stem.file.createInputStream().release(), true));
+            if (reader == nullptr) return false;
+            readers.push_back (std::move (reader));
+        }
+        mixFile.deleteFile();
+        std::unique_ptr<juce::OutputStream> stream (mixFile.createOutputStream());
+        if (stream == nullptr) return false;
+        std::unique_ptr<juce::AudioFormatWriter> out (wav.createWriterFor (stream, juce::AudioFormatWriterOptions().withSampleRate (rate).withNumChannels (2)
+                                                          .withBitsPerSample (32).withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint)));
+        if (out == nullptr) return false;
+        constexpr int kMixBlock = 4096;
+        juce::AudioBuffer<float> sum (2, kMixBlock), part (2, kMixBlock);
+        for (juce::int64 pos = 0; pos < frames; pos += kMixBlock)
+        {
+            const auto n = (int) std::min<juce::int64> (kMixBlock, frames - pos);
+            sum.clear();
+            for (auto& reader : readers)
+            {
+                if (! reader->read (&part, 0, n, pos, true, true)) return false;
+                for (int c = 0; c < 2; ++c) sum.addFrom (c, 0, part, c, 0, n);
+            }
+            if (! out->writeFromAudioSampleBuffer (sum, 0, n)) return false;
+        }
+        return true;
+    }
+
     std::shared_ptr<std::atomic<bool>> alive = std::make_shared<std::atomic<bool>> (true);
     juce::ThreadPool pool;
     std::vector<std::unique_ptr<Job>> jobs;
@@ -219,4 +269,5 @@ private:
     std::atomic<bool> cancelled { false }, failed { false }, running { false };
     std::atomic<int> remaining { 0 };
     double rate = 48000.0, songSeconds = 0.0, startedAt = 0.0;
+    juce::File mixFile; // vacío = sin mezcla
 };

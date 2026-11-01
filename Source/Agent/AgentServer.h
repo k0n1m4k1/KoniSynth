@@ -64,7 +64,8 @@
 //            {"track": 2, "preset": 117}], "multitimbral": false}   render de pistas más rápido que el tiempo real
 //            (Transport/StemRenderer.h): un WAV por pista lógica del .mid (índices como en el reproductor), con el preset dado
 //            (nombre o índice de presets; sin él, el sonido actual) sobre el estado actual. Sin tracks, todas las pistas. Con
-//            multitimbral, una sola instancia con todo el .mid. Devuelve los ficheros que se van a escribir; no espera
+//            multitimbral, una sola instancia con todo el .mid. Con "mix": true, además la suma de todas en "<mid> - Mix.wav".
+//            Devuelve los ficheros que se van a escribir; no espera
 //   render_status {}                        running, progress (0..1) y el resultado del último render (ok, cancelled,
 //            message, files, seconds)
 //   render_cancel {}                        cancela el render en curso (borra lo que llevaba)

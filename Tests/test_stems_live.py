@@ -5,6 +5,7 @@
 #  - dos stems con presets distintos: existen, misma longitud, más rápido que el tiempo real, cada uno solo con su nota
 #    (pico del espectro) y el evento de director de su canal aplicado (pitch bend al máximo en el canal 1 a 3,0 s: la
 #    pista A sube; la B no, aunque su motor atiende el pitch bend de cualquier canal);
+#  - con mix, un tercer WAV que es la suma exacta de los dos;
 #  - el mismo render dos veces da los mismos bytes (reproducible).
 import os, json, socket, subprocess, time, shutil, filecmp, glob, re, sys, tempfile, struct, hashlib
 import numpy as np
@@ -72,7 +73,7 @@ try:
         return json.loads(f.readline())
 
     def render(out):
-        r = call('render_stems', mid=MID, outDir=out, sampleRate=48000,
+        r = call('render_stems', mid=MID, outDir=out, sampleRate=48000, mix=True,
                  tracks=[{'track': 0, 'preset': 'OPL2 E.Piano'}, {'track': 1, 'preset': 'DX7 E.Piano 1'}])
         if not r['ok']:
             return r, None
@@ -86,12 +87,14 @@ try:
 
     out1 = os.path.join(S, 'out1')
     r, done = render(out1)
-    check(r['ok'] and len(r['result']['files']) == 2, 'render_stems: arranca con 2 ficheros (%s)' % r.get('error', ''))
+    check(r['ok'] and len(r['result']['files']) == 3, 'render_stems: arranca con 2 pistas + la mezcla (%s)' % r.get('error', ''))
     res, wall = done if done else ({}, 0)
     check(res.get('ok'), 'render terminado: %s' % res.get('message'))
     files = res.get('files', [])
-    if len(files) == 2:
-        (xa, fs), (xb, _) = read_float_wav(files[0]), read_float_wav(files[1])
+    if len(files) == 3:
+        (xa, fs), (xb, _), (xm, _) = read_float_wav(files[0]), read_float_wav(files[1]), read_float_wav(files[2])
+        check(files[2].endswith(' - Mix.wav') and xm.shape == xa.shape and np.max(np.abs(xm - (xa + xb))) < 1e-6,
+              'mezcla = suma de las pistas: error máximo %.1e' % (np.max(np.abs(xm - (xa + xb))) if xm.shape == xa.shape else -1))
         check(len(xa) == len(xb), 'misma longitud: %d y %d muestras (%.2f s)' % (len(xa), len(xb), len(xa) / fs))
         check(4.0 <= len(xa) / fs <= 9.5, 'longitud = canción (4 s) + cola: %.2f s' % (len(xa) / fs))
         check(wall < 4.0, 'más rápido que el tiempo real: %.2f s de reloj para 4 s de canción (%.0f×)' % (wall, 4.0 / max(wall, 1e-3)))
@@ -104,7 +107,7 @@ try:
         out2 = os.path.join(S, 'out2')
         r2, done2 = render(out2)
         files2 = done2[0].get('files', []) if done2 else []
-        same = len(files2) == 2 and all(hashlib.sha256(open(x, 'rb').read()).hexdigest() == hashlib.sha256(open(y, 'rb').read()).hexdigest()
+        same = len(files2) == 3 and all(hashlib.sha256(open(x, 'rb').read()).hexdigest() == hashlib.sha256(open(y, 'rb').read()).hexdigest()
                                         for x, y in zip(files, files2))
         check(same, 'el mismo render dos veces da los mismos bytes')
     r = call('render_stems', mid=MID, outDir=os.path.join(S, 'bad'), tracks=[{'track': 9}])

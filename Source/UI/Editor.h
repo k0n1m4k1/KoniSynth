@@ -1259,6 +1259,7 @@ private:
             return top != nullptr ? top->getScreenBounds() : juce::Rectangle<int>();
         };
         midiPlayer->onPartSelected = [this] { scope.setMode (Visualizer::playAlong); }; // tu parte, en el display
+        midiPlayer->onRenderStems = [this] (const juce::File& mid) { openPanel ("Render Stems", std::make_unique<StemRenderPanel> (koni, mid), 720, 460); };
         midiPlayer->onClose = [this]
         {
             juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<KoniSynthEditor> (this)]

@@ -2631,9 +2631,11 @@ inline juce::var KoniSynthProcessor::renderStems (const juce::var& req, juce::St
         o->setProperty ("files", written);
         o->setProperty ("seconds", r.seconds);
         lastStemResult = juce::var (o.release());
-    });
+    }, (bool) req.getProperty ("mix", false) ? outDir.getChildFile (juce::File::createLegalFileName (mid.getFileNameWithoutExtension() + " - Mix") + ".wav") : juce::File());
     if (error.isNotEmpty()) return {};
     auto o = std::make_unique<juce::DynamicObject>();
+    if ((bool) req.getProperty ("mix", false))
+        files.add (outDir.getChildFile (juce::File::createLegalFileName (mid.getFileNameWithoutExtension() + " - Mix") + ".wav").getFullPathName());
     o->setProperty ("files", files);
     return juce::var (o.release());
 }
@@ -2660,6 +2662,7 @@ inline void KoniSynthProcessor::cancelStems() { if (stemRenderer != nullptr) ste
 #include "UI/Displays.h"
 #include "UI/TransportPanel.h"
 #include "UI/MidiMusicPlayer.h"
+#include "UI/StemRenderPanel.h"
 #include "UI/AgentPanel.h"
 #include "UI/Arcade.h"
 #include "UI/BrandDemo.h"

@@ -25,6 +25,7 @@ class MidiMusicPlayer : public juce::Component, public juce::TooltipClient, priv
 {
 public:
     std::function<void()> onPartSelected, onClose;
+    std::function<void (const juce::File&)> onRenderStems; // STEMS: el .mid cargado, para el diálogo Render Stems
     std::function<juce::Rectangle<int>()> mainBounds; // ventana principal en coordenadas de pantalla
 
     explicit MidiMusicPlayer (KoniSynthProcessor& p) : koni (p), transport (p.sessionTransport)
@@ -35,6 +36,7 @@ public:
         if (auto cfg = openConfig())
         {
             shade = cfg->getBoolValue ("midiPlayerShade", false);
+            onTop = cfg->getBoolValue ("midiPlayerOnTop", true);
             showList = cfg->getBoolValue ("midiPlayerList", true);
             visibleRows = juce::jlimit (minRows, maxRows, cfg->getIntValue ("midiPlayerRows", 5));
         }
@@ -119,6 +121,8 @@ public:
             closeBox = right.removeFromRight (12);
             right.removeFromRight (4);
             shadeBox = right.removeFromRight (12);
+            right.removeFromRight (4);
+            pinBox = right.removeFromRight (12);
             right.removeFromRight (8);
             for (const auto id : { bStop, bPause, bPlay })
                 buttons.push_back ({ id, right.removeFromRight (20).reduced (1, 0) });
@@ -130,6 +134,8 @@ public:
             closeBox = t.removeFromRight (12);
             t.removeFromRight (4);
             shadeBox = t.removeFromRight (12);
+            t.removeFromRight (4);
+            pinBox = t.removeFromRight (12);
         }
         auto body = r.removeFromTop (mainH - titleH).reduced (pad);
         auto top = body.removeFromTop (timeH);
@@ -166,6 +172,8 @@ public:
             buttons.push_back ({ bRecent, listHeader.removeFromRight (64).reduced (0, 2) });
             listHeader.removeFromRight (4);
             buttons.push_back ({ bGm, listHeader.removeFromRight (74).reduced (0, 2) });
+            listHeader.removeFromRight (12); // separación del LED de GM>MT-32
+            buttons.push_back ({ bStems, listHeader.removeFromRight (56).reduced (0, 2) });
             listArea = list;
         }
     }
@@ -177,6 +185,7 @@ public:
         dragging = none;
         if (closeBox.expanded (2).contains (p)) { pressed = -2; return; }
         if (shadeBox.expanded (2).contains (p)) { pressed = -3; return; }
+        if (pinBox.expanded (2).contains (p)) { pressed = -4; return; }
         if (gripArea().contains (p)) { dragging = resizeList; dragRows = visibleRows; return; }
         if (! shade && multiChip.contains (p)) { turnOnMulti(); return; }
         for (const auto& b : buttons)
@@ -235,6 +244,13 @@ public:
         pressed = 0;
         if (id == -2 && closeBox.expanded (2).contains (p)) { if (onClose) onClose(); return; }
         if (id == -3 && shadeBox.expanded (2).contains (p)) { toggleShade(); return; }
+        if (id == -4 && pinBox.expanded (2).contains (p))
+        {
+            onTop = ! onTop;
+            if (auto cfg = openConfig()) cfg->setValue ("midiPlayerOnTop", onTop);
+            timerCallback();
+            return;
+        }
         for (const auto& b : buttons)
             if (b.id == id && b.area.contains (p))
                 press (id);
@@ -252,7 +268,7 @@ public:
         const auto p = e.getPosition();
         if (! shade && sliderTrack (tempoRow).expanded (0, 4).contains (p))      transport.setTempoScale (1.0f);
         else if (! shade && sliderTrack (volumeRow).expanded (0, 4).contains (p)) setVolumePosition (1.0f);
-        else if (titleArea.contains (p) && ! closeBox.expanded (2).contains (p) && ! shadeBox.expanded (2).contains (p)) toggleShade();
+        else if (titleArea.contains (p) && ! closeBox.expanded (2).contains (p) && ! shadeBox.expanded (2).contains (p) && ! pinBox.expanded (2).contains (p)) toggleShade();
     }
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
@@ -285,6 +301,7 @@ public:
                     case bClear: return "Remove the loop.";
                     case bList:  return "Show or hide the list of parts.";
                     case bRecent: return "The last 8 MIDI files you opened.";
+            case bStems: return "Render Stems: each part of this MIDI file to its own WAV file, with the preset you choose for it, faster than real time.";
                     case bGm:    return "GM to MT-32: plays a General MIDI file on the Roland MT-32 engine (turn its Multitimbral on). Programs are "
                                         "mapped to MT-32 patches, panning is flipped and the MT-32 is set up like a GM module (parts on "
                                         "channels 1-8, rhythm on 10; channels 9 and 11-16 stay silent). On by default for files without "
@@ -298,6 +315,8 @@ public:
                                                            ? " (this also switches the OPL model to OPL3, the only one with it)." : ".");
         if (closeBox.expanded (2).contains (p)) return "Close the player.";
         if (gripArea().contains (p)) return "Drag up or down to show fewer or more parts.";
+        if (pinBox.expanded (2).contains (p)) return onTop ? "On top: the player stays above other windows while KoniSynth is in front. Click to let other windows cover it."
+                                                            : "Not on top: other windows can cover the player. Click to keep it above them.";
         if (shadeBox.expanded (2).contains (p)) return shade ? "Full player." : "One-line player (also double-click the title).";
         if (! shade && sliderTrack (volumeRow).expanded (0, 4).contains (p))
             return "Volume of the whole KoniSynth output (100 % = unchanged, 71 % = -6 dB). Double-click: 100 %.";
@@ -360,7 +379,7 @@ private:
     mutable juce::Rectangle<int> multiChip;
     mutable int multiChipIndex = -1;
 
-    enum ButtonId { bPlay = 1, bPause, bStop, bEject, bModePlay, bModeWait, bModeFollow, bSetA, bSetB, bClear, bList, bRecent, bGm };
+    enum ButtonId { bPlay = 1, bPause, bStop, bEject, bModePlay, bModeWait, bModeFollow, bSetA, bSetB, bClear, bList, bRecent, bGm, bStems };
     struct Button { int id; juce::Rectangle<int> area; };
     enum Drag { none, window, volume, tempo, seek, resizeList };
 
@@ -451,8 +470,18 @@ private:
     void paintWindowButtons (juce::Graphics& g, const Palette& pal) const
     {
         g.setColour (pal.line);
+        g.drawRect (pinBox.toFloat(), 1.0f);
         g.drawRect (shadeBox.toFloat(), 1.0f);
         g.drawRect (closeBox.toFloat(), 1.0f);
+        {
+            // On top: barra arriba y flecha hacia ella (rellena = encendido; atenuada = apagado)
+            const auto b = pinBox.toFloat().reduced (2.5f);
+            g.setColour (pal.title.withAlpha (onTop ? 1.0f : 0.35f));
+            g.fillRect (b.getX(), b.getY(), b.getWidth(), 1.5f);
+            juce::Path arrow;
+            arrow.addTriangle (b.getCentreX(), b.getY() + 2.5f, b.getX() + 0.5f, b.getBottom() - 1.0f, b.getRight() - 0.5f, b.getBottom() - 1.0f);
+            if (onTop) g.fillPath (arrow); else g.strokePath (arrow, juce::PathStrokeType (1.0f));
+        }
         g.setColour (pal.title);
         if (shade) g.drawRect (shadeBox.toFloat().reduced (2.5f), 1.0f);                 // ampliar
         else g.drawHorizontalLine (shadeBox.getBottom() - 3, (float) shadeBox.getX() + 2.0f, (float) shadeBox.getRight() - 2.0f); // una línea
@@ -751,7 +780,7 @@ private:
             g.setColour (ink);
         }
         const auto label = b.id == bModePlay ? "PLAY" : b.id == bModeWait ? "WAIT" : b.id == bModeFollow ? "FOLLOW" : b.id == bList ? "PL"
-                         : b.id == bRecent ? "RECENT" : b.id == bGm ? "GM>MT-32" : b.id == bSetA ? "SET A" : b.id == bSetB ? "SET B" : "CLEAR";
+                         : b.id == bRecent ? "RECENT" : b.id == bStems ? "STEMS" : b.id == bGm ? "GM>MT-32" : b.id == bSetA ? "SET A" : b.id == bSetB ? "SET B" : "CLEAR";
         g.setFont (juce::FontOptions (10.0f, juce::Font::bold));
         g.drawText (label, text, juce::Justification::centred, false);
     }
@@ -863,6 +892,7 @@ private:
             case bStop:  transport.stop(); break;
             case bEject: chooseFile(); break;
             case bRecent: showRecent(); break;
+            case bStems: if (onRenderStems && loadedFile.existsAsFile()) onRenderStems (loadedFile); break;
             case bGm:    transport.setGmToMt32 (! transport.getGmToMt32()); break;
             case bModePlay:   transport.setPracticeMode (SessionTransport::practicePlay); break;
             case bModeWait:   transport.setPracticeMode (SessionTransport::practiceWait); break;
@@ -941,6 +971,7 @@ private:
             return;
         }
         loadError.clear();
+        loadedFile = f;
         // Recientes: los maxRecent últimos, el más nuevo primero
         auto list = recentFiles();
         list.removeString (f.getFullPathName());
@@ -1074,7 +1105,7 @@ private:
                 lastMain = mb;
             }
         // Encima de las demás solo mientras la aplicación (o el DAW) está en primer plano
-        const auto front = juce::Process::isForegroundProcess();
+        const auto front = onTop && juce::Process::isForegroundProcess();
         if (front != isAlwaysOnTop()) setAlwaysOnTop (front);
         repaint();
     }
@@ -1117,9 +1148,12 @@ private:
     std::array<float, 2 * fftSize> fftData {};
     std::array<float, numBands> bands { -100.0f, -100.0f, -100.0f, -100.0f, -100.0f, -100.0f, -100.0f, -100.0f, -100.0f, -100.0f };
 
+    bool onTop = true; // interruptor de la barra de título (clave midiPlayerOnTop)
+    juce::Rectangle<int> pinBox;
     juce::Rectangle<int> titleArea, closeBox, shadeBox, timeArea, marqueeArea, chipsArea, volumeRow, tempoRow, seekArea, listHeader, listArea;
     std::vector<Button> buttons;
     juce::String marquee, loadError;
+    juce::File loadedFile; // el .mid cargado con load() (STEMS)
     float marqueeOffset = 0.0f;
     bool shade = false, showList = true, isDocked = false;
     int pressed = 0, listScroll = 0;
