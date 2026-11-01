@@ -2041,6 +2041,12 @@ struct Section : juce::Component
         headerLabel.setAlpha (alpha);
     }
 
+    // Lo mismo para el segundo interruptor de la cabecera (withExtraToggle)
+    void setExtraToggleAlpha (float alpha)
+    {
+        if (extraToggle.getAlpha() != alpha) extraToggle.setAlpha (alpha);
+    }
+
     void setInfo (const juce::String& text)
     {
         if (! info.isVisible())

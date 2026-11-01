@@ -18,7 +18,8 @@
 //    efecto del orden de proceso del YMF262 (Nuked, OPL_QUIRK_CHANNELSAMPLEDELAY).
 //  - OPL2: solo 4 formas de onda (en el chip, con el bit WSE del registro de test, que activaban los juegos). Mono.
 // No verificado: la escala de la mezcla del YM3812 (ymfm la marca como "pendiente de verificar"); aquí, la de Nuked.
-// Sin modo de percusión (rítmico) ni CSM en esta versión. Remuestreo a la tasa del host con SincResampler.
+// Modo de percusión (registro BDh bit 5, OPL2 y OPL3): ver la sección "Modo ritmo" más abajo. Sin CSM. Remuestreo a la tasa
+// del host con SincResampler.
 // Modo GM (OPL3): el chip tocado por el driver DMX (Doom, Heretic, Hexen, Raptor...), multitímbrico, con el banco DMXOPL3
 // (Engines/OplGmBank.h): ver la sección "Modo GM" más abajo.
 // Modelos OPLL (YM2413) y VRC7: Engines/Opll.h (Nuked-OPLL).
@@ -43,6 +44,10 @@ struct OplEngine
         tremoloPos = 0; tremolo = 0; vibPos = 0;
         age = 0;
         gmInit();
+        drums = {};
+        drumKeys = drumRestart = 0;
+        noise = 1; // OPL3_Reset: chip->noise = 1
+        hhBit2 = hhBit3 = hhBit7 = hhBit8 = tcBit3 = tcBit5 = 0;
         resampler.reset();
         gold.reset();
         opll.reset();
@@ -229,6 +234,16 @@ private:
             gm = newGm;
             gmInit();
         }
+        const auto newRhythm = ! gm && p.oplRhythm->load() > 0.5f;
+        if (newRhythm != rhythm)
+        {
+            for (int k = 6; k < 9; ++k) voices[(size_t) k] = {}; // canales 6-8: de melodía a percusión o al revés
+            drums = {};
+            drumKeys = drumRestart = 0;
+            rhythm = newRhythm;
+            if (rhythm) setupDrumPitches();
+        }
+        for (size_t d = 0; d < 5; ++d) drumTl[d] = juce::jlimit (0, 63, (int) p.oplDrumTl[d]->load());
         alg = juce::jlimit (0, 3, (int) p.oplAlgorithm->load());
         if (! fourOp) alg &= 1;
         feedback = juce::jlimit (0, 7, (int) p.oplFeedback->load());
@@ -276,19 +291,25 @@ private:
 
     void handleMidi (const juce::MidiMessage& m)
     {
+        if (rhythm && m.getChannel() == 10 && (m.isNoteOn() || m.isNoteOff()))
+        {
+            drumMidi (m);
+            return;
+        }
         const auto n = numVoices();
         if (m.isNoteOn())
         {
             int target = -1;
             for (int k = 0; k < n; ++k)
-                if (voices[(size_t) k].note == m.getNoteNumber()) target = k;
+                if (! reserved (k) && voices[(size_t) k].note == m.getNoteNumber()) target = k;
             if (target < 0)
             {
                 long long best = std::numeric_limits<long long>::max();
                 for (int pass = 0; pass < 2 && target < 0; ++pass)
                     for (int k = 0; k < n; ++k)
-                        if ((pass == 1 || ! voices[(size_t) k].gate) && voices[(size_t) k].age < best) { best = voices[(size_t) k].age; target = k; }
+                        if (! reserved (k) && (pass == 1 || ! voices[(size_t) k].gate) && voices[(size_t) k].age < best) { best = voices[(size_t) k].age; target = k; }
             }
+            if (target < 0) return;
             auto& v = voices[(size_t) target];
             v.note = m.getNoteNumber();
             v.gate = true;
@@ -310,11 +331,14 @@ private:
         }
         else if (m.isAllNotesOff() || m.isAllSoundOff())
         {
-            for (auto& v : voices)
+            drumKeys = drumRestart = 0;
+            auto silence = [&m] (Voice& v)
             {
                 v.gate = false;
                 for (auto& s : v.slot) { s.key = false; if (m.isAllSoundOff()) { s.egRout = 0x1ff; s.gen = release; } }
-            }
+            };
+            for (auto& v : voices) silence (v);
+            for (auto& v : drums) silence (v);
         }
     }
 
@@ -412,8 +436,18 @@ private:
         const auto n = numVoices();
         const auto carrierMask = carriers();
         int mixL = 0, mixR = 0;
+        // Ruido del chip (OPL3_PhaseGenerate): LFSR de 23 bits que avanza una vez por operador, 36 por muestra; la caja (op. 16)
+        // y el charles (op. 13) leen el estado que tiene al procesarse
+        auto noiseNow = noise;
+        for (int i = 0; i < 13; ++i) noiseNow = noiseStep (noiseNow);
+        const auto noise13 = noiseNow;
+        for (int i = 13; i < 16; ++i) noiseNow = noiseStep (noiseNow);
+        const auto noise16 = noiseNow;
+        for (int i = 16; i < 36; ++i) noiseNow = noiseStep (noiseNow);
+        noise = noiseNow;
         for (int k = 0; k < n; ++k)
         {
+            if (reserved (k)) continue; // canales 6-8 en modo ritmo: abajo
             auto& v = voices[(size_t) k];
             const auto opCount = fourOp ? 4 : 2;
             // GM: cada canal del chip con su instrumento (conexión FM = solo la segunda es portadora; AM = las dos)
@@ -438,23 +472,182 @@ private:
                 prevOut = s.out;
                 if ((voiceCarriers >> j) & 1) acc += s.out;
             }
-            acc = (int) (int16_t) acc;
-            // Paneo (registro C0h, bits 4-5: A = izquierda, B = derecha), según el modo del driver de KoniSynth; en GM, el del
-            // driver DMX (CC 10)
-            const auto pan = panMode == 1 ? 1 : panMode == 2 ? 2 : panMode == 3 ? 1 + (k & 1) : 0;
-            const auto onL = model == opl2 || (gm ? (v.gmPan & 0x10) != 0 : pan != 2);
-            const auto onR = model == opl2 || (gm ? (v.gmPan & 0x20) != 0 : pan != 1);
-            // Retardo de canal del OPL3: la mezcla de un lado se toma antes de procesar el último operador de esos canales
-            const auto lateL = model == opl3 && v.channel >= 6 && v.channel <= 8;
-            const auto lateR = model == opl3 && v.channel >= 15;
-            if (onL) mixL += lateL ? v.prevAccLeft : acc;
-            if (onR) mixR += lateR ? v.prevAccRight : acc;
-            v.prevAccLeft = v.prevAccRight = acc;
+            mixChannel (v, k, acc, mixL, mixR);
         }
+        if (rhythm)
+            rhythmSample (noise13, noise16, mixL, mixR);
         advanceTimers();
         auto l = juce::jlimit (-32768, 32767, mixL), r = juce::jlimit (-32768, 32767, mixR);
         if (model == opl2) { l = roundtripFp (l); r = roundtripFp (r); }
         return { (float) l * kGain, (float) r * kGain };
+    }
+
+    // Suma de un canal a la mezcla (OPL3_Generate: acumulador de 16 bits con signo por canal)
+    void mixChannel (Voice& v, int k, int acc, int& mixL, int& mixR) const
+    {
+        acc = (int) (int16_t) acc;
+        // Paneo (registro C0h, bits 4-5: A = izquierda, B = derecha), según el modo del driver de KoniSynth; en GM, el del
+        // driver DMX (CC 10)
+        const auto pan = panMode == 1 ? 1 : panMode == 2 ? 2 : panMode == 3 ? 1 + (k & 1) : 0;
+        const auto onL = model == opl2 || (gm ? (v.gmPan & 0x10) != 0 : pan != 2);
+        const auto onR = model == opl2 || (gm ? (v.gmPan & 0x20) != 0 : pan != 1);
+        // Retardo de canal del OPL3: la mezcla de un lado se toma antes de procesar el último operador de esos canales
+        const auto lateL = model == opl3 && v.channel >= 6 && v.channel <= 8;
+        const auto lateR = model == opl3 && v.channel >= 15;
+        if (onL) mixL += lateL ? v.prevAccLeft : acc;
+        if (onR) mixR += lateR ? v.prevAccRight : acc;
+        v.prevAccLeft = v.prevAccRight = acc;
+    }
+
+    //==========================================================================
+    // Modo ritmo (registro BDh, bit 5 = RHY; bits 4-0 = BD SD TOM TC HH), igual en el OPL2 y el OPL3, según Nuked-OPL3 1.8
+    // (opl3.c: OPL3_ChannelUpdateRhythm, OPL3_ChannelSetupAlg y la parte rítmica de OPL3_PhaseGenerate):
+    //  - Canal 6: bombo, sus dos operadores (FM o AM según C0h); sale solo el segundo, dos veces (out[0] y out[1]).
+    //  - Canal 7: charles (HH, op. 13, el modulador) y caja (SD, op. 16, la portadora); canal 8: tom (op. 14) y platillo (TC,
+    //    op. 17). Sin modulación entre ellos; cada uno sale dos veces.
+    //  - Fase: HH = bits 2, 3, 7, 8 de su fase y 3, 5 de la del TC combinados por XOR, más el ruido; SD = bit 8 de la fase del
+    //    HH y el ruido; TC = la misma combinación XOR. HH y SD comparten la frecuencia del canal 7; TOM y TC la del canal 8.
+    //  - Cada tambor tiene su bit de key: tecla propia de la envolvente, aparte del key on de los canales.
+    // Quedan 6 canales melódicos en el OPL2 (0-5) y 15 en el OPL3 (0-5, 9-17); en 4 operadores, las 6 voces no usan 6-8.
+    // Instrumentos de percusión: los que carga por defecto el ADLIB.C del Ad Lib Music SDK (1987; valores reproducidos en el
+    // backend de Visual Composer de AdPlug, composer.cpp, LGPL-2.1+), con sus alturas: tom en la nota 24 del SDK (bloque 2,
+    // fnum 343 = 65,0 Hz) y caja 7 semitonos por encima (fnum 515, 97,6 Hz; calculado: fnum · 49 716 · 2^(bloque - 20)). El
+    // SDK no fija la del bombo (la da cada nota): aquí, la del tom (supuesto). Canal MIDI 10, mapa GM como en el OPLL.
+    // Niveles: el TL del operador que suena (BD: la portadora) más el mando de cada tambor y la velocidad.
+    enum Drum { bd, sd, tom, tc, hh };
+
+    bool reserved (int k) const { return rhythm && ! fourOp && k >= 6 && k <= 8; }
+
+    static uint32_t noiseStep (uint32_t n)
+    {
+        const auto bit = ((n >> 14) ^ n) & 1u;
+        return (n >> 1) | (bit << 22);
+    }
+
+    // Registros de los instrumentos de percusión del SDK. Orden de ADLIB.C: KSL, MULT, FB, AR, SL, EG, DR, RR, TL, AM, VIB,
+    // KSR, FM (1 = conexión FM), WAVE; aquí en OpRegs {am, vib, egt, ksr, mult, ksl, tl, ar, dr, sl, rr, wf}
+    static const OpRegs& drumOp (int which)
+    {
+        static const OpRegs t[6] = {
+            { false, false, false, false, 0, 0, 11, 10, 8, 4, 12, 0 },  // bdOpr0 (modulador del bombo)
+            { false, false, false, false, 0, 0, 0, 13, 6, 4, 15, 0 },   // bdOpr1 (portadora del bombo)
+            { false, false, false, false, 12, 0, 0, 15, 8, 11, 5, 0 },  // sdOpr
+            { false, false, false, false, 4, 0, 0, 15, 7, 11, 5, 0 },   // tomOpr
+            { false, false, false, false, 1, 0, 0, 15, 5, 11, 5, 0 },   // cymbOpr
+            { false, false, false, false, 1, 0, 0, 15, 7, 11, 5, 0 },   // hhOpr
+        };
+        return t[juce::jlimit (0, 5, which)];
+    }
+
+    static void setFnum (Voice& v, int fnum, int block)
+    {
+        v.fnum = fnum;
+        v.block = block;
+        v.ksv = (block << 1) | ((fnum >> 9) & 1);
+        static const int kslrom[16] = { 0, 32, 40, 45, 48, 51, 53, 55, 56, 58, 59, 60, 61, 62, 63, 64 };
+        v.kslBase = std::max (0, (kslrom[fnum >> 6] << 2) - ((8 - block) << 5));
+    }
+
+    void setupDrumPitches()
+    {
+        setFnum (drums[0], 343, 2); // bombo (supuesto: la altura del tom)
+        setFnum (drums[1], 515, 2); // canal 7: caja y charles (TOM_PITCH + 7)
+        setFnum (drums[2], 343, 2); // canal 8: tom y platillo (TOM_PITCH = 24)
+        for (int i = 0; i < 3; ++i) drums[(size_t) i].channel = 6 + i;
+    }
+
+    static int drumOfNote (int note)
+    {
+        switch (note)
+        {
+            case 35: case 36: return bd;
+            case 37: case 38: case 39: case 40: return sd;
+            case 41: case 43: case 45: case 47: case 48: case 50: return tom;
+            case 49: case 51: case 52: case 53: case 55: case 57: case 59: return tc;
+            case 42: case 44: case 46: return hh;
+            default: return -1;
+        }
+    }
+
+    // Bit de BDh de cada tambor y su operador (canal del chip, operador 0/1)
+    static int drumBit (int d) { static const int bits[5] = { 0x10, 0x08, 0x04, 0x02, 0x01 }; return bits[d]; }
+
+    void drumMidi (const juce::MidiMessage& m)
+    {
+        const auto d = drumOfNote (m.getNoteNumber());
+        if (d < 0) return;
+        const auto bit = drumBit (d);
+        if (m.isNoteOn())
+        {
+            drumVelTl[(size_t) d] = velocityOn ? juce::jlimit (0, 63, (int) std::lround (-20.0 * std::log10 (std::max (0.01f, m.getFloatVelocity())) / 0.75)) : 0;
+            if (drumKeys & bit) drumRestart |= bit; // ya pulsado: el driver apaga el bit y lo vuelve a encender
+            drumKeys |= bit;
+        }
+        else
+            drumKeys &= ~bit;
+    }
+
+    // Los cinco tambores de una muestra, en el orden de los operadores del chip (12-17)
+    void rhythmSample (uint32_t noise13, uint32_t noise16, int& mixL, int& mixR)
+    {
+        // Teclas: un redisparo deja el bit apagado una muestra (la envolvente pasa a release y vuelve a atacar)
+        const auto keys = drumKeys & ~drumRestart;
+        drumRestart = 0;
+        auto& c6 = drums[0];
+        auto& c7 = drums[1];
+        auto& c8 = drums[2];
+        c6.slot[0].key = c6.slot[1].key = (keys & 0x10) != 0;
+        c7.slot[0].key = (keys & 0x01) != 0; // HH
+        c7.slot[1].key = (keys & 0x08) != 0; // SD
+        c8.slot[0].key = (keys & 0x04) != 0; // TOM
+        c8.slot[1].key = (keys & 0x02) != 0; // TC
+        auto level = [this] (int d) { return juce::jlimit (0, 63, drumTl[(size_t) d] + drumVelTl[(size_t) d]); };
+
+        // Canal 6, bombo: FM (bdOpr con FM = 1), sin realimentación
+        {
+            auto& m = c6.slot[0];
+            m.prout = m.out;
+            envelope (m, drumOp (0), c6, 0);
+            phase (m, drumOp (0), c6);
+            m.out = waveform (0, m.phaseOut, m.egOut);
+            auto& c = c6.slot[1];
+            envelope (c, drumOp (1), c6, level (bd));
+            phase (c, drumOp (1), c6);
+            c.out = waveform (0, c.phaseOut + m.out, c.egOut);
+            mixChannel (c6, 6, 2 * c.out, mixL, mixR);
+        }
+        // Canal 7: charles (op. 13) y caja (op. 16)
+        {
+            auto& h = c7.slot[0];
+            envelope (h, drumOp (5), c7, level (hh));
+            phase (h, drumOp (5), c7);
+            hhBit2 = (h.phaseOut >> 2) & 1; hhBit3 = (h.phaseOut >> 3) & 1;
+            hhBit7 = (h.phaseOut >> 7) & 1; hhBit8 = (h.phaseOut >> 8) & 1;
+            const auto xorHh = (hhBit2 ^ hhBit7) | (hhBit3 ^ tcBit5) | (tcBit3 ^ tcBit5); // tc: los de la muestra anterior
+            h.phaseOut = (xorHh << 9) | (((uint32_t) xorHh ^ (noise13 & 1u)) != 0 ? 0xd0 : 0x34);
+            h.out = waveform (0, h.phaseOut, h.egOut);
+            auto& s = c7.slot[1];
+            envelope (s, drumOp (2), c7, level (sd));
+            phase (s, drumOp (2), c7);
+            s.phaseOut = (hhBit8 << 9) | (((uint32_t) hhBit8 ^ (noise16 & 1u)) << 8);
+            s.out = waveform (0, s.phaseOut, s.egOut);
+            mixChannel (c7, 7, 2 * h.out + 2 * s.out, mixL, mixR);
+        }
+        // Canal 8: tom (op. 14) y platillo (op. 17)
+        {
+            auto& t = c8.slot[0];
+            envelope (t, drumOp (3), c8, level (tom));
+            phase (t, drumOp (3), c8);
+            t.out = waveform (0, t.phaseOut, t.egOut);
+            auto& y = c8.slot[1];
+            envelope (y, drumOp (4), c8, level (tc));
+            phase (y, drumOp (4), c8);
+            tcBit3 = (y.phaseOut >> 3) & 1; tcBit5 = (y.phaseOut >> 5) & 1;
+            const auto xorTc = (hhBit2 ^ hhBit7) | (hhBit3 ^ tcBit5) | (tcBit3 ^ tcBit5);
+            y.phaseOut = (xorTc << 9) | 0x80;
+            y.out = waveform (0, y.phaseOut, y.egOut);
+            mixChannel (c8, 8, 2 * t.out + 2 * y.out, mixL, mixR);
+        }
     }
 
     // ¿El operador j recibe la salida del anterior? (Nuked, OPL3_ChannelSetupAlg)
@@ -783,7 +976,13 @@ private:
     std::array<Voice, 18> voices {};
     std::array<OpRegs, 4> ops {};
     int model = 0, alg = 0, feedback = 0, tremoloShift = 4, vibShift = 1, panMode = 0;
-    bool fourOp = false, velocityOn = true, monoOutput = false, pgReset = false, gm = false;
+    bool fourOp = false, velocityOn = true, monoOutput = false, pgReset = false, gm = false, rhythm = false;
+    // Modo ritmo: canales 6-8 de percusión, teclas BDh, ruido del chip y bits de fase compartidos
+    std::array<Voice, 3> drums {};
+    std::array<int, 5> drumTl {}, drumVelTl {};
+    int drumKeys = 0, drumRestart = 0;
+    uint32_t noise = 1;
+    int hhBit2 = 0, hhBit3 = 0, hhBit7 = 0, hhBit8 = 0, tcBit3 = 0, tcBit5 = 0;
     uint32_t timer = 0;
     uint64_t egTimer = 0;
     int egState = 0, egAdd = 0, egTimerLo = 0, tremoloPos = 0, tremolo = 0, vibPos = 0;

@@ -9,7 +9,8 @@ public:
     explicit OplPanel (KoniSynthProcessor& p) : koni (p)
     {
         auto& s = p.apvts;
-        header.withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
+        header.withExtraToggle (s, "oplFourOp", "4-Op") // OPL3: pares de canales con 4 operadores
+              .withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         addAndMakeVisible (header);
         diagram.setJustificationType (juce::Justification::centredLeft);
         diagram.setFont (juce::FontOptions (13.0f));
@@ -98,6 +99,9 @@ public:
     }
 
 private:
+    // 4-Op atenuado sin efecto: solo el OPL3 y no en el modo Multitimbral
+    void dimExtra (bool inert) { header.setExtraToggleAlpha (inert ? 0.35f : 1.0f); }
+
     juce::Rectangle<int> columnArea (int i) const
     {
         const auto w = grid.getWidth() / 4;
@@ -110,6 +114,7 @@ private:
         const auto four = (int) s.getRawParameterValue ("oplModel")->load() == 1 && s.getRawParameterValue ("oplFourOp")->load() > 0.5f;
         auto alg = juce::jlimit (0, 3, (int) s.getRawParameterValue ("oplAlgorithm")->load());
         if (! four) alg &= 1;
+        dimExtra ((int) s.getRawParameterValue ("oplModel")->load() != 1 || s.getRawParameterValue ("oplGm")->load() > 0.5f);
         if (alg == shownAlgorithm && four == fourOp)
             return;
         shownAlgorithm = alg;

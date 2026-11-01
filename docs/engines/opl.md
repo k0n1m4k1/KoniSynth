@@ -21,20 +21,19 @@ Sections: **OPL** and **OPL LFO / Output**; with Model = OPLL or VRC7, an **OPLL
 | Control | What it does | Range / default |
 |---|---|---|
 | Model (header menu) | OPL2 (YM3812), OPL3 (YMF262), OPLL (YM2413) or VRC7 (Konami), as described above. | default OPL2 (YM3812) |
-| 4-Op | OPL3 only: pairs of channels become 4-operator voices (6 voices) with 4 algorithms. | off |
 | Operators... (header button) | Opens the OPL editor (see below). | |
 | Gold... (header button) | OPL3 only: the AdLib Gold output stage and surround module (see AdLib Gold below). | off |
 | Algorithm | 2 operators: 0 = FM (1 modulates 2), 1 = AM (1 + 2 added). 4 operators (OPL3): 0 = 1->2->3->4, 1 = (1->2)+(3->4), 2 = 1+(2->3->4), 3 = 1+(2->3)+4. | 0-3; 0 |
 | Feedback | Self-modulation of OP1 (register C0h): 0 = off, 7 = most (noisy). | 0-7; 0 |
-| OP1 TL ... OP4 TL | Total level, 0.75 dB steps (63 = -47 dB). On a modulator it sets the brightness. | 0-63; OP1/OP3 63, OP2/OP4 0 |
-| Multitimbral (header switch) | OPL3 only: General MIDI on 16 channels with the DMX driver and the DMXOPL3 bank (see Multitimbral mode below). Algorithm, Feedback, the TLs, Pan and the operators are not used. | off |
+| OP1 TL ... OP4 TL | Total level, 0.75 dB steps (63 = -47 dB). On a modulator it sets the brightness. OP3/OP4 only in 4-operator mode. | 0-63; OP1/OP3 63, OP2/OP4 0 |
 
 Default patch: 2 operators in FM, the modulator silent (TL 63) and the carrier a sine with AR 15, RR 7, EGT on.
 
 In the OPL editor (Operators...), each operator column shows its envelope with the chip's times (at C4, with KSR), drawn
 from the chip's own envelope generator; drag its points for AR, DR and SL, and RR.
 
-**OPL editor (Operators...).** Columns OP1-OP4 with the chip's own registers, carriers highlighted, the algorithm drawn as
+**OPL editor (Operators...).** In its header, **4-Op** (OPL3 only: pairs of channels become 4-operator voices, 6 voices, with
+4 algorithms; off by default), Algorithm and Feedback. Columns OP1-OP4 with the chip's own registers, carriers highlighted, the algorithm drawn as
 a diagram (operator boxes, modulation lines, output line and the feedback loop on OP1) and written out;
 OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 
@@ -53,6 +52,19 @@ OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 | EGT | On = the envelope holds at SL while the key is down; off = keeps decaying at RR (percussive). | on |
 | KSR | Envelopes get faster in higher octaves. | off |
 
+### OPL Rhythm / GM (OPL2 and OPL3 models)
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Rhythm (header switch) | The chip's rhythm mode (register BDh): chip channels 6-8 become bass drum, snare, tom-tom, top cymbal and hi-hat, played on MIDI channel 10 with the General MIDI drum notes (36 BD, 38/40 SD, 41-50 toms, 49/51/57 cymbals, 42/44/46 hi-hat). 6 melodic voices remain on the OPL2, 15 on the OPL3 (6 in 4-operator mode). Not with Multitimbral. | off |
+| Multitimbral (header switch) | OPL3 only: General MIDI on 16 channels with the DMX driver and the DMXOPL3 bank (see Multitimbral mode below). Algorithm, Feedback, the TLs, Pan and the operators are not used. | off |
+| BD, SD, TOM, CY, HH | Rhythm mode: attenuation of each drum (Total Level, 0.75 dB steps; 0 = loudest). Velocity adds to it. | 0-63; 0 |
+
+The drum sounds are the defaults that Ad Lib's Music SDK (ADLIB.C, 1987) loads: their operator settings, the tom-tom at
+65.0 Hz and the snare and hi-hat channel 7 semitones higher (97.6 Hz). The snare, hi-hat and cymbal take their phase from the
+chip's noise generator and from bits of the hi-hat and cymbal phases, as on the silicon (Nuked-OPL3); each drum sounds
+twice as loud as one operator because the chip adds its output twice. The SDK sets no bass drum pitch (each song gives
+one); KoniSynth plays it at the tom-tom's 65.0 Hz.
 ### OPLL / VRC7 (OPLL and VRC7 models only)
 
 | Control | What it does | Range / default |
@@ -165,7 +177,7 @@ Choosing OPL from the engine menu loads OPL2 E.Piano.
 
 ## Limitations
 
-- OPL2/OPL3: no percussion (rhythm) mode and no CSM in this version.
+- OPL2/OPL3: no CSM mode. Rhythm mode: one pitch per drum (the SDK defaults; the bass drum pitch is an assumption).
 - AdLib Gold: the TDA8425 follows its datasheet (DOSBox Staging uses values tuned by ear to recordings: 400 Hz / 2.5 kHz and
   +3 dB of treble); the pseudo-stereo capacitors (15 nF) and the YM7128B input level are assumptions; the wet level (x1.8)
   is DOSBox Staging's calibration against the real card.

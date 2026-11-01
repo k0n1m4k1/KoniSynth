@@ -722,6 +722,14 @@ static juce::String paramHelp (const juce::String& id)
         { "oplVelocity", "Velocity lowers the carriers' Total Level (0.75 dB steps), as a sound driver would; the chip itself has no velocity." },
         { "oplPan", "OPL3 stereo (register C0h bits 4-5: left, right or both). Alternate: voices go left, right, left... The OPL2 is mono." },
         { "oplOutput", "Stereo (OPL3) or both sides summed to mono." },
+        { "oplRhythm", "Rhythm mode of the OPL2 / OPL3 chip (register BDh): chip channels 6-8 become bass drum, snare, tom, top cymbal "
+                       "and hi-hat on MIDI channel 10 (General MIDI drum notes); 6 melodic voices remain on the OPL2, 15 on the OPL3. "
+                       "The drum sounds are the defaults of Ad Lib's 1987 Music SDK. Not with Multitimbral. Off by default." },
+        { "oplBdTl", "Rhythm mode: bass drum attenuation (Total Level, 0.75 dB steps; 0 = loudest). Default 0." },
+        { "oplSdTl", "Rhythm mode: snare drum attenuation (Total Level, 0.75 dB steps; 0 = loudest). Default 0." },
+        { "oplTomTl", "Rhythm mode: tom-tom attenuation (Total Level, 0.75 dB steps; 0 = loudest). Default 0." },
+        { "oplCyTl", "Rhythm mode: top cymbal attenuation (Total Level, 0.75 dB steps; 0 = loudest). Default 0." },
+        { "oplHhTl", "Rhythm mode: hi-hat attenuation (Total Level, 0.75 dB steps; 0 = loudest). Default 0." },
         { "oplGold", "AdLib Gold 1000 (1992), OPL3 only: the card's output stage after the chip. The Philips TDA8425 (bass, treble, "
                      "stereo mode) and the optional SP2 surround module (Yamaha YM7128B). Off (default): the bare OPL3." },
         { "oplGoldBass", "AdLib Gold bass (TDA8425 shelving at about 300 Hz), -12 to +15 dB in 3 dB steps. Default 0 dB." },

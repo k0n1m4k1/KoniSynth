@@ -491,7 +491,7 @@ public:
                      .withKnob (s, "n64AttackVolume", "A Vol").withKnob (s, "n64DecayVolume", "D Vol")
                      .withSideBody (n64EnvView, 150, true);
         n64FxSection.withCombo (s, "n64Fx").withKnob (s, "n64FxMix", "Mix").withKnob (s, "n64Dac", "DAC");
-        oplSection.withCombo (s, "oplModel").withExtraToggle (s, "oplFourOp", "4-Op")
+        oplSection.withCombo (s, "oplModel") // 4-Op, en Operators...
                   .withHeaderButton ("Operators...", "Open the OPL editor: the operators with the chip's own registers.", [this] { openOplPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<OplPanel> (koni); }))
                   .withHeaderButton ("Gold...", "AdLib Gold 1000 (OPL3 only): the card's TDA8425 output stage (bass, treble, stereo "
                                      "mode) and the SP2 surround module (YM7128B). Off by default.", paramDialog ("AdLib Gold", [] (ParamPanel& p, APVTS& st)
@@ -504,7 +504,11 @@ public:
                   .withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             oplSection.withKnob (s, "opl" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");
-        oplSection.withHeaderControl ({}, oplMultiToggle, 130); // LED Multitimbral (General MIDI, OPL3) tras Operators...
+        // Percusión y General MIDI del OPL2/OPL3 (con OPLL/VRC7, en su lugar, el bloque OPLL / VRC7 con su Rhythm)
+        oplRhythmSection.withExtraToggle (s, "oplRhythm", "Rhythm")
+                        .withHeaderControl ({}, oplMultiToggle, 130) // LED Multitimbral (General MIDI, OPL3)
+                        .withKnob (s, "oplBdTl", "BD").withKnob (s, "oplSdTl", "SD").withKnob (s, "oplTomTl", "TOM")
+                        .withKnob (s, "oplCyTl", "CY").withKnob (s, "oplHhTl", "HH");
         opllSection.withCombo (s, "opllInstrument").withExtraToggle (s, "opllRhythm", "Rhythm")
                    .withKnob (s, "opllVolume", "Volume").withKnob (s, "opllSustain", "SUS");
         oplLfoSection.withExtraToggle (s, "oplVelocity", "Velocity")
@@ -729,7 +733,7 @@ public:
         content.addChildComponent (modBar);
         for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, &filter, &complexSection, &noiseSection, &thereminSection,
                                                                  &vl1Section, &vl1RhythmSection, &vl1DisplaySection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
-                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &gusSection, &pvOscSection, &pvFilterSection,
+                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplRhythmSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &gusSection, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
                                                                  &ampEnvSection })
             rows.addChildComponent (*c);
@@ -1169,6 +1173,7 @@ private:
         oplSection.setVisible (engine == 13);
         oplLfoSection.setVisible (engine == 13);
         opllSection.setVisible (engine == 13 && opllModel);
+        oplRhythmSection.setVisible (engine == 13 && ! opllModel);
         shownOplModel = (int) koni.apvts.getRawParameterValue ("oplModel")->load();
         mt32Section.setVisible (engine == 14);
         mt32DisplaySection.setVisible (engine == 14);
@@ -1842,10 +1847,19 @@ private:
         dim (gusSection.knobFor ("gusRam"), (int) v ("gusModel") == 2);
         // OPL: GM solo con el OPL3; con GM, el banco pone los operadores y el driver el volumen y el paneo
         const auto oplGm = (int) v ("oplModel") == 1 && v ("oplGm") > 0.5f;
-        oplSection.setHeaderControlAlpha ((int) v ("oplModel") != 1 ? 0.35f : 1.0f);
-        for (const char* id : { "oplAlgorithm", "oplFeedback", "opl1Tl", "opl2Tl", "opl3Tl", "opl4Tl" })
+        const auto opl2 = (int) v ("oplModel") == 0;
+        const auto oplFour = (int) v ("oplModel") == 1 && v ("oplFourOp") > 0.5f && ! oplGm;
+        const auto oplRhythm = ! oplGm && v ("oplRhythm") > 0.5f;
+        oplRhythmSection.setHeaderControlAlpha ((int) v ("oplModel") != 1 ? 0.35f : 1.0f);
+        oplRhythmSection.setExtraToggleAlpha (oplGm ? 0.35f : 1.0f); // Rhythm: no con Multitimbral
+        for (const char* id : { "oplAlgorithm", "oplFeedback", "opl1Tl", "opl2Tl" })
             dim (oplSection.knobFor (id), oplGm);
-        dim (oplLfoSection.knobFor ("oplPan"), oplGm);
+        for (const char* id : { "opl3Tl", "opl4Tl" }) // OP3/OP4: solo con 4 operadores
+            dim (oplSection.knobFor (id), ! oplFour);
+        for (const char* id : { "oplBdTl", "oplSdTl", "oplTomTl", "oplCyTl", "oplHhTl" })
+            dim (oplRhythmSection.knobFor (id), ! oplRhythm);
+        dim (oplLfoSection.knobFor ("oplPan"), oplGm || opl2); // el OPL2 es mono
+        dim (oplLfoSection.knobFor ("oplOutput"), opl2);
         // Synth.h: sin V.Pan no hay paneo que repartir (Pan Mode está en el diálogo Voice Pan... de Amp Envelope)
         dim (paramPanel != nullptr ? paramPanel->knobFor ("voicePanMode") : nullptr, std::abs (v ("voicePan")) < 1.0e-4f);
     }
@@ -2136,7 +2150,7 @@ private:
             case 12: return { { 1.0f, { &n64Section, &n64EnvSection, &n64FxSection }, 3 } };       // fuente -> envolvente -> efecto
             case 13: if ((int) koni.apvts.getRawParameterValue ("oplModel")->load() >= 2)
                          return { { 1.0f, { &oplSection, &opllSection, &oplLfoSection }, 1 } };
-                     return { { 1.0f, { &oplSection, &oplLfoSection }, 1 } };
+                     return { { 1.0f, { &oplSection, &oplRhythmSection, &oplLfoSection }, 1 } };
             case 14: return { { 1.0f, { &mt32Section, &mt32DisplaySection }, 1 } }; // controles y, a la derecha, el LCD
             case 15: return { { 2.4f, { &gusSection }, 1 } }; // un bloque alto: dos filas de controles y, a su derecha, el mapa de voces
             default: return { { 1.0f, { &ansSection }, 1 } };
@@ -3595,7 +3609,7 @@ private:
             pvOscSection { "Polivoks VCO" }, pvFilterSection { "Polivoks Mixer / VCF" }, pvFEnvSection { "Polivoks Filter EG" },
             pvAEnvSection { "Polivoks Amp EG" }, pvLfoSection { "Polivoks LFO" }, ansSection { "ANS" },
             mdSection { "Mega Drive" }, mdLfoSection { "MD LFO" }, mdVoiceSection { "MD Voice" }, mdPsgSection { "MD PSG (SN76489)" }, snesSection { "SNES" }, snesEnvSection { "SNES Envelope" },
-            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, gusSection { "Gravis UltraSound" }, fmDisplaySection { "Display" }, vl1DisplaySection { "Display" },
+            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplRhythmSection { "OPL Rhythm / GM" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, gusSection { "Gravis UltraSound" }, fmDisplaySection { "Display" }, vl1DisplaySection { "Display" },
             flangerSection { "Flanger" }, fshiftSection { "Freq Shifter" }, leslieSection { "Leslie" }, springSection { "Spring Reverb" }, eqSection { "EQ" },
             transSection { "Transient" }, compSection { "Compressor" }, limiterSection { "Limiter" },
             ampSection { "Amp" }, waveSection { "Wave" };

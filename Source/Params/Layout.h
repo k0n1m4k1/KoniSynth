@@ -779,6 +779,10 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplVelocity", 1 },  "OPL Velocity", true));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplPan", 1 },       "OPL Pan", StringArray { "Center", "Left", "Right", "Alternate L/R" }, 0));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplOutput", 1 },    "OPL Output", StringArray { "Stereo (OPL3)", "Mono" }, 0));
+    // Modo ritmo del OPL2/OPL3 (registro BDh): tambores por el canal MIDI 10 y su atenuación (TL, 0,75 dB por paso)
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplRhythm", 1 },    "OPL Rhythm", false));
+    for (const auto* d : { "Bd", "Sd", "Tom", "Cy", "Hh" })
+        l.add (std::make_unique<AudioParameterInt> (ParameterID { String ("opl") + d + "Tl", 1 }, String ("OPL Rhythm ") + String (d).toUpperCase() + " TL", 0, 63, 0));
     // AdLib Gold (Engines/OplGold.h): etapa TDA8425 y surround SP2 (YM7128B) tras el OPL3; apagada por defecto
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplGold", 1 },      "OPL AdLib Gold", false));
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "oplGoldBass", 1 },  "OPL Gold Bass", NormalisableRange<float> (-12.0f, 15.0f, 3.0f), 0.0f, decibels));
