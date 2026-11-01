@@ -92,29 +92,43 @@ private:
         presets.refresh();
         combo.clear (juce::dontSendNotification);
 
-        // Fábrica por categoría (en el orden de presetCategories) y después usuario por categoría; el filtro deja una
+        // Una sección por categoría (en el orden de presetCategories): primero los de fábrica y después los de usuario, que
+        // llevan "(U)" tras el nombre. El filtro deja una
         const auto filter = filterCombo.getSelectedId() <= 1 ? juce::String() : filterCombo.getText();
         const auto& list = presets.getPresets();
-        for (const auto factory : { true, false })
-            for (const auto& category : presetCategories())
+        for (const auto& category : presetCategories())
+        {
+            if (filter.isNotEmpty() && category != filter)
+                continue;
+            bool heading = false;
+            for (const auto factory : { true, false })
             {
-                if (filter.isNotEmpty() && category != filter)
-                    continue;
-                // Orden alfabético dentro de la sección (natural: "Pad 2" antes que "Pad 10"); el id sigue siendo el índice
-                std::vector<size_t> section;
+                // Orden alfabético dentro de cada grupo (natural: "Pad 2" antes que "Pad 10"); el id sigue siendo el índice
+                std::vector<size_t> group;
                 for (size_t i = 0; i < list.size(); ++i)
                     if (list[i].factory == factory && list[i].category == category)
-                        section.push_back (i);
-                std::stable_sort (section.begin(), section.end(), [&list] (size_t a, size_t b)
+                        group.push_back (i);
+                std::stable_sort (group.begin(), group.end(), [&list] (size_t a, size_t b)
                                   { return list[a].name.compareNatural (list[b].name) < 0; });
-                if (! section.empty())
-                    combo.addSectionHeading (factory ? category : "User - " + category);
-                for (const auto i : section)
-                    combo.addItem (list[i].displayName(), (int) i + 1); // id = índice + 1 (0 = sin selección)
+                if (! group.empty() && ! heading)
+                {
+                    combo.addSectionHeading (category);
+                    heading = true;
+                }
+                for (const auto i : group) // id = índice + 1 (0 = sin selección)
+                    combo.addItem (shownName ((int) i), (int) i + 1);
             }
+        }
 
         lastIndex = -2; // fuerza el refresco
         refreshDisplay();
+    }
+
+    // Nombre en la lista: el de usuario con "(U)" detrás
+    juce::String shownName (int index) const
+    {
+        const auto& p = presets.getPresets()[(size_t) index];
+        return p.displayName() + (p.factory ? "" : " (U)");
     }
 
     void refreshDisplay()
@@ -135,9 +149,9 @@ private:
         if (index < 0)
             combo.setSelectedId (0, juce::dontSendNotification);
         else if (combo.indexOfItemId (index + 1) < 0) // oculto por el filtro de categoría
-            combo.setText (presets.getPresets()[(size_t) index].displayName() + (dirty ? " *" : ""), juce::dontSendNotification);
+            combo.setText (shownName (index) + (dirty ? " *" : ""), juce::dontSendNotification);
         else if (dirty)
-            combo.setText (presets.getPresets()[(size_t) index].displayName() + " *", juce::dontSendNotification);
+            combo.setText (shownName (index) + " *", juce::dontSendNotification);
         else
             combo.setSelectedId (index + 1, juce::dontSendNotification);
 
