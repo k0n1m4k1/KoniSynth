@@ -565,7 +565,9 @@ public:
         ansSection.withCombo (s, "ansScore").withExtraToggle (s, "ansHold", "Hold")
                   .withHeaderButton ("Plate...", "Open the ANS plate: draw the score (pitch vertically, time horizontally) and set the 20 registers.",
                                      [this] { openAnsPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<AnsPanel> (koni); }))
-                  .withKnob (s, "ansSpeed", "Speed").withKnob (s, "ansEmulsion", "Emulsion");
+                  .withKnob (s, "ansSpeed", "Speed").withKnob (s, "ansEmulsion", "Emulsion")
+                  .withSideBody (ansMiniPlate, 220, true); // la placa, pequeña: un clic abre Plate...
+        ansMiniPlate.onClick = [this] { openAnsPanel(); };
         flangerSection.withToggle (s, "flangerOn").withExtraToggle (s, "flangerMatrix", "Matrix")
                       .withKnob (s, "flangerRate", "Rate").withKnob (s, "flangerRange", "Range").withKnob (s, "flangerColor", "Color")
                       .withKnob (s, "flangerMix", "Mix");
@@ -3538,6 +3540,7 @@ private:
     // Curvas de transferencia: saturación por voz (diálogo Saturation...), Crush y Tube
     ShaperView voiceSatView { koni.apvts, Shapers::voiceSat() }, crushView { koni.apvts, Shapers::crush() }, tubeView { koni.apvts, Shapers::tube() };
     EqCurve eqMiniCurve { koni.apvts, true }; // curva del EQ en su bloque (UI/EqPanel.h)
+    AnsPlateView ansMiniPlate { koni, true }; // placa del ANS en su bloque (UI/AnsPanel.h)
     // Paneles de conexiones (UI/PatchBay.h): el del complejo (dentro de su sección) y el de los destinos de los LFO
     PatchBay complexBay { koni.apvts, complexPatch (koni.apvts) };
     PatchBay lfoBay { koni.apvts, lfoPatch (koni.apvts, [this] { return engine == 0; }) };

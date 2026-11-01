@@ -27,16 +27,26 @@ Select **ANS** in the Engine menu. Choosing it from that menu loads the preset *
 | Speed | Plate speed in mm per second (up to 24, as on the ANS). 1 mm is one column of the score. | 0-24 mm/s / 12 mm/s |
 | Emulsion | Slow irregularity of each optical track, which made the ANS sound alive (amount not documented: estimate). | 0-100 % / 20 % |
 
-Header button **Plate...** opens the ANS plate editor.
+Header button **Plate...** opens the ANS plate editor. The block also shows a small view of the plate with the reading
+cursor; clicking it opens Plate... too.
 
 ### ANS plate editor (Plate...)
 
-- The header repeats Score, Hold, Speed and Emulsion.
-- The plate: 720 tones (vertical) x 512 mm (horizontal). Horizontal lines mark each octave (every 72 tones). A red
-  vertical line is the reading cursor.
-- **Left drag:** scratch (sound). **Right drag:** fill (silence). The brush is soft-edged: repeated strokes over the
-  same spot make it louder, up to the maximum.
-- Below the plate, the 20 **registers** (knobs 1-20).
+- The header repeats Score (as a large list), Hold, Speed and Emulsion.
+- **Tools:** Scratch (add sound), Erase, Line (drag from A to B: a held tone or a glissando with the brush's width) and
+  Band (drag a rectangle: a cluster or noise band at the Depth level). Right drag erases with the chosen tool.
+  **Size** is the brush diameter in tones (1-36), **Depth** how much each pass adds or removes at its centre (10-100 %),
+  **Soft / Hard** its edge, and **Snap** fixes the pitch of strokes to the ANS's semitones (6 tones) or quarter tones
+  (3 tones). **Clear plate** erases everything. Each stroke is one undo step. The tools are remembered while KoniSynth
+  stays open.
+- **Readout:** under the mouse, the tone, its frequency, the nearest note with its cents, the position in mm and in
+  seconds at the current speed, and the register band with its level.
+- **The plate:** 720 tones (vertical) x 512 mm (horizontal), drawn in the skin's screen colour. Horizontal lines mark
+  each octave (every 72 tones), labelled with the nearest note and the frequency; below, a time ruler in mm and seconds.
+  A red vertical line is the reading cursor.
+- **Registers:** to the right of the plate, one bar per register at the height of the tones it filters (36 tones each),
+  with its knob beside it. Drag a bar sideways or turn its knob; double click a bar = 100 %. The knobs have the usual
+  menu (Reset, Set value, MIDI Learn).
 
 | Control | What it does | Range / default |
 |---|---|---|
@@ -56,8 +66,8 @@ Header button **Plate...** opens the ANS plate editor.
 
 1. Click **Plate...**.
 2. Left-drag on the plate to scratch tones. A horizontal stroke is a sustained tone; a slanted stroke is a glissando; a
-   wide vertical band of tones sounds like noise.
-3. Right-drag to erase.
+   wide vertical band of tones sounds like noise. Line and Band draw those shapes in one drag.
+3. Right-drag (or the Erase tool) to erase.
 4. When you release the mouse, the drawing becomes the **User** score and the Score menu switches to User. If you
    started from a factory score, it is copied into User first, so the factory score is not changed.
 5. Turn on **Hold**, or press C4, to hear it. Shape the overall spectrum with registers 1-20.

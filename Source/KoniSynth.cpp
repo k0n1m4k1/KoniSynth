@@ -156,7 +156,7 @@ public:
         monoSynth.setMinimumRenderingSubdivisionSize (1, true);
         perfMacros.attach (apvts);
         undoHistory.attach (*this, apvts, { PerfMacros::mapProp, PerfMacros::namesProp, chipMacrosProp, mdMacrosProp, snesMacrosProp,
-                                            "presetName", "presetFactory", "dx7Voice", "dx7Bank" });
+                                            "presetName", "presetFactory", "dx7Voice", "dx7Bank", ansUserProp });
         presetManager.onBulkChange = [this] (bool begin) { if (begin) undoHistory.beginGroup(); else undoHistory.endGroup(); };
 
         migrateLegacyConfig(); // .txt de ajustes de versiones anteriores -> config.settings (Settings/Config.h)
