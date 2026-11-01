@@ -31,7 +31,8 @@ The default patch is the equivalent of an INIT VOICE: algorithm 0 with OP1-OP3 s
 RR 15.
 
 **Mega Drive editor (Operators...).** One column per operator (OP1-OP4), carriers highlighted, and the current algorithm
-written out (for example `(1 -> 2) + (3 -> 4)`). Per operator:
+drawn as a diagram (operator boxes, modulation lines, output line and the feedback loop on OP1) and written out (for
+example `(1 -> 2) + (3 -> 4)`). Per operator:
 
 | Control | What it does | Range / default |
 |---|---|---|

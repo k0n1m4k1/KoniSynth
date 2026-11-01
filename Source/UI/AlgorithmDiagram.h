@@ -35,6 +35,29 @@ struct AlgorithmGraph
         return a;
     }
 
+    // YM2612 de la Mega Drive (MegaDriveEngine::describe y carriers; OP1-OP4 como en el datasheet). Realimentación en OP1
+    static AlgorithmGraph ym2612 (int alg)
+    {
+        AlgorithmGraph a;
+        a.operators = 4;
+        a.fbFrom = a.fbTo = 1;
+        switch (juce::jlimit (0, 7, alg))
+        {
+            case 0:  a.edges = { { 1, 2 }, { 2, 3 }, { 3, 4 } }; break;           // 1 -> 2 -> 3 -> 4
+            case 1:  a.edges = { { 1, 3 }, { 2, 3 }, { 3, 4 } }; break;           // (1 + 2) -> 3 -> 4
+            case 2:  a.edges = { { 1, 4 }, { 2, 3 }, { 3, 4 } }; break;           // (1 + (2 -> 3)) -> 4
+            case 3:  a.edges = { { 1, 2 }, { 2, 4 }, { 3, 4 } }; break;           // ((1 -> 2) + 3) -> 4
+            case 4:  a.edges = { { 1, 2 }, { 3, 4 } }; break;                     // (1 -> 2) + (3 -> 4)
+            case 5:  a.edges = { { 1, 2 }, { 1, 3 }, { 1, 4 } }; break;           // 1 -> 2, 3, 4
+            case 6:  a.edges = { { 1, 2 } }; break;                               // (1 -> 2) + 3 + 4
+            default: break;                                                       // 1 + 2 + 3 + 4
+        }
+        const auto mask = MegaDriveEngine::carriers (alg); // las mismas portadoras que resalta el panel
+        for (int k = 0; k < 4; ++k)
+            if ((mask >> k) & 1) a.carriers.push_back (k + 1);
+        return a;
+    }
+
     // OPL2/OPL3 (OplEngine::describe): 2 operadores, conexión FM (0) o AM (1); 4 operadores del OPL3, algoritmos 0-3.
     // Realimentación en OP1
     static AlgorithmGraph opl (bool fourOp, int alg)

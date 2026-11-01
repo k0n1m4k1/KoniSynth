@@ -2,7 +2,8 @@
 // compilación; usa las declaraciones previas de KoniSynth.cpp (JUCE, Params, utilidades). No es una cabecera independiente.
 #pragma once
 
-// Panel del motor Mega Drive: los 4 operadores con sus registros nativos (columnas OP1..OP4, portadoras resaltadas)
+// Panel del motor Mega Drive: los 4 operadores con sus registros nativos (columnas OP1..OP4, portadoras resaltadas) y el
+// diagrama del algoritmo
 class MdPanel : public juce::Component, private juce::Timer
 {
 public:
@@ -12,8 +13,10 @@ public:
         header.withKnob (s, "mdAlgorithm", "Algorithm").withKnob (s, "mdFeedback", "Feedback");
         addAndMakeVisible (header);
         diagram.setJustificationType (juce::Justification::centredLeft);
-        diagram.setFont (juce::FontOptions (17.0f));
+        diagram.setFont (juce::FontOptions (13.0f));
+        diagram.setMinimumHorizontalScale (0.7f);
         addAndMakeVisible (diagram);
+        addAndMakeVisible (algorithm);
 
         for (int i = 0; i < 4; ++i)
         {
@@ -57,7 +60,9 @@ public:
         auto r = getLocalBounds();
         auto top = r.removeFromTop (130);
         header.setBounds (top.removeFromLeft (260));
-        diagram.setBounds (top.reduced (16, 0));
+        top.reduce (16, 0);
+        diagram.setBounds (top.removeFromBottom (18)); // conexiones en texto bajo el diagrama
+        algorithm.setBounds (top);
         r.removeFromTop (8);
         grid = r;
         for (int i = 0; i < 4; ++i)
@@ -95,6 +100,7 @@ private:
         shownAlgorithm = alg;
         diagram.setText ("Algorithm " + juce::String (alg) + ":   " + MegaDriveEngine::describe (alg) + "   (feedback on OP1)",
                          juce::dontSendNotification);
+        algorithm.setGraph (AlgorithmGraph::ym2612 (alg));
         for (int k = 0; k < 4; ++k)
             carrier[(size_t) k] = ((MegaDriveEngine::carriers (alg) >> k) & 1) != 0;
         repaint();
@@ -112,6 +118,7 @@ private:
     KoniSynthProcessor& koni;
     Section header { "Mega Drive" };
     juce::Label diagram;
+    AlgorithmDiagram algorithm; // cajas y conexiones del algoritmo (UI/AlgorithmDiagram.h)
     std::array<Column, 4> columns;
     std::array<bool, 4> carrier {};
     juce::Rectangle<int> grid;
