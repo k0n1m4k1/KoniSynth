@@ -8,7 +8,7 @@
 **Open-source synth lab with firmware-accurate emulations of the Yamaha DX7, Gravis UltraSound, Roland MT-32 & others.** Sixteen engines for the sounds of the 60s to the 90s in one free plugin: **VST3**, **CLAP** and **standalone**, on
 **Windows** and **Linux**.
 
-[KoniSynth](https://github.com/user-attachments/assets/bc25f214-fb35-41e4-b6d6-8f8946c0178c)
+https://github.com/user-attachments/assets/bc25f214-fb35-41e4-b6d6-8f8946c0178c
 
 ## Why KoniSynth
 
