@@ -493,6 +493,14 @@ public:
         n64FxSection.withCombo (s, "n64Fx").withKnob (s, "n64FxMix", "Mix").withKnob (s, "n64Dac", "DAC");
         oplSection.withCombo (s, "oplModel").withExtraToggle (s, "oplFourOp", "4-Op")
                   .withHeaderButton ("Operators...", "Open the OPL editor: the operators with the chip's own registers.", [this] { openOplPanel(); }).withResetSource (panelParams ([this] { return std::make_unique<OplPanel> (koni); }))
+                  .withHeaderButton ("Gold...", "AdLib Gold 1000 (OPL3 only): the card's TDA8425 output stage (bass, treble, stereo "
+                                     "mode) and the SP2 surround module (YM7128B). Off by default.", paramDialog ("AdLib Gold", [] (ParamPanel& p, APVTS& st)
+                      {
+                          p.add ("TDA8425 Output").withToggle (st, "oplGold")
+                                                  .withKnob (st, "oplGoldBass", "Bass").withKnob (st, "oplGoldTreble", "Treble")
+                                                  .withKnob (st, "oplGoldStereo", "Stereo"); // 4 posiciones: conmutador por pasos
+                          p.add ("SP2 Surround").withCombo (st, "oplGoldSurround").withKnob (st, "oplGoldLevel", "Level");
+                      }))
                   .withKnob (s, "oplAlgorithm", "Algorithm").withKnob (s, "oplFeedback", "Feedback");
         for (int op = 1; op <= 4; ++op)
             oplSection.withKnob (s, "opl" + juce::String (op) + "Tl", "OP" + juce::String (op) + " TL");

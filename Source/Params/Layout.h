@@ -779,6 +779,13 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplVelocity", 1 },  "OPL Velocity", true));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplPan", 1 },       "OPL Pan", StringArray { "Center", "Left", "Right", "Alternate L/R" }, 0));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplOutput", 1 },    "OPL Output", StringArray { "Stereo (OPL3)", "Mono" }, 0));
+    // AdLib Gold (Engines/OplGold.h): etapa TDA8425 y surround SP2 (YM7128B) tras el OPL3; apagada por defecto
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "oplGold", 1 },      "OPL AdLib Gold", false));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "oplGoldBass", 1 },  "OPL Gold Bass", NormalisableRange<float> (-12.0f, 15.0f, 3.0f), 0.0f, decibels));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "oplGoldTreble", 1 }, "OPL Gold Treble", NormalisableRange<float> (-12.0f, 12.0f, 3.0f), 0.0f, decibels));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplGoldStereo", 1 }, "OPL Gold Stereo", StringArray { "Forced Mono", "Linear Stereo", "Pseudo Stereo", "Spatial Stereo" }, 1));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplGoldSurround", 1 }, "OPL Gold Surround", StringArray { "Off", "Narrow", "Wide", "Room", "Hall" }, 0));
+    l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "oplGoldLevel", 1 }, "OPL Gold Surround Level", NormalisableRange<float> (-60.0f, 0.0f, 2.0f), 0.0f, decibels));
 
     // Roland MT-32 / CM-32L (Engines/Mt32.h, Munt): modelo de ROM, destino del teclado, programa, reverb del aparato y DAC
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Model", 1 },   "MT-32 Model", StringArray { "MT-32", "CM-32L" }, 0));

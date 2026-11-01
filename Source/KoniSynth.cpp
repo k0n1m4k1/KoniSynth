@@ -85,6 +85,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Engines/N64.h"
 #include "Engines/Opll.h"
 #include "Engines/OplGmBank.h" // banco GM de DMXOPL3 (modo GM del OPL)
+#include "Engines/OplGold.h"   // etapa de salida de la AdLib Gold (TDA8425 + YM7128B)
 #include "Engines/Opl.h"
 #include "Engines/Mt32.h"
 #include "Engines/Gus.h"

@@ -722,6 +722,16 @@ static juce::String paramHelp (const juce::String& id)
         { "oplVelocity", "Velocity lowers the carriers' Total Level (0.75 dB steps), as a sound driver would; the chip itself has no velocity." },
         { "oplPan", "OPL3 stereo (register C0h bits 4-5: left, right or both). Alternate: voices go left, right, left... The OPL2 is mono." },
         { "oplOutput", "Stereo (OPL3) or both sides summed to mono." },
+        { "oplGold", "AdLib Gold 1000 (1992), OPL3 only: the card's output stage after the chip. The Philips TDA8425 (bass, treble, "
+                     "stereo mode) and the optional SP2 surround module (Yamaha YM7128B). Off (default): the bare OPL3." },
+        { "oplGoldBass", "AdLib Gold bass (TDA8425 shelving at about 300 Hz), -12 to +15 dB in 3 dB steps. Default 0 dB." },
+        { "oplGoldTreble", "AdLib Gold treble (TDA8425 shelving at about 4.5 kHz), -12 to +12 dB in 3 dB steps. Default 0 dB." },
+        { "oplGoldStereo", "TDA8425 stereo mode: Forced Mono, Linear Stereo (default, unchanged), Pseudo Stereo (all-pass filters on "
+                           "the left side, for mono sources) or Spatial Stereo (52 % cross-talk: wider)." },
+        { "oplGoldSurround", "SP2 surround module (YM7128B: 8 taps up to 100 ms and a feedback path at 23.5 kHz). Games wrote their own "
+                             "programs and no original Ad Lib table is known: Narrow, Wide, Room and Hall are KoniSynth's own. Off by default "
+                             "(the module was optional)." },
+        { "oplGoldLevel", "Surround output level (YM7128B registers VL / VR), -60 to 0 dB in 2 dB steps. Default 0 dB." },
         { "mt32Model", "Which Roland ROM set to use from your ROM folder: MT-32 (first-generation control ROM preferred, the one most "
                        "late-80s PC games were written for) or CM-32L (more sound effects, the later DAC). Falls back to the other "
                        "if only that one is present." },

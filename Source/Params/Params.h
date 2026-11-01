@@ -152,6 +152,8 @@ struct Params
         oplModel = get ("oplModel"); oplFourOp = get ("oplFourOp"); oplGm = get ("oplGm"); oplAlgorithm = get ("oplAlgorithm"); oplFeedback = get ("oplFeedback");
         oplDeepTremolo = get ("oplDeepTremolo"); oplDeepVibrato = get ("oplDeepVibrato"); oplVelocity = get ("oplVelocity");
         oplPan = get ("oplPan"); oplOutput = get ("oplOutput");
+        oplGold = get ("oplGold"); oplGoldBass = get ("oplGoldBass"); oplGoldTreble = get ("oplGoldTreble"); oplGoldStereo = get ("oplGoldStereo");
+        oplGoldSurround = get ("oplGoldSurround"); oplGoldLevel = get ("oplGoldLevel");
         mt32Model = get ("mt32Model"); mt32Mode = get ("mt32Mode"); mt32Multi = get ("mt32Multi"); mt32Program = get ("mt32Program"); mt32Reverb = get ("mt32Reverb");
         mt32Dac = get ("mt32Dac"); mt32Queue = get ("mt32Queue"); mt32NiceAmp = get ("mt32NiceAmp"); mt32NicePan = get ("mt32NicePan"); mt32NiceMix = get ("mt32NiceMix"); mt32MidiDelay = get ("mt32MidiDelay");
         gusModel = get ("gusModel"); gusRam = get ("gusRam"); gusVoices = get ("gusVoices"); gusMode = get ("gusMode"); gusMulti = get ("gusMulti");
@@ -296,6 +298,7 @@ struct Params
     std::atomic<float> *opllInstrument {}, *opllVolume {}, *opllSustain {}, *opllRhythm {};
     std::atomic<float> *oplModel {}, *oplFourOp {}, *oplGm {}, *oplAlgorithm {}, *oplFeedback {}, *oplDeepTremolo {}, *oplDeepVibrato {},
                        *oplVelocity {}, *oplPan {}, *oplOutput {},
+                       *oplGold {}, *oplGoldBass {}, *oplGoldTreble {}, *oplGoldStereo {}, *oplGoldSurround {}, *oplGoldLevel {},
                        *mt32Model {}, *mt32Mode {}, *mt32Multi {}, *mt32Program {}, *mt32Reverb {}, *mt32Dac {}, *mt32Queue {}, *mt32NiceAmp {}, *mt32NicePan {}, *mt32NiceMix {}, *mt32MidiDelay {};
     std::atomic<float> *gusModel {}, *gusRam {}, *gusVoices {}, *gusMode {}, *gusMulti {}, *gusProgram {}, *gusPatchBits {};
     std::atomic<float> *mdVoice {}, *mdPsgNoise {}, *mdPsgNoiseRate {}, *mdPsgAttack {}, *mdPsgDecay {}, *mdPsgSustain {}, *mdPsgRelease {}, *mdDacRate {};

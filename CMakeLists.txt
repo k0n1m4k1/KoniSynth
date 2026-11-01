@@ -36,9 +36,11 @@ juce_add_plugin(KoniSynth
 target_sources(KoniSynth PRIVATE Source/KoniSynth.cpp Source/SimdAvx2.cpp
     Source/WinMaximiseFix.cpp # Windows: ventana maximizada con la barra de tareas a la izquierda o arriba (en otros sistemas, vacío)
     Source/ThirdParty/NukedOPLL/opll.c # Nuked-OPLL, GPL-2.0+ (YM2413 / VRC7)
+    Source/ThirdParty/TDA8425_emu/TDA8425_emu.c Source/ThirdParty/YM7128B_emu/YM7128B_emu.c # AdLib Gold (A. Zoppi, BSD-2-Clause)
     Source/ThirdParty/MTS-ESP/libMTSClient.cpp) # cliente MTS-ESP (ODDSound), 0BSD: carga LIBMTS.dll solo si está instalada
 # Código de terceros sin modificar: sin avisos (los suyos no son de KoniSynth)
-set_source_files_properties(Source/ThirdParty/NukedOPLL/opll.c PROPERTIES COMPILE_OPTIONS "$<$<C_COMPILER_ID:MSVC>:/w>")
+set_source_files_properties(Source/ThirdParty/NukedOPLL/opll.c Source/ThirdParty/TDA8425_emu/TDA8425_emu.c
+    Source/ThirdParty/YM7128B_emu/YM7128B_emu.c PROPERTIES COMPILE_OPTIONS "$<$<C_COMPILER_ID:MSVC>:/w>")
 set_source_files_properties(Source/ThirdParty/MTS-ESP/libMTSClient.cpp PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/w>")
 # Munt mt32emu 2.8.3 (Roland MT-32 / CM-32L, LGPL-2.1+): biblioteca estática sin modificar (config.h generado a mano). Las ROM
 # de Roland no se incluyen: las aporta el usuario

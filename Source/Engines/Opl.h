@@ -31,6 +31,7 @@ struct OplEngine
     {
         sampleRate = sr;
         resampler.prepare (kChipRate, sr);
+        gold.prepare (kChipRate, sr, kGain);
         opll.prepare (sr);
         reset();
     }
@@ -43,6 +44,7 @@ struct OplEngine
         age = 0;
         gmInit();
         resampler.reset();
+        gold.reset();
         opll.reset();
     }
 
@@ -63,14 +65,30 @@ struct OplEngine
             for (auto& v : voices)
                 if (v.note >= 0) setPitch (v);
 
+        // AdLib Gold (Engines/OplGold.h): solo con el OPL3, la única variante que montaba la tarjeta
+        const auto goldOn = model == opl3 && p.oplGold->load() > 0.5f;
+        if (goldOn != goldWasOn) { goldWasOn = goldOn; gold.reset(); }
+        if (goldOn)
+            gold.apply (juce::roundToInt (p.oplGoldBass->load()), juce::roundToInt (p.oplGoldTreble->load()),
+                        juce::roundToInt (p.oplGoldStereo->load()), juce::roundToInt (p.oplGoldSurround->load()),
+                        juce::roundToInt (p.oplGoldLevel->load()));
+        const auto surround = goldOn && gold.surroundOn();
+
         auto it = midi.cbegin();
         for (int i = 0; i < out.getNumSamples(); ++i)
         {
             for (; it != midi.cend() && (*it).samplePosition <= i; ++it)
                 gm ? gmHandleMidi ((*it).getMessage()) : handleMidi ((*it).getMessage());
-            auto lr = resampler.nextStereo ([this] { return chipSample(); });
+            auto lr = resampler.nextStereo ([this, surround]
+            {
+                const auto s = chipSample();
+                if (surround) gold.push (s[0], s[1]); // entrada del YM7128B, a la tasa del chip
+                return s;
+            });
             if (model == opl2 || monoOutput)
                 lr[0] = lr[1] = 0.5f * (lr[0] + lr[1]);
+            if (goldOn)
+                lr = gold.process (lr);
             if (out.getNumChannels() >= 2) { out.addSample (0, i, (float) lr[0]); out.addSample (1, i, (float) lr[1]); }
             else if (out.getNumChannels() == 1) out.addSample (0, i, (float) (0.5 * (lr[0] + lr[1])));
         }
@@ -759,6 +777,8 @@ private:
 
     double sampleRate = 44100.0;
     SincResampler resampler;
+    OplGold gold;
+    bool goldWasOn = false;
     OpllEngine opll;
     std::array<Voice, 18> voices {};
     std::array<OpRegs, 4> ops {};

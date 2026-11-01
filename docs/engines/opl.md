@@ -23,6 +23,7 @@ Sections: **OPL** and **OPL LFO / Output**; with Model = OPLL or VRC7, an **OPLL
 | Model (header menu) | OPL2 (YM3812), OPL3 (YMF262), OPLL (YM2413) or VRC7 (Konami), as described above. | default OPL2 (YM3812) |
 | 4-Op | OPL3 only: pairs of channels become 4-operator voices (6 voices) with 4 algorithms. | off |
 | Operators... (header button) | Opens the OPL editor (see below). | |
+| Gold... (header button) | OPL3 only: the AdLib Gold output stage and surround module (see AdLib Gold below). | off |
 | Algorithm | 2 operators: 0 = FM (1 modulates 2), 1 = AM (1 + 2 added). 4 operators (OPL3): 0 = 1->2->3->4, 1 = (1->2)+(3->4), 2 = 1+(2->3->4), 3 = 1+(2->3)+4. | 0-3; 0 |
 | Feedback | Self-modulation of OP1 (register C0h): 0 = off, 7 = most (noisy). | 0-7; 0 |
 | OP1 TL ... OP4 TL | Total level, 0.75 dB steps (63 = -47 dB). On a modulator it sets the brightness. | 0-63; OP1/OP3 63, OP2/OP4 0 |
@@ -71,6 +72,24 @@ OP3/OP4 are used only in OPL3 4-operator mode. Per operator:
 | Pan | OPL3 stereo (register C0h bits 4-5). Alternate: voices go left, right, left... The OPL2 is mono. | Center / Left / Right / Alternate L/R; Center |
 | Output | Stereo (OPL3) or both sides summed to mono. | Stereo (OPL3) / Mono; Stereo |
 
+### AdLib Gold (Gold...)
+
+The Ad Lib Gold 1000 (1992) put an OPL3 behind two more chips, emulated here with Andrea Zoppi's datasheet-based
+TDA8425_emu and YM7128B_emu (BSD-2-Clause), in the order DOSBox Staging uses for `oplmode = opl3gold`. OPL3 model only;
+off by default (the bare chip).
+
+| Control | What it does | Range / default |
+|---|---|---|
+| TDA8425 Output (switch) | Turns the Gold output stage on. | off |
+| Bass | Philips TDA8425 bass shelving at about 300 Hz. | -12 to +15 dB in 3 dB steps; 0 dB |
+| Treble | TDA8425 treble shelving at about 4.5 kHz. | -12 to +12 dB in 3 dB steps; 0 dB |
+| Stereo | Forced Mono, Linear Stereo (unchanged), Pseudo Stereo (all-pass filters on the left side) or Spatial Stereo (52 % cross-talk). | Linear Stereo |
+| Surround (SP2) | The optional surround daughterboard, a Yamaha YM7128B: 8 delay taps up to 100 ms and a feedback path, running at its own 23.55 kHz rate with 2x oversampled output. Games wrote their own programs (Dune, 1992) and no original Ad Lib table is known: Narrow, Wide, Room and Hall are KoniSynth's own. | Off / Narrow / Wide / Room / Hall; Off |
+| Level | Surround output level (YM7128B VL / VR). | -60 to 0 dB in 2 dB steps; 0 dB |
+
+The dry signal gets no added latency. The surround signal arrives 0.64 ms later than on the card (a buffer between the
+chip rates), less than one tap step (3.2 ms). Not emulated: the card's 12-bit digital audio (YMZ263 MMA), which a
+synthesizer does not use.
 ### Multitimbral mode (General MIDI)
 
 With the OPL3 model and **Multitimbral** on, KoniSynth plays General MIDI the way many DOS games did on a Sound Blaster 16: the OPL3
@@ -147,6 +166,9 @@ Choosing OPL from the engine menu loads OPL2 E.Piano.
 ## Limitations
 
 - OPL2/OPL3: no percussion (rhythm) mode and no CSM in this version.
+- AdLib Gold: the TDA8425 follows its datasheet (DOSBox Staging uses values tuned by ear to recordings: 400 Hz / 2.5 kHz and
+  +3 dB of treble); the pseudo-stereo capacitors (15 nF) and the YM7128B input level are assumptions; the wet level (x1.8)
+  is DOSBox Staging's calibration against the real card.
 - Not verified: the mix scale of the YM3812 (ymfm marks it as pending verification); the engine uses Nuked's.
 - OPLL/VRC7 output is mono; Pan applies to OPL3.
 - The VRC7 has no rhythm output; its ROM instruments have no official names.
