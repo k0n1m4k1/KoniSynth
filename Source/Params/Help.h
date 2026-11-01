@@ -211,6 +211,8 @@ static juce::String paramHelp (const juce::String& id)
         { "genxOctave", "Gen X-2 OCTAVE switch: transposes by -1, 0 or +1 octave." },
         { "drumVelocity", "Off (default, as the drum machines): a MIDI note plays at the normal level, or accented from velocity "
                           "100. On: the velocity sets the level continuously." },
+        { "drumCh10", "Off (default): notes on any MIDI channel play the drums. On: only channel 10, the General MIDI drum "
+                      "channel, so a multitrack GM song plays just its drum part (the other channels are ignored)." },
         { "styloRange", "Full keyboard: every key plays its own note (each keeps the vintage tuning of the matching original key). Original (20 keys): as on the real Stylophone, notes outside the model's 20 keys are moved by octaves into its range." },
         { "styloVibrato", "Stylophone vibrato switch: about 7 Hz, as measured on the original." },
         { "styloVibDepth", "Vibrato depth in cents (not documented for the original; 30 ct is an estimate)." },

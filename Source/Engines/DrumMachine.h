@@ -516,10 +516,13 @@ struct DrumMachine
         s.snappy = p.drumSnappy->load();
         const auto accent = p.drumAccent->load();
         const auto continuousVelocity = p.drumVelocity->load() > 0.5f;
+        // Ch 10: solo el canal de percusión GM (una canción multipista toca solo su batería)
+        const auto ch10Only = p.drumCh10->load() > 0.5f;
+        const auto heard = [ch10Only] (const juce::MidiMessage& m) { return ! ch10Only || m.getChannel() == 10; };
 
         if (rhythmStopped) // parado por PANIC: arranca de nuevo, desde el principio, con la siguiente nota
             for (const auto m : midi)
-                if (m.getMessage().isNoteOn())
+                if (m.getMessage().isNoteOn() && heard (m.getMessage()))
                 {
                     rhythmStopped = false;
                     clock.restart();
@@ -594,7 +597,7 @@ struct DrumMachine
             for (; midiIt != midi.cend() && (*midiIt).samplePosition <= i; ++midiIt)
             {
                 const auto m = (*midiIt).getMessage();
-                if (m.isNoteOn())
+                if (m.isNoteOn() && heard (m))
                     if (const auto voice = gmVoice (kitIndex, m.getNoteNumber()); voice >= 0)
                     {
                         // Como el aparato (por defecto): nivel normal (0,75, el "x" de los patrones) o acento desde velocidad

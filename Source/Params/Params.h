@@ -104,7 +104,7 @@ struct Params
         omniRhythm = get ("omniRhythm"); omniTempo = get ("omniTempo"); omniRhythmLevel = get ("omniRhythmLevel");
         drumKit = get ("drumKit"); drumPattern = get ("drumPattern"); drumPattern2 = get ("drumPattern2"); drumTempo = get ("drumTempo"); drumSwing = get ("drumSwing");
         drumTune = get ("drumTune"); drumDecay = get ("drumDecay"); drumTone = get ("drumTone"); drumSnappy = get ("drumSnappy");
-        drumAccent = get ("drumAccent"); drumVelocity = get ("drumVelocity");
+        drumAccent = get ("drumAccent"); drumVelocity = get ("drumVelocity"); drumCh10 = get ("drumCh10");
         chipModel = get ("chipModel"); chipVoice = get ("chipVoice"); chipDuty = get ("chipDuty"); chipVolume = get ("chipVolume");
         chipEnvelope = get ("chipEnvelope"); chipEnvRate = get ("chipEnvRate"); chipRelease = get ("chipRelease");
         chipSweep = get ("chipSweep"); chipSweepRate = get ("chipSweepRate"); chipArp = get ("chipArp"); chipArpSpeed = get ("chipArpSpeed");
@@ -348,7 +348,7 @@ struct Params
                        *omniSustain {}, *omniHarpLevel {}, *omniChordLevel {}, *omniBassLevel {}, *omniHarpOctave {}, *omniSplit {},
                        *omniRhythm {}, *omniTempo {}, *omniRhythmLevel {},
                        *drumKit {}, *drumPattern {}, *drumPattern2 {}, *drumTempo {}, *drumSwing {}, *drumTune {}, *drumDecay {}, *drumTone {},
-                       *drumSnappy {}, *drumAccent {}, *drumVelocity {},
+                       *drumSnappy {}, *drumAccent {}, *drumVelocity {}, *drumCh10 {},
                        *chipModel {}, *chipVoice {}, *chipDuty {}, *chipVolume {}, *chipEnvelope {}, *chipEnvRate {}, *chipRelease {},
                        *chipSweep {}, *chipSweepRate {}, *chipArp {}, *chipArpSpeed {}, *chipVibDepth {}, *chipVibRate {}, *chipVibDelay {},
                        *chipNoiseMode {}, *chipWave {}, *chipWaveLevel {}, *chipVelocity {}, *chipFilter {}, *chipDpcm {}, *chipDpcmLoop {},

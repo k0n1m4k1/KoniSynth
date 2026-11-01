@@ -356,6 +356,7 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterFloat>  (ParameterID { "drumAccent", 1 }, "Drum Accent", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
     // Velocidad MIDI continua (apagado = como el aparato: nivel normal o acento)
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "drumVelocity", 1 }, "Drum Velocity", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "drumCh10", 1 }, "Drum Channel 10", false)); // solo el canal 10 (percusión GM)
 
     // Efectos nuevos: flanger de BBD, desplazador de frecuencia, Leslie y muelles
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "flangerOn", 1 },    "Flanger On", false));

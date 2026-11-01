@@ -396,7 +396,7 @@ public:
                          .withSortedCombo (s, "omniRhythm").withKnob (s, "omniTempo", "Tempo").withKnob (s, "omniRhythmLevel", "Level");
         drumSection.withCombo (s, "drumKit").withExtraToggle (s, "drumVelocity", "Velocity")
                    .withKnob (s, "drumTune", "Tune").withKnob (s, "drumDecay", "Decay").withKnob (s, "drumTone", "Tone")
-                   .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent");
+                   .withKnob (s, "drumSnappy", "Snappy").withKnob (s, "drumAccent", "Accent").withKnob (s, "drumCh10", "Ch 10");
         drumPatternSection.withHeaderButton ("Edit Rhythms...", "Open the rhythm editor: draw your own rhythms (User 1-8) on a grid of "
                                              "instrument lanes and steps. Each one is a MIDI file you can also edit elsewhere.",
                                              [this] { openPanel ("Rhythm Editor", std::make_unique<RhythmEditor> (koni, UserRhythms::Target::drums), 1300, 560); })
