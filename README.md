@@ -2,14 +2,17 @@
 
 **Version 1.0.0** · by **@k0n1m4k1** 🇪🇸 · GNU AGPLv3
 
-**Open-source synth lab with firmware-accurate emulations of the Yamaha DX7, Gravis UltraSound, Roland MT-32 & others.**
 
 [![M8ven Score](https://m8ven.ai/badge/mcp/k0n1m4k1-konisynth-knlbk4?v=1c9d31871080c40a85dd776478b0d476)](https://m8ven.ai/mcp/k0n1m4k1-konisynth-knlbk4?s=readme)
+
+**Open-source synth lab with firmware-accurate emulations of the Yamaha DX7, Gravis UltraSound, Roland MT-32 & others.**
+
+
 
 Sixteen engines for the sounds of the 60s to the 90s in one free plugin: **VST3**, **CLAP** and **standalone**, on
 **Windows** and **Linux**.
 
-![KoniSynth](assets/cover.png)
+[KoniSynth](https://github.com/user-attachments/assets/bc25f214-fb35-41e4-b6d6-8f8946c0178c)
 
 ## Why KoniSynth
 
