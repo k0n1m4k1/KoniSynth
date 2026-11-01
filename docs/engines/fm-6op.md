@@ -116,9 +116,8 @@ belong to the instrument, so loading a .syx voice does not change them. One bloc
 - **EG Bias:** the controller opens operators with AMS above 0. With it assigned and the controller at zero, they are
   attenuated: voices made for a breath controller (named "BC") stay quiet without one, as on the DX7.
 
-Each controller only adds depth: when several act on the same target, or together with the voice's PMD / AMD, the largest
-one wins. Controller modulation does not wait for the LFO delay. These rules follow msfa (`controllers.h`,
-`dx7note.cc`); they are not measured on a DX7.
+Controllers assigned to the same target add up (up to the maximum), and their amount is added to the voice's PMD / AMD.
+Controller modulation does not wait for the LFO delay. These rules come from the DX7 firmware (see Faithful details).
 
 A fifth block, **Mono / Portamento**, holds the DX7's play mode settings (also not part of the voice):
 
@@ -173,8 +172,13 @@ the DX7.
   depending on the leading zeros.
 - Each DAC step is reconstructed band-limited (zero-order hold, as when recording the analog output) and then passes
   an output low-pass.
-- Envelopes run in the chip's logarithmic domain; LFO speed, PMD/AMD and PMS follow the msfa tables; operator frequency
-  follows `dx7note.cc` with Dexed's empirical detune.
+- Envelopes run in the chip's logarithmic domain; operator frequency follows `dx7note.cc` with Dexed's empirical detune.
+- **LFO and modulation as in the DX7 firmware.** On the DX7 the main CPU computes the LFO, the controller amounts and the
+  modulation sent to the sound chips, once per tick of a timer. KoniSynth does the same, from the annotated disassembly
+  of firmware v1.8 with every routine and table checked in the original mask ROM: LFO speed and delay formulas, the
+  eight-bit waveforms (the sine from its quarter-wave table, S&H sampling at mid-cycle), PMD / AMD / PMS scaling and the
+  controllers added together. On every new note in Poly the LFO delay and key sync restart (in Mono, only with the first
+  key). The timer runs at 369.7 Hz, measured from the vibrato and tremolo rates of 10 LFO speeds in demos of three DX7s.
 - Feedback loops in algorithms 4 and 6 are reproduced.
 - **Amplitude modulation measured on real DX7s.** The LFO tremolo (AMD x AMS) is linear in amplitude: the level stays
   high most of the cycle and dips briefly and deeply, down to -26 dB at AMD 99 and AMS 3. Measured on recordings of
@@ -222,7 +226,5 @@ after a 1990 bleep sound, not a copy of it.
 - Amplitude modulation is linear in amplitude, with a dip to -26 dB at AMD 99 and AMS 3. Both were measured on recordings
   of three original DX7s playing the factory voice TRAIN (ROM 1A); the scale for other AMD and AMS values (msfa's table)
   is not measured.
-- LFO speeds follow msfa's table. Vibrato and tremolo rates measured in factory-voice demos of three original DX7s run
-  slightly slower: speed 21 by 0.2 %, speeds 30 to 50 by 0.6 % +/- 0.3 % (for example, speed 39: 6.19-6.22 Hz against
-  6.25 Hz). The difference is not uniform across speeds, and speeds below 21 and above 50 are not measured, so the table
-  is kept.
+- The timer rate (369.7 Hz) is measured, not read: the firmware counts 3140 CPU cycles per tick, and the CPU clock is
+  not documented. msfa's LFO table is the same formula at 372.3 Hz.

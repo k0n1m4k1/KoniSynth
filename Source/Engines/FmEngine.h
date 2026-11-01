@@ -34,8 +34,13 @@ struct FmEngine
             for (auto& a : hwY2G[(size_t) g]) a.fill (0);
         }
         sustainPedal = false;
-        lfoPhase = 0.0;
-        lfoDelay = 0.0;
+        // LFO: el estado estable de un aparato encendido (fade al máximo; con retardo, cada nota lo reinicia)
+        lfoPh = 0;
+        lfoDelayAcc = 0xFFFF;
+        lfoFade = 255;
+        lfoS = 0;
+        ampA = 0;
+        pitchReg = 0;
         // VOICE_RESET_EVENT_AND_PITCH_BUFFERS: buffers de tono a 0x2EA8 (nota 36, ya en Voice) y estado mono a cero
         lastPitch = 0x2EA8;
         monoCount = 0;
@@ -97,48 +102,43 @@ struct FmEngine
             if (FmAlgorithms::flags[alg][i] & 0x80) fbSrc = i;
         }
 
-        // LFO (lfo.cc): velocidad 0..99 -> Hz por tabla medida; PMD/AMD ·165/64; PMS por tabla
-        static constexpr double lfoHz[100] = {
-            0.062541, 0.125031, 0.312393, 0.437120, 0.624610, 0.750694, 0.936330, 1.125302, 1.249609, 1.436782,
-            1.560915, 1.752081, 1.875117, 2.062494, 2.247191, 2.374451, 2.560492, 2.686728, 2.873976, 2.998950,
-            3.188013, 3.369840, 3.500175, 3.682224, 3.812065, 4.000800, 4.186202, 4.310716, 4.501260, 4.623209,
-            4.814636, 4.930480, 5.121901, 5.315191, 5.434783, 5.617346, 5.750431, 5.946717, 6.062811, 6.248438,
-            6.431695, 6.564264, 6.749460, 6.868132, 7.052186, 7.250580, 7.375719, 7.556294, 7.687577, 7.877738,
-            7.993605, 8.181967, 8.372405, 8.504848, 8.685079, 8.810573, 8.986341, 9.122423, 9.300595, 9.500285,
-            9.607994, 9.798158, 9.950249, 10.117361, 11.251125, 11.384335, 12.562814, 13.676149, 13.904338, 15.092062,
-            16.366612, 16.638935, 17.869907, 19.193858, 19.425019, 20.833333, 21.034918, 22.502250, 24.003841, 24.260068,
-            25.746653, 27.173913, 27.578599, 29.052876, 30.693677, 31.191516, 32.658393, 34.317090, 34.674064, 36.416606,
-            38.197097, 38.550501, 40.387722, 40.749796, 42.625746, 44.326241, 44.883303, 46.772685, 48.590865, 49.261084 };
+        // LFO y modulación: los calcula la CPU del DX7 en cada tick del temporizador (fwTick); aquí, sus parámetros.
+        // PATCH_ACTIVATE_SCALE_VALUE: sc(v) = (660·v) >> 8 (99 -> 255). Velocidad del LFO (PATCH_ACTIVATE_SCALE_LFO_SPEED):
+        // A = sc(velocidad), incremento por tick de la fase de 16 bits = A·11, o A·(((A - 160) >> 2) + 11) desde A = 160
+        // (velocidad 0 -> 11). Retardo (PATCH_ACTIVATE_SCALE_LFO_DELAY): x = 99 - delay, incremento
+        // (16 + (x & 15)) << (2 + (x >> 4)). PMS por TABLE_PITCH_MOD_SENS
         static constexpr int pmsTab[8] = { 0, 10, 20, 33, 55, 92, 153, 255 };
-        const auto lfoInc = lfoHz[juce::jlimit (0, 99, (int) p.fmLfoSpeed->load())] / opRate;
-        const auto lfoWave = (int) p.fmLfoWave->load();
-        const auto pmd = ((int) p.fmLfoPmd->load() * 165) >> 6;
-        const auto amd = ((int) p.fmLfoAmd->load() * 165) >> 6;
-        const auto pms = pmsTab[juce::jlimit (0, 7, (int) p.fmLfoPms->load())];
-        // Retardo: estado de 32 bits; primera mitad sin modulación, segunda en rampa (getdelay)
-        const auto delayParam = 99 - juce::jlimit (0, 99, (int) p.fmLfoDelay->load());
-        double delayInc1 = 1.0e12, delayInc2 = 1.0e12;
-        if (delayParam != 99)
+        const auto sc = [] (int v) { return (660 * juce::jlimit (0, 99, v)) >> 8; };
         {
-            const auto unit = 25190424.0 / opRate;
-            auto a = (16 + (delayParam & 15)) << (1 + (delayParam >> 4));
-            delayInc1 = unit * a;
-            a &= 0xff80;
-            delayInc2 = unit * std::max (0x80, a);
+            const auto speed = juce::roundToInt (p.fmLfoSpeed->load());
+            const auto a = sc (speed);
+            lfoIncFw = speed == 0 ? 11 : a * (a < 160 ? 11 : ((a - 160) >> 2) + 11);
+            lfoDelayParam = juce::jlimit (0, 99, juce::roundToInt (p.fmLfoDelay->load()));
+            const auto x = 99 - lfoDelayParam;
+            lfoDelayIncFw = (16 + (x & 15)) << (2 + (x >> 4));
         }
-        // Modo Function (msfa controllers.h): total = valor del controlador (0-127) · rango / 100, truncado; varios
-        // controladores sobre el mismo destino se combinan por máximo. Sin ningún EG BIAS asignado, eg = 127 (sin efecto)
-        std::array<int, 4> ctlRange {};
-        std::array<bool, 4> ctlPitch {}, ctlAmp {}, ctlEg {};
-        for (size_t c = 0; c < 4; ++c)
+        lfoWave = (int) p.fmLfoWave->load();
+        pmdSc = sc (juce::roundToInt (p.fmLfoPmd->load()));
+        amdSc = sc (juce::roundToInt (p.fmLfoAmd->load()));
+        pmsFw = pmsTab[juce::jlimit (0, 7, (int) p.fmLfoPms->load())];
+        // Modo Function (MOD_PROCESS_INPUT_SOURCES): cada fuente da q = (sc(rango) · 2·valor) >> 8 (el firmware guarda los
+        // controladores duplicados) y las fuentes asignadas a un mismo destino se SUMAN con saturación a 255. EG BIAS:
+        // egR = suma saturada de sc(rango) de las fuentes asignadas; bias = 255 - sat(suma de sus q + 255 - egR), es decir,
+        // con el controlador a 0 la atenuación es sc(rango) y se abre al subirlo
         {
-            ctlRange[c] = juce::jlimit (0, 99, juce::roundToInt (p.fmCtl[c].range->load()));
-            ctlPitch[c] = p.fmCtl[c].pitch->load() > 0.5f;
-            ctlAmp[c] = p.fmCtl[c].amp->load() > 0.5f;
-            ctlEg[c] = p.fmCtl[c].eg->load() > 0.5f;
-        }
-        const auto anyEg = ctlEg[0] || ctlEg[1] || ctlEg[2] || ctlEg[3];
-        const auto tune = (double) p.fineTune->load();
+            int ampSum = 0, pitSum = 0, egRange = 0, egSum = 0;
+            for (size_t c = 0; c < 4; ++c)
+            {
+                const auto r = sc (juce::roundToInt (p.fmCtl[c].range->load()));
+                const auto q = (r * 2 * ctlValue[c]) >> 8;
+                if (p.fmCtl[c].amp->load() > 0.5f)   ampSum = std::min (255, ampSum + q);
+                if (p.fmCtl[c].pitch->load() > 0.5f) pitSum = std::min (255, pitSum + q);
+                if (p.fmCtl[c].eg->load() > 0.5f)   { egRange = std::min (255, egRange + r); egSum = std::min (255, egSum + q); }
+            }
+            ampFactor = ampSum;
+            pitchFactor = pitSum;
+            egBias = 255 - std::min (255, egSum + (255 - egRange));
+        }        const auto tune = (double) p.fineTune->load();
         for (auto& v : voices)
             if (v.active)
                 updateFrequencies (v);
@@ -154,49 +154,14 @@ struct FmEngine
         args.fbScale = (float) fbScale;
         const auto useAvx2 = simdActive();
 
-        // Control común (LFO, su retardo y pitch bend) avanzado n muestras de operador
+        // Control común avanzado n muestras de operador: el registro de tono del EGS (1/16384 de octava; ver fwTick) más el
+        // pitch bend y la afinación de KoniSynth; la profundidad de AM A (0-255) que prepareVoice convierte en ganancia
         auto control = [&] (int n, double& pitchMul, double& ampDepth)
         {
-            lfoPhase += lfoInc * n;
-            if (lfoPhase >= 1.0)
-            {
-                lfoPhase -= std::floor (lfoPhase);
-                shState = (shState * 179 + 17) & 0xff;
-            }
-            double lfo; // 0..1
-            switch (lfoWave)
-            {
-                case 0:  lfo = lfoPhase < 0.5 ? 2.0 * lfoPhase : 2.0 - 2.0 * lfoPhase; break; // triángulo
-                case 1:  lfo = 1.0 - lfoPhase; break;                                         // sierra descendente
-                case 2:  lfo = lfoPhase; break;                                               // sierra ascendente
-                case 3:  lfo = lfoPhase < 0.5 ? 1.0 : 0.0; break;                             // cuadrada
-                case 4:  lfo = 0.5 + 0.5 * std::sin (juce::MathConstants<double>::twoPi * lfoPhase); break;
-                default: lfo = ((shState ^ 0x80) + 1) / 256.0; break;                        // S&H
-            }
-            if (lfoDelay < 4294967296.0)
-                lfoDelay += (lfoDelay < 2147483648.0 ? delayInc1 : delayInc2) * n;
-            const auto delayGain = lfoDelay < 2147483648.0 ? 0.0 : std::min (1.0, (lfoDelay - 2147483648.0) / 2147483648.0);
-            int pitchCtl = 0, ampCtl = 0, egCtl = anyEg ? 0 : 127;
-            for (size_t c = 0; c < 4; ++c)
-            {
-                const auto total = (int) (ctlValue[c] * (0.01f * (float) ctlRange[c]));
-                if (ctlPitch[c]) pitchCtl = std::max (pitchCtl, total);
-                if (ctlAmp[c])   ampCtl = std::max (ampCtl, total);
-                if (ctlEg[c])    egCtl = std::max (egCtl, total);
-            }
-            // Tono: Δoct = PMD·PMS·retardo·(lfo - 0,5)/2^15 (máximo ≈ 0,99 oct). Los controladores PITCH suben la profundidad
-            // sin pasar por el retardo: equivalen a 2·total (dx7note.cc: pmod_2 = pitch_mod·senslfo >> 14, frente a pmod_1
-            // >> 39 con PMD en Q32), y gana la mayor
-            const auto pitchOct = std::max (pmd * delayGain, 2.0 * pitchCtl) * pms * (lfo - 0.5) / 32768.0;
-            // Amplitud: profundidad 0..1 (AMD·retardo·LFO); prepareVoice la convierte en ganancia lineal (ver amModDepth).
-            // Controladores AMP: total/128 por el LFO, sin retardo; EG BIAS: atenuación fija 1 - (total + 1)/128 (con el
-            // controlador a 0, casi completa). Gana la mayor (dx7note.cc: amod_1, amod_2, amod_3)
-            ampDepth = std::max ({ amd / 255.0 * delayGain * (1.0 - lfo), ampCtl / 128.0 * (1.0 - lfo),
-                                   1.0 - (egCtl + 1) / 128.0 });
+            ampDepth = ampA / 256.0;
             bendSmoothed += (1.0f - std::pow (1.0f - bendCoef, (float) n)) * (p.pitchBend.load() - bendSmoothed);
-            pitchMul = std::exp2 (pitchOct + (tune + 100.0 * bendSmoothed) / 1200.0);
+            pitchMul = std::exp2 (pitchReg / 16384.0 + (tune + 100.0 * bendSmoothed) / 1200.0);
         };
-
         auto midiIt = midi.cbegin();
         const auto numSamples = out.getNumSamples();
         if (! hwMode)
@@ -212,8 +177,8 @@ struct FmEngine
                 if (midiIt != midi.cend())
                     n = std::min (n, (*midiIt).samplePosition - i);
                 double pitchMul, ampDepth;
+                fwTicks (n);
                 control (n, pitchMul, ampDepth);
-                portaTicks (n);
                 args.pitchMul = (float) pitchMul;
                 for (size_t vi = 0; vi < voices.size(); ++vi)
                     prepareVoice (voices[vi], vi, alg, ampDepth, n);
@@ -253,8 +218,8 @@ struct FmEngine
                 if (midiIt != midi.cend() && (*midiIt).samplePosition < start + n)
                     k = juce::jlimit (1, k, (int) std::ceil (((*midiIt).samplePosition - start - hwNext) / step));
                 double pitchMul, ampDepth;
+                fwTicks (k);
                 control (k, pitchMul, ampDepth);
-                portaTicks (k);
                 args.pitchMul = (float) pitchMul;
                 for (size_t vi = 0; vi < voices.size(); ++vi)
                     prepareVoice (voices[vi], vi, alg, ampDepth, k);
@@ -580,6 +545,7 @@ private:
                 if (v.age < target->age) target = &v;
         }
         auto& v = *target;
+        lfoKeyOn(); // en poly, en cada nota (msfa/Dexed: solo si no había otra tecla pulsada)
         startVoice (v, note, velocity);
         // Portamento en poly (VOICE_ADD_POLY): solo con el pedal pisado y tiempo > 0. Retain: la nota nueva arranca en el tono
         // de la última tocada. Follow: todas las voces sin tecla pulsada (sostenidas o en release) toman la nota nueva como
@@ -605,14 +571,6 @@ private:
     {
         const auto vi = (size_t) (&v - voices.data());
         const auto wasActive = v.active;
-        // LFO (lfo.cc keydown, llamado si no había otra tecla pulsada): el retardo vuelve a empezar y, con LFO key sync, la
-        // fase va a (2^31 - 1) / 2^32, la mitad del ciclo
-        if (std::none_of (voices.begin(), voices.end(), [] (const Voice& o) { return o.active && o.keyDown; }))
-        {
-            lfoDelay = 0.0;
-            if (lfoSync)
-                lfoPhase = 2147483647.0 / 4294967296.0;
-        }
         v.active = v.keyDown = true;
         v.sustained = false;
         v.note = note;
@@ -678,6 +636,7 @@ private:
         auto& v = voices[0];
         if (monoCount == 1)
         {
+            lfoKeyOn();
             startVoice (v, note, velocity);
             lastKey = note;
             v.targetPitch = dxPitch (v.playNote);
@@ -730,22 +689,101 @@ private:
             v.portaPitch = v.glissPitch = v.targetPitch; // VOICE_ADD_MONO_CLEAR_PORTA_FREQ
     }
 
-    // HANDLER_OCF llama a PORTA_PROCESS en cada tick del temporizador, alternando las voces 0-7 y 8-15: cada voz se actualiza
-    // a kTickHz / 2. kTickHz = 369,7 Hz: el temporizador cuenta 3140 ciclos (SYSTEM_TICK_PERIOD) y su periodo real se ha
-    // medido por la velocidad del LFO, que avanza un paso por tick, en demos de tres DX7 (10 velocidades, 368,8-371,2 Hz)
+    // HANDLER_OCF, en cada tick del temporizador: LFO_GET_AMPLITUDE, MOD_AMP_LOAD_TO_EGS, PORTA_PROCESS (alternando las
+    // voces 0-7 y 8-15: cada voz a kTickHz / 2) y MOD_PITCH_LOAD_TO_EGS. kTickHz = 369,7 Hz: el temporizador cuenta 3140
+    // ciclos (SYSTEM_TICK_PERIOD) y su periodo real se ha medido por la velocidad del LFO, que avanza un paso por tick, en
+    // demos de tres DX7 (10 velocidades, 368,8-371,2 Hz)
     static constexpr double kTickHz = 369.7;
 
-    void portaTicks (int n)
+    void fwTicks (int n)
     {
         portaTickPhase += n * kTickHz / opRate;
         while (portaTickPhase >= 1.0)
         {
             portaTickPhase -= 1.0;
+            lfoTick();
+            // MOD_AMP_LOAD_TO_EGS: x = sat(fade·sc(AMD)/256 + controladores AMP); el EG bias satura x por arriba;
+            // A = sat(x·(127 - s)/256 + bias). El EGS recibe TABLE_AMP_MOD[255 - A] (≈ -32·log2(1 - A/256)); cómo lo
+            // aplica cada AMS lo decide el EGS (ver prepareVoice)
+            auto x = std::min (255, ((lfoFade * amdSc) >> 8) + ampFactor);
+            x = std::min (255, x + egBias) - egBias;
+            ampA = std::min (255, ((x * (127 - lfoS)) >> 8) + egBias);
             const auto first = portaHalf ? 8 : 0;
             portaHalf = ! portaHalf;
             for (int i = first; i < first + 8; ++i)
                 portaStep (voices[(size_t) i]);
+            // MOD_PITCH_LOAD_TO_EGS: T = sat(controladores PITCH + fade·sc(PMD)/256); l = s·PMS/256 (truncado hacia 0);
+            // registro = (l·T) >> 1, en 1/16384 de octava (el pitch bend de 12 semitonos llega a 0x3FFF)
+            const auto t = std::min (255, pitchFactor + ((lfoFade * pmdSc) >> 8));
+            const auto l = lfoS >= 0 ? (lfoS * pmsFw) >> 8 : -(((-lfoS) * pmsFw) >> 8);
+            pitchReg = (l * t) >> 1;
         }
+    }
+
+    // LFO_GET_AMPLITUDE: retardo (acumulador de 16 bits; al desbordar, el fade sube max(1, incremento >> 8) por tick hasta
+    // 255), fase de 16 bits y la forma de onda como byte con signo s (-128..127)
+    void lfoTick()
+    {
+        if (const auto d = lfoDelayAcc + lfoDelayIncFw; d > 0xFFFF)
+        {
+            lfoFade = std::min (255, lfoFade + std::max (1, lfoDelayIncFw >> 8));
+            lfoDelayAcc = 0xFFFF;
+        }
+        else
+        {
+            lfoDelayAcc = d;
+        }
+        const auto old = lfoPh;
+        lfoPh = (lfoPh + lfoIncFw) & 0xFFFF;
+        const auto shNew = old < 0x8000 && lfoPh >= 0x8000; // desbordamiento con signo: el S&H toma muestra a mitad de ciclo
+        const auto msb = lfoPh >> 8;
+        const auto toS8 = [] (int b) { b &= 0xFF; return b > 127 ? b - 256 : b; };
+        switch (lfoWave)
+        {
+            case 0: // triángulo: -128 en fase 0, +127 en fase 0,5 (el key sync deja la fase en 0x7FFF: el pico)
+            {
+                auto t = ((lfoPh << 1) & 0xFFFF) >> 8;
+                if (lfoPh & 0x8000) t = ~t & 0xFF;
+                lfoS = toS8 (t + 128);
+                break;
+            }
+            case 1: lfoS = toS8 (~msb); break; // sierra descendente
+            case 2: lfoS = toS8 (msb); break;  // sierra ascendente
+            case 3: lfoS = (lfoPh & 0x8000) ? -128 : 127; break;
+            case 4: // seno: TABLE_LFO_SIN de un cuarto de onda (64 valores)
+            {
+                static constexpr std::uint8_t sinTab[64] = {
+                    2, 5, 8, 11, 14, 17, 20, 23, 26, 29, 32, 35, 38, 41, 44, 47, 50, 53, 56, 58, 61, 64, 67, 69, 72, 74,
+                    77, 79, 82, 84, 86, 89, 91, 93, 95, 97, 99, 101, 103, 105, 106, 108, 110, 111, 113, 114, 115, 117, 118,
+                    119, 120, 121, 122, 123, 124, 124, 125, 125, 126, 126, 127, 127, 127, 127 };
+                auto idx = msb & 63;
+                if (msb & 64) idx ^= 63;
+                auto v = (int) sinTab[idx];
+                if (msb & 0x80) v = ~v & 0xFF;
+                lfoS = toS8 (v);
+                break;
+            }
+            default: // S&H: generador congruente 179·s + 0x11 (8 bits)
+                if (shNew)
+                {
+                    lfoShAcc = (lfoShAcc * 179 + 0x11) & 0xFF;
+                    lfoS = toS8 (lfoShAcc);
+                }
+                break;
+        }
+    }
+
+    // Nota nueva (VOICE_ADD_POLY en cada nota, VOICE_ADD_MONO solo con la primera tecla): con retardo, el LFO vuelve a
+    // esperar y a entrar desde 0; con LFO key sync, la fase va a 0x7FFF
+    void lfoKeyOn()
+    {
+        if (lfoDelayParam != 0)
+        {
+            lfoDelayAcc = 0;
+            lfoFade = 0;
+        }
+        if (lfoSync)
+            lfoPh = 0x7FFF;
     }
 
     // PORTA_PROCESS para una voz, con su aritmética de 16 bits: paso = velocidad · ((MSB de la distancia >> 2) + 1), es decir,
@@ -921,7 +959,7 @@ private:
             return;
         }
         static constexpr double amsTab[4] = { 0.0, 66.0 / 255.0, 109.0 / 255.0, 1.0 }; // ampmodsenstab de msfa
-        static constexpr double amModDepth = 0.94988;                                   // 1 - 10^(-26/20)
+        static constexpr double amModDepth = 0.9612;                                    // A = 253 -> -26 dB (ver abajo)
         const auto down = v.keyDown || v.sustained;
         // Envolvente de tono del subbloque: solo en los operadores en modo razón (dx7note.cc: los de frecuencia fija solo
         // siguen el pitch bend)
@@ -938,12 +976,12 @@ private:
             auto& op = v.ops[(size_t) k];
             const auto& pk = patch[(size_t) k];
             auto level = envStep (op, pk, down, n);
-            // Modulación de amplitud lineal en amplitud: g = 1 - amModDepth·profundidad·AMS. Medido en tres DX7 (voz TRAIN de
-            // la ROM 1A, AMD 99, AMS 3, LFO triangular): la forma lineal en amplitud ajusta mejor que la lineal en dB en los
-            // tres (error rms 0,79-1,10 dB frente a 1,23-2,54 dB) y el valle sin efectos es de 23 y 30 dB: se toma 26 dB,
-            // amModDepth = 1 - 10^(-26/20). Grabaciones: YouTube FRghocE4pPA (872-896 s), W_xLKRBeuCU (2402-2478 s) y
-            // F3rrjQtQe5A (15:06, con reverb). Solo AMD 99 / AMS 3 está medido; la escala para otros valores (proporcional
-            // en amplitud con la tabla de msfa) es un supuesto.
+            // Modulación de amplitud: el firmware da la profundidad A (0-255, fwTicks) y el EGS la aplica según el AMS del
+            // operador; esa conversión no está en el firmware y se ha medido: g = 1 - amModDepth·(A/256)·AMS. En grabaciones
+            // de tres DX7 (voz TRAIN de la ROM 1A, AMD 99 -> A = 253, AMS 3), con el LFO del firmware simulado, la forma
+            // lineal en amplitud con valle de 26 dB ajusta mejor (error rms 1,00 y 1,24 dB) que aplicar el registro
+            // logarítmico TABLE_AMP_MOD tal cual (1,42 y 2,74 dB). Grabaciones: YouTube FRghocE4pPA (872-896 s) y
+            // W_xLKRBeuCU (2402-2478 s). AMS 1 y 2 con la tabla de msfa: supuesto.
             if (pk.ams > 0 && ampDepth > 0.0)
                 level += 256.0 * std::log2 (1.0 - amModDepth * ampDepth * amsTab[pk.ams & 3]); // ganancia -> unidades de 2^-8 oct
             target[(size_t) k] = (float) std::exp2 (level / 256.0 - 14.0);
@@ -959,8 +997,11 @@ private:
             lanesOf (vi).ampStep[k][laneOf (vi)] = (target[(size_t) k] - lanesOf (vi).amp[k][laneOf (vi)]) / (float) n;
     }
 
-    double sampleRate = 44100.0, srScale = 1.0, lfoPhase = 0.0, lfoDelay = 0.0;
-    int shState = 0;
+    double sampleRate = 44100.0, srScale = 1.0;
+    // LFO y registros de modulación del firmware (ver fwTicks / lfoTick)
+    int lfoPh = 0, lfoDelayAcc = 0xFFFF, lfoFade = 255, lfoS = 0, lfoShAcc = 0, lfoIncFw = 11, lfoDelayIncFw = 0,
+        lfoDelayParam = 0, lfoWave = 0, pmdSc = 0, amdSc = 0, pmsFw = 0, ampFactor = 0, pitchFactor = 0, egBias = 0,
+        ampA = 0, pitchReg = 0;
     int transpose = 0;
     bool oscSync = true, lfoSync = true;
     std::array<int, 4> pitchRates { 99, 99, 99, 99 }, pitchLevels { 50, 50, 50, 50 };
