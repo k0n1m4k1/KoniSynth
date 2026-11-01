@@ -1446,6 +1446,9 @@ public:
                 if (! xml->hasAttribute (mt32QueueAttribute))
                     if (auto* q = xml->getChildByAttribute ("id", "mt32Queue"))
                         q->setAttribute ("value", PresetManager::mt32QueueFromFormat8 (juce::roundToInt (q->getDoubleAttribute ("value"))));
+                // Como kslDb: la marca no se queda en el estado (si se quedara, al guardar cambiaría el orden de los atributos y el
+                // estado no sería igual byte a byte tras cargarlo: clap-validator, state-reproducibility-binary)
+                xml->removeAttribute (mt32QueueAttribute);
 
                 // Estados anteriores al formato 8 (sin osc2WtLevel): Wavetable / Sample de Osc 2 y Osc 3 eran formas de onda
                 // (osc2Wave / osc3Wave 10 y 11); pasan a fuentes con su nivel (PresetManager::splitOscFamilies)
@@ -1472,6 +1475,7 @@ public:
                 if (xml->getIntAttribute (oplModelAttribute, 0) != 1)
                     if (auto* m = xml->getChildByAttribute ("id", "oplModel"))
                         m->setAttribute ("value", PresetManager::oplModelFromFormat9 (juce::roundToInt (m->getDoubleAttribute ("value"))));
+                xml->removeAttribute (oplModelAttribute);
 
                 apvts.replaceState (juce::ValueTree::fromXml (*xml));
                 presetManager.invalidateSnapshot();

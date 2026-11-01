@@ -47,11 +47,18 @@ static APVTS::ParameterLayout createLayout()
         { return String (v, 1) + " dB"; }));
 
     // On/off que en realidad elige entre dos modos: el texto de cada valor (la UI los dibuja como palanca con esos nombres;
-    // el valor guardado sigue siendo 0 / 1, presets y automatización intactos)
+    // el valor guardado sigue siendo 0 / 1, presets y automatización intactos). Texto a valor: primero las dos etiquetas; el
+    // respaldo numérico solo con un número sin más ("1 dB" empieza por 1 y es la etiqueta de apagado de OPL Deep Tremolo)
     auto twoModes = [] (const String& off, const String& on)
     {
         return AudioParameterBoolAttributes().withStringFromValueFunction ([off, on] (bool v, int) { return v ? on : off; })
-                                             .withValueFromStringFunction ([on] (const String& t) { return t.trim().equalsIgnoreCase (on) || t.getIntValue() == 1; });
+                                             .withValueFromStringFunction ([off, on] (const String& text)
+        {
+            const auto t = text.trim();
+            if (t.equalsIgnoreCase (on)) return true;
+            if (t.equalsIgnoreCase (off)) return false;
+            return t.containsOnly ("0123456789.") && t.getFloatValue() >= 0.5f;
+        });
     };
     APVTS::ParameterLayout l;
     l.add (std::make_unique<AudioParameterFloat> (ParameterID { "gain", 1 }, "Gain", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));

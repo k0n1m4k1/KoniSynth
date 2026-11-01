@@ -54,7 +54,9 @@ try:
     r = call('save_preset', name='zzKoniTest Saved', category='Lead')
     head = open(saved, encoding='utf-8').read()[:300] if os.path.exists(saved) else ''
     m1 = re.search(r'formatVersion="(\d+)"', head); m2 = re.search(r'pluginVersion="([^"]+)"', head)
-    check(r['ok'] and m1 and m1.group(1) == '6' and m2 is not None, 'guardado: formatVersion=%s pluginVersion=%s' % (m1 and m1.group(1), m2 and m2.group(1)))
+    # La versión de formato vigente, leída de la fuente (no un número fijo: sube con cada formato nuevo)
+    fv = re.search(r'static constexpr int formatVersion = (\d+);', open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'Source', 'Presets', 'PresetManager.h'), encoding='utf-8').read()).group(1)
+    check(r['ok'] and m1 and m1.group(1) == fv and m2 is not None, 'guardado: formatVersion=%s (vigente %s) pluginVersion=%s' % (m1 and m1.group(1), fv, m2 and m2.group(1)))
     r = call('load_preset', name='zzKoniTest ksl4')
     g = call('get', ids=['opl1Ksl', 'opl2Ksl', 'opl3Ksl'])['result']
     check(r['ok'] and g == {'opl1Ksl': '1.5 dB/oct', 'opl2Ksl': '3 dB/oct', 'opl3Ksl': '6 dB/oct'},
