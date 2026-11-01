@@ -135,7 +135,7 @@ Optional "nicer" setting: Model = Clean (no analog filter). Defaults are Model 1
 | MD Synth Brass | Brass |
 | MD Additive Pad | Pad |
 
-Choosing Mega Drive from the engine menu loads MD Green Hill Bass.
+Choosing Mega Drive from the engine menu loads MD Electric Slap Bass.
 
 ## Limitations
 

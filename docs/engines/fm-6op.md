@@ -15,7 +15,7 @@ Nothing extra. Optional: Yamaha DX7 SysEx files (`.syx`) if you want to load ori
 
 ## Controls
 
-Select **FM 6-Op (DX7)** in the Engine menu. Choosing it from that menu loads the preset **FM E.Piano**. The engine shows three
+Select **FM 6-Op (DX7)** in the Engine menu. Choosing it from that menu loads the preset **DX7 E.Piano 1**. The engine shows three
 sections side by side: **FM 6-Op (DX7)**, **FM LFO** and **Display**.
 
 ### FM 6-Op (DX7)

@@ -14,7 +14,7 @@ Nothing extra.
 
 ## Controls
 
-Select **Casio VL-1** in the Engine menu. Choosing it from that menu loads the preset **VL-1 Piano**. The engine shows
+Select **Casio VL-1** in the Engine menu. Choosing it from that menu loads the preset **Da Da Da (VL-1)**. The engine shows
 three sections: **Casio VL-1**, **VL-1 Rhythm** and **Display**.
 
 ### Casio VL-1

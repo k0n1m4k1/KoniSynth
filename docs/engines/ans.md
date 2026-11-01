@@ -16,7 +16,7 @@ Nothing extra.
 
 ## Controls
 
-Select **ANS** in the Engine menu. Choosing it from that menu loads the preset **ANS Cluster**.
+Select **ANS** in the Engine menu. Choosing it from that menu loads the preset **ANS Glissandi**.
 
 ### ANS
 

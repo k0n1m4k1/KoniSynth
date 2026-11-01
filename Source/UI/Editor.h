@@ -58,9 +58,9 @@ public:
         if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (s.getParameter ("engine")))
         {
             const std::pair<const char*, std::vector<int>> groups[] = { { "Synthesizers", { 0, 6, 8, 9 } },
-                                                                        { "Instruments", { 1, 2, 3, 4, 5 } },
+                                                                        { "Instruments", { 1, 3, 4, 2, 5 } },
                                                                         { "Consoles", { 7, 10, 11, 12 } },
-                                                                        { "Computers", { 13, 14, 15 } } };
+                                                                        { "Computers", { 14, 15, 13 } } };
             for (const auto& [heading, items] : groups)
             {
                 engineCombo.addSectionHeading (heading);
@@ -70,7 +70,7 @@ public:
             }
         }
         engineCombo.setTooltip (paramTooltip (s, "engine"));
-        // Elegir un motor en el desplegable carga su preset más representativo (Synth: solo cambia de motor)
+        // Elegir un motor en el desplegable carga su preset más representativo (Synth: Init)
         engineComboAttachment = std::make_unique<PickComboAttachment> (*s.getParameter ("engine"), engineCombo,
                                                                          [this] (int e) { loadRepresentative (e, -1); });
         engineMenu = std::make_unique<ParamMenu> (s, "engine", engineCombo);
@@ -855,7 +855,7 @@ public:
 
 private:
     // Preset que carga el desplegable de motor (y el de modelo del Chip): el sonido más conocido de cada aparato.
-    // Fuentes en el comentario de cada preset de fábrica. Synth (0): sin preset, solo cambia de motor.
+    // Fuentes en el comentario de cada preset de fábrica. Synth (0): Init.
     static juce::String representativePreset (int engineIndex, int chipModel)
     {
         if (engineIndex == 7)
@@ -864,8 +864,8 @@ private:
                                           "NES PAL Unadapted Lead" };
             return chip[juce::jlimit (0, 5, chipModel)];
         }
-        static const char* names[] = { "", "Etheric Theremin", "VL-1 Piano", "Stylophone", "Omnichord Strum", "808 Kit",
-                                       "FM E.Piano", "", "Polivoks Scream", "ANS Cluster", "MD Green Hill Bass", "SNES Echo Strings", "N64 Big Room Choir",
+        static const char* names[] = { "Init", "Etheric Theremin", "Da Da Da (VL-1)", "Stylophone", "Omnichord Strum", "808 Kit",
+                                       "DX7 E.Piano 1", "", "Polivoks Scream", "ANS Glissandi", "MD Electric Slap Bass", "SNES Echo Strings", "N64 Big Room Choir",
                                        "OPL2 E.Piano", "MT-32 Piano 1", "GUS Piano" };
         return juce::isPositiveAndBelow (engineIndex, (int) std::size (names)) ? names[engineIndex] : "";
     }
