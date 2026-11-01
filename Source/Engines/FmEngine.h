@@ -141,7 +141,7 @@ struct FmEngine
             const auto delayGain = lfoDelay < 2147483648.0 ? 0.0 : std::min (1.0, (lfoDelay - 2147483648.0) / 2147483648.0);
             // Tono: Δoct = PMD·PMS·retardo·(lfo - 0,5)/2^15 (máximo ≈ 0,99 oct)
             const auto pitchOct = pmd * pms * delayGain * (lfo - 0.5) / 32768.0;
-            // Amplitud: atenuación hasta AMD·AMS en dB (escala estimada: 0..24 dB con AMD 99 y AMS 3)
+            // Amplitud: profundidad 0..1 (AMD·retardo·LFO); prepareVoice la convierte en ganancia lineal (ver amModDepth)
             ampDepth = amd / 255.0 * delayGain * (1.0 - lfo);
             bendSmoothed += (1.0f - std::pow (1.0f - bendCoef, (float) n)) * (p.pitchBend.load() - bendSmoothed);
             pitchMul = std::exp2 (pitchOct + (tune + 100.0 * bendSmoothed) / 1200.0);
@@ -658,6 +658,7 @@ private:
             return;
         }
         static constexpr double amsTab[4] = { 0.0, 66.0 / 255.0, 109.0 / 255.0, 1.0 }; // ampmodsenstab de msfa
+        static constexpr double amModDepth = 0.94988;                                   // 1 - 10^(-26/20)
         const auto down = v.keyDown || v.sustained;
         // Envolvente de tono del subbloque: solo en los operadores en modo razón (dx7note.cc: los de frecuencia fija solo
         // siguen el pitch bend)
@@ -671,8 +672,14 @@ private:
             auto& op = v.ops[(size_t) k];
             const auto& pk = patch[(size_t) k];
             auto level = envStep (op, pk, down, n);
+            // Modulación de amplitud lineal en amplitud: g = 1 - amModDepth·profundidad·AMS. Medido en tres DX7 (voz TRAIN de
+            // la ROM 1A, AMD 99, AMS 3, LFO triangular): la forma lineal en amplitud ajusta mejor que la lineal en dB en los
+            // tres (error rms 0,79-1,10 dB frente a 1,23-2,54 dB) y el valle sin efectos es de 23 y 30 dB: se toma 26 dB,
+            // amModDepth = 1 - 10^(-26/20). Grabaciones: YouTube FRghocE4pPA (872-896 s), W_xLKRBeuCU (2402-2478 s) y
+            // F3rrjQtQe5A (15:06, con reverb). Solo AMD 99 / AMS 3 está medido; la escala para otros valores (proporcional
+            // en amplitud con la tabla de msfa) es un supuesto.
             if (pk.ams > 0 && ampDepth > 0.0)
-                level -= ampDepth * amsTab[pk.ams & 3] * 24.0 / 0.0235; // atenuación en dB -> unidades de 2^-8 oct
+                level += 256.0 * std::log2 (1.0 - amModDepth * ampDepth * amsTab[pk.ams & 3]); // ganancia -> unidades de 2^-8 oct
             target[(size_t) k] = (float) std::exp2 (level / 256.0 - 14.0);
             if ((FmAlgorithms::flags[alg][k] & 3) == 0 && (op.env.ix < 4 || level > 16.5))
                 anyAudible = true;

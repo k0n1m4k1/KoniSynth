@@ -136,6 +136,18 @@ syncs on.
 - Envelopes run in the chip's logarithmic domain; LFO speed, PMD/AMD and PMS follow the msfa tables; operator frequency
   follows `dx7note.cc` with Dexed's empirical detune.
 - Feedback loops in algorithms 4 and 6 are reproduced.
+- **Amplitude modulation measured on real DX7s.** The LFO tremolo (AMD x AMS) is linear in amplitude: the level stays
+  high most of the cycle and dips briefly and deeply, down to -26 dB at AMD 99 and AMS 3. Measured on recordings of
+  three original DX7s playing the factory voice TRAIN (ROM 1A); see the table below. In the msfa code this part is marked
+  as needing tuning (`dx7note.cc`), and it computes a nearly constant attenuation (1.2 % of the envelope level in its log
+  domain) that hardly follows the LFO.
+
+| Recording (YouTube, TRAIN) | Dip (dB) | Fit error, linear in amplitude / linear in dB |
+|---|---|---|
+| FRghocE4pPA, 872-896 s, dry | 30 (26-34) | 0.79 / 2.54 dB |
+| W_xLKRBeuCU, 2402-2478 s, dry | 23 (19-27) | 1.10 / 1.86 dB |
+| F3rrjQtQe5A, 15:06, with reverb (the reverb fills the dip) | 18 | 0.79 / 1.23 dB |
+| KoniSynth, same analysis | 26 | 0.26 / 2.26 dB |
 
 Optional setting that goes beyond the original: **Mode = Clean** (smooth floating-point FM at the host sample rate),
 off by default.
@@ -167,4 +179,8 @@ after a 1990 bleep sound, not a copy of it.
 
 ## Limitations
 
-- The amplitude modulation scale is estimated (0 to 24 dB with AMD 99 and AMS 3).
+- Amplitude modulation is linear in amplitude, with a dip to -26 dB at AMD 99 and AMS 3. Both were measured on recordings
+  of three original DX7s playing the factory voice TRAIN (ROM 1A); the scale for other AMD and AMS values (msfa's table)
+  is not measured.
+- LFO speeds follow msfa's table. On the same three DX7s, speed 39 ran 0.65-1.07 % slower (6.19 Hz on average against
+  6.25 Hz); the table is kept until more speeds are measured.
