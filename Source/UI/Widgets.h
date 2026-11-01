@@ -1021,6 +1021,7 @@ struct ListControl : juce::Component, private juce::Timer
         if (selectedId != 0)
             combo.setSelectedId (selectedId, juce::dontSendNotification);
         resized(); // el ancho sigue al texto más largo
+        combo.resized(); // la lista de fósforo recalcula su letra con los nombres nuevos (positionComboBoxText)
         if (auto* parent = getParentComponent()) parent->resized();
     }
 
@@ -1039,11 +1040,13 @@ struct ListControl : juce::Component, private juce::Timer
     {
         auto r = getLocalBounds();
         label.setBounds (r.removeFromTop (18));
-        combo.setBounds (r.withSizeKeepingCentre (juce::jmin (r.getWidth() - 8, preferredWidth()), juce::jmin (comboHeight, r.getHeight())));
+        const auto w = phosphor() ? r.getWidth() - 8 : juce::jmin (r.getWidth() - 8, preferredWidth()); // la grande llena su celda
+        combo.setBounds (r.withSizeKeepingCentre (w, juce::jmin (comboHeight, r.getHeight())));
     }
 
-    // Lista grande con aspecto de pantalla de fósforo (KoniLookAndFeel, propiedad "phosphor"): letra monoespaciada de
-    // ~0,54 del alto (56 px -> 30 px)
+    // Lista grande con aspecto de pantalla de fósforo (KoniLookAndFeel, propiedad "phosphor"): ocupa el ancho de su peso
+    // (no se ensancha con el texto: el espacio de al lado es de otros) y crece en alto; letra monoespaciada de 0,54 del
+    // alto (56 px -> 30 px), menor si el nombre más largo no cabe a lo ancho
     void setPhosphor (int height)
     {
         comboHeight = height;
@@ -1063,7 +1066,8 @@ struct ListControl : juce::Component, private juce::Timer
     }
 
     // Peso en la fila: el de 'width' perillas o lo que pide el texto más largo (60 px por unidad, como layoutWeight de Section)
-    float layoutWeight() const { return juce::jmax (width, (float) preferredWidth() / 60.0f); }
+    float layoutWeight() const { return phosphor() ? width : juce::jmax (width, (float) preferredWidth() / 60.0f); }
+    bool phosphor() const { return combo.getProperties().contains ("phosphor"); }
 
     juce::ComboBox combo;
     juce::Label label;
@@ -1520,7 +1524,17 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
     juce::Font getComboBoxFont (juce::ComboBox& box) override
     {
         if (box.getProperties().contains ("phosphor"))
-            return juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), (float) box.getHeight() * 0.54f, juce::Font::plain));
+        {
+            // 0,54 del alto, reducida para que el nombre más largo quepa entre el margen (12 px) y la flecha (50 px)
+            juce::Font font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), (float) box.getHeight() * 0.54f, juce::Font::plain));
+            float widest = 1.0f;
+            for (int i = 0; i < box.getNumItems(); ++i)
+                widest = juce::jmax (widest, juce::GlyphArrangement::getStringWidth (font, box.getItemText (i)));
+            const auto avail = (float) (box.getWidth() - 62);
+            if (widest > avail && avail > 0.0f)
+                font = font.withHeight (juce::jmax (12.0f, font.getHeight() * avail / widest));
+            return font;
+        }
         return LookAndFeel_V4::getComboBoxFont (box);
     }
 
