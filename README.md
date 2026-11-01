@@ -2,6 +2,8 @@
 
 **Version 1.0.1-beta** · by **@k0n1m4k1** 🇪🇸 · GNU AGPLv3
 
+**Open-source synth lab with firmware-accurate emulations of the Yamaha DX7, Gravis UltraSound, Roland MT-32 & others.**
+
 [![M8ven Score](https://m8ven.ai/badge/mcp/k0n1m4k1-konisynth-knlbk4?v=1c9d31871080c40a85dd776478b0d476)](https://m8ven.ai/mcp/k0n1m4k1-konisynth-knlbk4?s=readme)
 
 KoniSynth is an experimental synthesizer laboratory for the sounds of the 60s to the 90s: sixteen engines, from an analog-style
