@@ -30,7 +30,7 @@ sections side by side: **FM 6-Op (DX7)**, **FM LFO** and **Display**.
 Header buttons:
 
 - **Operators...** opens the FM editor (see below).
-- **Function...** opens the DX7 Function settings for the performance controllers (see below).
+- **Function...** opens the DX7 Function settings: performance controllers, Mono and portamento (see below).
 - **Load .syx...** loads a DX7 voice or a 32-voice bank into the 6 operators.
 
 ### FM LFO
@@ -119,6 +119,23 @@ belong to the instrument, so loading a .syx voice does not change them. One bloc
 Each controller only adds depth: when several act on the same target, or together with the voice's PMD / AMD, the largest
 one wins. Controller modulation does not wait for the LFO delay. These rules follow msfa (`controllers.h`,
 `dx7note.cc`); they are not measured on a DX7.
+
+A fifth block, **Mono / Portamento**, holds the DX7's play mode settings (also not part of the voice):
+
+| Control | What it does | Range / default |
+|---|---|---|
+| Mono | One note at a time. A key played while another is held slides in legato without restarting the envelopes; with three or more keys, only a key that continues the direction of the legato counts. Releasing a key returns to the highest (legato upwards) or lowest (downwards) key still held. | Off / On / Off |
+| Mode | Poly: **Retain** (a new note slides from the last note played) or **Follow** (notes still sounding after their key was released slide to the new note). Mono: **Fingered** (slides only in legato, no pedal needed) or **Full Time** (always slides while the pedal is on). | Retain / Fingered |
+| Time | Portamento time; 0 = off. MIDI CC 5 also sets it. | 0-99 / 0 |
+| Glissando | The slide moves in semitone steps. | Off / On / Off |
+| Pedal | Holds the portamento footswitch on. Poly and Full Time portamento only work with the footswitch on: this switch or MIDI CC 65 (any value above 0, as on the DX7). | Off / On / Off |
+
+These rules come from the DX7's own firmware: the annotated disassembly of firmware v1.8, with every routine and table
+used here checked byte by byte in the original mask ROM (YA2138). The slide is not a constant rate: each step is the
+rate times (distance / 3 semitones + 1), so large intervals start fast and every glide ends at the same speed over the
+last three semitones. The rate comes from the same table as the pitch envelope. Each voice is updated about 185 times per
+second (the DX7's 370 Hz timer, half of the voices per tick). Switching between Poly and Mono silences the notes, as on
+the DX7.
 
 ## Playing it
 

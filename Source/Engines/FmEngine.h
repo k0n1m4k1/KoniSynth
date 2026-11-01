@@ -36,6 +36,13 @@ struct FmEngine
         sustainPedal = false;
         lfoPhase = 0.0;
         lfoDelay = 0.0;
+        // VOICE_RESET_EVENT_AND_PITCH_BUFFERS: buffers de tono a 0x2EA8 (nota 36, ya en Voice) y estado mono a cero
+        lastPitch = 0x2EA8;
+        monoCount = 0;
+        legatoUp = false;
+        lastKey = 0;
+        portaTickPhase = 0.0;
+        portaHalf = false;
     }
 
     void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p)
@@ -51,6 +58,24 @@ struct FmEngine
         srScale = 44100.0 / opRate;
         bendCoef = 1.0f - (float) std::exp (-1.0 / (0.005 * opRate));
         readPatch (p);
+        // POLY/MONO: al cambiar, el DX7 apaga todas las voces y reinicia sus buffers (MIDI_RX_CC_126/127 -> VOICE_RESET)
+        if (const auto m = p.fmMono->load() > 0.5f; m != mono)
+        {
+            reset();
+            mono = m;
+        }
+        // Portamento: la velocidad sale de TABLE_PITCH_EG_RATE[99 - tiempo] (PORTA_COMPUTE_RATE_VALUE), la misma tabla que
+        // pitchEnvRate; tiempo 0 -> 255 = sin portamento. El CC 5 fija el tiempo hasta que se mueve el parámetro
+        const auto timeParam = juce::jlimit (0, 99, juce::roundToInt (p.fmPortaTime->load()));
+        if (timeParam != portaTimeParam)
+        {
+            portaTimeParam = timeParam;
+            midiPortaTime = -1;
+        }
+        portaRate = pitchEnvRate[99 - (midiPortaTime >= 0 ? midiPortaTime : timeParam)];
+        portaMode = (int) p.fmPortaMode->load();
+        glissando = p.fmGlissando->load() > 0.5f;
+        portaPedalParam = p.fmPortaPedal->load() > 0.5f;
         // Redondeo, no truncado: el valor por defecto llega desnormalizado de 50/99 como 49,9999… y (int) lo dejaría en 49
         // (medido: pitch EG desafinado 1/32 de octava)
         transpose = juce::jlimit (-24, 24, juce::roundToInt (p.fmTranspose->load()));
@@ -188,6 +213,7 @@ struct FmEngine
                     n = std::min (n, (*midiIt).samplePosition - i);
                 double pitchMul, ampDepth;
                 control (n, pitchMul, ampDepth);
+                portaTicks (n);
                 args.pitchMul = (float) pitchMul;
                 for (size_t vi = 0; vi < voices.size(); ++vi)
                     prepareVoice (voices[vi], vi, alg, ampDepth, n);
@@ -228,6 +254,7 @@ struct FmEngine
                     k = juce::jlimit (1, k, (int) std::ceil (((*midiIt).samplePosition - start - hwNext) / step));
                 double pitchMul, ampDepth;
                 control (k, pitchMul, ampDepth);
+                portaTicks (k);
                 args.pitchMul = (float) pitchMul;
                 for (size_t vi = 0; vi < voices.size(); ++vi)
                     prepareVoice (voices[vi], vi, alg, ampDepth, k);
@@ -404,6 +431,9 @@ private:
         std::array<Op, 6> ops; // índice 0 = OP6 ... 5 = OP1, como en fm_core.cc
         PitchEnv pitchEnv;
         std::array<float, 6> baseInc {}; // incremento de fase sin envolvente de tono
+        // Portamento (unidades de 1/4096 oct del firmware): tono actual, del glissando, destino y el que suena. 0x2EA8 = nota
+        // 36, el valor con que el firmware llena los buffers al arrancar (VOICE_RESET_EVENT_AND_PITCH_BUFFERS)
+        int portaPitch = 0x2EA8, glissPitch = 0x2EA8, targetPitch = 0x2EA8, portaOut = 0x2EA8;
     };
 
     static int scaleOutLevel (int ol)
@@ -471,7 +501,22 @@ private:
     {
         if (m.isNoteOn())
         {
-            noteOn (m.getNoteNumber(), m.getVelocity());
+            if (mono) monoNoteOn (m.getNoteNumber(), m.getVelocity());
+            else      noteOn (m.getNoteNumber(), m.getVelocity());
+        }
+        else if (m.isNoteOff() && mono)
+        {
+            monoNoteOff (m.getNoteNumber());
+        }
+        else if (m.isController() && m.getControllerNumber() == 5)
+        {
+            // MIDI_RX_CC_5_PORTAMENTO_TIME: el valor llega duplicado (ASLA) y se escala ·100/256 -> 0-99
+            midiPortaTime = (2 * m.getControllerValue() * 100) >> 8;
+        }
+        else if (m.isController() && m.getControllerNumber() == 65)
+        {
+            // MIDI_RX_CC_65_PORTAMENO: cualquier valor distinto de 0 pisa el pedal (no >= 64 como en la norma MIDI)
+            portaPedalCc = m.getControllerValue() != 0;
         }
         else if (m.isNoteOff())
         {
@@ -511,6 +556,7 @@ private:
         {
             for (auto& v : voices)
                 if (v.active && v.keyDown) { v.keyDown = false; keyUp (v); }
+            monoCount = 0;
         }
         else if (m.isAllSoundOff())
         {
@@ -534,6 +580,29 @@ private:
                 if (v.age < target->age) target = &v;
         }
         auto& v = *target;
+        startVoice (v, note, velocity);
+        // Portamento en poly (VOICE_ADD_POLY): solo con el pedal pisado y tiempo > 0. Retain: la nota nueva arranca en el tono
+        // de la última tocada. Follow: todas las voces sin tecla pulsada (sostenidas o en release) toman la nota nueva como
+        // destino; la nueva sigue desde el tono que tenía esa voz, y la "última nota" no cambia
+        const auto targetPitch = dxPitch (v.playNote);
+        const auto glide = portaPedal() && portaRate != 0xFF;
+        if (glide && portaMode != 0)
+        {
+            for (auto& o : voices)
+                if (! o.keyDown || &o == &v)
+                    o.targetPitch = targetPitch;
+            return;
+        }
+        if (! glide)
+            lastPitch = targetPitch;
+        v.portaPitch = v.glissPitch = v.portaOut = lastPitch;
+        v.targetPitch = targetPitch;
+        lastPitch = targetPitch;
+    }
+
+    // Arranque de una nota en la voz v (EG, pitch EG, LFO, frecuencias), común a poly y mono
+    void startVoice (Voice& v, int note, int velocity)
+    {
         const auto vi = (size_t) (&v - voices.data());
         const auto wasActive = v.active;
         // LFO (lfo.cc keydown, llamado si no había otra tecla pulsada): el retardo vuelve a empezar y, con LFO key sync, la
@@ -573,6 +642,165 @@ private:
         v.pitchEnv.level = pitchEnvTab[pitchLevels[3]] * 524288.0; // << 19
         pitchAdvance (v.pitchEnv, 0);
         updateFrequencies (v);
+    }
+
+    // ---- Mono y portamento: firmware del DX7 (desensamblado anotado de la v1.8 de ajxs; las mismas instrucciones y tablas
+    // están en la mask ROM original YA2138, comprobado byte a byte). El tono interno va en unidades de 1/4096 de octava ----
+
+    // VOICE_CONVERT_NOTE_TO_LOG_FREQ: MSB de TABLE_MIDI_KEY_TO_LOG_F = (n - 1) + (n - 1)/3 (los MSB ≡ 3 mod 4 no se usan:
+    // 16 por octava para 12 semitonos), y el LSB repite los 2 bits bajos del MSB. Semitonos de 340, 340 y 344 unidades
+    // (desviación máxima 0,4 cents frente a la escala igual)
+    static int dxPitchFromMsb (int msb)
+    {
+        const auto a = msb & 3;
+        int lsb = a;
+        for (int i = 0; i < 3; ++i)
+            lsb = ((lsb | a) << 2) & 0xFF;
+        return ((msb & 0xFF) << 8) | (lsb & 0xFC);
+    }
+
+    static int dxPitch (int note)
+    {
+        const auto n = juce::jlimit (0, 127, note);
+        return dxPitchFromMsb (n == 0 ? 0 : (n - 1) + (n - 1) / 3);
+    }
+
+    bool portaPedal() const { return portaPedalParam || portaPedalCc; }
+
+    // VOICE_ADD_MONO: la voz 0 hace de única voz. La primera tecla reinicia la nota; con más teclas pulsadas no hay nuevo
+    // ataque (legato): solo cambia el tono destino. Con 3 o más teclas, solo cuenta una tecla que siga la dirección del
+    // legato (más aguda si subía, más grave si bajaba)
+    void monoNoteOn (int note, int velocity)
+    {
+        if (monoCount >= kVoices)
+            return;
+        monoKeys[(size_t) monoCount++] = note;
+        auto& v = voices[0];
+        if (monoCount == 1)
+        {
+            startVoice (v, note, velocity);
+            lastKey = note;
+            v.targetPitch = dxPitch (v.playNote);
+            // Full Time con el pedal: desliza desde el tono anterior. Fingered nunca desliza con una sola tecla
+            if (! (portaRate != 0xFF && portaMode != 0 && portaPedal()))
+                v.portaPitch = v.glissPitch = v.targetPitch;
+            v.portaOut = v.targetPitch; // el EGS recibe la nota nueva; PORTA_PROCESS lo corrige en su siguiente pasada
+            return;
+        }
+        if (monoCount == 2)
+            legatoUp = note >= lastKey;
+        else if (legatoUp ? note < lastKey : note >= lastKey)
+            return;
+        monoGlideTo (note);
+    }
+
+    // VOICE_REMOVE_MONO: si quedan teclas, el destino pasa a la más aguda (legato hacia arriba) o a la más grave (hacia
+    // abajo); con la última suelta, key off salvo que el sustain esté pisado
+    void monoNoteOff (int note)
+    {
+        int i = 0;
+        while (i < monoCount && monoKeys[(size_t) i] != note) ++i;
+        if (i == monoCount)
+            return;
+        for (; i < monoCount - 1; ++i)
+            monoKeys[(size_t) i] = monoKeys[(size_t) i + 1];
+        --monoCount;
+        auto& v = voices[0];
+        if (monoCount == 0)
+        {
+            v.keyDown = false;
+            if (sustainPedal) v.sustained = true;
+            else              keyUp (v);
+            return;
+        }
+        auto k = monoKeys[0];
+        for (int j = 1; j < monoCount; ++j)
+            if (legatoUp ? monoKeys[(size_t) j] >= k : monoKeys[(size_t) j] < k)
+                k = monoKeys[(size_t) j];
+        monoGlideTo (k);
+    }
+
+    // Nuevo destino de la voz mono. Fingered desliza sin pedal; Full Time, solo con el pedal; tiempo 0, nunca
+    void monoGlideTo (int key)
+    {
+        auto& v = voices[0];
+        lastKey = key;
+        v.targetPitch = dxPitch (key + transpose);
+        if (portaRate == 0xFF || (portaMode != 0 && ! portaPedal()))
+            v.portaPitch = v.glissPitch = v.targetPitch; // VOICE_ADD_MONO_CLEAR_PORTA_FREQ
+    }
+
+    // HANDLER_OCF llama a PORTA_PROCESS en cada tick del temporizador, alternando las voces 0-7 y 8-15: cada voz se actualiza
+    // a kTickHz / 2. kTickHz = 369,7 Hz: el temporizador cuenta 3140 ciclos (SYSTEM_TICK_PERIOD) y su periodo real se ha
+    // medido por la velocidad del LFO, que avanza un paso por tick, en demos de tres DX7 (10 velocidades, 368,8-371,2 Hz)
+    static constexpr double kTickHz = 369.7;
+
+    void portaTicks (int n)
+    {
+        portaTickPhase += n * kTickHz / opRate;
+        while (portaTickPhase >= 1.0)
+        {
+            portaTickPhase -= 1.0;
+            const auto first = portaHalf ? 8 : 0;
+            portaHalf = ! portaHalf;
+            for (int i = first; i < first + 8; ++i)
+                portaStep (voices[(size_t) i]);
+        }
+    }
+
+    // PORTA_PROCESS para una voz, con su aritmética de 16 bits: paso = velocidad · ((MSB de la distancia >> 2) + 1), es decir,
+    // velocidad · (distancia/1024 + 1): más rápido en saltos grandes, constante en los últimos 3 semitonos. Con glissando el
+    // paso es velocidad · 3 y lo que suena salta de semitono en semitono (umbral 0x154)
+    void portaStep (Voice& v) const
+    {
+        const auto rate = (unsigned) portaRate;
+        auto fin = (unsigned) v.targetPitch & 0xFFFF;
+        const auto cur = (unsigned) v.portaPitch & 0xFFFF;
+        const auto diff = (cur - fin) & 0xFFFF;
+        const auto above = (diff & 0x8000) == 0;
+        if (above)
+        {
+            const auto step = rate * (glissando ? 3u : ((diff >> 8) >> 2) + 1u);
+            auto nw = (cur - step) & 0xFFFF;
+            if (nw < fin) nw = fin;
+            fin = nw;
+        }
+        else
+        {
+            const auto negMsb = (0x100u - (diff >> 8)) & 0xFF;
+            const auto step = rate * (glissando ? 3u : (negMsb >> 2) + 1u);
+            auto nw = (cur + step) & 0xFFFF;
+            if (nw >= fin) nw = fin;
+            fin = nw;
+        }
+        v.portaPitch = (int) fin;
+        if (! glissando)
+        {
+            v.portaOut = v.portaPitch;
+            return;
+        }
+        // Glissando: el tono que suena (glissPitch) da un semitono cuando el portamento se aleja de él 0x154 o más
+        auto g = (unsigned) v.glissPitch & 0xFFFF;
+        const auto next = [] (unsigned x)
+        {
+            auto msb = (int) (x >> 8) & 0xFF;
+            if (((msb + 1) & 3) == 0) msb = (msb + 1) & 0xFF; // salta los MSB ≡ 3 mod 4
+            return (unsigned) dxPitchFromMsb (msb);
+        };
+        const auto gDiff = (g - fin) & 0xFFFF;
+        if (above && (gDiff & 0x8000) == 0)
+        {
+            if ((((gDiff - 0x154) & 0xFFFF) & 0x8000) == 0)
+                g = next ((g - 0x154) & 0xFFFF);
+        }
+        else
+        {
+            const auto up = (fin - g) & 0xFFFF;
+            if ((((up - 0x154) & 0xFFFF) & 0x8000) == 0)
+                g = next ((g + 0x155) & 0xFFFF);
+        }
+        v.glissPitch = (int) g;
+        v.portaOut = v.glissPitch;
     }
 
     // Tablas de pitchenv.cc (msfa): velocidad por rate 0..99 y nivel por level 0..99 (en 2^-5 octava; 50 = 0)
@@ -697,7 +925,10 @@ private:
         const auto down = v.keyDown || v.sustained;
         // Envolvente de tono del subbloque: solo en los operadores en modo razón (dx7note.cc: los de frecuencia fija solo
         // siguen el pitch bend)
-        const auto pitchMul = (float) std::exp2 (pitchStep (v.pitchEnv, n));
+        // El portamento desplaza el tono respecto a la nota de la voz (en mono, la primera tecla del legato); como la envolvente
+        // de tono, solo en los operadores en modo razón
+        const auto portaOct = (v.portaOut - dxPitch (v.playNote)) / 4096.0;
+        const auto pitchMul = (float) std::exp2 (pitchStep (v.pitchEnv, n) + portaOct);
         for (int k = 0; k < 6; ++k)
             lanesOf (vi).inc[k][laneOf (vi)] = patch[(size_t) k].fixed ? v.baseInc[(size_t) k] : v.baseInc[(size_t) k] * pitchMul;
         bool anyAudible = false;
@@ -735,6 +966,11 @@ private:
     std::array<int, 4> pitchRates { 99, 99, 99, 99 }, pitchLevels { 50, 50, 50, 50 };
     bool sustainPedal = false;
     std::array<int, 4> ctlValue {}; // últimos valores (0-127) de rueda, foot, breath y aftertouch; persisten tras reset()
+    // Mono y portamento (ver monoNoteOn / portaStep)
+    bool mono = false, legatoUp = false, glissando = false, portaPedalParam = false, portaPedalCc = false, portaHalf = false;
+    int monoCount = 0, lastKey = 0, lastPitch = 0x2EA8, portaRate = 0xFF, portaMode = 0, portaTimeParam = -1, midiPortaTime = -1;
+    std::array<int, kVoices> monoKeys {};
+    double portaTickPhase = 0.0;
     std::uint64_t ageCounter = 0;
     std::array<Voice, kVoices> voices;
     std::array<OpPatch, 6> patch;

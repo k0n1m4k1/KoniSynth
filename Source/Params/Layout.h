@@ -696,6 +696,13 @@ static APVTS::ParameterLayout createLayout()
         l.add (std::make_unique<AudioParameterBool> (ParameterID { id + "Amp", 1 },   nm + " Amp", false));
         l.add (std::make_unique<AudioParameterBool> (ParameterID { id + "Eg", 1 },    nm + " EG Bias", false));
     }
+    // Modo Function del DX7: POLY/MONO, PORTAMENTO MODE (en poly Retain / Follow, en mono Fingered / Full Time; el firmware
+    // usa la misma variable), PORTAMENTO TIME y GLISSANDO. Pedal: el interruptor de portamento enganchado (además del CC 65)
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmMono", 1 },       "FM Mono", false));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "fmPortaMode", 1 },  "FM Portamento Mode", StringArray { "Retain / Fingered", "Follow / Full Time" }, 0));
+    l.add (std::make_unique<AudioParameterInt>    (ParameterID { "fmPortaTime", 1 },  "FM Portamento Time", 0, 99, 0));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmGlissando", 1 },  "FM Glissando", false));
+    l.add (std::make_unique<AudioParameterBool>   (ParameterID { "fmPortaPedal", 1 }, "FM Portamento Pedal", false));
 
     // Mega Drive (YM2612 / YM3438): rangos nativos de los registros (plutiedev.com "YM2612 registers"). Por defecto, el
     // equivalente al INIT VOICE: algoritmo 0 con OP1-OP3 en silencio (TL 127) y OP4 = seno, AR 31, RR 15

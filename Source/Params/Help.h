@@ -148,6 +148,15 @@ static juce::String paramHelp (const juce::String& id)
         { "fmAtPitch", "Aftertouch adds LFO vibrato (like raising PMD). Default off." },
         { "fmAtAmp", "Aftertouch adds LFO tremolo (like raising AMD) to operators with Amp Mod Sens above 0. Default off." },
         { "fmAtEg", "Aftertouch as EG bias: no pressure attenuates operators with Amp Mod Sens, pressing opens them. Default off." },
+        { "fmMono", "DX7 Function: Mono plays one note at a time. Keys played while another is held slide in legato without "
+                    "restarting the envelopes; releasing returns to the highest or lowest key still held. Default off (Poly)." },
+        { "fmPortaMode", "Portamento mode. Poly: Retain (a new note slides from the last note played) or Follow (notes still "
+                         "sounding after their key is released slide to the new note). Mono: Fingered (slides only when legato, "
+                         "no pedal needed) or Full Time (always slides while the portamento pedal is on). Default Retain / Fingered." },
+        { "fmPortaTime", "Portamento time, 0-99 (0 = off). The slide is faster over large intervals, as on the DX7. MIDI CC 5 also sets it. Default 0." },
+        { "fmGlissando", "Glissando: the portamento moves in semitone steps instead of a smooth slide. Default off." },
+        { "fmPortaPedal", "Holds the portamento footswitch on. Poly and Full Time portamento only work with the footswitch on "
+                          "(this switch or MIDI CC 65, any value above 0, as on the DX7). Default off." },
         { "fmPR1", "Pitch envelope rate 1 (0-99): speed towards level 1 when you play." },
         { "fmPR2", "Pitch envelope rate 2 (0-99): speed from level 1 to level 2." },
         { "fmPR3", "Pitch envelope rate 3 (0-99): speed from level 2 to level 3, held while the key is down." },

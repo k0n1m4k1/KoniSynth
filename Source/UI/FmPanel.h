@@ -145,21 +145,28 @@ public:
               .withKnob (s, "fmBreathAmp", "Amp").withKnob (s, "fmBreathEg", "EG Bias");
         aftertouch.withKnob (s, "fmAtRange", "Range").withKnob (s, "fmAtPitch", "Pitch")
                   .withKnob (s, "fmAtAmp", "Amp").withKnob (s, "fmAtEg", "EG Bias");
-        for (auto* sec : { &wheel, &foot, &breath, &aftertouch })
+        // POLY/MONO, PORTAMENTO MODE / TIME, GLISSANDO y el pedal de portamento (además del CC 65)
+        porta.withKnob (s, "fmMono", "Mono").withKnob (s, "fmPortaMode", "Mode").withKnob (s, "fmPortaTime", "Time")
+             .withKnob (s, "fmGlissando", "Glissando").withKnob (s, "fmPortaPedal", "Pedal");
+        for (auto* sec : { &wheel, &foot, &breath, &aftertouch, &porta })
             addAndMakeVisible (*sec);
     }
 
     void resized() override
     {
-        // Rejilla de 2 × 2
+        // Rejilla de 2 × 2 y, debajo, el portamento a lo ancho
         auto r = getLocalBounds();
-        auto top = r.removeFromTop (r.getHeight() / 2);
+        const auto rowH = r.getHeight() / 3;
+        auto top = r.removeFromTop (rowH);
         wheel.setBounds (top.removeFromLeft (top.getWidth() / 2).reduced (4));
         foot.setBounds (top.reduced (4));
-        breath.setBounds (r.removeFromLeft (r.getWidth() / 2).reduced (4));
-        aftertouch.setBounds (r.reduced (4));
+        auto mid = r.removeFromTop (rowH);
+        breath.setBounds (mid.removeFromLeft (mid.getWidth() / 2).reduced (4));
+        aftertouch.setBounds (mid.reduced (4));
+        porta.setBounds (r.reduced (4));
     }
 
 private:
-    Section wheel { "Mod Wheel (CC 1)" }, foot { "Foot (CC 4)" }, breath { "Breath (CC 2)" }, aftertouch { "Aftertouch" };
+    Section wheel { "Mod Wheel (CC 1)" }, foot { "Foot (CC 4)" }, breath { "Breath (CC 2)" }, aftertouch { "Aftertouch" },
+            porta { "Mono / Portamento (Time: CC 5, Pedal: CC 65)" };
 };
