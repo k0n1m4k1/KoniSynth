@@ -130,11 +130,14 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Midi/MonoNoteFilter.h"
 
 //==============================================================================
+class StemRenderer; // Transport/StemRenderer.h, tras el procesador (usa la clase completa)
+
 class KoniSynthProcessor : public juce::AudioProcessor, private juce::Timer
 {
 public:
-    // Entrada de audio (micro/línea) para el vocoder y el monitor; puede venir desactivada (layouts sin entrada)
-    KoniSynthProcessor()
+    // Entrada de audio (micro/línea) para el vocoder y el monitor; puede venir desactivada (layouts sin entrada).
+    // offlineRender: instancia de Transport/StemRenderer.h (render de pistas); no arranca el agente MCP aunque esté activado
+    explicit KoniSynthProcessor (bool offlineRender = false)
         : AudioProcessor (BusesProperties().withInput ("Input", juce::AudioChannelSet::stereo(), true)
                                            .withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
           apvts (*this, nullptr, "PARAMS", createLayout()),
@@ -165,7 +168,7 @@ public:
         if (auto config = openConfig())
         {
             simdStatus().userEnabled = config->getBoolValue ("useAvx2", true);
-            if (config->getBoolValue ("agentControl", false)) // desactivado por defecto
+            if (! offlineRender && config->getBoolValue ("agentControl", false)) // desactivado por defecto
                 setAgentEnabled (true, false);
         }
 
@@ -1841,7 +1844,9 @@ public:
                 agentScheduler = std::make_unique<AgentScheduler>();
             agentServer = std::make_unique<AgentServer> (AgentServer::Host { apvts, presetManager, undoHistory, JucePlugin_VersionString,
                                                                               keyboardState, *agentTap, *agentScheduler,
-                                                                              [this] { requestPanic(); }, agentSession });
+                                                                              [this] { requestPanic(); }, agentSession,
+                                                                              [this] (const juce::var& r, juce::String& e) { return renderStems (r, e); },
+                                                                              [this] { return renderStatus(); }, [this] { cancelStems(); } });
             if (agentServer->start())
             {
                 agentTapActive.store (agentTap.get(), std::memory_order_release);
@@ -1876,6 +1881,14 @@ public:
     AgentSession agentSession;
     // Tras tap, planificador y sesión: se destruye antes que ellos (su stop manda cancelar al planificador)
     std::unique_ptr<AgentServer> agentServer;
+
+    // Render de pistas de un .mid (Transport/StemRenderer.h): uno a la vez, con sus propias instancias del procesador; vive
+    // con este procesador (sigue aunque se cierre el editor). Hilo de mensajes. Definidas tras StemRenderer.h
+    juce::var renderStems (const juce::var& request, juce::String& error);
+    juce::var renderStatus();
+    void cancelStems();
+    std::shared_ptr<StemRenderer> stemRenderer; // shared_ptr: se crea donde la clase está completa
+    juce::var lastStemResult;
 
 private:
     // Silencio inmediato: corta voces sin release y vacía todos los estados con memoria (colas de echo, reverb, chorus,
@@ -2555,6 +2568,86 @@ private:
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KoniSynthProcessor)
 };
+
+#include "Transport/StemRenderer.h" // render de pistas: necesita KoniSynthProcessor completo
+
+// Render de pistas pedido por el agente (render_stems) o por la UI. Hilo de mensajes
+inline juce::var KoniSynthProcessor::renderStems (const juce::var& req, juce::String& error)
+{
+    const juce::File mid (req.getProperty ("mid", juce::var()).toString());
+    const juce::File outDir (req.getProperty ("outDir", juce::var()).toString());
+    if (! juce::File::isAbsolutePath (mid.getFullPathName()) || ! mid.existsAsFile()) { error = "mid: absolute path of an existing .mid"; return {}; }
+    if (! juce::File::isAbsolutePath (outDir.getFullPathName())) { error = "outDir: absolute path of a folder"; return {}; }
+    const auto rate = (double) req.getProperty ("sampleRate", 48000.0);
+    if (rate != 44100.0 && rate != 48000.0 && rate != 88200.0 && rate != 96000.0) { error = "sampleRate: 44100, 48000, 88200 or 96000"; return {}; }
+    juce::FileInputStream in (mid);
+    juce::MidiFile mf;
+    if (! in.openedOk() || ! mf.readFrom (in, true)) { error = "not a valid MIDI file: " + mid.getFileName(); return {}; }
+    const auto song = PlayAlongSong::analyse (mf);
+    juce::MemoryBlock base;
+    getStateInformation (base);
+    const auto& presets = presetManager.getPresets();
+    const auto presetIndex = [&presets] (const juce::var& v) -> int
+    {
+        if (v.isVoid()) return -1;
+        if (v.isInt() || v.isInt64() || v.isDouble()) return juce::isPositiveAndBelow ((int) v, (int) presets.size()) ? (int) v : -2;
+        for (size_t i = 0; i < presets.size(); ++i)
+            if (presets[i].name == v.toString()) return (int) i;
+        return -2;
+    };
+    const auto fileFor = [&outDir, &mid] (int k, const juce::String& name)
+    {
+        const auto label = k < 0 ? juce::String ("All tracks") : juce::String (k + 1).paddedLeft ('0', 2) + " " + name;
+        return outDir.getChildFile (juce::File::createLegalFileName (mid.getFileNameWithoutExtension() + " - " + label) + ".wav");
+    };
+    std::vector<StemRenderer::Stem> stems;
+    if ((bool) req.getProperty ("multitimbral", false))
+        stems.push_back ({ -1, base, presetIndex (req.getProperty ("preset", juce::var())), fileFor (-1, {}) });
+    else if (const auto* list = req.getProperty ("tracks", juce::var()).getArray(); list != nullptr && ! list->isEmpty())
+        for (const auto& t : *list)
+        {
+            const auto k = (int) t.getProperty ("track", -1);
+            if (! juce::isPositiveAndBelow (k, (int) song->tracks.size())) { error = "track " + juce::String (k) + ": the file has " + juce::String (song->tracks.size()) + " tracks"; return {}; }
+            stems.push_back ({ k, base, presetIndex (t.getProperty ("preset", juce::var())), fileFor (k, song->tracks[(size_t) k].name) });
+        }
+    else
+        for (int k = 0; k < (int) song->tracks.size(); ++k)
+            stems.push_back ({ k, base, -1, fileFor (k, song->tracks[(size_t) k].name) });
+    for (const auto& s : stems)
+        if (s.presetIndex == -2) { error = "unknown preset"; return {}; }
+    if (stemRenderer == nullptr)
+        stemRenderer = std::make_shared<StemRenderer>();
+    juce::Array<juce::var> files;
+    for (const auto& s : stems) files.add (s.file.getFullPathName());
+    lastStemResult = juce::var();
+    error = stemRenderer->start (mid, std::move (stems), rate, [this] (const StemRenderer::Result& r)
+    {
+        auto o = std::make_unique<juce::DynamicObject>();
+        o->setProperty ("ok", r.ok);
+        o->setProperty ("cancelled", r.cancelled);
+        o->setProperty ("message", r.message);
+        juce::Array<juce::var> written;
+        for (const auto& f : r.files) written.add (f.getFullPathName());
+        o->setProperty ("files", written);
+        o->setProperty ("seconds", r.seconds);
+        lastStemResult = juce::var (o.release());
+    });
+    if (error.isNotEmpty()) return {};
+    auto o = std::make_unique<juce::DynamicObject>();
+    o->setProperty ("files", files);
+    return juce::var (o.release());
+}
+
+inline juce::var KoniSynthProcessor::renderStatus()
+{
+    auto o = std::make_unique<juce::DynamicObject>();
+    o->setProperty ("running", stemRenderer != nullptr && stemRenderer->isRunning());
+    o->setProperty ("progress", stemRenderer != nullptr ? stemRenderer->progress() : 0.0);
+    o->setProperty ("result", lastStemResult);
+    return juce::var (o.release());
+}
+
+inline void KoniSynthProcessor::cancelStems() { if (stemRenderer != nullptr) stemRenderer->cancel(); }
 
 #include "UI/Skin.h" // antes que cualquier UI: Skin::c() en todos los colores
 #include "UI/Overlay.h" // antes de Widgets: el menú de parámetro abre "Set value..." en un Overlay

@@ -7,6 +7,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 tests = ['test_units.py', 'test_regression.py', 'test_filters.py', 'test_voice.py', 'test_midi_learn.py', 'test_clap.py', 'test_mt32.py', 'test_gus.py', 'test_ui_reach.py', 'test_rhythms.py', 'test_panic.py', 'test_extremes.py']
 if '--live' in sys.argv:
     tests.append('test_preset_live.py')
+    tests.append('test_stems_live.py')
 rows, failed = [], 0
 for t in tests:
     print('==', t, flush=True)

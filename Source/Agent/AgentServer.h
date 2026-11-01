@@ -60,6 +60,14 @@
 //   control_status {}                       request, sessionOpen, secondsLeft, inControl, recording, task
 //   release_control {"summary": "..."}      suelta el control al terminar la tarea (la sesión sigue abierta)
 //   record {} / stop_record {}              REC y su parada con el control; record devuelve el WAV, stop_record {wav, mid}
+//   render_stems {"mid": "C:/x.mid", "outDir": "C:/out", "sampleRate": 48000, "tracks": [{"track": 0, "preset": "OPL2 Bass"},
+//            {"track": 2, "preset": 117}], "multitimbral": false}   render de pistas más rápido que el tiempo real
+//            (Transport/StemRenderer.h): un WAV por pista lógica del .mid (índices como en el reproductor), con el preset dado
+//            (nombre o índice de presets; sin él, el sonido actual) sobre el estado actual. Sin tracks, todas las pistas. Con
+//            multitimbral, una sola instancia con todo el .mid. Devuelve los ficheros que se van a escribir; no espera
+//   render_status {}                        running, progress (0..1) y el resultado del último render (ok, cancelled,
+//            message, files, seconds)
+//   render_cancel {}                        cancela el render en curso (borra lo que llevaba)
 class AgentServer : private juce::Thread
 {
 public:
@@ -74,6 +82,9 @@ public:
         AgentScheduler& scheduler;         // S2: notas de play con el reloj de audio (Agent/AgentScheduler.h)
         std::function<void()> panic;       // el del botón PANIC (KoniSynthProcessor::requestPanic)
         AgentSession& session;             // cesión del transporte al agente (Agent/AgentSession.h)
+        std::function<juce::var (const juce::var&, juce::String&)> renderStems; // KoniSynthProcessor::renderStems
+        std::function<juce::var()> renderStatus;
+        std::function<void()> renderCancel;
     };
 
     static constexpr int firstPort = 47800, lastPort = 47899;
@@ -293,6 +304,9 @@ private:
         if (cmd == "release_control") return host.session.release (req.getProperty ("summary", juce::var()).toString());
         if (cmd == "record")          return host.session.record (error);
         if (cmd == "stop_record")     return host.session.stopRecord (error);
+        if (cmd == "render_stems")    return host.renderStems (req, error);
+        if (cmd == "render_status")   return host.renderStatus();
+        if (cmd == "render_cancel")   { host.renderCancel(); return true; }
         error = "unknown cmd: " + cmd;
         return {};
     }

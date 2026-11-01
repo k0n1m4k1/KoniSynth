@@ -247,6 +247,11 @@ public:
         return juce::isPositiveAndBelow (t, maxTracks) && (muted[(size_t) t].load() || (soloCount.load() > 0 && ! soloed[(size_t) t].load()));
     }
 
+    // Render de pistas (Transport/StemRenderer.h): solo entra la pista lógica 'track' del .mid (-1: todas). Pasan sus eventos,
+    // los de canal sin pista (CC de una pista del fichero sin notas en ese canal, p. ej. la pista de director) de su mismo
+    // canal y los SysEx (preparan el aparato entero). Así un CC 7 de otra pista no llega a un motor que funde los canales
+    void setStemFilter (int track) { stemTrack.store (track); }
+
     // GM -> MT-32: toca un .mid de General MIDI en el MT-32 (en Multi). Al activarlo y en cada PLAY desde el principio prepara
     // la máquina como el controlador GM/MT-32 de ScummVM (audio/mt32gm.cpp, initMT32, "basado en los ajustes GM de Roland para
     // el MT-32"): reset, reverb Plate (tiempo 3, nivel 4), reserva de parciales como el SC-55 y las partes 1-8 en los canales
@@ -402,6 +407,8 @@ public:
                 break;
             if (practice && e.track == sel && e.message.isNoteOnOrOff())
                 continue; // tu parte: la tocas tú (sus CC y Program Change sí entran: tu instrumento y tu volumen)
+            if (const auto stem = stemTrack.load (std::memory_order_relaxed); stem >= 0 && s != nullptr && ! stemAccepts (*s, stem, e))
+                continue; // render de una pista: las demás no entran
             if (e.message.isNoteOn() && isTrackSilenced (e.track))
                 continue; // pista en mute (o fuera del solo)
             const auto offset = (int) juce::jlimit (0.0, (double) (numSamples - 1), std::floor ((t - start) / rate));
@@ -582,6 +589,13 @@ public:
 
 private:
     struct PlayEvent { double seconds; juce::MidiMessage message; int track = -1; }; // track: pista lógica (PlayAlongSong)
+
+    static bool stemAccepts (const PlayAlongSong& s, int stem, const PlayEvent& e)
+    {
+        if (e.message.isSysEx() || e.track == stem) return true;
+        return e.track < 0 && stem < (int) s.tracks.size() && e.message.getChannel() == s.tracks[(size_t) stem].channel;
+    }
+    std::atomic<int> stemTrack { -1 };
 
     // Práctica: margen de acierto en Play (s) y de acorde (notas que empiezan a la vez, s)
     static constexpr double hitWindow = 0.15, chordWindow = 0.08;
