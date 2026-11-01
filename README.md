@@ -110,7 +110,7 @@ the Roland MT-32 and the Gravis UltraSound. It runs as a **VST3** and **CLAP** p
   UltraSound engines with Multi on play the other tracks with their own instruments (the others play every track with the
   current sound); for the MT-32, General MIDI files are converted on the fly (GM>MT-32: program mapping, flipped panning
   and a GM-like set-up of the unit).
-- **Presets:** 446 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
+- **Presets:** 462 factory presets (including recreations of popular instruments from the 60s to the 90s), user presets,
   favorites in your own order (keys 1-9 load the first nine) and a searchable browser with filters by category and engine.
   Presets say how to play them (on the display and in the browser) and grey out the keys outside their recommended range.
   Presets that use your own files tell you when one is missing. User presets can be exported (one as `.xml`, all as a

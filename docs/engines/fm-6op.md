@@ -224,6 +224,25 @@ off by default.
 | Industrial Metal Hit | Drums |
 | House Piano Stab FM | Keys |
 | House Organ Chord Stab | Keys |
+| DX7 Brass 1 | Brass |
+| DX7 Tub Bells | Mallets |
+| DX7 E.Organ 1 | Organ |
+| DX7 Harpsichord 1 | Keys |
+| DX7 Clav 1 | Keys |
+| DX7 Marimba | Mallets |
+| DX7 Strings 1 | Strings |
+| DX7 Flute 1 | Woodwind |
+| DX7 Syn-Lead 1 | Lead |
+| DX7 E.Piano 2 | Keys |
+| DX7 E.Piano 3 | Keys |
+| DX7 E.Piano 4 | Keys |
+| DX7 Train | FX |
+| DX7 Voice 1 | Vocal |
+| DX7 Voice 2 | Vocal |
+| DX7 Voices | Vocal |
+
+The DX7 presets are voices from the DX7's factory ROM cartridges 1A, 1B, 2A and 4A, converted exactly as the SysEx import does;
+only their output gain is set to match the rest of the bank. DX7 Bass 1 keeps the voice's transpose of -12.
 
 The FM E.Piano preset is KoniSynth's own conversion to the DX7 scale, not the ROM patch. FM Bleep is an original design
 after a 1990 bleep sound, not a copy of it.
