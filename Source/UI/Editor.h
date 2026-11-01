@@ -1170,7 +1170,7 @@ private:
             c->setVisible (engine == 11);
         for (auto* c : { &n64Section, &n64EnvSection, &n64FxSection })
             c->setVisible (engine == 12);
-        const auto opllModel = (int) koni.apvts.getRawParameterValue ("oplModel")->load() >= 2;
+        const auto opllModel = (int) koni.apvts.getRawParameterValue ("oplModel")->load() >= 3; // oplModel: OPL, OPL2, OPL3, OPLL, VRC7
         oplSection.setVisible (engine == 13);
         oplLfoSection.setVisible (engine == 13);
         opllSection.setVisible (engine == 13 && opllModel);
@@ -1847,11 +1847,13 @@ private:
         dim (gusSection.listFor ("gusProgram"), gusMulti || (int) v ("gusMode") == 1);
         dim (gusSection.knobFor ("gusRam"), (int) v ("gusModel") == 2);
         // OPL: GM solo con el OPL3; con GM, el banco pone los operadores y el driver el volumen y el paneo
-        const auto oplGm = (int) v ("oplModel") == 1 && v ("oplGm") > 0.5f;
-        const auto opl2 = (int) v ("oplModel") == 0, opll = (int) v ("oplModel") >= 2;
-        const auto oplFour = (int) v ("oplModel") == 1 && v ("oplFourOp") > 0.5f && ! oplGm;
+        // oplModel: 0 OPL (YM3526), 1 OPL2, 2 OPL3, 3 OPLL, 4 VRC7
+        const auto opl3 = (int) v ("oplModel") == 2;
+        const auto oplGm = opl3 && v ("oplGm") > 0.5f;
+        const auto opl2 = (int) v ("oplModel") <= 1, opll = (int) v ("oplModel") >= 3; // opl2: OPL u OPL2 (mono)
+        const auto oplFour = opl3 && v ("oplFourOp") > 0.5f && ! oplGm;
         const auto oplRhythm = ! oplGm && v ("oplRhythm") > 0.5f;
-        oplRhythmSection.setHeaderControlAlpha ((int) v ("oplModel") != 1 ? 0.35f : 1.0f);
+        oplRhythmSection.setHeaderControlAlpha (opl3 ? 1.0f : 0.35f);
         oplRhythmSection.setExtraToggleAlpha (oplGm ? 0.35f : 1.0f); // Rhythm: no con Multitimbral
         for (const char* id : { "oplFeedback", "opl1Tl" })
             dim (oplSection.knobFor (id), oplGm);
@@ -1859,8 +1861,8 @@ private:
             dim (oplSection.knobFor (id), oplGm || opll);
         if (auto* gold = oplSection.headerButton (1)) // Gold...: la AdLib Gold solo llevaba OPL3
         {
-            gold->setEnabled ((int) v ("oplModel") == 1);
-            gold->setAlpha ((int) v ("oplModel") == 1 ? 1.0f : 0.35f);
+            gold->setEnabled (opl3);
+            gold->setAlpha (opl3 ? 1.0f : 0.35f);
         }
         for (const char* id : { "oplDeepTremolo", "oplDeepVibrato" }) // OPLL: profundidades fijas
             dim (oplLfoSection.knobFor (id), opll);
@@ -1870,7 +1872,7 @@ private:
         for (const char* id : { "oplBdTl", "oplSdTl", "oplTomTl", "oplCyTl", "oplHhTl" })
             dim (oplRhythmSection.knobFor (id), ! oplRhythm);
         dim (oplLfoSection.knobFor ("oplPan"), oplGm || opl2 || opll); // OPL2 y OPLL: mono
-        opllSection.setExtraToggleAlpha ((int) v ("oplModel") == 3 ? 0.35f : 1.0f); // Rhythm: la VRC7 no tiene ritmo
+        opllSection.setExtraToggleAlpha ((int) v ("oplModel") == 4 ? 0.35f : 1.0f); // Rhythm: la VRC7 no tiene ritmo
         // Synth.h: sin V.Pan no hay paneo que repartir (Pan Mode está en el diálogo Voice Pan... de Amp Envelope)
         dim (paramPanel != nullptr ? paramPanel->knobFor ("voicePanMode") : nullptr, std::abs (v ("voicePan")) < 1.0e-4f);
     }
@@ -2159,7 +2161,7 @@ private:
             case 10: return { { 1.0f, { &mdSection, &mdLfoSection }, 1 }, { 1.0f, { &mdVoiceSection, &mdPsgSection }, 0 } };
             case 11: return { { 1.0f, { &snesSection, &snesEnvSection, &snesEchoSection }, 3 } }; // fuente -> envolvente -> eco/salida
             case 12: return { { 1.0f, { &n64Section, &n64EnvSection, &n64FxSection }, 3 } };       // fuente -> envolvente -> efecto
-            case 13: if ((int) koni.apvts.getRawParameterValue ("oplModel")->load() >= 2)
+            case 13: if ((int) koni.apvts.getRawParameterValue ("oplModel")->load() >= 3)
                          return { { 1.0f, { &oplSection, &opllSection, &oplLfoSection }, 1 } };
                      return { { 1.0f, { &oplSection, &oplRhythmSection, &oplLfoSection }, 1 } };
             case 14: return { { 1.0f, { &mt32Section, &mt32DisplaySection }, 1 } }; // controles y, a la derecha, el LCD

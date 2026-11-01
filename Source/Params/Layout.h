@@ -768,7 +768,8 @@ static APVTS::ParameterLayout createLayout()
         for (int c = 1; c <= 16; ++c) channels.add (String (c));
         l.add (std::make_unique<AudioParameterChoice> (ParameterID { "midiInChannel", 1 }, "MIDI Input Channel", channels, 0));
     }
-    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplModel", 1 },     "OPL Model", StringArray { "OPL2 (YM3812)", "OPL3 (YMF262)", "OPLL (YM2413)", "VRC7 (Konami)" }, 0));
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "oplModel", 1 },     "OPL Model", StringArray { "OPL (YM3526)", "OPL2 (YM3812)", "OPL3 (YMF262)", "OPLL (YM2413)", "VRC7 (Konami)" }, 1));
+    // OPL (YM3526) delante de OPL2 en la 1.0.0 (formato de preset 10, marca de proyecto oplModel5); por defecto, OPL2
     // OPLL / VRC7: instrumento de la ROM (0 = el de usuario, con los mandos de OP1/OP2), volumen del canal (pasos de 3 dB),
     // SUS (release lento al soltar) y percusión del YM2413 (canal MIDI 10)
     {

@@ -69,8 +69,11 @@ public:
     // osc3WtPath (ausentes: sin fichero); complexModSource con Noise al final. 7 (1.0.1): Osc 3 con Oct -2..+2 (osc3Octave) en vez
     // de subOctave ("-1 oct" / "-2 oct") y Semi ±12 en vez de ±24 (osc3FromSub). 8 (1.0.1): Wavetable y Sample de Osc 2 / Osc 3
     // dejan de ser formas de onda y pasan a fuentes con su nivel (splitOscFamilies). 9 (1.0.1): cola MIDI del MT-32 con 4 tamaños
-    // (mt32QueueFromFormat8)
-    static constexpr int formatVersion = 9;
+    // (mt32QueueFromFormat8). 10 (1.0.0): oplModel con el OPL (YM3526) delante de OPL2 (oplModelFromFormat9)
+    static constexpr int formatVersion = 10;
+
+    // oplModel hasta el formato 9: OPL2 0, OPL3 1, OPLL 2, VRC7 3; desde el 10, OPL (YM3526) 0 y los demás un índice más
+    static int oplModelFromFormat9 (int index) { return juce::jlimit (1, 4, index + 1); }
 
     // mt32Queue hasta el formato 8: { 1024, 4096 }; desde el 9: { 512, 1024, 2048, 4096 }. Mismo tamaño de cola.
     // También lo usa KoniSynthProcessor::setStateInformation con los proyectos anteriores
@@ -668,6 +671,9 @@ private:
         if (from < 9) // 8 -> 9: cola del MT-32 de { 1024, 4096 } a { 512, 1024, 2048, 4096 }
             if (const auto it = real.find ("mt32Queue"); it != real.end())
                 it->second = (float) mt32QueueFromFormat8 (juce::roundToInt (it->second));
+        if (from < 10) // 9 -> 10: el OPL (YM3526) entra delante de OPL2 en oplModel
+            if (const auto it = real.find ("oplModel"); it != real.end())
+                it->second = (float) oplModelFromFormat9 (juce::roundToInt (it->second));
     }
 
 public:

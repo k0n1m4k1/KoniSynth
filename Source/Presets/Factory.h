@@ -420,7 +420,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
                           { "fmLfoSpeed", 33 }, { "fmLfoDelay", 60 }, { "fmLfoPmd", 5 },
                           { "chorusOn", 1 }, { "chorusMode", 3 }, { "chorusMix", 0.5f } }, {}, "Sustained chords, C3-C5", 48, 72 },
         // OPL2 2-op FM, ataque lento (AR 6) y vibrato profundo en ambos operadores. Diseño propio
-        { "OPL2 Strings", "Strings", { { "gain", 0.274f }, { "engine", 13 }, { "oplModel", 0 }, { "oplAlgorithm", 0 }, { "oplFeedback", 3 }, { "oplDeepVibrato", 1 },
+        { "OPL2 Strings", "Strings", { { "gain", 0.274f }, { "engine", 13 }, { "oplModel", 1 }, { "oplAlgorithm", 0 }, { "oplFeedback", 3 }, { "oplDeepVibrato", 1 },
                           { "opl1Mult", 1 }, { "opl1Tl", 26 }, { "opl1Ar", 6 }, { "opl1Dr", 2 }, { "opl1Sl", 2 }, { "opl1Rr", 5 }, { "opl1Vib", 1 },
                           { "opl2Mult", 1 }, { "opl2Tl", 0 }, { "opl2Ar", 6 }, { "opl2Dr", 1 }, { "opl2Sl", 1 }, { "opl2Rr", 5 }, { "opl2Vib", 1 } }, {}, "Sustained chords, C3-C5", 48, 72 },
         // SNES: sample Strings con ADSR percusivo (SL 1, SR 18) y eco corto (EDL 4 = 64 ms). Diseño propio
@@ -432,7 +432,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
                           { "filterDrive", 0.3f }, { "filterEnv", 0.2f }, { "filterDecay", 0.4f }, { "filterKey", 0.3f }, { "tubeOn", 1 }, { "tubeDrive", 6.0f },
                           { "gain", 0.441f } }, {}, "Hold low notes C1-C2 (slow beating)", 24, 36 },
         // OPL3: portadora en forma 6 (cuadrada, solo OPL3) modulada levemente. Diseño propio
-        { "OPL3 Square Bass", "Bass", { { "gain", 0.233f }, { "engine", 13 }, { "oplModel", 1 }, { "oplAlgorithm", 0 }, { "oplFeedback", 2 },
+        { "OPL3 Square Bass", "Bass", { { "gain", 0.233f }, { "engine", 13 }, { "oplModel", 2 }, { "oplAlgorithm", 0 }, { "oplFeedback", 2 },
                           { "opl1Mult", 1 }, { "opl1Tl", 34 }, { "opl1Ar", 15 }, { "opl1Dr", 5 }, { "opl1Sl", 6 }, { "opl1Rr", 8 },
                           { "opl2Mult", 1 }, { "opl2Tl", 0 }, { "opl2Ar", 15 }, { "opl2Dr", 2 }, { "opl2Sl", 3 }, { "opl2Rr", 9 }, { "opl2Wave", 6 } }, {}, "Bass line, C1-C3", 24, 48 },
         // Polivoks: una sierra a 16', resonancia alta, envolvente de filtro corta y glide de 60 ms (bajo ácido). Diseño propio
@@ -707,7 +707,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
         // 24 voces)
         { "GUS Piano", "Keys", { { "engine", 15 }, { "gusMode", 0 }, { "gusProgram", 0 } }, {}, "Needs your GUS patches (see the Gravis UltraSound manual)" },
         // OPLL: instrumento 7 "Trumpet" de la ROM del YM2413 (volcado del silicio, Nuked-OPLL) con SUS
-        { "OPLL Trumpet", "Brass", { { "gain", 0.189f }, { "engine", 13 }, { "oplModel", 2 }, { "opllInstrument", 7 }, { "opllSustain", 1 } }, {}, "Mono melody, C4-C6", 60, 84 },
+        { "OPLL Trumpet", "Brass", { { "gain", 0.189f }, { "engine", 13 }, { "oplModel", 3 }, { "opllInstrument", 7 }, { "opllSustain", 1 } }, {}, "Mono melody, C4-C6", 60, 84 },
         // Stab de metales polifónico: 2 sierras + sub-octava del Osc 2, filtro que abre en 40 ms. Diseño propio
         { "Poly Brass Stab", "Brass", { { "gain", 0.542f }, { "wave", 2 }, { "unisonVoices", 2 }, { "unisonDetune", 8.0f }, { "osc2Wave", 2 }, { "osc2Octave", -1 }, { "osc2Level", 0.4f },
                           { "attack", 0.02f }, { "decay", 0.35f }, { "sustain", 0.55f }, { "release", 0.25f }, { "cutoff", 700.0f }, { "resonance", 0.1f },
@@ -750,24 +750,24 @@ static const std::vector<FactoryPreset>& factoryPresets()
         // ANS: partitura de fábrica "72-Step Scale" (índice 5), la única sin preset
         { "ANS 72-Step Scale", "Machines", { { "engine", 9 }, { "ansScore", 5 }, { "ansSpeed", 12.0f }, { "ansEmulsion", 0.3f } }, {}, "Press C4 to run the plate; other keys transpose it", 60, 60 },
         // OPL (YM3812 / YMF262): instrumentos diseñados para KoniSynth con los registros del chip (no son bancos de juegos)
-        { "OPL2 E.Piano", "Keys", { { "gain", 0.344f }, { "engine", 13 }, { "oplModel", 0 }, { "oplAlgorithm", 0 }, { "oplFeedback", 2 },
+        { "OPL2 E.Piano", "Keys", { { "gain", 0.344f }, { "engine", 13 }, { "oplModel", 1 }, { "oplAlgorithm", 0 }, { "oplFeedback", 2 },
                           { "opl1Mult", 1 }, { "opl1Tl", 30 }, { "opl1Ar", 15 }, { "opl1Dr", 5 }, { "opl1Sl", 8 }, { "opl1Rr", 5 }, { "opl1Egt", 0 }, { "opl1Wave", 1 },
                           { "opl2Mult", 1 }, { "opl2Tl", 0 }, { "opl2Ar", 15 }, { "opl2Dr", 3 }, { "opl2Sl", 12 }, { "opl2Rr", 6 }, { "opl2Egt", 0 } }, {}, "Chords and riffs, C3-C5", 48, 72 },
-        { "OPL2 Bass", "Bass", { { "gain", 0.396f }, { "engine", 13 }, { "oplModel", 0 }, { "oplAlgorithm", 0 }, { "oplFeedback", 5 },
+        { "OPL2 Bass", "Bass", { { "gain", 0.396f }, { "engine", 13 }, { "oplModel", 1 }, { "oplAlgorithm", 0 }, { "oplFeedback", 5 },
                           { "opl1Mult", 1 }, { "opl1Tl", 22 }, { "opl1Ar", 15 }, { "opl1Dr", 6 }, { "opl1Sl", 4 }, { "opl1Rr", 8 },
                           { "opl2Mult", 1 }, { "opl2Tl", 0 }, { "opl2Ar", 15 }, { "opl2Dr", 2 }, { "opl2Sl", 3 }, { "opl2Rr", 8 } }, {}, "Bass line, C1-C3", 24, 48 },
-        { "OPL2 Organ", "Organ", { { "gain", 0.233f }, { "engine", 13 }, { "oplModel", 0 }, { "oplAlgorithm", 1 }, { "oplFeedback", 0 },
+        { "OPL2 Organ", "Organ", { { "gain", 0.233f }, { "engine", 13 }, { "oplModel", 1 }, { "oplAlgorithm", 1 }, { "oplFeedback", 0 },
                           { "opl1Mult", 2 }, { "opl1Tl", 8 }, { "opl1Vib", 1 }, { "opl1Rr", 9 },
                           { "opl2Mult", 1 }, { "opl2Tl", 0 }, { "opl2Vib", 1 }, { "opl2Rr", 9 } }, {}, "Organ chords, C3-C5", 48, 72 },
-        { "OPL3 4-Op Brass", "Brass", { { "gain", 0.235f }, { "engine", 13 }, { "oplModel", 1 }, { "oplFourOp", 1 }, { "oplAlgorithm", 1 }, { "oplFeedback", 4 },
+        { "OPL3 4-Op Brass", "Brass", { { "gain", 0.235f }, { "engine", 13 }, { "oplModel", 2 }, { "oplFourOp", 1 }, { "oplAlgorithm", 1 }, { "oplFeedback", 4 },
                           { "opl1Mult", 1 }, { "opl1Tl", 24 }, { "opl1Ar", 10 }, { "opl1Dr", 2 }, { "opl1Sl", 3 },
                           { "opl2Mult", 1 }, { "opl2Tl", 0 }, { "opl2Ar", 9 }, { "opl2Dr", 1 }, { "opl2Sl", 2 }, { "opl2Rr", 6 },
                           { "opl3Mult", 2 }, { "opl3Tl", 28 }, { "opl3Ar", 11 }, { "opl3Dr", 3 }, { "opl3Sl", 4 },
                           { "opl4Mult", 1 }, { "opl4Tl", 4 }, { "opl4Ar", 9 }, { "opl4Dr", 1 }, { "opl4Sl", 2 }, { "opl4Rr", 6 }, { "opl4Wave", 0 } }, {}, "Brass chords, C3-C5", 48, 72 },
         // OPLL / VRC7: instrumentos de la ROM de cada chip (volcados del silicio; Nuked-OPLL)
-        { "OPLL Piano", "Keys", { { "gain", 0.206f }, { "engine", 13 }, { "oplModel", 2 }, { "opllInstrument", 3 } }, {}, "Chords and melody, C3-C5", 48, 72 },
-        { "OPLL Synth Bass + Drums", "Bass", { { "gain", 0.326f }, { "engine", 13 }, { "oplModel", 2 }, { "opllInstrument", 13 }, { "opllRhythm", 1 } }, {}, "Bass on the keys; drums on MIDI channel 10 (GM map)" },
-        { "VRC7 Patch 1", "8-Bit", { { "engine", 13 }, { "oplModel", 3 }, { "opllInstrument", 1 }, { "gain", 0.127f } }, {}, "Melody, C4-C6", 60, 84 },
+        { "OPLL Piano", "Keys", { { "gain", 0.206f }, { "engine", 13 }, { "oplModel", 3 }, { "opllInstrument", 3 } }, {}, "Chords and melody, C3-C5", 48, 72 },
+        { "OPLL Synth Bass + Drums", "Bass", { { "gain", 0.326f }, { "engine", 13 }, { "oplModel", 3 }, { "opllInstrument", 13 }, { "opllRhythm", 1 } }, {}, "Bass on the keys; drums on MIDI channel 10 (GM map)" },
+        { "VRC7 Patch 1", "8-Bit", { { "engine", 13 }, { "oplModel", 4 }, { "opllInstrument", 1 }, { "gain", 0.127f } }, {}, "Melody, C4-C6", 60, 84 },
         // N64: samples propios de KoniSynth a 22 kHz en VADPCM; efectos de libultra con sus ajustes de fábrica. Big Room es el
         // efecto por defecto del reproductor de música de libultra (manual de N64, "Audio Effects")
         { "N64 Big Room Choir", "Pad", { { "gain", 0.471f }, { "engine", 12 }, { "n64Source", 4 }, { "n64SourceRate", 4 }, { "n64Attack", 40.0f }, { "n64Release", 700.0f },

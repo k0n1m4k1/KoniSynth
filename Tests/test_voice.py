@@ -512,13 +512,23 @@ c.check(abs(got - 0.9) < 1e-3, 'Reverb Decay numérico 0.9 = %.3f s' % got)
 # --- KSL del OPL en dB/oct: un proyecto anterior (sin la marca kslDb="1") con OPL2/OPL3 guardaba el valor de registro
 # (1 = 3 dB/oct, 2 = 1,5 dB/oct) y al cargarlo se intercambian 1 y 2; OPLL no cambia; un estado actual tampoco ---
 OPL = ['--param=engine=13', '--param=opl2Ksl=1', '--param=opl3Ksl=2']
-for args, want, what in ((OPL + ['--param=oplModel=0', '--prop=kslDb=0'], (2, 1), 'OPL2 anterior: se intercambian'),
-                         (OPL + ['--param=oplModel=1', '--prop=kslDb=0'], (2, 1), 'OPL3 anterior: se intercambian'),
-                         (OPL + ['--param=oplModel=2', '--prop=kslDb=0'], (1, 2), 'OPLL anterior: igual'),
-                         (OPL + ['--param=oplModel=0'], (1, 2), 'OPL2 actual (con la marca): igual')):
+# Un proyecto anterior al KSL en dB/oct también es anterior al OPL (YM3526) en oplModel (sin la marca oplModel5): sus índices
+# son los antiguos (OPL2 0, OPL3 1, OPLL 2)
+OLD = ['--prop=kslDb=0', '--prop=oplModel5=0']
+for args, want, what in ((OPL + ['--param=oplModel=0'] + OLD, (2, 1), 'OPL2 anterior: se intercambian'),
+                         (OPL + ['--param=oplModel=1'] + OLD, (2, 1), 'OPL3 anterior: se intercambian'),
+                         (OPL + ['--param=oplModel=2'] + OLD, (1, 2), 'OPLL anterior: igual'),
+                         (OPL + ['--param=oplModel=1'], (1, 2), 'OPL2 actual (con la marca): igual')):
     got = (state_value(args, 'opl2Ksl'), state_value(args, 'opl3Ksl'))
     c.check(got == want, 'KSL de un proyecto, %s: opl2/opl3 1, 2 -> %d, %d' % (what, got[0], got[1]))
 c.check(b'kslDb="1"' in juce_base64(open(os.path.join(RENDERS, 'rt60_state.txt')).read()), 'el estado guardado lleva la marca kslDb="1"')
+# --- oplModel con el OPL (YM3526) delante (1.0.0): un proyecto sin la marca oplModel5 sube un índice; uno actual, no ---
+for old, want, what in ((0, 1, 'OPL2'), (1, 2, 'OPL3'), (2, 3, 'OPLL'), (3, 4, 'VRC7')):
+    got = state_value(['--param=engine=13', '--param=oplModel=%d' % old, '--prop=oplModel5=0'], 'oplModel')
+    c.check(got == want, 'oplModel de un proyecto anterior, %s: %d -> %d (esperado %d)' % (what, old, got, want))
+got = state_value(['--param=engine=13', '--param=oplModel=0'], 'oplModel')
+c.check(got == 0, 'oplModel actual 0 (OPL, YM3526) se conserva: %d' % got)
+c.check(b'oplModel5="1"' in juce_base64(open(os.path.join(RENDERS, 'rt60_state.txt')).read()), 'el estado guardado lleva la marca oplModel5="1"')
 
 # --- Sample propio de cada motor de consola (hasta la 1.0.0 usaban el de la fuente Sample del Synth) ---
 import wave as _wave

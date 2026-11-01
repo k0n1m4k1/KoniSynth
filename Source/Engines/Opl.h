@@ -2,7 +2,9 @@
 #pragma once
 
 //==============================================================================
-// Motor OPL: Yamaha YM3812 (OPL2: AdLib, Sound Blaster) e YMF262 (OPL3: Sound Blaster Pro 2 / 16). Implementación propia que
+// Motor OPL: Yamaha YM3526 (OPL: placas arcade, Sound Expander del C64), YM3812 (OPL2: AdLib, Sound Blaster) e YMF262 (OPL3:
+// Sound Blaster Pro 2 / 16). El YM3526 es el YM3812 sin selección de forma de onda: solo seno, sin registros E0h ni bit WSE
+// (ymfm de A. Giles, BSD-3, ymfm_opl.h: WAVEFORMS = 1; ritmo, CSM y salida, iguales). Implementación propia que
 // sigue el comportamiento del silicio documentado por Nuked-OPL3 1.8 (Nuke.YKT, LGPL-2.1+; análisis del chip):
 //  - fs = 49 716 Hz (14,318 MHz / 288 en el OPL3; 3,58 MHz / 72 en el OPL2); fase de 19 bits: += ((fnum << block) >> 1)·MULT2 >> 1
 //    (MULT ×0,5..15, sin 11 ni 13), salida de fase de 10 bits; la modulación suma la salida del modulador a la fase.
@@ -26,7 +28,7 @@
 struct OplEngine
 {
     static constexpr double kChipRate = 14318180.0 / 288.0;
-    enum Model { opl2, opl3, opllYm2413, opllVrc7 };
+    enum Model { opl1, opl2, opl3, opllYm2413, opllVrc7 }; // = índice del parámetro oplModel
 
     void prepare (double sr, int)
     {
@@ -55,7 +57,7 @@ struct OplEngine
 
     void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p)
     {
-        const auto m = juce::jlimit (0, 3, (int) p.oplModel->load());
+        const auto m = juce::jlimit (0, 4, (int) p.oplModel->load());
         if (m >= opllYm2413)
         {
             if (model < opllYm2413) for (auto& v : voices) v = {};
@@ -90,7 +92,7 @@ struct OplEngine
                 if (surround) gold.push (s[0], s[1]); // entrada del YM7128B, a la tasa del chip
                 return s;
             });
-            if (model == opl2 || monoOutput)
+            if (model <= opl2 || monoOutput)
                 lr[0] = lr[1] = 0.5f * (lr[0] + lr[1]);
             if (goldOn)
                 lr = gold.process (lr);
@@ -222,7 +224,7 @@ private:
 
     void readParams (const Params& p)
     {
-        const auto newModel = juce::jlimit (0, 1, (int) p.oplModel->load());
+        const auto newModel = juce::jlimit ((int) opl1, (int) opl3, (int) p.oplModel->load());
         if (model >= opllYm2413) opll.reset(); // al volver de OPLL, el chip OPLL queda en silencio
         const auto newGm = newModel == opl3 && p.oplGm->load() > 0.5f;
         const auto newFour = newModel == opl3 && ! newGm && p.oplFourOp->load() > 0.5f;
@@ -261,11 +263,11 @@ private:
             o.ar = (int) s.ar->load(); o.dr = (int) s.dr->load(); o.rr = (int) s.rr->load();
             const auto sl = (int) s.sl->load();
             o.sl = sl == 15 ? 0x1f : sl; // SL 15 = 93 dB
-            o.wf = (int) s.wave->load() & (model == opl2 ? 3 : 7);
+            o.wf = model == opl1 ? 0 : (int) s.wave->load() & (model == opl2 ? 3 : 7); // OPL: solo seno
         }
     }
 
-    int numVoices() const { return model == opl2 ? 9 : fourOp ? 6 : 18; } // GM: 18 (OPL3, 2 operadores)
+    int numVoices() const { return model <= opl2 ? 9 : fourOp ? 6 : 18; } // GM: 18 (OPL3, 2 operadores)
 
     // Canal real del chip de cada voz (para el retardo de canal del OPL3): 2 operadores 0..17; 4 operadores, los pares
     // (0,3) (1,4) (2,5) (9,12) (10,13) (11,14), cuya salida sale por el segundo canal del par
@@ -478,7 +480,7 @@ private:
             rhythmSample (noise13, noise16, mixL, mixR);
         advanceTimers();
         auto l = juce::jlimit (-32768, 32767, mixL), r = juce::jlimit (-32768, 32767, mixR);
-        if (model == opl2) { l = roundtripFp (l); r = roundtripFp (r); }
+        if (model <= opl2) { l = roundtripFp (l); r = roundtripFp (r); } // OPL y OPL2: DAC YM3014
         return { (float) l * kGain, (float) r * kGain };
     }
 
@@ -489,8 +491,8 @@ private:
         // Paneo (registro C0h, bits 4-5: A = izquierda, B = derecha), según el modo del driver de KoniSynth; en GM, el del
         // driver DMX (CC 10)
         const auto pan = panMode == 1 ? 1 : panMode == 2 ? 2 : panMode == 3 ? 1 + (k & 1) : 0;
-        const auto onL = model == opl2 || (gm ? (v.gmPan & 0x10) != 0 : pan != 2);
-        const auto onR = model == opl2 || (gm ? (v.gmPan & 0x20) != 0 : pan != 1);
+        const auto onL = model <= opl2 || (gm ? (v.gmPan & 0x10) != 0 : pan != 2);
+        const auto onR = model <= opl2 || (gm ? (v.gmPan & 0x20) != 0 : pan != 1);
         // Retardo de canal del OPL3: la mezcla de un lado se toma antes de procesar el último operador de esos canales
         const auto lateL = model == opl3 && v.channel >= 6 && v.channel <= 8;
         const auto lateR = model == opl3 && v.channel >= 15;

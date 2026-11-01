@@ -84,7 +84,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Engines/Snes.h"
 #include "Engines/N64.h"
 #include "Engines/Opll.h"
-#include "Engines/OplGmBank.h" // banco GM de DMXOPL3 (modo GM del OPL)
+#include "Engines/OplGmBank.h" // banco GM de DMXOPL3 (modo GM del OPL)
 #include "Engines/OplGold.h"   // etapa de salida de la AdLib Gold (TDA8425 + YM7128B)
 #include "Engines/Opl.h"
 #include "Engines/Mt32.h"
@@ -1293,12 +1293,14 @@ public:
             xml->setAttribute (kslDbAttribute, 1);
             xml->setAttribute (engineSamplesAttribute, 1);
             xml->setAttribute (mt32QueueAttribute, 1); // mt32Queue con 4 tamaños (512..4096); sin la marca: { 1024, 4096 }
+            xml->setAttribute (oplModelAttribute, 1);  // oplModel con el OPL (YM3526) delante; sin la marca, un índice menos
             copyXmlToBinary (*xml, dest);
         }
     }
     static constexpr const char* kslDbAttribute = "kslDb";
     static constexpr const char* engineSamplesAttribute = "engineSamples";
     static constexpr const char* mt32QueueAttribute = "mt32Queue4";
+    static constexpr const char* oplModelAttribute = "oplModel5";
 
     // Grupos de la cadena de efectos (bloques COLOR..SPACE del editor), en su orden de siempre
     enum FxGroup { fxColor = 0, fxAmp, fxDynamics, fxModFx, fxEnsemble, fxSpace, numFxGroups };
@@ -1461,6 +1463,12 @@ public:
                             }
                             e->setAttribute ("value", (double) v);
                         });
+
+                // Estados anteriores al OPL (YM3526) en oplModel (sin la marca oplModel5): sus índices (OPL2 0, OPL3 1, OPLL 2,
+                // VRC7 3) suben uno. Va la última: las migraciones de arriba leen oplModel con los índices antiguos
+                if (xml->getIntAttribute (oplModelAttribute, 0) != 1)
+                    if (auto* m = xml->getChildByAttribute ("id", "oplModel"))
+                        m->setAttribute ("value", PresetManager::oplModelFromFormat9 (juce::roundToInt (m->getDoubleAttribute ("value"))));
 
                 apvts.replaceState (juce::ValueTree::fromXml (*xml));
                 presetManager.invalidateSnapshot();

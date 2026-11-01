@@ -109,14 +109,16 @@ private:
     void timerCallback() override
     {
         auto& s = koni.apvts;
-        const auto four = (int) s.getRawParameterValue ("oplModel")->load() == 1 && s.getRawParameterValue ("oplFourOp")->load() > 0.5f;
+        const auto four = (int) s.getRawParameterValue ("oplModel")->load() == 2 && s.getRawParameterValue ("oplFourOp")->load() > 0.5f;
         auto alg = juce::jlimit (0, 3, (int) s.getRawParameterValue ("oplAlgorithm")->load());
         if (! four) alg &= 1;
         // OPL2 y OPL3 en Multitimbral (driver DMX): solo 2 operadores; OPLL / VRC7: el instrumento User es siempre FM
         const auto model = (int) s.getRawParameterValue ("oplModel")->load();
-        const auto opll = model >= 2;
+        const auto opll = model >= 3; // oplModel: 0 OPL, 1 OPL2, 2 OPL3, 3 OPLL, 4 VRC7
         connection.setTexts (opll ? "FM" : "FM/AM", "4-Op");
-        connection.setLock (model == 1 && s.getRawParameterValue ("oplGm")->load() < 0.5f ? -1 : 0);
+        connection.setLock (model == 2 && s.getRawParameterValue ("oplGm")->load() < 0.5f ? -1 : 0);
+        for (auto& c : columns) // WAVE: el OPL (YM3526) solo tiene seno
+            c.knobs[7]->setAlpha (model == 0 ? 0.35f : 1.0f);
         if (alg == shownAlgorithm && four == fourOp)
             return;
         shownAlgorithm = alg;

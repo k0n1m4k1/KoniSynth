@@ -1,10 +1,11 @@
 # OPL (AdLib / Sound Blaster)
 
-The OPL engine emulates four Yamaha FM chips. OPL2 is the YM3812 of the AdLib and Sound Blaster 1-2: 9 two-operator
+The OPL engine emulates five Yamaha FM chips. OPL is the YM3526 (1984: arcade boards, the Commodore 64 Sound Expander):
+the OPL2 without waveform select, so every operator is a sine. OPL2 is the YM3812 of the AdLib and Sound Blaster 1-2: 9 two-operator
 voices, 4 waveforms, mono, through the YM3014 floating-point DAC. OPL3 is the YMF262 of the Sound Blaster Pro 2 and 16:
 18 voices or 6 four-operator voices, 8 waveforms, stereo. OPLL is the YM2413 (Japanese Master System FM, MSX-MUSIC):
 9 voices, 15 ROM instruments + 1 user instrument, optional drums. VRC7 is Konami's OPLL variant used in Lagrange Point:
-6 voices and its own ROM set. OPL2/OPL3 are KoniSynth's own implementation following Nuked-OPL3 1.8; OPLL and VRC7 run
+6 voices and its own ROM set. OPL/OPL2/OPL3 are KoniSynth's own implementation following Nuked-OPL3 1.8; OPLL and VRC7 run
 on Nuked-OPLL 1.0.2, cycle-accurate, with instrument ROMs dumped from each chip. Use it for DOS game music, AdLib-era FM,
 and MSX / Master System FM.
 
@@ -14,13 +15,14 @@ Nothing extra.
 
 ## Controls
 
-Sections: **OPL** and **OPL LFO / Output**; with Model = OPLL or VRC7, an **OPLL / VRC7** section appears between them.
+Sections: **OPL**, **OPL Rhythm / GM** and **OPL LFO / Output**; with Model = OPLL or VRC7, the **OPLL / VRC7** section takes
+the place of OPL Rhythm / GM.
 
 ### OPL
 
 | Control | What it does | Range / default |
 |---|---|---|
-| Model (header menu) | OPL2 (YM3812), OPL3 (YMF262), OPLL (YM2413) or VRC7 (Konami), as described above. | default OPL2 (YM3812) |
+| Model (header menu) | OPL (YM3526), OPL2 (YM3812), OPL3 (YMF262), OPLL (YM2413) or VRC7 (Konami), as described above. OPL was added in front of OPL2 in 1.0.0: presets and projects from earlier versions load with the same chip, but host automation of the Model recorded before 1.0.0 shifts. | default OPL2 (YM3812) |
 | Operators... (header button) | Opens the OPL editor (see below). | |
 | Gold... (header button) | OPL3 only: the AdLib Gold output stage and surround module (see AdLib Gold below). | off |
 | Algorithm | 2 operators: 0 = FM (1 modulates 2), 1 = AM (1 + 2 added). 4 operators (OPL3): 0 = 1->2->3->4, 1 = (1->2)+(3->4), 2 = 1+(2->3->4), 3 = 1+(2->3)+4. | 0-3; 0 |

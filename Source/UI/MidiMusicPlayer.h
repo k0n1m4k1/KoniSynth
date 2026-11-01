@@ -294,7 +294,7 @@ public:
         if (! shade && multiChip.contains (p))
             return "This MIDI file uses " + juce::String (songChannels()) + " channels, but the engine plays them as one part "
                    "(notes of different channels collide and drums play as the melody sound). Click to turn on "
-                   + juce::String (multiSwitch().label) + (koniEngine() == 13 && (int) koni.apvts.getRawParameterValue ("oplModel")->load() != 1
+                   + juce::String (multiSwitch().label) + (koniEngine() == 13 && (int) koni.apvts.getRawParameterValue ("oplModel")->load() != 2
                                                            ? " (this also switches the OPL model to OPL3, the only one with it)." : ".");
         if (closeBox.expanded (2).contains (p)) return "Close the player.";
         if (gripArea().contains (p)) return "Drag up or down to show fewer or more parts.";
@@ -324,7 +324,7 @@ private:
         {
             case 14: return { "mt32Multi", on ("mt32Multi"), "MT-32 MULTITIMBRAL", "MT-32 SINGLE", "MULTITIMBRAL" };
             case 15: return { "gusMulti", on ("gusMulti"), "GUS MULTITIMBRAL", "GUS SINGLE", "MULTITIMBRAL" };
-            case 13: return { "oplGm", on ("oplGm") && (int) koni.apvts.getRawParameterValue ("oplModel")->load() == 1, "OPL MULTITIMBRAL", "OPL SINGLE", "MULTITIMBRAL" };
+            case 13: return { "oplGm", on ("oplGm") && (int) koni.apvts.getRawParameterValue ("oplModel")->load() == 2, "OPL MULTITIMBRAL", "OPL SINGLE", "MULTITIMBRAL" };
             case 5:  return { "drumCh10", on ("drumCh10"), "DRUMS CH 10", "DRUMS ALL CH", "CH 10" };
             default: return {};
         }
@@ -352,7 +352,7 @@ private:
             }
         };
         koni.undoHistory.beginGroup();
-        if (koniEngine() == 13) set ("oplModel", 1.0f);
+        if (koniEngine() == 13) set ("oplModel", 2.0f); // OPL3
         set (sw.id, 1.0f);
         koni.undoHistory.endGroup();
         repaint();
