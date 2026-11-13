@@ -147,3 +147,12 @@ target_link_libraries(KoniBench
     PRIVATE juce::juce_audio_processors juce::juce_audio_formats
     PUBLIC  juce::juce_recommended_config_flags
             juce::juce_recommended_warning_flags)
+
+# Pruebas del núcleo pi32v2 del futuro motor FM-1 (Bench/Fm1Tests.cpp): sin JUCE, solo Source/Fm1. Fm1Isa.cpp incluye
+# la tabla de instrucciones generada (Fm1IsaTable.inc, 3,2 MB)
+add_executable(KoniFm1Tests Bench/Fm1Tests.cpp Source/Fm1/Fm1Isa.cpp Source/Fm1/Fm1Cpu.cpp)
+if(MSVC)
+    target_compile_options(KoniFm1Tests PRIVATE /W4 /utf-8 /bigobj)
+else()
+    target_compile_options(KoniFm1Tests PRIVATE -Wall -Wextra)
+endif()
