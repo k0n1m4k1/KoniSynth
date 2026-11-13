@@ -144,6 +144,7 @@ public:
     // segunda instrucción aún ve los valores viejos; después se confirman los que la segunda no escribió.
     bool pairPending = false;
     uint32_t pairOld[16] {}, pairNew[16] {};
+    uint32_t pairBefore[16] {};  // los registros antes de la cabeza (aquí y no en la pila de step: sin cookie /GS por instrucción)
     bool ie = false;  // habilitación global (sti / cli); el bit 8 de icfg es la segunda llave
     std::vector<uint8_t> irqLevels;  // prioridades de las ISR en curso, la más interna al final
     // El anidamiento solo se abre mientras la ISR tiene reti guardado en la pila (regla de Blackfin)

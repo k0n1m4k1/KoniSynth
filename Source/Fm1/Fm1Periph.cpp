@@ -328,15 +328,6 @@ void Periph::uartUpdate() noexcept
     uartIrq = ((u.con0 & 0x08) != 0 && u.rpnd) || ((u.con0 & 0x20) != 0 && u.otpnd) || ((u.con0 & 0x04) != 0 && u.tpnd);
 }
 
-bool Periph::anyPending() const noexcept
-{
-    if (t5Pending || (alnkPend & 0xf0) != 0 || ilat != 0 || tickPending || spi1Pending || excPending || adcIrq || spi2Pending || uartIrq)
-        return true;
-    for (const auto& t : tmr)
-        if (t.pending) return true;
-    return false;
-}
-
 bool Periph::irqEnabled (uint32_t core, uint8_t n) const noexcept
 {
     const auto& bank = core == 0 ? icfg : icfg1;

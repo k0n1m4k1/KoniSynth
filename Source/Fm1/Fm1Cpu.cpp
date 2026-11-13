@@ -808,7 +808,7 @@ const Fm1IsaEntry* preTableRaw (uint64_t raw) noexcept
 } // namespace
 
 // ---- decode_any ------------------------------------------------------------------------------------------------------
-const Fm1IsaEntry* decodeAny (uint64_t win, uint64_t& raw) noexcept
+static const Fm1IsaEntry* decodeAnyUncached (uint64_t win, uint64_t& raw) noexcept
 {
     const auto w32 = win & 0xffffffffull;
     raw = w32;
@@ -867,6 +867,27 @@ const Fm1IsaEntry* decodeAny (uint64_t win, uint64_t& raw) noexcept
     if ((lo16 == 0xe1c4 || lo16 == 0xf1c4) && (win & 0x0e000000) == 0)
         return lo16 == 0xf1c4 ? &kRotPairCraw : &kRotCraw;
     return nullptr;
+}
+
+// decode_any con memoria: es una función pura de la ventana, así que guardar el resultado por ventana da lo mismo. La tabla
+// se recorre entera en cada fallo (2916 clases), y blockEnd vuelve a decodificar el cuerpo de cada if {} predicado cada vez
+// que se ejecuta: sin esta memoria era el 42 % del tiempo del emulador (medido con KoniFm1Run --hostprofile). Mapeo directo de
+// 2^12 ventanas por hilo (96 KiB); una colisión solo vuelve a decodificar.
+const Fm1IsaEntry* decodeAny (uint64_t win, uint64_t& raw) noexcept
+{
+    struct Memo { uint64_t win; const Fm1IsaEntry* e; uint64_t raw; };
+    constexpr unsigned kBits = 12;
+    thread_local Memo memo[1u << kBits] {};
+    auto& m = memo[(win * 0x9e3779b97f4a7c15ull) >> (64 - kBits)];
+    if (m.e != nullptr && m.win == win)
+    {
+        raw = m.raw;
+        return m.e;
+    }
+    const auto* e = decodeAnyUncached (win, raw);
+    if (e != nullptr)
+        m = { win, e, raw };
+    return e;
 }
 
 // ---- route_of ----------------------------------------------------------------------------------------------------------
@@ -1205,9 +1226,8 @@ bool Cpu::step (Bus& bus)
     if (hist != nullptr)
         ++(*hist)[line.entry];
     const auto nextPc = pc + line.len;
-    uint32_t before[16];
     if (line.pre.pairHead)
-        std::memcpy (before, regs, sizeof regs);  // solo la cabeza de un par necesita los registros de antes
+        std::memcpy (pairBefore, regs, sizeof regs);  // solo la cabeza de un par necesita los registros de antes
     const bool pending = pairPending;
     pairPending = false;
     const bool ok = execute (bus, line, nextPc);
@@ -1220,9 +1240,9 @@ bool Cpu::step (Bus& bus)
     }
     if (line.pre.pairHead && ok)
     {
-        std::memcpy (pairOld, before, sizeof regs);
+        std::memcpy (pairOld, pairBefore, sizeof regs);
         std::memcpy (pairNew, regs, sizeof regs);
-        std::memcpy (regs, before, sizeof regs);
+        std::memcpy (regs, pairBefore, sizeof regs);
         pairPending = true;
     }
     return ok;
@@ -1282,7 +1302,6 @@ static void stW (Bus& bus, uint8_t w, uint32_t a, uint32_t val)
 bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
 {
     const auto raw = l.raw;
-    const sv name (l.entry->name);
     const auto& pre = l.pre;
     bool jumped = false;
     uint32_t target = 0;
@@ -1354,6 +1373,8 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
         return true;
     }
 
+    // el nombre solo lo miran unas pocas rutas: strlen en cada instrucción era el 9 % del tiempo (--hostprofile)
+    const auto name = [&l] { return sv (l.entry->name); };
     switch (pre.route)
     {
         case 0:
@@ -1379,7 +1400,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
         case 2: break;
         case 3:
             // lockset / lockclr: el cerrojo hardware que comparten los núcleos; si lo tiene el otro, se reintenta
-            if (! bus.hwLock (coreId, name == "lockset"))
+            if (! bus.hwLock (coreId, name() == "lockset"))
                 jumpTo (pc);
             break;
         case 4:
@@ -1402,7 +1423,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             const auto addr = regs[(raw >> 28) & 0xf] + (uint32_t) ((raw >> 8) & 0xff);
             const auto cur = bus.read32 (addr);
             const auto src = regs[(raw >> 24) & 0xf];
-            bus.write32 (addr, has (name, "and") ? (cur & src) : (cur | src));
+            bus.write32 (addr, has (name(), "and") ? (cur & src) : (cur | src));
             break;
         }
         case 10:
@@ -1412,8 +1433,8 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             auto shc = (uint32_t) ((raw >> 8) & 0x1f);
             if (shc == 0) shc = 32;
             const auto x = regs[(raw >> 4) & 7];
-            if (has (name, "lsr")) regs[d] = shc >= 32 ? 0 : x >> shc;
-            else if (has (name, "asr")) regs[d] = (uint32_t) ((int32_t) x >> std::min<uint32_t> (shc, 31));
+            if (has (name(), "lsr")) regs[d] = shc >= 32 ? 0 : x >> shc;
+            else if (has (name(), "asr")) regs[d] = (uint32_t) ((int32_t) x >> std::min<uint32_t> (shc, 31));
             else regs[d] = shc >= 32 ? 0 : x << shc;
             break;
         }
@@ -1576,7 +1597,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
         case 25:
         {
             const auto val = (uint32_t) slot (l, 0);
-            const bool cond = has (name, "ne") ? rets != val : rets == val;
+            const bool cond = has (name(), "ne") ? rets != val : rets == val;
             if (cond)
             {
                 const auto off = slot (l, 1);
@@ -1645,7 +1666,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             const auto n = 2 * ((uint32_t) ((raw >> 4) & 0xf) + 1);
             repStart = nextPc;
             repEnd = nextPc + n;
-            if (name == "rep_i_r")
+            if (name() == "rep_i_r")
             {
                 repCount = regs[raw & 0xf];
                 regs[raw & 0xf] = 0;

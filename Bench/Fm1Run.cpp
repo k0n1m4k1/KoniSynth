@@ -11,11 +11,24 @@
 //   --wav FICHERO       guarda el audio (WAV estéreo de 16 bits)
 //   --syx FICHERO       un banco DX7 de 32 voces en el área USR
 //   --profile N         las N clases de instrucción más ejecutadas por cpu0
+//   --hostprofile N     perfil del propio emulador por muestreo (Windows; necesita el PDB): N funciones y líneas
 //   --reference 1       sin la ruta rápida de la CPU ni el salto de bucles (para la prueba diferencial: el hash del estado final debe coincidir)
 // El WAV se escribe a 44 118 Hz: el FM-1 saca tramas a 24 MHz / 544 = 44 117,65 Hz (el entero más cercano; error 0,008 ct).
 #include "../Source/Fm1/Fm1Soc.h"
 
+#ifdef _WIN32
+ #define NOMINMAX
+ #define WIN32_LEAN_AND_MEAN
+ #include <windows.h>
+ #include <dbghelp.h>
+ #include <timeapi.h>
+ #pragma comment (lib, "dbghelp.lib")
+ #pragma comment (lib, "winmm.lib")
+#endif
+
 #include <algorithm>
+#include <atomic>
+#include <thread>
 #include <chrono>
 #include <cstdio>
 #include <cstring>
@@ -84,6 +97,86 @@ bool parseHexBytes (const char* s, std::vector<uint8_t>& out)
     }
     return true;
 }
+
+#ifdef _WIN32
+// Perfil del propio emulador (--hostprofile): un hilo para el hilo principal cada ~1 ms y apunta su RIP; al final se
+// resuelve con dbghelp contra el PDB (función y fichero:línea). Sin elevación ni herramientas externas.
+class HostSampler
+{
+public:
+    void start()
+    {
+        DuplicateHandle (GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &target, 0, FALSE, DUPLICATE_SAME_ACCESS);
+        timeBeginPeriod (1);
+        worker = std::thread ([this]
+        {
+            while (! stop.load())
+            {
+                Sleep (1);
+                if (SuspendThread (target) == (DWORD) -1) continue;
+                CONTEXT c {};
+                c.ContextFlags = CONTEXT_CONTROL;
+                if (GetThreadContext (target, &c)) rips.push_back (c.Rip);
+                ResumeThread (target);
+            }
+        });
+    }
+    void report (int top)
+    {
+        stop = true;
+        worker.join();
+        timeEndPeriod (1);
+        const auto proc = GetCurrentProcess();
+        SymSetOptions (SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+        SymInitialize (proc, nullptr, TRUE);
+        std::map<std::string, uint64_t> byFn, byLine;
+        alignas (SYMBOL_INFO) char buf[sizeof (SYMBOL_INFO) + 512];
+        for (const auto rip : rips)
+        {
+            auto* s = reinterpret_cast<SYMBOL_INFO*> (buf);
+            s->SizeOfStruct = sizeof (SYMBOL_INFO);
+            s->MaxNameLen = 511;
+            DWORD64 d64 = 0;
+            ++byFn[SymFromAddr (proc, rip, &d64, s) ? std::string (s->Name) : "?"];
+            IMAGEHLP_LINE64 ln {};
+            ln.SizeOfStruct = sizeof ln;
+            DWORD d = 0;
+            if (SymGetLineFromAddr64 (proc, rip, &d, &ln))
+            {
+                std::string f = ln.FileName;
+                if (const auto k = f.find_last_of ("\\/"); k != std::string::npos) f = f.substr (k + 1);
+                ++byLine[f + ":" + std::to_string (ln.LineNumber)];
+            }
+            else
+                ++byLine["?"];
+        }
+        SymCleanup (proc);
+        const auto print = [&] (const char* title, const std::map<std::string, uint64_t>& m)
+        {
+            std::vector<std::pair<uint64_t, std::string>> v;
+            for (const auto& [k, n] : m) v.push_back ({ n, k });
+            std::sort (v.rbegin(), v.rend());
+            std::printf ("%s (%zu muestras):\n", title, rips.size());
+            double acc = 0;
+            for (size_t i = 0; i < std::min<size_t> (v.size(), (size_t) top); ++i)
+            {
+                const double p = 100.0 * (double) v[i].first / (double) std::max<size_t> (rips.size(), 1);
+                acc += p;
+                std::printf ("  %6.2f %%  (acum %6.2f %%)  %s\n", p, acc, v[i].second.c_str());
+            }
+        };
+        print ("perfil del emulador por función", byFn);
+        print ("perfil del emulador por línea", byLine);
+    }
+    ~HostSampler() { if (target != nullptr) CloseHandle (target); }
+
+private:
+    HANDLE target = nullptr;
+    std::thread worker;
+    std::atomic<bool> stop { false };
+    std::vector<DWORD64> rips;
+};
+#endif
 } // namespace
 
 int main (int argc, char** argv)
@@ -100,6 +193,7 @@ int main (int argc, char** argv)
     std::string wav;
     bool reference = false;  // --reference 1: sin la ruta rápida de la CPU (prueba diferencial)
     int profile = 0;  // --profile N: las N clases de instrucción más ejecutadas por cpu0
+    int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
     bool haveSyx = false;
     for (int i = 2; i + 1 < argc; i += 2)
@@ -113,6 +207,7 @@ int main (int argc, char** argv)
         else if (opt == "--vel") actions.push_back ({ 0, { PanelAction::KeyVel, 0, std::atoi (v) } });
         else if (opt == "--profile") profile = std::atoi (v);
         else if (opt == "--reference") reference = std::atoi (v) != 0;
+        else if (opt == "--hostprofile") hostProfile = std::atoi (v);
         else if (opt == "--wav") wav = v;
         else if (opt == "--syx") { syx = readFile (v); haveSyx = true; }
         else if (opt == "--key" && std::sscanf (v, "%llu:%63[^:]:%d", &at, name, &d) == 3)
@@ -165,6 +260,10 @@ int main (int argc, char** argv)
     Machine m (soc, cpu);
     m.fastPath = ! reference;
     m.loopSkip.enabled = ! reference;
+#ifdef _WIN32
+    HostSampler sampler;
+    if (hostProfile > 0) sampler.start();
+#endif
     const auto t0 = std::chrono::steady_clock::now();
     size_t nextShot = 0;
     bool ok = true;
@@ -186,6 +285,9 @@ int main (int argc, char** argv)
     for (; nextShot < shots.size(); ++nextShot)
         writeBmp (shots[nextShot].second, soc.lcd);
     const auto wall = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
+#ifdef _WIN32
+    if (hostProfile > 0) sampler.report (hostProfile);
+#endif
 
     std::printf ("máquina %llu ms (%.2f s reales, %.3f× tiempo real); cpu0 %llu instrucciones, cpu1 %s %llu; saltado por idle %.1f %%\n",
                  (unsigned long long) soc.periph.ms(), wall, (double) soc.periph.ms() / 1000.0 / wall, (unsigned long long) cpu.insnCount,

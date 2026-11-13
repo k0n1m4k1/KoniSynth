@@ -65,7 +65,11 @@ public:
     bool tick() noexcept { ++cycles; return cycles >= nextDue; }
     uint64_t tickRoom() const noexcept { return std::min (nextDue > cycles + 1 ? nextDue - (cycles + 1) : 0, roomCap); }
     bool nextTickDue() const noexcept { return cycles + 1 >= nextDue; }
-    bool anyPending() const noexcept;
+    bool anyPending() const noexcept  // (en línea: se mira tras cada instrucción)
+    {
+        return t5Pending || (alnkPend & 0xf0) != 0 || ilat != 0 || tickPending || spi1Pending || excPending || adcIrq || spi2Pending
+            || uartIrq || tmr[0].pending || tmr[1].pending || tmr[2].pending || tmr[3].pending;
+    }
     bool irqEnabled (uint32_t core, uint8_t n) const noexcept;
     std::optional<std::pair<uint8_t, uint8_t>> pendingIrqFor (uint32_t core) const noexcept;  // (irq, prioridad)
 

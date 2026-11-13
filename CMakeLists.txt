@@ -163,6 +163,9 @@ add_executable(KoniFm1Run Bench/Fm1Run.cpp Source/Fm1/Fm1Isa.cpp Source/Fm1/Fm1C
 if(MSVC)
     target_compile_options(KoniFm1Run PRIVATE /W4 /utf-8 /bigobj)
     target_compile_definitions(KoniFm1Run PRIVATE _CRT_SECURE_NO_WARNINGS) # sscanf para leer las opciones
+    # PDB para --hostprofile (dbghelp resuelve las muestras a función y línea); /OPT:REF,ICF conserva el binario optimizado
+    target_compile_options(KoniFm1Run PRIVATE /Zi)
+    target_link_options(KoniFm1Run PRIVATE /DEBUG /OPT:REF /OPT:ICF)
 else()
     target_compile_options(KoniFm1Run PRIVATE -Wall -Wextra)
 endif()
