@@ -1020,6 +1020,46 @@ void Cpu::interrupt (uint32_t handler, uint8_t prio)
     pc = handler;
 }
 
+bool Cpu::plainState (PlainState& o) const noexcept
+{
+    if (pairPending || ! predSkips.empty() || repEnd != 0 || holdIrq != 0 || ! irqLevels.empty())
+        return false;
+    o.pc = pc;
+    std::memcpy (o.regs, regs, sizeof regs);
+    o.sp = sp; o.ssp = ssp; o.usp = usp;
+    o.user = user; o.userIrq = userIrq; o.rets = rets;
+    o.repStart = repStart; o.repCount = repCount;
+    o.cc = cc; o.flags = flags;
+    std::memcpy (o.sregStore, sregStore, sizeof sregStore);
+    o.ie = ie; o.nestOk = nestOk;
+    return true;
+}
+
+void Cpu::setPlainState (const PlainState& s) noexcept
+{
+    pc = s.pc;
+    std::memcpy (regs, s.regs, sizeof regs);
+    sp = s.sp; ssp = s.ssp; usp = s.usp;
+    user = s.user; userIrq = s.userIrq; rets = s.rets;
+    repStart = s.repStart; repEnd = 0; repCount = s.repCount;
+    predSkips.clear();
+    cc = s.cc; flags = s.flags;
+    std::memcpy (sregStore, s.sregStore, sizeof sregStore);
+    pairPending = false;
+    ie = s.ie;
+    irqLevels.clear();
+    nestOk = s.nestOk;
+    holdIrq = 0;
+}
+
+bool Cpu::pcEnter (uint32_t at) noexcept
+{
+    const bool outside = hasPcWin && ! (pcWin[0][0] <= at && at <= pcWin[0][1]) && ! (pcWin[1][0] <= at && at <= pcWin[1][1]);
+    const bool trip = outside && ! pcOut;
+    pcOut = outside;
+    return trip;
+}
+
 // icfg al leerlo: byte bajo, las prioridades de ISR en curso; bit 9, la habilitación global de sti / cli
 uint32_t Cpu::icfg() const noexcept
 {

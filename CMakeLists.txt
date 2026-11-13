@@ -151,9 +151,18 @@ target_link_libraries(KoniBench
 # Pruebas del núcleo pi32v2 del futuro motor FM-1 (Bench/Fm1Tests.cpp): sin JUCE, solo Source/Fm1. Fm1Isa.cpp incluye
 # la tabla de instrucciones generada (Fm1IsaTable.inc, 3,2 MB)
 add_executable(KoniFm1Tests Bench/Fm1Tests.cpp Source/Fm1/Fm1Isa.cpp Source/Fm1/Fm1Cpu.cpp Source/Fm1/Fm1Fwsc.cpp
-    Source/Fm1/Fm1Devices.cpp Source/Fm1/Fm1Periph.cpp)
+    Source/Fm1/Fm1Devices.cpp Source/Fm1/Fm1Periph.cpp Source/Fm1/Fm1Soc.cpp)
 if(MSVC)
     target_compile_options(KoniFm1Tests PRIVATE /W4 /utf-8 /bigobj)
 else()
     target_compile_options(KoniFm1Tests PRIVATE -Wall -Wextra)
+endif()
+# Arranca un .fwsc sin interfaz y guarda pantalla (BMP) y audio (WAV): el primer punto de validación a mano del FM-1
+add_executable(KoniFm1Run Bench/Fm1Run.cpp Source/Fm1/Fm1Isa.cpp Source/Fm1/Fm1Cpu.cpp Source/Fm1/Fm1Fwsc.cpp
+    Source/Fm1/Fm1Devices.cpp Source/Fm1/Fm1Periph.cpp Source/Fm1/Fm1Soc.cpp)
+if(MSVC)
+    target_compile_options(KoniFm1Run PRIVATE /W4 /utf-8 /bigobj)
+    target_compile_definitions(KoniFm1Run PRIVATE _CRT_SECURE_NO_WARNINGS) # sscanf para leer las opciones
+else()
+    target_compile_options(KoniFm1Run PRIVATE -Wall -Wextra)
 endif()

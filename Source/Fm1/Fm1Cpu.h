@@ -87,6 +87,24 @@ public:
     uint32_t icfg() const noexcept;
     uint32_t sreg (const char* name) const noexcept;
 
+    // Lo que las instrucciones ven del núcleo entre instrucciones, fuera de pares, bloques predicados, bucles rep e
+    // interrupciones (plain_state de fm1-core): el reset del chip vuelve a uno tomado al arrancar
+    struct PlainState
+    {
+        uint32_t pc, regs[16], sp, ssp, usp;
+        bool user;
+        uint32_t userIrq, rets, repStart, repCount;
+        bool cc;
+        uint32_t flags, sregStore[7];
+        bool ie, nestOk;
+    };
+    bool plainState (PlainState& out) const noexcept;  // false si no está en un estado simple
+    void setPlainState (const PlainState& s) noexcept;
+
+    // Límites de PC (las guardas de la CPU): el código corre dentro de alguna de las dos ventanas; una instrucción
+    // traída fuera de ambas dispara la excepción. Devuelve si esta entrada es la que sale (trip)
+    bool pcEnter (uint32_t at) noexcept;
+
     // ---- estado arquitectónico (público, como en fm1-emu: el SoC y las pruebas lo leen y lo escriben) ----
     uint32_t coreId = 0;  // lo que devuelve cnum (el AC791N tiene dos núcleos)
     uint32_t pc = 0;
@@ -124,6 +142,9 @@ public:
     uint32_t faultPc = 0;
     uint64_t faultRaw = 0;
     uint64_t decodes = 0;  // fallos de la caché de instrucciones desde el reset
+    bool hasPcWin = false;
+    uint32_t pcWin[2][2] {};  // (bajo, alto) de cada ventana
+    bool pcOut = false;
 
     static constexpr size_t kMaxPred = 64;
 
