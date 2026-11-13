@@ -200,6 +200,12 @@ int main (int argc, char** argv)
     int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
     bool haveSyx = false;
+    // --dumpcpu1 FICHERO: cada bloque de 64 float que deja dx7note_compute_block (cpu1) en su búfer doble, para la prueba
+    // diferencial del núcleo de sonido. Direcciones de la V13 (FM-1-RE): índice b[0x01c0e685], búferes 0x01c10694 + 256·índice;
+    // otra versión: --dumpaddr ÍNDICE:BÚFER en hexadecimal.
+    std::string dumpCpu1;
+    uint32_t dumpIdx = 0x01c0e685, dumpBuf = 0x01c10694;
+    std::vector<std::pair<uint64_t, std::string>> ramDumps;  // --dumpram MS:FICHERO: la RAM entera en ese ms
     for (int i = 2; i + 1 < argc; i += 2)
     {
         const std::string opt = argv[i];
@@ -216,6 +222,10 @@ int main (int argc, char** argv)
         else if (opt == "--pcprofile1") pcProfile1 = std::atoi (v);
         else if (opt == "--wav") wav = v;
         else if (opt == "--syx") { syx = readFile (v); haveSyx = true; }
+        else if (opt == "--dumpcpu1") dumpCpu1 = v;
+        else if (opt == "--dumpaddr" && std::sscanf (v, "%x:%x", &dumpIdx, &dumpBuf) == 2) {}
+        else if (opt == "--dumpram" && std::sscanf (v, "%llu:", &at) == 1 && std::strchr (v, ':') != nullptr)
+            ramDumps.push_back ({ at, std::strchr (v, ':') + 1 });
         else if (opt == "--key" && std::sscanf (v, "%llu:%63[^:]:%d", &at, name, &d) == 3)
         {
             const auto id = fm1KeyId (name);
@@ -278,15 +288,58 @@ int main (int argc, char** argv)
     if (hostProfile > 0) sampler.start();
 #endif
     const auto t0 = std::chrono::steady_clock::now();
-    size_t nextShot = 0;
+    size_t nextShot = 0, nextRam = 0;
+    std::sort (ramDumps.begin(), ramDumps.end());
+    std::FILE* dump = dumpCpu1.empty() ? nullptr : std::fopen (dumpCpu1.c_str(), "wb");
+    const auto ramAt = [&soc] (uint32_t a) { return soc.ram.ptr() + (a - kRamBase); };
+    uint8_t lastIdx = dump != nullptr ? *ramAt (dumpIdx) : 0;
+    uint64_t blocks = 0, skippedBlocks = 0;
     bool ok = true;
     while (soc.periph.ms() < ms)
     {
-        if (! m.run (65536, err))
+        // con volcado, tramos de 2048 ciclos: un bloque de cpu1 son ~11 000 instrucciones (estimado), así que entre dos
+        // lecturas del índice no caben dos bloques; si el índice no cambia en ±1 se cuenta como bloque perdido
+        if (! m.run (dump != nullptr ? 2048 : 65536, err))
         {
             std::printf ("PARADA en %llu ms: %s\n", (unsigned long long) soc.periph.ms(), err.c_str());
             ok = false;
             break;
+        }
+        if (dump != nullptr && *ramAt (dumpIdx) != lastIdx)
+        {
+            // registro (780 B): tramas de DAC ya emitidas (uint64), índice del búfer escrito (uint32), sus 64 float
+            const uint8_t idx = *ramAt (dumpIdx);
+            if (((lastIdx + 1) & 1) != idx) ++skippedBlocks;
+            const uint64_t frames = soc.periph.audio.size() / 2;
+            const uint32_t which = lastIdx;
+            std::fwrite (&frames, 8, 1, dump);
+            std::fwrite (&which, 4, 1, dump);
+            std::fwrite (ramAt (dumpBuf + 256u * which), 1, 256, dump);
+            // y los dos búferes int32 de 64 muestras del núcleo antes de la etapa float: [r12+24] y [r12+28], con
+            // r12 = [0x01c0e670 + 252] (V13); a cero si el puntero no cae en la RAM
+            uint32_t r12 = 0;
+            std::memcpy (&r12, ramAt (0x01c0e670 + 252), 4);
+            for (const uint32_t off : { 24u, 28u })
+            {
+                uint32_t p = 0;
+                if (r12 >= kRamBase && r12 + off + 4 <= kRamBase + soc.ram.size())
+                    std::memcpy (&p, ramAt (r12 + off), 4);
+                static const uint8_t zeros[256] = {};
+                const bool inRam = p >= kRamBase && p + 256 <= kRamBase + soc.ram.size();
+                std::fwrite (inRam ? ramAt (p) : zeros, 1, 256, dump);
+            }
+            lastIdx = idx;
+            ++blocks;
+        }
+        while (nextRam < ramDumps.size() && soc.periph.ms() >= ramDumps[nextRam].first)
+        {
+            if (std::FILE* f = std::fopen (ramDumps[nextRam].second.c_str(), "wb"))
+            {
+                std::fwrite (soc.ram.ptr(), 1, soc.ram.size(), f);
+                std::fclose (f);
+            }
+            std::printf ("  RAM en %llu ms -> %s\n", (unsigned long long) soc.periph.ms(), ramDumps[nextRam].second.c_str());
+            ++nextRam;
         }
         while (nextShot < shots.size() && soc.periph.ms() >= shots[nextShot].first)
         {
@@ -297,6 +350,12 @@ int main (int argc, char** argv)
     }
     for (; nextShot < shots.size(); ++nextShot)
         writeBmp (shots[nextShot].second, soc.lcd);
+    if (dump != nullptr)
+    {
+        std::fclose (dump);
+        std::printf ("cpu1: %llu bloques -> %s (índice fuera de secuencia %llu veces)\n", (unsigned long long) blocks, dumpCpu1.c_str(),
+                     (unsigned long long) skippedBlocks);
+    }
     const auto wall = std::chrono::duration<double> (std::chrono::steady_clock::now() - t0).count();
 #ifdef _WIN32
     if (hostProfile > 0) sampler.report (hostProfile);
