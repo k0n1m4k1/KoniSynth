@@ -12,6 +12,7 @@
 //   --syx FICHERO       un banco DX7 de 32 voces en el área USR
 //   --profile N         las N clases de instrucción más ejecutadas por cpu0
 //   --pcprofile N       los N pc de cpu0 más ejecutados, con su instrucción (incluye las de los sondeos del salto de bucles)
+//   --pcprofile1 N      lo mismo para cpu1 (los dos con el mismo formato, cpu1 detrás)
 //   --hostprofile N    perfil del propio emulador por muestreo (Windows; necesita el PDB): N funciones y líneas
 //   --reference 1       sin la ruta rápida de la CPU ni el salto de bucles (para la prueba diferencial: el hash del estado final debe coincidir)
 // El WAV se escribe a 44 118 Hz: el FM-1 saca tramas a 24 MHz / 544 = 44 117,65 Hz (el entero más cercano; error 0,008 ct).
@@ -194,6 +195,7 @@ int main (int argc, char** argv)
     std::string wav;
     bool reference = false;  // --reference 1: sin la ruta rápida de la CPU (prueba diferencial)
     int profile = 0;  // --profile N: las N clases de instrucción más ejecutadas por cpu0
+    int pcProfile1 = 0;  // --pcprofile1 N: lo mismo para cpu1
     int pcProfile = 0;  // --pcprofile N: los N pc de cpu0 más ejecutados
     int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
@@ -211,6 +213,7 @@ int main (int argc, char** argv)
         else if (opt == "--reference") reference = std::atoi (v) != 0;
         else if (opt == "--hostprofile") hostProfile = std::atoi (v);
         else if (opt == "--pcprofile") pcProfile = std::atoi (v);
+        else if (opt == "--pcprofile1") pcProfile1 = std::atoi (v);
         else if (opt == "--wav") wav = v;
         else if (opt == "--syx") { syx = readFile (v); haveSyx = true; }
         else if (opt == "--key" && std::sscanf (v, "%llu:%63[^:]:%d", &at, name, &d) == 3)
@@ -263,10 +266,12 @@ int main (int argc, char** argv)
     if (profile > 0) cpu.synHist = &synHist;
     std::unordered_map<uint32_t, uint64_t> pcHist;
     if (pcProfile > 0) cpu.pcHist = &pcHist;
+    std::unordered_map<uint32_t, uint64_t> pcHist1;  // cpu1, con --pcprofile1
     cpu.fastPath = ! reference;
     Machine m (soc, cpu);
     m.fastPath = ! reference;
     if (profile > 0) m.synHist1 = &synHist;
+    if (pcProfile1 > 0) m.pcHist1 = &pcHist1;
     m.loopSkip.enabled = ! reference;
 #ifdef _WIN32
     HostSampler sampler;
@@ -347,21 +352,25 @@ int main (int argc, char** argv)
                          (unsigned long long) h[i].first, h[i].second->name, h[i].second->canon);
         }
     }
-    if (pcProfile > 0)
+    for (int core = 0; core < 2; ++core)
     {
+        const auto& hist1 = core == 0 ? pcHist : pcHist1;
+        const auto limit = core == 0 ? pcProfile : pcProfile1;
+        if (limit <= 0)
+            continue;
         std::vector<std::pair<uint64_t, uint32_t>> h;
         uint64_t total = 0;
-        for (const auto& [a, c] : pcHist) { h.push_back ({ c, a }); total += c; }
+        for (const auto& [a, c] : hist1) { h.push_back ({ c, a }); total += c; }
         std::sort (h.rbegin(), h.rend());
-        std::printf ("perfil por pc de cpu0 (%llu instrucciones, %zu pc):\n", (unsigned long long) total, h.size());
+        std::printf ("perfil por pc de cpu%d (%llu instrucciones, %zu pc):\n", core, (unsigned long long) total, h.size());
         double acc = 0;
-        for (size_t i = 0; i < std::min<size_t> (h.size(), (size_t) pcProfile); ++i)
+        for (size_t i = 0; i < std::min<size_t> (h.size(), (size_t) limit); ++i)
         {
             uint64_t raw = 0;
             const auto* e = decodeAny (((uint64_t) soc.fetch32 (h[i].second + 4) << 32) | soc.fetch32 (h[i].second), raw);
             acc += 100.0 * (double) h[i].first / (double) total;
-            std::printf ("  %6.2f %%  (acum %6.2f %%)  0x%08x  %-28s raw 0x%llx\n", 100.0 * (double) h[i].first / (double) total, acc,
-                         h[i].second, e != nullptr ? e->syntax : "?", (unsigned long long) raw);
+            std::printf ("  %6.2f %%  (acum %6.2f %%)  %10llu  0x%08x  %-28s raw 0x%llx\n", 100.0 * (double) h[i].first / (double) total, acc,
+                         (unsigned long long) h[i].first, h[i].second, e != nullptr ? e->syntax : "?", (unsigned long long) raw);
         }
     }
     {

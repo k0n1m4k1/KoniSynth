@@ -178,6 +178,7 @@ public:
     std::unique_ptr<Cpu> cpu1;
     bool fastPath = true;  // la ruta rápida de la CPU también para cpu1 (false: la referencia)
     std::unordered_map<const Fm1IsaEntry*, uint64_t>* synHist1 = nullptr;  // perfil de exec_syntax de cpu1 (Cpu::synHist)
+    std::unordered_map<uint32_t, uint64_t>* pcHist1 = nullptr;              // perfil por pc de cpu1 (Cpu::pcHist)
 
     // Salto exacto de los bucles de sondeo de cpu0 (LoopSkip de fm1-emu): una vuelta que deja la máquina como la
     // encontró se repite igual hasta el siguiente evento temporizado; se saltan las vueltas enteras que caben, al mismo

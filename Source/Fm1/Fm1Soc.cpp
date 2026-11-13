@@ -1176,6 +1176,7 @@ std::unique_ptr<Cpu> Machine::releasedCpu1()
     c1->coreId = 1;
     c1->fastPath = fastPath;
     c1->synHist = synHist1;
+    c1->pcHist = pcHist1;
     c1->usp = kRamBase + 0x15eb4;
     c1->sp = kRamBase + 0x16eb4;
     return c1;
@@ -1197,7 +1198,8 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
             return true;
         soc.cpu1Idle = false;
     }
-    const auto probePc = c1.pc, probeSp = c1.sp;
+    const auto probePc = c1.pc;
+    auto probeSp = c1.sp;
     uint32_t probeRegs[16];
     std::memcpy (probeRegs, c1.regs, sizeof probeRegs);
     const uint64_t budget = std::min<uint64_t> (cycles, 1u << 20);
@@ -1221,8 +1223,17 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
         }
         if (soc.resetDue() || soc.cpu1Idle || bus.stop)
             break;
-        if (c1.pc == probePc && c1.sp == probeSp && std::memcmp (c1.regs, probeRegs, sizeof probeRegs) == 0)
-            break;  // sondeando sin nada que hacer
+        if (c1.pc == probePc)
+        {
+            // de vuelta en el pc donde empezó: si la vuelta dejó todo como la anterior, sondea sin nada que hacer y el resto
+            // del tramo sería igual (cpu0 no corre mientras tanto). La primera vuelta tras reanudar suele diferir del estado
+            // en que se dejó (r0 trae lo último leído): se compara con la vuelta anterior, no solo con el inicio. V13, 4 s: de
+            // 117 instrucciones de media por tramo ocioso a ~2 vueltas (fm1-emu compara solo con el inicio)
+            if (c1.sp == probeSp && std::memcmp (c1.regs, probeRegs, sizeof probeRegs) == 0)
+                break;  // sondeando sin nada que hacer
+            probeSp = c1.sp;
+            std::memcpy (probeRegs, c1.regs, sizeof probeRegs);
+        }
         if (until && ! soc.stillWaits (0, *until))
             break;  // cpu0 ya obtendría lo que espera
     }
