@@ -145,6 +145,7 @@ const Fm1IsaEntry* decodeBytes (const uint8_t* bytes, size_t n) noexcept
 }
 
 size_t entryCount() noexcept { return countOf (kIsa); }
+const Fm1IsaEntry& entryAt (size_t i) noexcept { return kIsa[i]; }
 
 const Fm1IsaEntry* findEntry (const char* name) noexcept
 {

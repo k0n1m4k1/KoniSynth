@@ -67,6 +67,61 @@ void step (Cpu& c, Bus& b)
     }
 }
 
+// Prueba diferencial de las micro-ops: cada muestra del corpus de cada clase de la tabla cuya forma tiene micro-op se
+// ejecuta con estados aleatorios (sembrados: reproducible) por la ruta rápida y por exec_syntax, y el estado visible debe
+// coincidir entero: registros, sp, pc, banderas, rets y la memoria. Cubre todas las clases, no solo las que usa un firmware
+void fastPathMatchesExecSyntax()
+{
+    constexpr uint32_t kPc = 0x100, kMem = 1u << 16;
+    uint64_t rng = 0x5eed5eed12345678ull;
+    const auto next = [&rng] { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return rng; };
+    size_t classes = 0, runs = 0, bad = 0;
+    for (size_t ei = 0; ei < entryCount(); ++ei)
+    {
+        const auto& e = entryAt (ei);
+        bool counted = false;
+        for (uint32_t si = 0; si < std::min<uint32_t> (e.sampleCount, 8); ++si)
+        {
+            uint64_t win = e.samples[si], raw = 0;
+            const auto* d = decodeAny (win, raw);
+            if (d == nullptr)
+                continue;
+            Fm1Pre pre;
+            computePre (*d, raw, pre);
+            if (pre.fast == Fm1Pre::FastNone)
+                continue;
+            if (! counted) { ++classes; counted = true; }
+            for (int trial = 0; trial < 4; ++trial)
+            {
+                FlatRam ma (kMem), mb (kMem);
+                for (auto& b : ma.mem) b = (uint8_t) next();
+                for (int k = 0; k < 8; ++k) ma.mem[kPc + (uint32_t) k] = (uint8_t) (win >> (8 * k));
+                for (int k = 8; k < 16; ++k) ma.mem[kPc + (uint32_t) k] = 0;  // nop detrás (la segunda de un par)
+                mb.mem = ma.mem;
+                Cpu a (kPc), b (kPc);
+                for (int r = 0; r < 16; ++r)
+                    a.regs[r] = (trial & 1) != 0 ? (uint32_t) next() : 0x4000u + ((uint32_t) next() & 0x7ffcu);
+                a.sp = 0x8000u + ((uint32_t) next() & 0x3ffcu);
+                a.flags = (uint32_t) next() & 15;
+                a.rets = 0x2000u + ((uint32_t) next() & 0xffeu);
+                std::memcpy (b.regs, a.regs, sizeof a.regs);
+                b.sp = a.sp; b.flags = a.flags; b.rets = a.rets;
+                b.fastPath = false;
+                const bool oa = a.step (ma), ob = b.step (mb);
+                ++runs;
+                const bool same = oa == ob && a.pc == b.pc && a.sp == b.sp && a.flags == b.flags && a.rets == b.rets
+                               && std::memcmp (a.regs, b.regs, sizeof a.regs) == 0 && ma.mem == mb.mem;
+                if (! same && bad++ < 8)
+                    std::printf ("  FALLA %s: %s (\"%s\", bytes 0x%llx, ensayo %d): ok %d/%d pc 0x%x/0x%x flags %x/%x\n",
+                                 currentTest, d->name, d->syntax, (unsigned long long) win, trial, oa, ob, a.pc, b.pc, a.flags, b.flags);
+            }
+        }
+    }
+    std::printf ("  micro-ops: %zu clases, %zu ejecuciones comparadas, %zu distintas\n", classes, runs, bad);
+    CHECK (classes > 0, "hay clases con micro-op");
+    CHECK_EQ (bad, 0, "ejecuciones distintas entre la ruta rápida y exec_syntax");
+}
+
 void nopRunsAtEntry()
 {
     FlatRam ram (16);
@@ -1245,6 +1300,7 @@ int main (int argc, char** argv)
         { "periph uart_midi_in_dma_latch_and_timeout", periphUartMidiIn },
         { "periph audio_frames_follow_the_dac_clock", periphAudioFrames },
         { "periph led_peek_reads_the_fractions_without_taking_them", periphLedPeek },
+        { "fast_path_matches_exec_syntax (todas las clases)", fastPathMatchesExecSyntax },
     };
     std::printf ("Tabla pi32v2: %zu clases\n", entryCount());
     for (const auto& t : tests)

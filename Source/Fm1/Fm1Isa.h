@@ -82,5 +82,6 @@ const Fm1IsaEntry* decodeWin (uint64_t win) noexcept;
 const Fm1IsaEntry* decodeBytes (const uint8_t* bytes, size_t n) noexcept;
 
 size_t entryCount() noexcept;                         // clases de la tabla minada (sin FPU ni respaldo)
+const Fm1IsaEntry& entryAt (size_t i) noexcept;       // la clase i de esa tabla (i < entryCount())
 const Fm1IsaEntry* findEntry (const char* name) noexcept;  // por nombre (pruebas y diagnóstico)
 } // namespace fm1
