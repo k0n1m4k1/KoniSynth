@@ -104,12 +104,14 @@ void fastPathMatchesExecSyntax()
                 a.sp = 0x8000u + ((uint32_t) next() & 0x3ffcu);
                 a.flags = (uint32_t) next() & 15;
                 a.rets = 0x2000u + ((uint32_t) next() & 0xffeu);
+                a.coreId = (uint32_t) (trial >> 1) & 1;  // (R = cnum)
+                a.ie = (next() & 1) != 0;
                 std::memcpy (b.regs, a.regs, sizeof a.regs);
-                b.sp = a.sp; b.flags = a.flags; b.rets = a.rets;
+                b.sp = a.sp; b.flags = a.flags; b.rets = a.rets; b.coreId = a.coreId; b.ie = a.ie;
                 b.fastPath = false;
                 const bool oa = a.step (ma), ob = b.step (mb);
                 ++runs;
-                const bool same = oa == ob && a.pc == b.pc && a.sp == b.sp && a.flags == b.flags && a.rets == b.rets
+                const bool same = oa == ob && a.pc == b.pc && a.sp == b.sp && a.flags == b.flags && a.rets == b.rets && a.ie == b.ie
                                && std::memcmp (a.regs, b.regs, sizeof a.regs) == 0 && ma.mem == mb.mem;
                 if (! same && bad++ < 8)
                     std::printf ("  FALLA %s: %s (\"%s\", bytes 0x%llx, ensayo %d): ok %d/%d pc 0x%x/0x%x flags %x/%x\n",

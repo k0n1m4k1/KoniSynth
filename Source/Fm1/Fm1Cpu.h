@@ -67,7 +67,26 @@ struct Fm1Pre
     // Micro-operación (ruta rápida, como fast_of de fm1-emu) para las formas comunes que van por exec_syntax: operandos
     // resueltos al decodificar, la misma semántica. FastNone = sin micro-op (va por exec_syntax)
     enum FastOp : uint8_t { FastNone, FastLd, FastSt, FastBrI, FastBrR, FastAluI, FastAluR, FastMov, FastMovI, FastGoto, FastCall,
-                            FastRts, FastPart };
+                            FastRts, FastPart,
+                            // segunda tanda (la cola de exec_syntax medida con la V15)
+                            FastLdX,    // carga con cualquier direccionamiento (fmode), incrementos previos y posteriores
+                            FastStX,    // almacenamiento o lectura-modificación-escritura (fcond = op, fsrc = fuente)
+                            FastSpAdd,  // sp += #i
+                            FastSpPlus, // R = sp + #i
+                            FastCnum,   // R = cnum (el núcleo: no se resuelve al decodificar)
+                            FastField,  // uextra / sextra / insert (fcond = 0 / 1 / 2; fsh = posición, fw = longitud)
+                            FastAdc,    // R = R + R + c
+                            FastIe,     // sti / cli (fimm = 1 / 0)
+                            FastAndNot, // R = R & ~R
+                            FastShift,  // R = R <<|>>|>>>|<<< #i|R (fcond = 0..3; fidx: la cuenta en un registro)
+                            FastDecBr,  // if (--R <op> #i) goto #i
+                            FastPopPc   // pc = [sp++]
+    };
+    // Direccionamientos de FastLdX / FastStX (los de exec_syntax)
+    enum MemMode : uint8_t { MemRImm, MemSpImm, MemSp, MemRR, MemRRShl, MemPostImm, MemPostR, MemPreImm, MemPreR, MemPushSp };
+    enum MemSrc : uint8_t { SrcReg, SrcImm, SrcRets };
+    enum MemOp : uint8_t { OpSet, OpOr, OpAnd, OpXor, OpAdd, OpSub };
+    uint8_t fmode = 0, fsrc = 0;
     FastOp fast = FastNone;
     uint8_t fd = 0, fa = 0, fb = 0;  // destino, fuente / base, segundo registro (índice o rhs)
     uint8_t fw = 4, fsh = 0;         // ancho de acceso; desplazamiento del índice (R+R<<#i) o parte (FastPart)
@@ -167,6 +186,7 @@ public:
     bool fastPath = true;  // micro-ops para las formas comunes (false = solo exec_syntax: la referencia)
     // Perfil opcional (nullptr = apagado): instrucciones ejecutadas por clase
     std::unordered_map<const Fm1IsaEntry*, uint64_t>* hist = nullptr;
+    std::unordered_map<const Fm1IsaEntry*, uint64_t>* synHist = nullptr;  // las que van de verdad por exec_syntax
     std::unordered_map<uint32_t, uint64_t>* pcHist = nullptr;  // instrucciones ejecutadas por pc (también las de los sondeos)
     bool hasPcWin = false;
     uint32_t pcWin[2][2] {};  // (bajo, alto) de cada ventana

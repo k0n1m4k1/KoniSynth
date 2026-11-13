@@ -259,11 +259,14 @@ int main (int argc, char** argv)
     std::printf ("%s: \"%s\", entrada 0x%08x, XIP %zu B, clave 0x%04x\n", argv[1], st.identity.c_str(), st.entry, st.xip.size(), st.key);
     std::unordered_map<const Fm1IsaEntry*, uint64_t> hist;
     if (profile > 0) cpu.hist = &hist;
+    std::unordered_map<const Fm1IsaEntry*, uint64_t> synHist;  // los dos núcleos
+    if (profile > 0) cpu.synHist = &synHist;
     std::unordered_map<uint32_t, uint64_t> pcHist;
     if (pcProfile > 0) cpu.pcHist = &pcHist;
     cpu.fastPath = ! reference;
     Machine m (soc, cpu);
     m.fastPath = ! reference;
+    if (profile > 0) m.synHist1 = &synHist;
     m.loopSkip.enabled = ! reference;
 #ifdef _WIN32
     HostSampler sampler;
@@ -330,6 +333,18 @@ int main (int argc, char** argv)
             acc += 100.0 * (double) h[i].first / (double) total;
             std::printf ("  %6.2f %%  (acum %6.2f %%)  ruta %2u%s %-28s %s\n", 100.0 * (double) h[i].first / (double) total, acc, pre.route, pre.fast != Fm1Pre::FastNone ? "*" : " ",
                          h[i].second->name, h[i].second->syntax);
+        }
+        h.clear();
+        uint64_t syn = 0;
+        for (const auto& [e, c] : synHist) { h.push_back ({ c, e }); syn += c; }
+        std::sort (h.rbegin(), h.rend());
+        std::printf ("por exec_syntax de verdad (los dos núcleos): %llu instrucciones, %zu clases\n", (unsigned long long) syn, h.size());
+        acc = 0;
+        for (size_t i = 0; i < std::min<size_t> (h.size(), (size_t) profile); ++i)
+        {
+            acc += 100.0 * (double) h[i].first / (double) std::max<uint64_t> (syn, 1);
+            std::printf ("  %6.2f %%  (acum %6.2f %%)  %10llu  %-28s %s\n", 100.0 * (double) h[i].first / (double) std::max<uint64_t> (syn, 1), acc,
+                         (unsigned long long) h[i].first, h[i].second->name, h[i].second->canon);
         }
     }
     if (pcProfile > 0)

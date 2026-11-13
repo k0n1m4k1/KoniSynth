@@ -1131,6 +1131,7 @@ std::unique_ptr<Cpu> Machine::releasedCpu1()
     auto c1 = std::make_unique<Cpu> (inCode ? entry : kRamBase + 0x22b6);
     c1->coreId = 1;
     c1->fastPath = fastPath;
+    c1->synHist = synHist1;
     c1->usp = kRamBase + 0x15eb4;
     c1->sp = kRamBase + 0x16eb4;
     return c1;

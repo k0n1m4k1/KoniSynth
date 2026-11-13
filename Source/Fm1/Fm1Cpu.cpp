@@ -1432,6 +1432,98 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
                 regs[pre.fd] = y;
                 break;
             }
+            case Fm1Pre::FastLdX:
+            {
+                uint32_t addr, inc = 0;
+                bool post = false;
+                switch (pre.fmode)
+                {
+                    case Fm1Pre::MemPostImm: addr = regs[pre.fa]; inc = pre.fimm; post = true; break;
+                    case Fm1Pre::MemPostR:   addr = regs[pre.fa]; inc = regs[pre.fb]; post = true; break;
+                    case Fm1Pre::MemPreImm:  regs[pre.fa] += pre.fimm; addr = regs[pre.fa]; break;
+                    default:                 regs[pre.fa] += regs[pre.fb]; addr = regs[pre.fa]; break;
+                }
+                regs[pre.fd] = ldW (bus, pre.fw, pre.fsign, addr);
+                if (post)
+                    regs[pre.fa] += inc;
+                break;
+            }
+            case Fm1Pre::FastStX:
+            {
+                uint32_t addr, inc = 0;
+                bool post = false;
+                switch (pre.fmode)
+                {
+                    case Fm1Pre::MemRImm:    addr = regs[pre.fa] + pre.fimm; break;
+                    case Fm1Pre::MemSpImm:   addr = sp + pre.fimm; break;
+                    case Fm1Pre::MemSp:      addr = sp; break;
+                    case Fm1Pre::MemRR:
+                    case Fm1Pre::MemRRShl:   addr = regs[pre.fa] + (regs[pre.fb] << pre.fsh); break;
+                    case Fm1Pre::MemPostImm: addr = regs[pre.fa]; inc = pre.fimm; post = true; break;
+                    case Fm1Pre::MemPostR:   addr = regs[pre.fa]; inc = regs[pre.fb]; post = true; break;
+                    case Fm1Pre::MemPreImm:  regs[pre.fa] += pre.fimm; addr = regs[pre.fa]; break;
+                    case Fm1Pre::MemPreR:    regs[pre.fa] += regs[pre.fb]; addr = regs[pre.fa]; break;
+                    default:                 sp -= 4; addr = sp; break;
+                }
+                const uint32_t val = pre.fsrc == Fm1Pre::SrcReg ? regs[pre.fd] : pre.fsrc == Fm1Pre::SrcRets ? rets : (uint32_t) pre.foff;
+                uint32_t nv;
+                switch (pre.fcond)
+                {
+                    case Fm1Pre::OpSet: nv = val; break;
+                    case Fm1Pre::OpOr:  nv = ldW (bus, pre.fw, false, addr) | val; break;
+                    case Fm1Pre::OpAnd: nv = ldW (bus, pre.fw, false, addr) & val; break;
+                    case Fm1Pre::OpXor: nv = ldW (bus, pre.fw, false, addr) ^ val; break;
+                    case Fm1Pre::OpAdd: nv = ldW (bus, pre.fw, false, addr) + val; break;
+                    default:            nv = ldW (bus, pre.fw, false, addr) - val; break;
+                }
+                stW (bus, pre.fw, addr, nv);
+                if (post)
+                    regs[pre.fa] += inc;
+                break;
+            }
+            case Fm1Pre::FastSpAdd: sp += pre.fimm; break;
+            case Fm1Pre::FastSpPlus: regs[pre.fd] = sp + pre.fimm; break;
+            case Fm1Pre::FastCnum: regs[pre.fd] = coreId; break;
+            case Fm1Pre::FastField:
+            {
+                const auto src = regs[pre.fa];
+                const uint32_t p = pre.fsh, ln = pre.fw;
+                const auto mask = ln == 0 ? 0xffffffffu : (1u << ln) - 1;
+                if (pre.fcond == 0) regs[pre.fd] = (src >> p) & mask;
+                else if (pre.fcond == 1) regs[pre.fd] = ln == 0 ? (src >> p) : (uint32_t) ((int32_t) ((src >> p) << (32 - ln)) >> (32 - ln));
+                else regs[pre.fd] = (regs[pre.fd] & ~(mask << p)) | ((src & mask) << p);
+                break;
+            }
+            case Fm1Pre::FastAdc: regs[pre.fd] = addFlags (regs[pre.fa], regs[pre.fb], (flags & kFlagC) != 0 ? 1u : 0u, flags); break;
+            case Fm1Pre::FastIe: ie = pre.fimm != 0; break;
+            case Fm1Pre::FastAndNot: regs[pre.fd] = regs[pre.fa] & ~regs[pre.fb]; break;
+            case Fm1Pre::FastShift:
+            {
+                const auto x = regs[pre.fa];
+                const uint32_t c = pre.fidx ? (regs[pre.fb] & 31) : pre.fimm;
+                uint32_t y;
+                switch (pre.fcond)
+                {
+                    case 0:  y = c >= 32 ? 0 : x << c; break;
+                    case 1:  y = c >= 32 ? 0 : x >> c; break;
+                    case 2:  y = c >= 32 ? (uint32_t) ((int32_t) x >> 31) : (uint32_t) ((int32_t) x >> c); break;
+                    default: y = qasl (x, c); break;
+                }
+                regs[pre.fd] = y;
+                break;
+            }
+            case Fm1Pre::FastDecBr:
+                regs[pre.fa] -= 1;
+                if (condEval ((Cond) pre.fcond, regs[pre.fa], pre.fimm))
+                    jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff));
+                break;
+            case Fm1Pre::FastPopPc:
+            {
+                const auto t = bus.read32 (sp);
+                sp += 4;
+                jumpTo (t);
+                break;
+            }
             case Fm1Pre::FastNone: break;
         }
         finish (jumped, target, nextPc);
@@ -1754,6 +1846,8 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
         }
         case kRouteSyntax:
         {
+            if (synHist != nullptr)
+                ++(*synHist)[l.entry];
             missingSlot = false;
             bool hasJump = false;
             uint32_t j = 0;
@@ -2852,6 +2946,20 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
                 else if (inner == "sp" && n >= 1) { p.fd = rg (0); p.fsp = true; p.fimm = 0; }
                 else if (inner == "R+R" && n >= 3) { p.fd = rg (0); p.fidx = true; p.fa = rg (1); p.fb = rg (2); p.fsh = 0; }
                 else if (inner == "R+R<<#i" && n >= 4) { p.fd = rg (0); p.fidx = true; p.fa = rg (1); p.fb = rg (2); p.fsh = (uint8_t) (sl (3) & 31); }
+                else if (n >= 3 && (inner == "R++=#i" || inner == "R++=R" || inner == "++R=#i" || inner == "++R=R"))
+                {
+                    // con incremento de la base: R++= después de leer (con el incremento de antes), ++R= antes
+                    p.fd = rg (0);
+                    p.fa = rg (1);
+                    if (inner.ends_with ('R')) p.fb = rg (2);
+                    else p.fimm = (uint32_t) sl (2);
+                    p.fmode = inner == "R++=#i" ? Fm1Pre::MemPostImm : inner == "R++=R" ? Fm1Pre::MemPostR
+                            : inner == "++R=#i" ? Fm1Pre::MemPreImm : Fm1Pre::MemPreR;
+                    p.fw = w;
+                    p.fsign = sgn;
+                    p.fast = Fm1Pre::FastLdX;
+                    return;
+                }
                 else return;
                 p.fw = w;
                 p.fsign = sgn;
@@ -2876,6 +2984,90 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
             p.fast = Fm1Pre::FastSt;
             return;
         }
+    }
+    // el resto de <mem> op= x: los direccionamientos y fuentes que exec_syntax conoce ("known"), en su mismo orden
+    {
+        uint8_t w;
+        sv inner, addrTxt, rest;
+        if (widthOf (s, w, inner) && split2 (inner, "] ", addrTxt, rest))
+        {
+            const auto spc = rest.find (' ');
+            if (spc == sv::npos)
+                return;
+            const sv op = rest.substr (0, spc), src = rest.substr (spc + 1);
+            int k;  // ranuras de la dirección
+            Fm1Pre::MemMode mode;
+            if (addrTxt == "R+#i") { k = 2; mode = Fm1Pre::MemRImm; }
+            else if (addrTxt == "sp+#i") { k = 1; mode = Fm1Pre::MemSpImm; }
+            else if (addrTxt == "sp") { k = 0; mode = Fm1Pre::MemSp; }
+            else if (addrTxt == "R+R") { k = 2; mode = Fm1Pre::MemRR; }
+            else if (addrTxt == "R+R<<#i") { k = 3; mode = Fm1Pre::MemRRShl; }
+            else if (addrTxt == "R++=#i") { k = 2; mode = Fm1Pre::MemPostImm; }
+            else if (addrTxt == "R++=R") { k = 2; mode = Fm1Pre::MemPostR; }
+            else if (addrTxt == "++R=#i") { k = 2; mode = Fm1Pre::MemPreImm; }
+            else if (addrTxt == "++R=R") { k = 2; mode = Fm1Pre::MemPreR; }
+            else if (addrTxt == "--sp") { k = 0; mode = Fm1Pre::MemPushSp; }
+            else return;
+            Fm1Pre::MemSrc from;
+            if (src == "R") from = Fm1Pre::SrcReg;
+            else if (src == "#i" || src == "#h") from = Fm1Pre::SrcImm;
+            else if (src == "rets") from = Fm1Pre::SrcRets;
+            else return;
+            Fm1Pre::MemOp mop;
+            if (op == "=") mop = Fm1Pre::OpSet;
+            else if (op == "|=") mop = Fm1Pre::OpOr;
+            else if (op == "&=") mop = Fm1Pre::OpAnd;
+            else if (op == "^=") mop = Fm1Pre::OpXor;
+            else if (op == "+=") mop = Fm1Pre::OpAdd;
+            else if (op == "-=") mop = Fm1Pre::OpSub;
+            else return;
+            if (n < k + (from == Fm1Pre::SrcRets ? 0 : 1))
+                return;  // (le falta una ranura: exec_syntax falla)
+            switch (mode)
+            {
+                case Fm1Pre::MemRImm:    p.fa = rg (0); p.fimm = (uint32_t) sl (1); break;
+                case Fm1Pre::MemSpImm:   p.fimm = (uint32_t) sl (0); break;
+                case Fm1Pre::MemRR:      p.fa = rg (0); p.fb = rg (1); p.fsh = 0; break;
+                case Fm1Pre::MemRRShl:   p.fa = rg (0); p.fb = rg (1); p.fsh = (uint8_t) (sl (2) & 31); break;
+                case Fm1Pre::MemPostImm:
+                case Fm1Pre::MemPreImm:  p.fa = rg (0); p.fimm = (uint32_t) sl (1); break;
+                case Fm1Pre::MemPostR:
+                case Fm1Pre::MemPreR:    p.fa = rg (0); p.fb = rg (1); break;
+                default: break;
+            }
+            if (from == Fm1Pre::SrcReg) p.fd = rg (k);
+            else if (from == Fm1Pre::SrcImm) p.foff = (int64_t) (uint32_t) sl (k);
+            p.fmode = mode;
+            p.fsrc = from;
+            p.fcond = mop;
+            p.fw = w;
+            p.fast = Fm1Pre::FastStX;
+            return;
+        }
+    }
+    // salto con decremento: if[s] (--R <op> #i) goto #i (el registro baja antes de comparar)
+    if ((s.starts_with ("if (--R ") || s.starts_with ("ifs (--R ")) && s.ends_with (") goto #i") && n >= 3)
+    {
+        const bool sgn = s.starts_with ("ifs");
+        sv cond = s.substr (s.find ("--R ") + 4);
+        cond.remove_suffix (sv (") goto #i").size());
+        const sv op = cond.substr (0, cond.find (' '));
+        if (cond.substr (op.size()) != " #i")
+            return;
+        Cond c;
+        if (op == "==") c = Cond::Eq;
+        else if (op == "!=") c = Cond::Ne;
+        else if (op == "<") c = sgn ? Cond::LtS : Cond::LtU;
+        else if (op == ">") c = sgn ? Cond::GtS : Cond::GtU;
+        else if (op == "<=") c = sgn ? Cond::LeS : Cond::LeU;
+        else if (op == ">=") c = sgn ? Cond::GeS : Cond::GeU;
+        else return;
+        p.fcond = (uint8_t) c;
+        p.fa = rg (0);
+        p.fimm = (uint32_t) sl (1);
+        p.foff = sl (2);
+        p.fast = Fm1Pre::FastDecBr;
+        return;
     }
     // saltos: if[s] (R <op> R|#x) goto #i
     if ((s.starts_with ("if (R ") || s.starts_with ("ifs (R ")) && s.ends_with (") goto #i") && n >= 3)
@@ -2966,5 +3158,48 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
             p.fast = Fm1Pre::FastPart;
             return;
         }
+    // segunda tanda: la cola de exec_syntax con la V15 (sp += #i, R = cnum, campos de bits, desplazamientos...)
+    if (s == "R = cnum" && n >= 1) { p.fd = rg (0); p.fast = Fm1Pre::FastCnum; return; }
+    if (s == "sp += #i")
+    {
+        if (e.len == 4 && (raw & 0xffff) == 0xe8f0)
+        {
+            const auto f = (uint32_t) ((raw >> 16) & 0x1fff);  // f0 e8 <imm> de 4 bytes: sext13(bits(16,28))
+            p.fimm = (f & 0x1000) != 0 ? (f | ~0x1fffu) : f;
+        }
+        else if (n >= 1)
+            p.fimm = (uint32_t) sl (0);
+        else
+            return;
+        p.fast = Fm1Pre::FastSpAdd;
+        return;
+    }
+    if (s == "R = sp + #i" && n >= 2) { p.fd = rg (0); p.fimm = (uint32_t) sl (1); p.fast = Fm1Pre::FastSpPlus; return; }
+    if ((s == "R = uextra(R, p:#i, l:#i)" || s == "R = sextra(R, p:#i, l:#i)" || s == "R <= insert(R, p:#i, l:#i)") && n >= 4)
+    {
+        p.fd = rg (0);
+        p.fa = rg (1);
+        p.fsh = (uint8_t) (sl (2) & 31);
+        p.fw = (uint8_t) (sl (3) & 31);
+        p.fcond = s[4] == 'u' ? 0 : s[4] == 's' ? 1 : 2;
+        p.fast = Fm1Pre::FastField;
+        return;
+    }
+    if (s == "R = R + R + c" && n >= 3) { p.fd = rg (0); p.fa = rg (1); p.fb = rg (2); p.fast = Fm1Pre::FastAdc; return; }
+    if (s == "sti" || s == "cli") { p.fimm = s == "sti" ? 1u : 0u; p.fast = Fm1Pre::FastIe; return; }
+    if (s == "R = R & ~R" && n >= 3) { p.fd = rg (0); p.fa = rg (1); p.fb = rg (2); p.fast = Fm1Pre::FastAndNot; return; }
+    if ((s == "R = R << #i" || s == "R = R >> #i" || s == "R = R >>> #i" || s == "R = R <<< #i" || s == "R = R << R"
+         || s == "R = R >> R" || s == "R = R >>> R") && n >= 3)
+    {
+        p.fd = rg (0);
+        p.fa = rg (1);
+        if (s.ends_with ('R')) { p.fidx = true; p.fb = rg (2); }
+        else { p.fimm = (uint32_t) sl (2); if (p.fimm == 0) p.fimm = 32; }  // la cuenta inmediata 0 es 32
+        const sv kind = s.substr (6, s.find (' ', 6) - 6);
+        p.fcond = kind == "<<" ? 0 : kind == ">>" ? 1 : kind == ">>>" ? 2 : 3;
+        p.fast = Fm1Pre::FastShift;
+        return;
+    }
+    if (s == "pc = [sp++]") { p.fast = Fm1Pre::FastPopPc; return; }
 }
 } // namespace fm1
