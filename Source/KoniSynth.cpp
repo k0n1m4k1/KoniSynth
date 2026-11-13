@@ -89,6 +89,7 @@ using APVTS = juce::AudioProcessorValueTreeState;
 #include "Engines/Opl.h"
 #include "Engines/Mt32.h"
 #include "Engines/Gus.h"
+#include "Engines/Fm1.h" // M-VAVE FM-1: el firmware del usuario en el emulador de Source/Fm1
 
 #include "Engines/Polivoks.h"
 
@@ -276,6 +277,30 @@ public:
     }
     void setMt32Folder (const juce::File& folder) { setMt32RomFolder (folder); rebuildMt32(); }
 
+    // FM-1 (hilo de mensajes): arranca el firmware elegido (fm1Choice: ruta relativa a la carpeta de firmwares) o, sin
+    // elección, el primero de la carpeta en orden alfabético. Un intento al elegir el motor; Rescan lo repite
+    void startFm1()
+    {
+        fm1Tried = true;
+        const auto folder = fm1FirmwareFolder();
+        auto file = fm1Choice.isNotEmpty() ? folder.getChildFile (fm1Choice) : juce::File();
+        if (! file.existsAsFile())
+        {
+            auto all = folder.findChildFiles (juce::File::findFiles, true, "*.fwsc");
+            all.sort();
+            file = all.isEmpty() ? juce::File() : all[0];
+        }
+        juce::String status;
+        if (! file.existsAsFile())
+            status = "No firmware: put your FM-1 .fwsc files in " + folder.getFullPathName();
+        else if (! fm1Engine.start (file, status))
+            status = file.getFileName() + ": " + status;
+        const juce::ScopedLock sl (sampleInfoLock);
+        fm1StartError = status;
+    }
+    void rescanFm1() { fm1Engine.stop(); startFm1(); }
+    void setFm1Folder (const juce::File& folder) { setFm1FirmwareFolder (folder); fm1Choice = {}; rescanFm1(); }
+
     // Gravis UltraSound (cualquier hilo salvo el de audio): lee los patches de la carpeta y publica el juego. Una vez al elegir
     // el motor; "Rescan" o una carpeta nueva lo repiten
     void rebuildGus()
@@ -319,6 +344,17 @@ public:
         undoHistory.endGroup();
     }
     juce::String getGusStatus() const { const juce::ScopedLock sl (sampleInfoLock); return gusStatus; }
+    // FM-1: estado (el error al arrancar, o el del emulador en marcha) y pantalla para la interfaz
+    Fm1Engine::View getFm1View() const
+    {
+        auto v = fm1Engine.view();
+        const juce::ScopedLock sl (sampleInfoLock);
+        if (! v.live && fm1StartError.isNotEmpty())
+            v.status = fm1StartError;
+        return v;
+    }
+    bool takeFm1Screen (std::vector<uint16_t>& to, uint64_t& rev, bool& on) { return fm1Engine.takeScreen (to, rev, on); }
+    void fm1Panel (const fm1::PanelAction& a) { fm1Engine.panel (a); }
     juce::StringArray getGusPatchNames() const { const juce::ScopedLock sl (sampleInfoLock); return gusPatchNames; }
     const GusEngine::View& getGusView() const { return gusEngine.view; }
     bool hasGusBank() const { bool has = false; gusEngine.slot.withCurrent ([&has] (const GusBank* b) { has = b != nullptr; }); return has; }
@@ -379,10 +415,13 @@ public:
         oplEngine.prepare (sampleRate, samplesPerBlock);
         mt32Engine.prepare (sampleRate, samplesPerBlock);
         gusEngine.prepare (sampleRate, samplesPerBlock);
+        fm1Engine.prepare (sampleRate, samplesPerBlock);
         if ((int) params.engine->load() == 14 && sampleRate != mt32Rate) // la conversión de Munt depende de la frecuencia
             rebuildMt32();
         if ((int) params.engine->load() == 15 && ! gusBuilt) // Gravis: los patches, la primera vez (también sin editor: KoniBench)
             rebuildGus();
+        if ((int) params.engine->load() == 16 && ! fm1Tried) // FM-1: el firmware, la primera vez (también sin editor)
+            startFm1();
         updateAnsScore(); // la partitura existe antes del primer bloque (no espera al temporizador)
         updateBuiltInWavetable();
         updateMacros();
@@ -658,6 +697,7 @@ public:
         const auto oplOn = engine == 13;
         const auto mt32On = engine == 14;
         const auto gusOn = engine == 15;
+        const auto fm1On = engine == 16;
         if (thereminOn)
         {
             if (! thereminWasOn)
@@ -757,6 +797,15 @@ public:
             }
             gusEngine.render (buffer, midi, params);
         }
+        else if (fm1On)
+        {
+            if (! fm1WasOn)
+            {
+                allVoicesOff();
+                fm1Engine.reset();
+            }
+            fm1Engine.render (buffer, midi, isNonRealtime());
+        }
         else if (n64On)
         {
             if (! n64WasOn)
@@ -830,6 +879,7 @@ public:
         oplWasOn = oplOn;
         mt32WasOn = mt32On;
         gusWasOn = gusOn;
+        fm1WasOn = fm1On;
 
         // Captura "engine" del agente: la salida del motor con sus efectos propios, antes de todo lo añadido (Agent/AudioTap.h)
         if (auto* tap = agentTapActive.load (std::memory_order_acquire))
@@ -1926,6 +1976,7 @@ private:
         oplEngine.reset();
         mt32Engine.reset();
         gusEngine.reset();
+        fm1Engine.reset();
         flanger.reset();
         freqShifter.reset();
         leslie.reset();
@@ -2060,14 +2111,18 @@ private:
     bool snesWasOn = false;
     N64Engine n64Engine;
     OplEngine oplEngine;
-    bool n64WasOn = false, oplWasOn = false, mt32WasOn = false, gusWasOn = false;
+    bool n64WasOn = false, oplWasOn = false, mt32WasOn = false, gusWasOn = false, fm1WasOn = false;
     Mt32Engine mt32Engine;
     GusEngine gusEngine;
+    Fm1Engine fm1Engine; // (su hilo se para en su destructor)
+    bool fm1Tried = false; // se intentó arrancar el firmware con el motor elegido (Rescan lo repite)
     bool gusBuilt = false; // se intentó leer la carpeta de patches (una vez; Rescan lo repite)
     double mt32Rate = 0.0;
     int mt32BuiltModel = -1, mt32BuiltQueue = 0; // con qué se construyó la máquina: si cambian, se reconstruye
     juce::String mt32Status; // protegido por sampleInfoLock
     juce::String gusStatus;  // protegido por sampleInfoLock
+    juce::String fm1StartError; // protegido por sampleInfoLock
+    juce::String fm1Choice; // firmware elegido: ruta relativa a la carpeta de firmwares (vacío: el primero)
     juce::StringArray gusPatchNames; // nombres por índice del banco; protegido por sampleInfoLock
     AnsSlot ansSlot;
     MacroSlot chipMacroSlot, mdMacroSlot, snesMacroSlot;
@@ -2097,7 +2152,9 @@ private:
         // (juce_Oversampling.cpp:285-289), el que interesa para alinear pistas; redondeado a muestras enteras
         const auto tube = params.tubeOn->load() > 0.5f && tubeOversampling != nullptr ? (int) std::lround (tubeOversampling->getLatencyInSamples()) : 0;
         const auto pv = (int) params.engine->load() == 8 ? polivoks.latency() : 0;
-        return amp + tube + pv + currentLookahead();
+        // FM-1: la cola del emulador por delante del audio (30 ms por defecto) y su remuestreador
+        const auto fm1 = (int) params.engine->load() == 16 ? fm1Engine.latencySamples (getSampleRate()) : 0;
+        return amp + tube + pv + fm1 + currentLookahead();
     }
     // Latencia del limitador (muestras): solo con el limitador encendido y la anticipación activa
     int currentLookahead() const
@@ -2259,6 +2316,16 @@ private:
             rebuildMt32(); // solo con el motor elegido: desactivado no carga ROM ni ocupa memoria
         if ((int) params.engine->load() == 15 && ! gusBuilt)
             rebuildGus(); // igual: los patches solo se leen con el Gravis elegido
+        if ((int) params.engine->load() == 16)
+        {
+            if (! fm1Tried)
+                startFm1();
+        }
+        else if (fm1Tried)
+        {
+            fm1Engine.stop(); // sin el FM-1 elegido, su hilo no gasta CPU ni memoria
+            fm1Tried = false;
+        }
         updateMacros();
         perfMacros.update();
         updateBuiltInWavetable();

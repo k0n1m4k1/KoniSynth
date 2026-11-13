@@ -956,3 +956,87 @@ private:
     int voices = 24, ramKB = 1024, usedKB = 0, resident = 0, substituted = 0;
     bool eightBit = true, table = false;
 };
+
+//==============================================================================
+// La pantalla del M-VAVE FM-1 (ST7789, 240 × 240 RGB565) tal como la pinta el firmware en el emulador, a escala entera para
+// que los píxeles queden nítidos y con sus colores (no se tiñe con el skin: es la del aparato). Sin firmware en marcha, el
+// estado (dónde poner los .fwsc o por qué no arrancó). Pie: velocidad del emulador (1.00x = tiempo real) y cortes
+static juce::Rectangle<int> fm1ScreenArea (juce::Rectangle<int> area)
+{
+    const auto side = std::min (area.getWidth(), area.getHeight());
+    const auto scale = side / Fm1Engine::kScreen;
+    const auto px = scale >= 1 ? scale * Fm1Engine::kScreen : side;
+    return juce::Rectangle<int> (px, px).withCentre (area.getCentre());
+}
+
+class Fm1Screen : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
+{
+public:
+    explicit Fm1Screen (KoniSynthProcessor& p) : processor (p)
+    {
+        setTooltip ("The FM-1's own screen, drawn by its firmware running in the emulator. Footer: emulator speed (1.00x = real "
+                    "time; below that the sound drops out) and how many dropouts there were.");
+        startTimerHz (30);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        g.fillAll (juce::Colours::black);
+        auto area = getLocalBounds().reduced (4);
+        const auto footer = area.removeFromBottom (18);
+        const auto screen = fm1ScreenArea (area);
+        if (view.live && on && hasImage)
+        {
+            g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality); // píxeles nítidos
+            g.drawImage (image, screen.toFloat());
+        }
+        else
+        {
+            g.setColour (juce::Colour (0xff9a9a9a));
+            g.setFont (juce::FontOptions (14.0f));
+            g.drawFittedText (view.status.isNotEmpty() ? view.status : juce::String ("Booting..."), screen.reduced (12),
+                              juce::Justification::centred, 8);
+        }
+        g.setColour (juce::Colour (0xffb0b0b0));
+        g.setFont (juce::FontOptions (12.0f));
+        juce::String info;
+        if (view.live)
+        {
+            info = juce::String (view.speed, 2) + "x real time";
+            if (view.underruns > 0)
+                info << "   dropouts: " << juce::String ((juce::int64) view.underruns);
+        }
+        g.drawText (info, footer, juce::Justification::centred);
+    }
+
+private:
+    void timerCallback() override
+    {
+        const auto v = processor.getFm1View();
+        bool changed = v.status != view.status || v.live != view.live || std::abs (v.speed - view.speed) >= 0.005
+                    || v.underruns != view.underruns;
+        view = v;
+        if (processor.takeFm1Screen (pixels, rev, on))
+        {
+            const juce::Image::BitmapData bd (image, juce::Image::BitmapData::writeOnly);
+            for (int y = 0; y < Fm1Engine::kScreen; ++y)
+                for (int x = 0; x < Fm1Engine::kScreen; ++x)
+                {
+                    uint8_t r, gr, b;
+                    fm1::rgb565To888 (pixels[(size_t) (y * Fm1Engine::kScreen + x)], r, gr, b);
+                    bd.setPixelColour (x, y, juce::Colour (r, gr, b));
+                }
+            hasImage = true;
+            changed = true;
+        }
+        if (changed)
+            repaint();
+    }
+
+    KoniSynthProcessor& processor;
+    Fm1Engine::View view;
+    std::vector<uint16_t> pixels;
+    uint64_t rev = 0;
+    bool on = false, hasImage = false;
+    juce::Image image { juce::Image::RGB, Fm1Engine::kScreen, Fm1Engine::kScreen, true };
+};

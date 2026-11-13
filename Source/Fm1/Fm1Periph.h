@@ -62,6 +62,9 @@ public:
     PeriphDue advance (uint64_t n);
     void chipReset();  // el estado propio del chip como al encender; lo de fuera (reloj, teclas, cola MIDI...) se queda
     void apply (const PanelAction& a);
+    // Programa una acción en el ciclo at, en orden con las demás; una ya pasada se aplica en el siguiente avance. Para
+    // añadir acciones con la máquina en marcha (entre dos Machine::run): adelanta el próximo evento si hace falta
+    void schedule (uint64_t at, const PanelAction& a);
     bool tick() noexcept { ++cycles; return cycles >= nextDue; }
     uint64_t tickRoom() const noexcept { return std::min (nextDue > cycles + 1 ? nextDue - (cycles + 1) : 0, roomCap); }
     bool nextTickDue() const noexcept { return cycles + 1 >= nextDue; }

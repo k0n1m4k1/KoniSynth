@@ -57,7 +57,7 @@ public:
         // Motores agrupados (los ids son el índice del parámetro + 1: los presets y estados no cambian)
         if (auto* choice = dynamic_cast<juce::AudioParameterChoice*> (s.getParameter ("engine")))
         {
-            const std::pair<const char*, std::vector<int>> groups[] = { { "Synthesizers", { 0, 6, 8, 9 } },
+            const std::pair<const char*, std::vector<int>> groups[] = { { "Synthesizers", { 0, 6, 8, 9, 16 } },
                                                                         { "Instruments", { 1, 3, 4, 2, 5 } },
                                                                         { "Consoles", { 7, 10, 11, 12 } },
                                                                         { "Computers", { 14, 15, 13 } } };
@@ -573,6 +573,9 @@ public:
                   .withKnob (s, "gusPatchBits", "Bits")
                   .withRowBreak (1).withRightBody (gusDisplay, 560); // a la derecha, el mapa de voces (4 columnas desde 560 px)
         gusSection.stretchToFill = true; // el display se queda con el ancho que sobre en la fila
+        fm1Section.withHeaderButton ("Firmware...", "KoniSynth does not include any FM-1 firmware: put your .fwsc files (M-VAVE's own or a "
+                                     "community one) in a folder, one subfolder per firmware, and choose it here.", [this] { fm1FirmwareMenu(); })
+                  .withBody (fm1Screen, 0, 500); // la pantalla de 240 px a escala 2 (480) y su pie
         if (auto* list = gusSection.listFor ("gusProgram")) list->setPhosphor (56); // lista grande, letra de 30 px
         if (auto* list = mt32Section.listFor ("mt32Program")) list->setPhosphor (48); // igual, en la fila de perillas: 3 de ancho
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
@@ -734,7 +737,7 @@ public:
         content.addChildComponent (modBar);
         for (auto* c : std::initializer_list<juce::Component*> { &signalStrip, &waveSection, &filter, &complexSection, &noiseSection, &thereminSection,
                                                                  &vl1Section, &vl1RhythmSection, &vl1DisplaySection, &styloSection, &genxOscSection, &genxFxSection, &omniSection, &omniRhythmSection,
-                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplRhythmSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &gusSection, &pvOscSection, &pvFilterSection,
+                                                                 &drumSection, &drumPatternSection, &fmSection, &fmLfoSection, &fmDisplaySection, &chipSection, &chipDriverSection, &chipStereoSection, &chipVrc6Section, &mdSection, &mdLfoSection, &mdVoiceSection, &mdPsgSection, &snesSection, &snesEnvSection, &snesEchoSection, &n64Section, &n64EnvSection, &n64FxSection, &oplSection, &oplRhythmSection, &oplLfoSection, &opllSection, &mt32Section, &mt32DisplaySection, &gusSection, &fm1Section, &pvOscSection, &pvFilterSection,
                                                                  &pvFEnvSection, &pvAEnvSection, &pvLfoSection, &ansSection, &filterEnvSection,
                                                                  &ampEnvSection })
             rows.addChildComponent (*c);
@@ -881,7 +884,7 @@ private:
         }
         static const char* names[] = { "Init", "Etheric Theremin", "Da Da Da (VL-1)", "Stylophone", "Omnichord Strum", "808 Kit",
                                        "DX7 E.Piano 1", "", "Polivoks Scream", "ANS Glissandi", "MD Electric Slap Bass", "SNES Echo Strings", "N64 Big Room Choir",
-                                       "OPL2 E.Piano", "MT-32 Piano 1", "GUS Piano" };
+                                       "OPL2 E.Piano", "MT-32 Piano 1", "GUS Piano", "FM-1 Firmware" };
         return juce::isPositiveAndBelow (engineIndex, (int) std::size (names)) ? names[engineIndex] : "";
     }
 
@@ -980,6 +983,27 @@ private:
         m.addItem ("Open patch folder", [] { const auto f = gusPatchFolder(); f.createDirectory(); f.startAsProcess(); });
         m.addItem ("Rescan", [this] { koni.rebuildGus(); });
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gusSection));
+    }
+
+    void fm1FirmwareMenu()
+    {
+        juce::PopupMenu m;
+        const auto status = koni.getFm1View().status;
+        m.addSectionHeader (status.isEmpty() ? juce::String ("Not started yet") : status);
+        m.addItem ("Choose firmware folder...", [this]
+        {
+            fileChooser = std::make_unique<juce::FileChooser> ("M-VAVE FM-1 firmware folder (.fwsc files, one subfolder per firmware)",
+                                                               fm1FirmwareFolder());
+            fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
+                {
+                    if (safe != nullptr && fc.getResult() != juce::File())
+                        safe->koni.setFm1Folder (fc.getResult());
+                });
+        });
+        m.addItem ("Open firmware folder", [] { const auto f = fm1FirmwareFolder(); f.createDirectory(); f.startAsProcess(); });
+        m.addItem ("Restart", [this] { koni.rescanFm1(); });
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fm1Section));
     }
 
     // Skin (UI/Skin.h): ajuste global; se aplica al momento en esta ventana y en las flotantes (las demás instancias, al repintar)
@@ -1179,6 +1203,7 @@ private:
         mt32Section.setVisible (engine == 14);
         mt32DisplaySection.setVisible (engine == 14);
         gusSection.setVisible (engine == 15);
+        fm1Section.setVisible (engine == 16);
         keyboard.setVisible (keyboardMode() == 0); // el piano en todos los motores (el Theremin y el Stylophone lo doblan a su rango)
         styloPad.setVisible (engine == 3 && padMode() == 0);
         padTab->setVisible (engine == 1 || engine == 3);
@@ -2166,6 +2191,7 @@ private:
                          return { { 1.0f, { &oplSection, &opllSection, &oplLfoSection }, 1 } };
                      return { { 1.0f, { &oplSection, &oplRhythmSection, &oplLfoSection }, 1 } };
             case 14: return { { 1.0f, { &mt32Section, &mt32DisplaySection }, 1 } }; // controles y, a la derecha, el LCD
+            case 16: return { { 2.4f, { &fm1Section }, 1 } }; // la pantalla del aparato
             case 15: return { { 2.4f, { &gusSection }, 1 } }; // un bloque alto: dos filas de controles y, a su derecha, el mapa de voces
             default: return { { 1.0f, { &ansSection }, 1 } };
         }
@@ -3598,6 +3624,7 @@ private:
     LfoView lfoView { koni.apvts, false }, lfo2View { koni.apvts, true }; // ídem, LFO 1 y LFO 2
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
     GusDisplay gusDisplay { koni }; // antes que gusSection (componente de la sección): se destruye después
+    Fm1Screen fm1Screen { koni }; // antes que fm1Section (cuerpo de la sección): se destruye después
     juce::ComboBox dx7VoiceBox; // igual, antes que fmSection
     int shownDx7Bank = -1;
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
@@ -3624,7 +3651,7 @@ private:
             pvOscSection { "Polivoks VCO" }, pvFilterSection { "Polivoks Mixer / VCF" }, pvFEnvSection { "Polivoks Filter EG" },
             pvAEnvSection { "Polivoks Amp EG" }, pvLfoSection { "Polivoks LFO" }, ansSection { "ANS" },
             mdSection { "Mega Drive" }, mdLfoSection { "MD LFO" }, mdVoiceSection { "MD Voice" }, mdPsgSection { "MD PSG (SN76489)" }, snesSection { "SNES" }, snesEnvSection { "SNES Envelope" },
-            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplRhythmSection { "OPL Rhythm / GM" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, gusSection { "Gravis UltraSound" }, fmDisplaySection { "Display" }, vl1DisplaySection { "Display" },
+            snesEchoSection { "SNES Echo / Output" }, n64Section { "N64" }, n64EnvSection { "N64 Envelope" }, n64FxSection { "N64 Effect" }, oplSection { "OPL" }, oplRhythmSection { "OPL Rhythm / GM" }, oplLfoSection { "OPL LFO / Output" }, opllSection { "OPLL / VRC7" }, mt32Section { "Roland MT-32" }, mt32DisplaySection { "Display" }, gusSection { "Gravis UltraSound" }, fm1Section { "M-VAVE FM-1" }, fmDisplaySection { "Display" }, vl1DisplaySection { "Display" },
             flangerSection { "Flanger" }, fshiftSection { "Freq Shifter" }, leslieSection { "Leslie" }, springSection { "Spring Reverb" }, eqSection { "EQ" },
             transSection { "Transient" }, compSection { "Compressor" }, limiterSection { "Limiter" },
             ampSection { "Amp" }, waveSection { "Wave" };

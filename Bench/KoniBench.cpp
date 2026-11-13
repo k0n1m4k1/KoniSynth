@@ -231,6 +231,7 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
             dumpState.replaceWithText (inner.toBase64Encoding());
     }
 
+    plugin.setNonRealtime (true); // un render es una exportación (el FM-1 avanza su emulador aquí en vez de en su hilo)
     plugin.prepareToPlay (rate, kBlockSize);
     const auto total = (int) (seconds * rate);
     const auto outChannels = stereo ? 2 : 1;

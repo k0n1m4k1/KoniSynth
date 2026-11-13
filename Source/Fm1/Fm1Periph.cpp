@@ -211,6 +211,13 @@ PeriphDue Periph::advance (uint64_t n)
     return due;
 }
 
+void Periph::schedule (uint64_t at, const PanelAction& a)
+{
+    const auto it = std::upper_bound (script.begin(), script.end(), at, [] (uint64_t c, const auto& e) { return c < e.first; });
+    script.insert (it, { at, a });
+    nextDue = std::min (nextDue, at);
+}
+
 void Periph::chipReset()
 {
     Periph p;

@@ -80,3 +80,19 @@ static juce::File gusPatchFolder()
 }
 
 static void setGusPatchFolder (const juce::File& folder) { setConfigText ("gusPatches", folder.getFullPathName()); }
+
+// Carpeta de firmwares del M-VAVE FM-1: una subcarpeta por firmware con sus versiones (.fwsc), p. ej. M-VAVE/FM-1_015.fwsc o
+// GHOULBOX/ghoulbox-2.4.fwsc. La elegida (clave fm1Firmware) o Documentos/KoniSynth/Firmware/FM-1. KONI_FM1_FIRMWARE (pruebas y
+// KoniBench) la sustituye sin tocar el ajuste del usuario. KoniSynth no incluye ningún firmware: los aporta el usuario
+static juce::File fm1FirmwareFolder()
+{
+    if (const auto env = juce::SystemStats::getEnvironmentVariable ("KONI_FM1_FIRMWARE", {}); env.isNotEmpty())
+        return juce::File (env);
+    auto config = openConfig();
+    const auto path = config != nullptr ? config->getValue ("fm1Firmware").trim() : juce::String();
+    return path.isNotEmpty() && juce::File::isAbsolutePath (path)
+               ? juce::File (path)
+               : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("KoniSynth/Firmware/FM-1");
+}
+
+static void setFm1FirmwareFolder (const juce::File& folder) { setConfigText ("fm1Firmware", folder.getFullPathName()); }

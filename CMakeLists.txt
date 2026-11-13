@@ -37,7 +37,13 @@ target_sources(KoniSynth PRIVATE Source/KoniSynth.cpp Source/SimdAvx2.cpp
     Source/WinMaximiseFix.cpp # Windows: ventana maximizada con la barra de tareas a la izquierda o arriba (en otros sistemas, vacío)
     Source/ThirdParty/NukedOPLL/opll.c # Nuked-OPLL, GPL-2.0+ (YM2413 / VRC7)
     Source/ThirdParty/TDA8425_emu/TDA8425_emu.c Source/ThirdParty/YM7128B_emu/YM7128B_emu.c # AdLib Gold (A. Zoppi, BSD-2-Clause)
-    Source/ThirdParty/MTS-ESP/libMTSClient.cpp) # cliente MTS-ESP (ODDSound), 0BSD: carga LIBMTS.dll solo si está instalada
+    Source/ThirdParty/MTS-ESP/libMTSClient.cpp # cliente MTS-ESP (ODDSound), 0BSD: carga LIBMTS.dll solo si está instalada
+    # Emulador del M-VAVE FM-1 (motor 16; port de fm1-emu, MIT): unidades propias, como en KoniFm1Tests y KoniFm1Run
+    Source/Fm1/Fm1Isa.cpp Source/Fm1/Fm1Cpu.cpp Source/Fm1/Fm1Fwsc.cpp Source/Fm1/Fm1Devices.cpp Source/Fm1/Fm1Periph.cpp
+    Source/Fm1/Fm1Soc.cpp)
+# la tabla de la ISA (Fm1IsaTable.inc, 3,2 MB) necesita /bigobj; los comentarios en español, /utf-8
+set_source_files_properties(Source/Fm1/Fm1Isa.cpp Source/Fm1/Fm1Cpu.cpp Source/Fm1/Fm1Fwsc.cpp Source/Fm1/Fm1Devices.cpp
+    Source/Fm1/Fm1Periph.cpp Source/Fm1/Fm1Soc.cpp PROPERTIES COMPILE_OPTIONS "$<$<CXX_COMPILER_ID:MSVC>:/utf-8;/bigobj>")
 # Código de terceros sin modificar: sin avisos (los suyos no son de KoniSynth)
 set_source_files_properties(Source/ThirdParty/NukedOPLL/opll.c Source/ThirdParty/TDA8425_emu/TDA8425_emu.c
     Source/ThirdParty/YM7128B_emu/YM7128B_emu.c PROPERTIES COMPILE_OPTIONS "$<$<C_COMPILER_ID:MSVC>:/w>")
