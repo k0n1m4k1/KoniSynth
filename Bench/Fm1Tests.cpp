@@ -1,17 +1,20 @@
 // Pruebas del núcleo pi32v2 del motor FM-1 (Source/Fm1). Sin JUCE.
 //
-// Uso: KoniFm1Tests [--listing <objdump.txt> ...]
+// Uso: KoniFm1Tests [--listing <objdump.txt> ...] [--fwsc <paquete.fwsc> [--app <app.bin>] ...]
 //   sin argumentos: las pruebas de ejecución, portadas de fm1-emu (crate fm1-core, módulo tests; MIT) con sus mismos
 //   bytes y resultados esperados; solo las que van por step (la ruta de referencia). Las de micro-ops, bloques, JIT y
 //   costes de ciclo no aplican aquí.
 //   --listing: además decodifica cada instrucción de un listado del objdump de JieLi (formato "  27c:\t40 f0 10 27 \t...")
 //   y compara la longitud con la del listado (lo mismo que tools/fm1/check_isa.py, ahora con el decodificador C++).
 #include "../Source/Fm1/Fm1Cpu.h"
+#include "../Source/Fm1/Fm1Fwsc.h"
 
 #include <algorithm>
+#include <bit>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
@@ -351,7 +354,7 @@ FlatRam thenPartProgram (bool call)
     FlatRam ram (0x100);
     ram.put (0x10, { 0xc5, 0x21, (uint8_t) (call ? 0x80 : 0xc5), (uint8_t) (call ? 0x00 : 0x21) });
     ram.put (0x80, { 0xb0, 0xe8, 0x00, 0x10 });
-    ram.put (0x84, { (uint8_t) (call ? 0xbf : 0xff), 0xea, (uint8_t) off, (uint8_t) (off >> 8) });
+    ram.put (0x84, { (uint8_t) (call ? 0xbf : 0xff), 0xea, (uint8_t) (off & 0xff), (uint8_t) (off >> 8) });
     ram.put (0x88, { 0x40, 0x20 });
     ram.put (0x8a, { 0xc6, 0x21 });
     ram.put (0x14, { 0xff, 0xea, 0xfe, 0xff });
@@ -421,7 +424,7 @@ void pairMultiplyAccumulate()
     cpu.regs[0] = 0xffffffff; cpu.regs[1] = 1; cpu.regs[3] = 0x10000; cpu.regs[7] = 0x10001;
     step (cpu, ram);
     const uint64_t want = 0x1ffffffffull + 0x10000ull * 0x10001ull;
-    CHECK (cpu.regs[0] == (uint32_t) want && cpu.regs[1] == (uint32_t) (want >> 32), "r1_r0 += r3 * r7");
+    CHECK (cpu.regs[0] == (uint32_t) (want & 0xffffffffu) && cpu.regs[1] == (uint32_t) (want >> 32), "r1_r0 += r3 * r7");
 }
 
 uint64_t pairOfRegs (const Cpu& c, int p) { return ((uint64_t) c.regs[2 * p + 1] << 32) | c.regs[2 * p]; }
@@ -502,6 +505,420 @@ void pairHeadByteExtract()
     step (cpu, ram);
     CHECK_EQ (ram.read8 (0x4b), 0xef, "el store ve el r0 viejo (su byte bajo)");
     CHECK_EQ (cpu.regs[0], 0xef, "r0 = byte bajo");
+}
+
+void shiftImmHighSource()
+{
+    FlatRam ram (0x100);
+    ram.put (0, { 0xc0, 0xe1, 0xc8, 0x10, 0xc0, 0xe1, 0xc1, 0x38 });
+    Cpu cpu (0);
+    cpu.regs[12] = 3;
+    step (cpu, ram);
+    step (cpu, ram);
+    CHECK_EQ (cpu.regs[1], 0x300, "r1 = r12 << 8");
+    CHECK_EQ (cpu.regs[3], 1, "r3 = r12 >> 1");
+}
+
+void spPairStoreLargeOffset()
+{
+    FlatRam ram (0x800);
+    ram.put (0, { 0xd0, 0xe9, 0x21, 0xa4, 0xd0, 0xe9, 0xc0, 0x01 });
+    Cpu cpu (0);
+    cpu.sp = 0x100;
+    cpu.regs[10] = 0x11223344; cpu.regs[11] = 0x55667788;
+    step (cpu, ram);
+    CHECK_EQ (ram.read32 (0x100 + 1056), 0x11223344, "d[sp+1056] bajo");
+    CHECK_EQ (ram.read32 (0x100 + 1060), 0x55667788, "d[sp+1056] alto");
+    cpu.sp = 0x100 + 1056 - 448;
+    step (cpu, ram);
+    CHECK (cpu.regs[0] == 0x11223344 && cpu.regs[1] == 0x55667788, "r1_r0 = d[sp+448]");
+}
+
+void pairAccessModes()
+{
+    FlatRam ram (0x400);
+    ram.put (0, { 0x5c, 0xec, 0x13, 0x40, 0x57, 0xec, 0x19, 0x8f, 0x58, 0xec, 0x09, 0x20, 0x58, 0xec, 0x13, 0x82 });
+    Cpu cpu (0);
+    cpu.regs[0] = 0x40; cpu.regs[1] = 0x100;
+    cpu.regs[4] = 0x11; cpu.regs[5] = 0x22; cpu.regs[8] = 0x33; cpu.regs[9] = 0x44; cpu.regs[2] = 0x55; cpu.regs[3] = 0x66;
+    step (cpu, ram);
+    CHECK (cpu.regs[1] == 0x140 && ram.read32 (0x140) == 0x11 && ram.read32 (0x144) == 0x22, "d[++r1=r0] = r5_r4");
+    step (cpu, ram);
+    CHECK (ram.read32 (0x138) == 0x33 && ram.read32 (0x13c) == 0x44, "d[r1+-8] = r9_r8");
+    step (cpu, ram);
+    CHECK (cpu.regs[0] == 0x48 && ram.read32 (0x40) == 0x55 && ram.read32 (0x44) == 0x66, "d[r0++=8] = r3_r2");
+    cpu.regs[2] = 0x80;
+    step (cpu, ram);
+    CHECK (ram.read32 (0x1c0) == 0x33 && ram.read32 (0x1c4) == 0x44, "d[r1+r2] = r9_r8");
+}
+
+void bitfieldExtractIsNotAnAdd()
+{
+    FlatRam ram (0x100);
+    ram.put (0, { 0xb4, 0xe1, 0xa0, 0x4b });  // r4 = uextra(r4, p:23, l:8)
+    Cpu cpu (0);
+    cpu.regs[4] = std::bit_cast<uint32_t> (1e-5f);
+    step (cpu, ram);
+    CHECK_EQ (cpu.regs[4], 0x6e, "exponente de 1e-5");
+}
+
+void fpuOpsAndFloatCompare()
+{
+    FlatRam ram (0x100);
+    ram.put (0, { 0x3f, 0xe5, 0x30, 0x57, 0x3f, 0xe5, 0x1f, 0x65, 0x3f, 0xe5, 0x8f, 0x26, 0x12, 0xe9, 0x80, 0x01, 0x40, 0x20 });
+    Cpu cpu (0);
+    cpu.regs[3] = std::bit_cast<uint32_t> (2.5f);
+    cpu.regs[7] = std::bit_cast<uint32_t> (-7.75f);
+    cpu.regs[1] = std::bit_cast<uint32_t> (0.0f);
+    cpu.regs[0] = 1;
+    for (int i = 0; i < 4; ++i) step (cpu, ram);
+    CHECK (std::bit_cast<float> (cpu.regs[5]) == -5.25f, "r5 = r3 + r7 (f)");
+    CHECK_EQ ((int32_t) cpu.regs[6], -5, "r6 = ftoi(r5)");
+    CHECK (std::bit_cast<float> (cpu.regs[2]) == -5.0f, "r2 = itof(r6)");
+    CHECK (cpu.pc == 18 && cpu.regs[0] == 1, "-5.0 u>= 0.0 es falso: bloque saltado");
+}
+
+void shortShiftBy32()
+{
+    FlatRam ram (0x100);
+    ram.put (0, { 0xdf, 0xa0, 0x32, 0xa0 });
+    Cpu cpu (0);
+    cpu.regs[5] = 0x80001234; cpu.regs[3] = 0xffffffff;
+    step (cpu, ram);
+    step (cpu, ram);
+    CHECK_EQ (cpu.regs[7], 0xffffffff, "r7 = r5 >>> 32");
+    CHECK_EQ (cpu.regs[2], 0, "r2 = r3 << 32");
+}
+
+void pushPopRegisterMask()
+{
+    FlatRam ram (0x200);
+    ram.put (0, { 0xd9, 0xe8, 0xf0, 0x0d, 0xd5, 0xe8, 0xf0, 0x0d });
+    Cpu cpu (0);
+    cpu.sp = 0x200;
+    cpu.rets = 0x44;
+    for (int r = 0; r < 16; ++r) cpu.regs[r] = 0x100u + (uint32_t) r;
+    step (cpu, ram);
+    CHECK_EQ (cpu.sp, 0x200 - 4 * 8, "sp tras el push");
+    CHECK_EQ (ram.read32 (0x1fc), 0x44, "rets arriba");
+    CHECK_EQ (ram.read32 (0x1f8), 0x10b, "luego r11");
+    CHECK_EQ (ram.read32 (0x200 - 32), 0x104, "r4 abajo");
+    for (auto& r : cpu.regs) r = 0;
+    step (cpu, ram);
+    CHECK_EQ (cpu.pc, 0x44, "pc");
+    CHECK_EQ (cpu.sp, 0x200, "sp");
+    CHECK (cpu.regs[4] == 0x104 && cpu.regs[8] == 0x108 && cpu.regs[9] == 0 && cpu.regs[10] == 0x10a && cpu.regs[11] == 0x10b, "registros");
+}
+
+void retsMaskPopAndPairs()
+{
+    FlatRam ram (0x200);
+    ram.put (0, { 0xd9, 0xe8, 0xf0, 0x0d, 0xd1, 0xe8, 0xf0, 0x0d, 0x40, 0x15, 0x10, 0x04 });
+    Cpu cpu (0);
+    cpu.sp = 0x200;
+    cpu.rets = 0x44;
+    for (int r = 0; r < 16; ++r) cpu.regs[r] = 0x100u + (uint32_t) r;
+    step (cpu, ram);
+    for (auto& r : cpu.regs) r = 0;
+    cpu.rets = 0;
+    step (cpu, ram);
+    CHECK (cpu.pc == 8 && cpu.sp == 0x200 && cpu.rets == 0x44, "pop con rets, sin salto");
+    CHECK (cpu.regs[4] == 0x104 && cpu.regs[8] == 0x108 && cpu.regs[9] == 0 && cpu.regs[10] == 0x10a && cpu.regs[11] == 0x10b, "registros");
+    cpu.regs[5] = 0x55;
+    step (cpu, ram);
+    CHECK (cpu.regs[1] == 0x55 && cpu.regs[0] == 0x104, "r1_r0 = r5_r4");
+    step (cpu, ram);
+    CHECK (cpu.sp == 0x1fc && ram.read32 (0x1fc) == 0x44, "[--sp] = rets");
+}
+
+void shiftAndAddFields()
+{
+    FlatRam ram (12);
+    ram.put (0, { 0xa2, 0xa2, 0x9a, 0xa2, 0x93, 0x1c });
+    Cpu cpu (0);
+    cpu.regs[1] = 0xfffffff0; cpu.regs[2] = 0x9e7c;
+    step (cpu, ram);
+    CHECK_EQ (cpu.regs[2], 0x9e7c >> 2, "r2 = r2 >> 2");
+    step (cpu, ram);
+    CHECK_EQ (cpu.regs[2], 0xfffffffc, "r2 = r1 >>> 2");
+    step (cpu, ram);
+    CHECK_EQ (cpu.regs[3], 0xfffffff0u + 0xfffffffcu, "r3 = r1 + r2");
+}
+
+void repBlockRegisterCount()
+{
+    FlatRam ram (0x100);
+    ram.put (0, { 0x12, 0x03, 0x13, 0x05, 0xc3, 0x05, 0x80, 0x00 });  // rep 4 r2 { r3 = [r1++=4]; [r4++=4] = r3 }; rts
+    for (uint32_t i = 0; i < 3; ++i) ram.put32 (0x40 + 4 * i, 0x1111 * (i + 1));
+    Cpu cpu (0);
+    cpu.regs[1] = 0x40; cpu.regs[2] = 3; cpu.regs[4] = 0x80;
+    for (int i = 0; i < 7; ++i) step (cpu, ram);
+    CHECK_EQ (cpu.pc, 6, "el bloque corrió 3 veces y siguió");
+    CHECK_EQ (cpu.regs[2], 0, "r2");
+    CHECK_EQ (cpu.regs[1], 0x4c, "r1");
+    CHECK_EQ (cpu.regs[4], 0x8c, "r4");
+    CHECK_EQ (ram.read32 (0x88), 0x3333, "copia");
+    FlatRam ram2 (10);
+    ram2.put (0, { 0x02, 0x03, 0xb1, 0x05, 0x80, 0x00 });
+    Cpu cpu2 (0);
+    cpu2.regs[2] = 0;
+    step (cpu2, ram2);
+    CHECK_EQ (cpu2.pc, 4, "cuenta 0: salta el bloque");
+}
+
+// run1 / run_regs de fm1-core: una instrucción en 0, r0..r15 = 0x1000 + 0x100·n, sp = 0x2000
+struct Run1 { Cpu cpu; FlatRam ram; };
+Run1 run1 (std::initializer_list<uint8_t> bytes, std::initializer_list<std::pair<size_t, uint32_t>> pokes)
+{
+    Run1 x { Cpu (0), FlatRam (0x4000) };
+    for (size_t a = 0x40; a < 0x4000; a += 4) x.ram.put32 (a, (uint32_t) a);
+    for (const auto& [a, v] : pokes) x.ram.put32 (a, v);
+    x.ram.put (0, bytes);
+    for (int n = 0; n < 16; ++n) x.cpu.regs[n] = 0x1000u + 0x100u * (uint32_t) n;
+    x.cpu.sp = 0x2000;
+    step (x.cpu, x.ram);
+    return x;
+}
+
+Cpu runRegs (std::initializer_list<uint8_t> bytes, std::initializer_list<std::pair<int, uint32_t>> regs)
+{
+    FlatRam ram (0x4000);
+    ram.put (0, bytes);
+    Cpu cpu (0);
+    for (int n = 0; n < 16; ++n) cpu.regs[n] = 0x1000u + 0x100u * (uint32_t) n;
+    for (const auto& [r, v] : regs) cpu.regs[r] = v;
+    cpu.sp = 0x2000;
+    step (cpu, ram);
+    return cpu;
+}
+
+void pairHeadSregMoves()
+{
+    const auto run = [] (std::initializer_list<uint8_t> b, auto set)
+    {
+        FlatRam ram (0x100);
+        ram.put (0, b);
+        Cpu cpu (0);
+        set (cpu);
+        step (cpu, ram);
+        step (cpu, ram);
+        return cpu;
+    };
+    CHECK_EQ (run ({ 0x64, 0xf0, 0x00, 0x23 }, [] (Cpu& c) { c.rets = 0x02012345; }).regs[2], 0x02012345, "r2 = rets #");
+    CHECK_EQ (run ({ 0x64, 0xf0, 0x80, 0xa3 }, [] (Cpu& c) { c.regs[10] = 0x02001000; }).rets, 0x02001000, "rets = r10 #");
+    CHECK_EQ (run ({ 0x64, 0xf0, 0x00, 0xae }, [] (Cpu& c) { c.sp = 0x1f80; }).regs[10], 0x1f80, "r10 = sp #");
+}
+
+void bitTestBothWays()
+{
+    const auto run = [] (std::initializer_list<uint8_t> b, int r, uint32_t v)
+    {
+        FlatRam ram (0x100);
+        ram.put (0x80, b);
+        Cpu cpu (0x80);
+        cpu.regs[r] = v;
+        step (cpu, ram);
+        return cpu.pc;
+    };
+    CHECK_EQ (run ({ 0x60, 0xff, 0x01, 0x00, 0xfe, 0xff }, 0, 2), 0x82, "== 0 tomado");
+    CHECK_EQ (run ({ 0x60, 0xff, 0x01, 0x00, 0xfe, 0xff }, 0, 1), 0x86, "== 0 no tomado");
+    CHECK_EQ (run ({ 0x61, 0xff, 0x03, 0x50, 0x00, 0x80 }, 5, 2), 0x86u - 0x10000u, "!= 0 tomado hacia atrás");
+    CHECK_EQ (run ({ 0x61, 0xff, 0x03, 0x50, 0x00, 0x80 }, 5, 4), 0x86, "!= 0 no tomado");
+}
+
+void dspEncodings()
+{
+    CHECK_EQ (runRegs ({ 0xde, 0xe1, 0x6d, 0x39 }, { { 7, 1 }, { 6, 0 } }).regs[3], 8, "r3 = r7_r6 >> 29 (s)");
+    CHECK_EQ (runRegs ({ 0xde, 0xe1, 0x6d, 0x39 }, { { 7, 0x40000000 }, { 6, 0 } }).regs[3], 0x7fffffff, "saturado +");
+    CHECK_EQ (runRegs ({ 0xde, 0xe1, 0x6d, 0x39 }, { { 7, 0xffffffff }, { 6, 0xe0000000 } }).regs[3], 0xffffffff, "-1");
+    CHECK_EQ (runRegs ({ 0xde, 0xe1, 0x6d, 0x39 }, { { 7, 0x80000000 }, { 6, 0 } }).regs[3], 0x80000000, "saturado -");
+    CHECK_EQ (runRegs ({ 0xde, 0xe1, 0x01, 0x02 }, { { 1, 0xfffffffe }, { 0, 5 } }).regs[0], 0x7fffffff, "r0 = r1_r0 >> 33 (u)");
+    {
+        // d4 f1 05 eb: la rotación con acarreo (bit 27) no es la rotación de par: se para
+        FlatRam ram (0x4000);
+        ram.put (0, { 0xd4, 0xf1, 0x05, 0xeb });
+        Cpu cpu (0);
+        ++checks;
+        if (cpu.step (ram)) { ++failures; std::printf ("  FALLA %s: d4 f1 05 eb debía parar\n", currentTest); }
+    }
+    CHECK_EQ (runRegs ({ 0x39, 0xe4, 0x20, 0x13 }, { { 2, 0x7ffffff0 }, { 3, 0x100 } }).regs[1], 0x7fffffff, "r1 = r2 + r3 (ssat)");
+    CHECK_EQ (runRegs ({ 0x39, 0xe4, 0x20, 0x13 }, { { 2, 5 }, { 3, 0xfffffff9u } }).regs[1], 0xfffffffeu, "5 + -7");
+    CHECK_EQ (runRegs ({ 0x39, 0xe4, 0x28, 0x13 }, { { 2, 0x80000010 }, { 3, 0x100 } }).regs[1], 0x80000000, "r1 = r2 - r3 (ssat)");
+    CHECK_EQ (runRegs ({ 0x39, 0xe4, 0xe0, 0xf9 }, { { 14, 3 }, { 9, 4 } }).regs[15], 7, "r15 = r14 + r9 (ssat)");
+    CHECK_EQ (runRegs ({ 0xc4, 0xe1, 0x73, 0x61 }, { { 7, 0x00080001 } }).regs[6], std::rotr (0x00080001u, 19), "r6 = r7 <> 19");
+    CHECK_EQ (runRegs ({ 0xc4, 0xe1, 0xaf, 0x91 }, { { 10, 1 } }).regs[9], 2, "r9 = r10 <> 31");
+    CHECK_EQ (runRegs ({ 0x78, 0xe0, 0x01, 0x35 }, { { 5, 0x12345 } }).regs[3], 32767, "sat16 (s)");
+    CHECK_EQ (runRegs ({ 0x78, 0xe0, 0x00, 0x35 }, { { 5, 0xfffffffbu } }).regs[3], 0, "sat16 (u)");
+    CHECK_EQ (runRegs ({ 0x20, 0xe0, 0xd0, 0xec }, { { 14, 0x12345678 } }).regs[14], 0xd0345678, "r14.b3 = 208");
+    CHECK_EQ (runRegs ({ 0x20, 0xe0, 0xff, 0x24 }, { { 2, 0x12345678 } }).regs[2], 0x1234ff78, "r2.b1 = 255");
+    CHECK_EQ (runRegs ({ 0x94, 0xe1, 0x13, 0x16 }, { { 1, 0xff }, { 6, 3 } }).regs[1], 0xf7, "r1 & ~(1 << r6)");
+}
+
+void builtinEncodings()
+{
+    CHECK_EQ (runRegs ({ 0x08, 0xa1 }, { { 0, 0x7fffffff } }).regs[0], 0x7fffffff, "<<< satura");
+    CHECK_EQ (runRegs ({ 0x08, 0xa1 }, { { 0, 0x30000000 } }).regs[0], 0x60000000, "<<< 1");
+    CHECK_EQ (runRegs ({ 0x18, 0x1a }, { { 0, 0xfffffffdu }, { 1, 31 } }).regs[0], 0x80000000, "r0 <<<= r1");
+    CHECK_EQ (runRegs ({ 0xc0, 0xe1, 0xa9, 0x14 }, { { 10, 0x00400000 } }).regs[1], 0x7fffffff, "r1 = r10 <<< 9 satura");
+    CHECK_EQ (runRegs ({ 0xc0, 0xe1, 0xa9, 0x14 }, { { 10, 3 } }).regs[1], 3 << 9, "r1 = r10 <<< 9");
+    CHECK_EQ (runRegs ({ 0xc8, 0xe1, 0x11, 0x1a }, { { 1, 0xffffffffu }, { 10, 4 } }).regs[1], 0xfffffff0u, "r1 <<< r10");
+    CHECK_EQ (runRegs ({ 0x70, 0xe0, 0x80, 0x14 }, { { 4, 0x12340080 } }).regs[1], 0xffff8000, "revs(r4.l)");
+    auto c = runRegs ({ 0xd4, 0xe1, 0x01, 0x41 }, { { 5, 0 }, { 4, 1 } });
+    CHECK (c.regs[5] == 0x8000 && c.regs[4] == 0, "r5_r4 <>= 17");
+    c = runRegs ({ 0xdc, 0xe1, 0x00, 0x43 }, { { 5, 0 }, { 4, 1 }, { 3, 33 } });
+    CHECK (c.regs[5] == 0 && c.regs[4] == 0x80000000, "r5_r4 <>= r3");
+    CHECK_EQ (runRegs ({ 0xdf, 0xe1, 0xc1, 0x95 }, { { 13, 0xfffffff0 }, { 12, 0 }, { 5, 4 } }).regs[9], 0x80000000, "r9 = r13_r12 >> r5 (s)");
+    CHECK_EQ (runRegs ({ 0xdf, 0xe1, 0x20, 0x05 }, { { 3, 1 }, { 2, 0x10 }, { 5, 4 } }).regs[0], 0x10000001, "r0 = r3_r2 >> r5 (u)");
+    CHECK_EQ (runRegs ({ 0x80, 0xe1, 0x01, 0x14 }, { { 4, 0xffff00ff } }).regs[1], 15, "cls");
+    CHECK_EQ (runRegs ({ 0x80, 0xe1, 0x01, 0x14 }, { { 4, 1 } }).regs[1], 30, "cls(1)");
+    CHECK_EQ (runRegs ({ 0xb0, 0xe0, 0x00, 0x14 }, { { 1, 0x80000000 }, { 4, 0x80000000 } }).regs[1], 0x40000000, "brev add");
+}
+
+void vendorEncodings()
+{
+    auto x = run1 ({ 0xdc, 0xec, 0xcc, 0xbc }, {});
+    CHECK (x.cpu.regs[11] == 0x1c00 && x.cpu.regs[12] == 0x1c00 - 820, "r11 = [r12++=-820]");
+    x = run1 ({ 0xdf, 0xec, 0x00, 0x4f }, {});
+    CHECK (x.cpu.regs[4] == 0x1000 && x.cpu.regs[0] == 0x1000 - 16, "r4 = [r0++=-16]");
+    x = run1 ({ 0xd8, 0xec, 0x05, 0x1f }, {});
+    CHECK (x.ram.read32 (0x1000) == 0x1100 && x.cpu.regs[0] == 0x1000 + 244, "[r0++=244] = r1");
+    x = run1 ({ 0x5e, 0xec, 0x02, 0x21 }, {});
+    CHECK (x.cpu.regs[2] == 0x1000 && x.cpu.regs[3] == 0x1004 && x.cpu.regs[0] == 0x2100, "r3_r2 = d[r0++=r1]");
+    x = run1 ({ 0xdc, 0xe9, 0x00, 0x40 }, {});
+    CHECK (x.cpu.regs[4] == 0 && x.cpu.regs[8] == 0x1800, "r4 = b[sp] (u)");
+    x = run1 ({ 0xd8, 0xe9, 0x00, 0xf4 }, { { 0x2400, 0x9234 } });
+    CHECK_EQ (x.cpu.regs[15], 0x9234, "r15 = h[sp+1024] (u)");
+    x = run1 ({ 0xd9, 0xe9, 0x00, 0xf4 }, { { 0x2400, 0x9234 } });
+    CHECK_EQ (x.cpu.regs[15], 0xffff9234, "r15 = h[sp+1024] (s)");
+    x = run1 ({ 0xd8, 0xe9, 0x03, 0x40 }, {});
+    CHECK_EQ (x.ram.read32 (0x2000), (0x1400u << 16) | 0x2000u, "h[sp+2] = r4");
+    x = run1 ({ 0xd0, 0xed, 0x02, 0x39 }, { { 0x1000, 0x8001 } });
+    CHECK (x.cpu.regs[3] == 0x8001 && x.cpu.regs[0] == 0x1000 + 146, "r3 = h[r0++=146] (u)");
+    x = run1 ({ 0xd4, 0xed, 0x02, 0x39 }, { { 0x1000, 0x8001 } });
+    CHECK (x.cpu.regs[3] == 0xffff8001 && x.cpu.regs[0] == 0x1000 + 146, "r3 = h[r0++=146] (s)");
+}
+
+// Una ventana XIP: las direcciones se reducen a 64 KiB (Xip de la prueba de fm1-core)
+struct XipRam : FlatRam
+{
+    XipRam() : FlatRam (0x10000) {}
+    uint8_t read8 (uint32_t a) override { return FlatRam::read8 (a & 0xffff); }
+    void write8 (uint32_t a, uint8_t v) override { FlatRam::write8 (a & 0xffff, v); }
+};
+
+void blockMovesUpAndDown()
+{
+    const struct { uint8_t op; uint32_t at, base; } cases[] = {
+        { 0x00, 0x1000, 0x1000 }, { 0x10, 0x1000, 0x1008 }, { 0x20, 0x1000, 0x1000 }, { 0x30, 0x1000, 0x1008 },
+        { 0x40, 0x0ff8, 0x1000 }, { 0x50, 0x0ff8, 0x0ff8 }, { 0x60, 0x0ff8, 0x1000 }, { 0x70, 0x0ff8, 0x0ff8 } };
+    for (const auto& c : cases)
+    {
+        const bool store = (c.op & 0x20) != 0;
+        XipRam bus;
+        bus.put (0, { c.op, 0xeb, 0x06, 0x00 });
+        const uint32_t words[] = { 0x0ff8, 0x0ffc, 0x1000, 0x1004 };
+        for (uint32_t k = 0; k < 4; ++k) bus.put32 (words[k], 0xa0 + k);
+        Cpu cpu (0x02000000);
+        cpu.regs[0] = 0x1000; cpu.regs[1] = 0x11; cpu.regs[2] = 0x22;
+        step (cpu, bus);
+        const auto lo = bus.read32 (c.at), hi = bus.read32 (c.at + 4);
+        if (store) CHECK (lo == 0x11 && hi == 0x22, "guardado");
+        else CHECK (cpu.regs[1] == lo && cpu.regs[2] == hi && lo != 0, "cargado");
+        CHECK_EQ (cpu.regs[0], c.base, "la base");
+    }
+    // 41 eb 0a 00: {r1, r3} = [-r1]; la base, también en la lista, toma su palabra cargada
+    XipRam bus;
+    bus.put (0, { 0x41, 0xeb, 0x0a, 0x00 });
+    bus.put (0x0ff8, { 1, 0, 0, 0, 2, 0, 0, 0 });
+    Cpu cpu (0x02000000);
+    cpu.regs[1] = 0x1000; cpu.regs[3] = 0x33;
+    step (cpu, bus);
+    CHECK (cpu.regs[1] == 1 && cpu.regs[3] == 2, "{r1, r3} = [-r1]");
+}
+
+// ---- paquetes .fwsc (pruebas de fm1-soc/src/fwsc.rs) -------------------------------------------------------------------
+std::vector<uint8_t> fwscHeader (const char* id, size_t n)
+{
+    std::vector<uint8_t> f (n * 0x30 + 0x100, 0);
+    const auto len = std::strlen (id);
+    for (size_t i = 0; i < n; ++i)
+        f[i * 0x30 + 0x2f] = i < len ? (uint8_t) ((uint8_t) id[i] + (uint8_t) (i + 1)) : (uint8_t) 0x7d;
+    f[n * 0x30 + 0x2f] = 0x12;
+    return f;
+}
+
+void fwscContainerIdentity()
+{
+    std::string id;
+    CHECK_EQ (fwscContainer (fwscHeader ("FM-1_015", 20), id), 20, "bloques FM-1");
+    CHECK (id == "FM-1_015", "identidad FM-1_015");
+    CHECK_EQ (fwscContainer (fwscHeader ("SMK-37 Pro_016", 36), id), 36, "bloques SMK-37");
+    CHECK (id == "SMK-37 Pro_016", "identidad SMK-37 Pro_016");
+}
+
+void fwscDefaultBank()
+{
+    const auto allEq = [] (const std::vector<uint8_t>& v, size_t a, size_t b, uint8_t x)
+    { return std::all_of (v.begin() + (std::ptrdiff_t) a, v.begin() + (std::ptrdiff_t) b, [x] (uint8_t c) { return c == x; }); };
+    std::vector<uint8_t> fm (1 << 20, 0xff);
+    size_t usr = 0xea000;
+    CHECK (usrFillDefaults (fm, usr, UsrLayout::fm1), "banco por defecto FM-1");
+    CHECK (std::memcmp (&fm[usr + 0x4000 + 118], "EMU E.PNO ", 10) == 0, "primera voz");
+    CHECK (allEq (fm, usr + 0x10000, usr + 0x10000 + 128 * 59, 0), "ajustes a 0");
+    CHECK (! usrFillDefaults (fm, usr, UsrLayout::fm1), "un banco escrito se queda");
+
+    std::vector<uint8_t> smk (1 << 20, 0xff);
+    usr = 0xf4000;
+    CHECK (usrFillDefaults (smk, usr, UsrLayout::smk37), "banco por defecto SMK-37");
+    CHECK (std::memcmp (&smk[usr + 118], "EMU E.PNO ", 10) == 0, "voz 0");
+    CHECK (std::memcmp (&smk[usr + 128 + 118], "EMU BASS  ", 10) == 0, "voz 1");
+    CHECK (std::memcmp (&smk[usr + 0x1000 + 118], "INIT VOICE", 10) == 0, "banco 1, patch 0");
+    CHECK (allEq (smk, usr + 0x4000, usr + 0x9200, 0), "registros de 163 bytes y el bloque siguiente");
+    CHECK (allEq (smk, usr + 0x9200, usr + 0xa000, 0xff), "el resto intacto");
+    CHECK (allEq (smk, 0, usr, 0xff) && allEq (smk, usr + 0xa000, smk.size(), 0xff), "fuera del área intacto");
+    std::string err;
+    const std::vector<uint8_t> bank (4096, 0x23);
+    CHECK_EQ (usrLoadSyx (smk, usr, UsrLayout::smk37, bank, 0, err), 32, "32 voces");
+    CHECK (allEq (smk, usr, usr + 4096, 0x23), "voces cargadas");
+    CHECK (std::memcmp (&smk[usr + 4096 + 118], "INIT VOICE", 10) == 0, "la ranura 32 se conserva");
+}
+
+std::vector<uint8_t> readFile (const char* path)
+{
+    std::ifstream in (path, std::ios::binary);
+    return std::vector<uint8_t> ((std::istreambuf_iterator<char> (in)), std::istreambuf_iterator<char>());
+}
+
+// Desempaqueta un .fwsc; si se da un app.bin extraído por otra herramienta (jl-misctools), lo compara byte a byte
+void checkFwsc (const char* path, const char* appBin)
+{
+    const auto file = readFile (path);
+    FwscUnpacked u;
+    std::string err;
+    ++checks;
+    if (! fwscUnpack (file, u, err))
+    {
+        ++failures;
+        std::printf ("  FALLA %s: %s\n", path, err.c_str());
+        return;
+    }
+    std::printf ("  %s: identidad \"%s\", flash %zu B, área 0x%zx (+%zu B), fin protegido 0x%zx, clave 0x%04x\n", path,
+                 u.identity.c_str(), u.raw.size(), u.area, u.size, u.end, u.key);
+    for (const auto& h : u.dir)
+        std::printf ("    %-14s off 0x%06zx  size %7zu  flags 0x%02x\n", h.name.c_str(), h.offset, h.size, h.flags);
+    if (appBin == nullptr)
+        return;
+    const auto ref = readFile (appBin);
+    const auto* app = u.entry ("app.bin");
+    ++checks;
+    if (app == nullptr || app->offset + ref.size() > u.xip.size()
+        || std::memcmp (u.xip.data() + app->offset, ref.data(), ref.size()) != 0 || app->size != ref.size())
+    {
+        ++failures;
+        std::printf ("  FALLA %s: app.bin distinto de %s (%zu B)\n", path, appBin, ref.size());
+    }
+    else
+        std::printf ("    app.bin idéntico a %s (%zu B)\n", appBin, ref.size());
 }
 
 // ---- decodificador contra un listado del objdump de JieLi --------------------------------------------------------------
@@ -603,6 +1020,24 @@ int main (int argc, char** argv)
         { "multiply_immediate_dual_issue", multiplyImmediateDualIssue },
         { "pair_store_and_load", pairStoreAndLoad },
         { "pair_head_byte_extract", pairHeadByteExtract },
+        { "shift_imm_high_source_register", shiftImmHighSource },
+        { "sp_pair_store_large_offset", spPairStoreLargeOffset },
+        { "pair_access_modes", pairAccessModes },
+        { "bitfield_extract_is_not_an_add", bitfieldExtractIsNotAnAdd },
+        { "fpu_ops_and_float_compare", fpuOpsAndFloatCompare },
+        { "short_shift_by_32", shortShiftBy32 },
+        { "push_pop_register_mask", pushPopRegisterMask },
+        { "rets_mask_pop_and_pair_micro_ops (step)", retsMaskPopAndPairs },
+        { "shift_and_add_fields", shiftAndAddFields },
+        { "rep_block_runs_register_count_times", repBlockRegisterCount },
+        { "pair_head_special_register_moves", pairHeadSregMoves },
+        { "bit_test_branches_both_ways", bitTestBothWays },
+        { "dsp_encodings", dspEncodings },
+        { "builtin_encodings", builtinEncodings },
+        { "vendor_encodings", vendorEncodings },
+        { "block_moves_up_and_down (step)", blockMovesUpAndDown },
+        { "fwsc container_counts_blocks_and_reads_the_identity", fwscContainerIdentity },
+        { "fwsc default_bank_in_each_boards_usr_layout", fwscDefaultBank },
     };
     std::printf ("Tabla pi32v2: %zu clases\n", entryCount());
     for (const auto& t : tests)
@@ -617,6 +1052,13 @@ int main (int argc, char** argv)
         {
             currentTest = argv[i + 1];
             checkListing (argv[++i]);
+        }
+        else if (std::strcmp (argv[i], "--fwsc") == 0)
+        {
+            currentTest = argv[i + 1];
+            const char* app = (i + 3 < argc && std::strcmp (argv[i + 2], "--app") == 0) ? argv[i + 3] : nullptr;
+            checkFwsc (argv[i + 1], app);
+            i += app != nullptr ? 3 : 1;
         }
     std::printf ("\n%d comprobaciones, %d fallos\n", checks, failures);
     return failures == 0 ? 0 : 1;
