@@ -305,7 +305,8 @@ int main (int argc, char** argv)
             ok = false;
             break;
         }
-        if (dump != nullptr && *ramAt (dumpIdx) != lastIdx)
+        // el firmware hace índice + 1 y, si llega a 2, lo pone a 0: el 2 es transitorio y no marca un bloque
+        if (dump != nullptr && *ramAt (dumpIdx) != lastIdx && *ramAt (dumpIdx) < 2)
         {
             // registro (780 B): tramas de DAC ya emitidas (uint64), índice del búfer escrito (uint32), sus 64 float
             const uint8_t idx = *ramAt (dumpIdx);
