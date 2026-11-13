@@ -252,6 +252,31 @@ void Soc::p33Event()
         pd.nextDue = std::min (pd.nextDue, pd.wdtAt);
 }
 
+bool Soc::pureRead (uint32_t addr) const noexcept
+{
+    switch (region (addr))
+    {
+        case Region::Xip: case Region::XipFlash: case Region::Ram: case Region::Ovl: case Region::Sram2: return true;
+        case Region::Usb: return true;  // (USB sin portar: almacenamiento simple)
+        case Region::Irqc: case Region::Iomap: case Region::Clk: case Region::Ana: case Region::Bt: case Region::Dbg: case Region::Guard:
+            return true;
+        case Region::Spi2: case Region::Crc: case Region::P33: case Region::Alnk: case Region::Uart1: case Region::Sfcenc: return true;
+        case Region::Irqc2: return addr != 0x1eef0f0;  // la palabra del contador del tick cuenta el reloj
+        case Region::Timer:
+            // las palabras de control y periodo; los contadores cuentan el reloj
+            return addr == 0x10800 || addr == 0x10900 || addr == 0x10908 || (addr & ~0x300u) == 0x10400 || (addr & ~0x300u) == 0x10408;
+        case Region::Gpio: case Region::Adc: return true;
+        case Region::Spi1: return ! lcdTimed;
+        default: return false;
+    }
+}
+
+bool Soc::loopWriteOk (uint32_t addr) const noexcept
+{
+    const auto r = region (addr);
+    return r == Region::P33 || (r == Region::Adc && (addr == 0x13100 || addr == 0x13104));
+}
+
 std::optional<uint8_t> Soc::ramByte (uint32_t a) const noexcept
 {
     if (a >= kRamBase && a - kRamBase < ram.size()) return ram.read8 (a - kRamBase);
@@ -804,6 +829,206 @@ void Machine::cpu0Between()
     }
 }
 
+// ---- salto de bucles de sondeo (probe_loop de fm1-emu) ---------------------------------------------------------------------
+namespace
+{
+constexpr uint32_t kProbeMax = 2048;  // lo más que un sondeo sigue a cpu0 buscando una vuelta
+constexpr uint32_t kProbeMin = 1024;  // solo con al menos estas instrucciones y ciclos por delante
+constexpr int64_t kCreditMax = 1 << 16;
+constexpr size_t kVisits = 8;         // visitas al pc inicial que se guardan para comparar
+
+// cpu0 tal como la ve un sondeo: un acceso que una vuelta saltada no podría repetir no se hace (una carga lee 0) y marca el
+// sondeo como malo; las escrituras a RAM se apuntan con lo que había
+struct ProbeBus : Bus
+{
+    Soc& soc;
+    bool bad = false;
+    std::vector<std::pair<uint32_t, uint32_t>>& log;
+    std::optional<P33>& p33Was;
+    ProbeBus (Soc& s, std::vector<std::pair<uint32_t, uint32_t>>& l, std::optional<P33>& p) : soc (s), log (l), p33Was (p) {}
+
+    bool load (uint32_t a)
+    {
+        if (bad) return false;
+        if ((size_t) (a - kRamBase) < soc.ram.size() || soc.pureRead (a)) return true;
+        bad = true;
+        return false;
+    }
+    bool store (uint32_t a, uint32_t width, uint32_t word)
+    {
+        if (bad) return false;
+        const auto o = a - kRamBase;
+        if ((size_t) o < soc.ram.size())
+        {
+            // no en código (sus escrituras cuentan) ni más allá del final de la RAM
+            if ((size_t) o + width > soc.ram.size() || soc.ram.isCode (o))
+            {
+                bad = true;
+                return false;
+            }
+            const auto w = o & ~3u;
+            log.push_back ({ w, soc.ram.read32 (w) });
+            if ((o & 3) + width > 4)  // un store no alineado llega a la palabra siguiente
+                log.push_back ({ w + 4, soc.ram.read32 (w + 4) });
+            return true;
+        }
+        if (! soc.loopWriteOk (word))
+        {
+            bad = true;
+            return false;
+        }
+        if (! p33Was && word - P33::kCon < 8)
+            p33Was = soc.p33;
+        return true;
+    }
+    uint8_t read8 (uint32_t a) override { return load (a & ~3u) ? soc.read8 (a) : 0; }
+    uint16_t read16 (uint32_t a) override { return load (a & ~3u) ? soc.read16 (a) : 0; }
+    uint32_t read32 (uint32_t a) override { return load (a) ? soc.read32 (a) : 0; }
+    uint32_t fetch32 (uint32_t a) override { return load (a) ? soc.fetch32 (a) : 0; }
+    void write8 (uint32_t a, uint8_t v) override { if (store (a, 1, a & ~3u)) soc.write8 (a, v); }
+    void write16 (uint32_t a, uint16_t v) override { if (store (a, 2, a & ~3u)) soc.write16 (a, v); }
+    void write32 (uint32_t a, uint32_t v) override { if (store (a, 4, a)) soc.write32 (a, v); }
+    bool hwLock (uint32_t, bool) override { bad = true; return true; }
+    void spin (uint32_t, uint32_t) override { bad = true; }  // la vuelta de un cerrojo de byte no es un bucle de sondeo
+    void idle (uint32_t) override { bad = true; }
+};
+} // namespace
+
+bool Machine::LoopSkip::mayProbe (uint64_t now)
+{
+    if (now < nextTry)
+        return false;
+    const auto earned = (int64_t) std::min<uint64_t> ((now > creditAt ? now - creditAt : 0) / 2048, (uint64_t) kCreditMax);
+    credit = std::min (credit + earned, kCreditMax);
+    creditAt = now;
+    return credit > 0;
+}
+
+// Sin sondeos un tiempo (doblando hasta ~17 ms a 240 MHz)
+void Machine::LoopSkip::backOff (uint64_t now)
+{
+    backoff = std::clamp<uint64_t> (backoff * 2, 1u << 11, 1u << 22);
+    nextTry = now + backoff;
+}
+
+// Busca un bucle de sondeo en el pc de cpu0 con el tick de esa instrucción pagado. Devuelve las instrucciones ejecutadas,
+// vueltas saltadas incluidas (como mucho budget; el tick de la siguiente sin pagar), o 0: no hay bucle y nada cambió
+uint32_t Machine::probeLoop (uint32_t budget)
+{
+    Cpu::PlainState start;
+    if (! cpu0.plainState (start))
+        return 0;
+    const auto pc0 = start.pc;
+    const auto cycles0 = soc.periph.cycles, due0 = soc.periph.nextDue, wdt0 = soc.periph.wdtAt;
+    const auto adc0 = soc.periph.adcState();
+    const auto insns0 = cpu0.insnCount;
+    auto& ls = loopSkip;
+    ++ls.probes;
+    ls.log.clear();
+    ls.seen.clear();
+    std::optional<P33> p33Was;
+    uint32_t i = 0;
+    size_t visits = 0;
+    int result = 0;  // 1 = vuelta encontrada (len en roundLen); -1 = no; -2 = un evento vence (mirar después de él)
+    uint32_t roundLen = 0;
+    while (true)
+    {
+        Cpu::PlainState core;
+        if (cpu0.pc == pc0 && cpu0.plainState (core))
+        {
+            const auto snap = soc.p33.snap();
+            const auto adc = soc.periph.adcState();
+            const LoopSkip::Visit visit { core, snap, adc, i, ls.log.size() };
+            size_t j = 0;
+            while (j < ls.seen.size() && ! (ls.seen[j].core == core && ls.seen[j].p33 == snap && ls.seen[j].adc == adc))
+                ++j;
+            if (j < ls.seen.size())
+            {
+                // cada palabra que la vuelta escribió conserva lo que tenía al empezarla (el primer valor apuntado)
+                ls.scratch.assign (ls.log.begin() + (std::ptrdiff_t) ls.seen[j].log, ls.log.end());
+                std::stable_sort (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+                ls.scratch.erase (std::unique (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first == b.first; }),
+                                  ls.scratch.end());
+                if (std::all_of (ls.scratch.begin(), ls.scratch.end(), [this] (const auto& e) { return soc.ram.read32 (e.first) == e.second; }))
+                {
+                    roundLen = i - ls.seen[j].at;
+                    result = 1;
+                    break;
+                }
+                ls.seen[j] = visit;  // (una primera vuelta que preparó algo: comparar con esta en adelante)
+            }
+            else if (ls.seen.size() < kVisits)
+                ls.seen.push_back (visit);
+            else
+                ls.seen[visits % kVisits] = visit;
+            ++visits;
+        }
+        if (i >= budget || i >= kProbeMax)
+        {
+            result = -1;
+            break;
+        }
+        // (el tick de la primera instrucción está pagado; con algo pendiente sigue el bucle normal)
+        if (i > 0 && soc.periph.tick())
+        {
+            result = -2;
+            break;
+        }
+        ProbeBus bus (soc, ls.log, p33Was);
+        const bool ok = cpu0.step (bus);
+        // (un reset pedido: llega tras esta vuelta, no tras las saltadas)
+        if (! ok || bus.bad || soc.periph.anyPending() || soc.resetDue())
+        {
+            result = -1;
+            break;
+        }
+        ++i;
+    }
+    if (result == 1)
+    {
+        // vueltas enteras cuyos ticks caen antes del siguiente pendiente, y dentro del presupuesto
+        const uint64_t l = roundLen;
+        const auto c = soc.periph.cycles;
+        const auto due = soc.periph.nextDue;
+        const auto byEvent = (due > c + 1 ? due - (c + 1) : 0) / l;
+        const auto byBudget = (uint64_t) (budget - i) / l;
+        const auto k = std::min (byEvent, byBudget);
+        soc.periph.cycles += k * l;
+        cpu0.insnCount += k * l;
+        ls.credit = std::min<int64_t> (ls.credit + (int64_t) (k * l / 4) - (int64_t) i, kCreditMax);
+        ++ls.hits;
+        ls.skipped += k * l;
+        if (k * l >= 8ull * i)
+        {
+            ls.backoff = 0;
+            ls.nextTry = 0;
+        }
+        else if (byEvent < byBudget)
+            ls.nextTry = due;  // un evento cerca: mirar después de él
+        else
+            ls.backOff (soc.periph.cycles);
+        return i + (uint32_t) (k * l);
+    }
+    // deshacerlo todo: el bucle normal sigue desde donde empezó el sondeo, como sin él
+    for (auto it = ls.log.rbegin(); it != ls.log.rend(); ++it)
+        soc.ram.restore32 (it->first, it->second);
+    if (p33Was)
+        soc.p33 = *p33Was;
+    soc.periph.setAdcState (adc0);
+    soc.periph.nextDue = due0;
+    soc.periph.wdtAt = wdt0;
+    soc.clearResetReq();
+    soc.periph.cycles = cycles0;
+    cpu0.setPlainState (start);
+    cpu0.insnCount = insns0;
+    ls.credit -= i;
+    if (result == -2)
+        ls.nextTry = due0;
+    else
+        ls.backOff (cycles0);
+    return 0;
+}
+
 // El bucle de cpu0 (de referencia: una instrucción cada vez, el SoC atendido cuando vence un tick). Devuelve en done las
 // instrucciones ejecutadas: n, o menos si cpu0 liberó a cpu1, el chip se reseteó o encontró un cerrojo de cpu1
 bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
@@ -813,6 +1038,7 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
     if (soc.resetDue())
     {
         soc.chipReset (cpu0);
+        loopSkip.nextTry = 0;
         return true;
     }
     bool ticked = pendingTick;
@@ -825,9 +1051,22 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
         if (soc.resetDue())
         {
             soc.chipReset (cpu0);
+            loopSkip.nextTry = 0;
             break;
         }
         cpu0Between();
+        // (no con una liberación de cpu1 retenida: el tramo debe cortarse donde lo haría sin el salto)
+        if (loopSkip.enabled && ! soc.cpu1Release && n - done >= kProbeMin && ! soc.periph.anyPending()
+            && loopSkip.mayProbe (soc.periph.cycles))
+        {
+            if (soc.periph.nextDue < soc.periph.cycles + kProbeMin)
+                loopSkip.nextTry = soc.periph.nextDue;  // demasiado cerca del siguiente evento
+            else if (const auto k = probeLoop (n - done); k > 0)
+            {
+                done += k;
+                continue;  // (el tick de la siguiente instrucción, sin pagar)
+            }
+        }
         const bool trip = cpu0.pcEnter (cpu0.pc);
         if (! cpu0.step (soc))
         {
@@ -858,6 +1097,7 @@ std::unique_ptr<Cpu> Machine::releasedCpu1()
     const bool inCode = (entry >= 0x02000000 && entry < 0x03000000) || (entry >= kRamBase && entry < kRamBase + soc.ram.size());
     auto c1 = std::make_unique<Cpu> (inCode ? entry : kRamBase + 0x22b6);
     c1->coreId = 1;
+    c1->fastPath = fastPath;
     c1->usp = kRamBase + 0x15eb4;
     c1->sp = kRamBase + 0x16eb4;
     return c1;

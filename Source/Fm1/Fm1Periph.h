@@ -79,6 +79,14 @@ public:
     void spi1IrqOff() noexcept { spi1Pending = false; spi1IrqAt = kNever; }
     void spi2Start (uint32_t bytes, uint32_t baud, bool irq);
     void srShiftByte (uint8_t b) noexcept;
+    // El estado del SARADC tal como un bucle de sondeo puede cambiarlo (el salto de bucles lo compara y lo deshace)
+    struct AdcState
+    {
+        uint32_t con; bool done, irq; uint16_t sample; uint32_t noise;
+        bool operator== (const AdcState&) const = default;
+    };
+    AdcState adcState() const noexcept { return { adcCon, adcDone, adcIrq, adcSample, adcNoise }; }
+    void setAdcState (const AdcState& s) noexcept { adcCon = s.con; adcDone = s.done; adcIrq = s.irq; adcSample = s.sample; adcNoise = s.noise; }
     size_t midiQueued() const noexcept { return uart.q.size(); }
     uint64_t midiDropped() const noexcept { return uart.dropped; }
 

@@ -10,9 +10,9 @@
 //   0x1210_0     UART1 (MIDI IN); 0x1310_0 ADC; 0x1eee000 controlador de interrupciones; 0x1eee240 DBG_MSG
 // Política: un acceso a MMIO desconocido se registra y devuelve un valor inocuo; el registro es la hoja de ruta.
 //
-// Diferencias con fm1-emu en este port (de momento): solo la ruta de referencia (una instrucción cada vez, sin
-// micro-ops, sin JIT ni salto de bucles de sondeo); sin USB ni las unidades DSP / EQ / SRC por hardware (se registran
-// como accesos desconocidos); sin el modo estricto (caché de la flash, alineación, costes de ciclo); solo la placa FM-1.
+// Diferencias con fm1-emu en este port (de momento): una instrucción cada vez, con micro-ops y salto exacto de bucles
+// de sondeo pero sin bloques ni JIT; sin USB ni las unidades DSP / EQ / SRC por hardware (se registran como accesos
+// desconocidos); sin el modo estricto (caché de la flash, alineación, costes de ciclo); solo la placa FM-1.
 #pragma once
 
 #include "Fm1Cpu.h"
@@ -67,6 +67,11 @@ public:
     void guardTrip (uint32_t bit);
     bool pcWindows (uint32_t out[2][2]);  // los límites de PC; false si el firmware no los ha puesto
     const std::vector<UnknownAccess>& unknownAccesses() const noexcept { return unknownLog; }
+    // ¿Una carga de 32 bits en addr solo mira (sin efectos ni dependencia del reloj)? ¿Puede una vuelta de un bucle de
+    // sondeo escribir en addr? (salto de bucles: pure_read y loop_write_ok de fm1-emu)
+    bool pureRead (uint32_t addr) const noexcept;
+    bool loopWriteOk (uint32_t addr) const noexcept;
+    void clearResetReq() noexcept { resetReq.reset(); }
     std::string consoleString() const { return std::string (console.begin(), console.end()); }
 
     std::vector<uint8_t> xip;
@@ -167,8 +172,27 @@ public:
     bool run (uint32_t n, std::string& error);
 
     std::unique_ptr<Cpu> cpu1;
+    bool fastPath = true;  // la ruta rápida de la CPU también para cpu1 (false: la referencia)
+
+    // Salto exacto de los bucles de sondeo de cpu0 (LoopSkip de fm1-emu): una vuelta que deja la máquina como la
+    // encontró se repite igual hasta el siguiente evento temporizado; se saltan las vueltas enteras que caben, al mismo
+    // ciclo. Un sondeo que no encuentra vuelta lo deshace todo. Con enabled = false el resultado es el mismo
+    struct LoopSkip
+    {
+        bool enabled = true;
+        uint64_t nextTry = 0, backoff = 0;
+        int64_t credit = 1 << 16;
+        uint64_t creditAt = 0;
+        uint64_t skipped = 0, probes = 0, hits = 0;  // ciclos (= instrucciones) saltados, sondeos, sondeos con bucle
+        struct Visit { Cpu::PlainState core; P33::Snap p33; Periph::AdcState adc; uint32_t at; size_t log; };
+        std::vector<std::pair<uint32_t, uint32_t>> log, scratch;
+        std::vector<Visit> seen;
+        bool mayProbe (uint64_t now);
+        void backOff (uint64_t now);
+    } loopSkip;
 
 private:
+    uint32_t probeLoop (uint32_t budget);
     void cpu0Between();
     bool runBlocks (uint32_t n, uint32_t& done, std::string& error);  // el bucle de bloques de cpu0
     std::unique_ptr<Cpu> releasedCpu1();

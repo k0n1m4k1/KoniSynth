@@ -3,9 +3,9 @@
 // Port a C++ de fm1-emu (Joakim Eriksson, licencia MIT, https://github.com/joakimeriksson/fm1-emu, commit 3e3fb27),
 // crate fm1-core: el estado de la CPU, decode_any (la tabla más las familias que se decodifican por sus campos),
 // execute / exec_syntax / exec_raw / finish, los pares de emisión doble, los bucles rep, los bloques predicados
-// if {} else {} y las interrupciones. Es la ruta lenta de fm1-emu, la de referencia: sin micro-ops (Fast), sin bloques
-// y sin JIT. fm1-emu ejecuta con micro-ops las instrucciones que las tienen y sus pruebas comprueban que dan lo mismo
-// que exec_syntax y que exec_raw; la ruta rápida de KoniSynth se contrastará contra esta.
+// if {} else {} y las interrupciones. Además, micro-ops (Fm1Pre::fast) para las formas comunes de exec_syntax; sin
+// bloques ni JIT. Con fastPath = false todo va por exec_syntax (la referencia): KoniFm1Run --reference 1 compara el
+// hash del estado final de las dos rutas.
 //
 // Las afirmaciones del original que este marca como supuestas o pendientes de probar en el aparato se conservan como
 // comentarios con "supuesto (fm1-emu)".
@@ -14,6 +14,7 @@
 #include "Fm1Isa.h"
 
 #include <cstdint>
+#include <unordered_map>
 #include <vector>
 
 namespace fm1
@@ -63,6 +64,17 @@ struct Fm1Pre
     AluOp aluOp = Add;
     Rhs aluRhs {};
     int32_t aluMemOff = 0;
+    // Micro-operación (ruta rápida, como fast_of de fm1-emu) para las formas comunes que van por exec_syntax: operandos
+    // resueltos al decodificar, la misma semántica. FastNone = sin micro-op (va por exec_syntax)
+    enum FastOp : uint8_t { FastNone, FastLd, FastSt, FastBrI, FastBrR, FastAluI, FastAluR, FastMov, FastMovI, FastGoto, FastCall,
+                            FastRts, FastPart };
+    FastOp fast = FastNone;
+    uint8_t fd = 0, fa = 0, fb = 0;  // destino, fuente / base, segundo registro (índice o rhs)
+    uint8_t fw = 4, fsh = 0;         // ancho de acceso; desplazamiento del índice (R+R<<#i) o parte (FastPart)
+    uint8_t fcond = 0;               // condición (FastBr*) u operación (FastAlu*: AluOp)
+    bool fsign = false, fsp = false, fidx = false, fflags = false;
+    uint32_t fimm = 0;
+    int64_t foff = 0;                // desplazamiento del salto desde el pc siguiente
     // salto por prueba de bits (decode_bittest)
     uint8_t btReg = 0;
     Rhs btMask {};
@@ -97,6 +109,7 @@ public:
         bool cc;
         uint32_t flags, sregStore[7];
         bool ie, nestOk;
+        bool operator== (const PlainState&) const = default;
     };
     bool plainState (PlainState& out) const noexcept;  // false si no está en un estado simple
     void setPlainState (const PlainState& s) noexcept;
@@ -142,6 +155,9 @@ public:
     uint32_t faultPc = 0;
     uint64_t faultRaw = 0;
     uint64_t decodes = 0;  // fallos de la caché de instrucciones desde el reset
+    bool fastPath = true;  // micro-ops para las formas comunes (false = solo exec_syntax: la referencia)
+    // Perfil opcional (nullptr = apagado): instrucciones ejecutadas por clase
+    std::unordered_map<const Fm1IsaEntry*, uint64_t>* hist = nullptr;
     bool hasPcWin = false;
     uint32_t pcWin[2][2] {};  // (bajo, alto) de cada ventana
     bool pcOut = false;

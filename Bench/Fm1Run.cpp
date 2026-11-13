@@ -10,6 +10,8 @@
 //   --shot MS:FICHERO   guarda la pantalla (BMP 240×240) en ese ms; se puede repetir
 //   --wav FICHERO       guarda el audio (WAV estéreo de 16 bits)
 //   --syx FICHERO       un banco DX7 de 32 voces en el área USR
+//   --profile N         las N clases de instrucción más ejecutadas por cpu0
+//   --reference 1       sin la ruta rápida de la CPU ni el salto de bucles (para la prueba diferencial: el hash del estado final debe coincidir)
 // El WAV se escribe a 44 118 Hz: el FM-1 saca tramas a 24 MHz / 544 = 44 117,65 Hz (el entero más cercano; error 0,008 ct).
 #include "../Source/Fm1/Fm1Soc.h"
 
@@ -21,6 +23,7 @@
 #include <iterator>
 #include <map>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 using namespace fm1;
@@ -95,6 +98,8 @@ int main (int argc, char** argv)
     std::vector<std::pair<uint64_t, PanelAction>> actions;
     std::vector<std::pair<uint64_t, std::string>> shots;
     std::string wav;
+    bool reference = false;  // --reference 1: sin la ruta rápida de la CPU (prueba diferencial)
+    int profile = 0;  // --profile N: las N clases de instrucción más ejecutadas por cpu0
     std::vector<uint8_t> syx;
     bool haveSyx = false;
     for (int i = 2; i + 1 < argc; i += 2)
@@ -106,6 +111,8 @@ int main (int argc, char** argv)
         int d = 0;
         if (opt == "--ms") ms = std::strtoull (v, nullptr, 10);
         else if (opt == "--vel") actions.push_back ({ 0, { PanelAction::KeyVel, 0, std::atoi (v) } });
+        else if (opt == "--profile") profile = std::atoi (v);
+        else if (opt == "--reference") reference = std::atoi (v) != 0;
         else if (opt == "--wav") wav = v;
         else if (opt == "--syx") { syx = readFile (v); haveSyx = true; }
         else if (opt == "--key" && std::sscanf (v, "%llu:%63[^:]:%d", &at, name, &d) == 3)
@@ -152,7 +159,12 @@ int main (int argc, char** argv)
     std::sort (shots.begin(), shots.end());
 
     std::printf ("%s: \"%s\", entrada 0x%08x, XIP %zu B, clave 0x%04x\n", argv[1], st.identity.c_str(), st.entry, st.xip.size(), st.key);
+    std::unordered_map<const Fm1IsaEntry*, uint64_t> hist;
+    if (profile > 0) cpu.hist = &hist;
+    cpu.fastPath = ! reference;
     Machine m (soc, cpu);
+    m.fastPath = ! reference;
+    m.loopSkip.enabled = ! reference;
     const auto t0 = std::chrono::steady_clock::now();
     size_t nextShot = 0;
     bool ok = true;
@@ -179,6 +191,8 @@ int main (int argc, char** argv)
                  (unsigned long long) soc.periph.ms(), wall, (double) soc.periph.ms() / 1000.0 / wall, (unsigned long long) cpu.insnCount,
                  m.cpu1 ? "en marcha," : "sin arrancar,", (unsigned long long) (m.cpu1 ? m.cpu1->insnCount : 0),
                  100.0 * (double) soc.periph.skipped / (double) std::max<uint64_t> (soc.periph.cycles, 1));
+    std::printf ("salto de bucles: %llu sondeos, %llu con bucle, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.probes,
+                 (unsigned long long) m.loopSkip.hits, (unsigned long long) m.loopSkip.skipped);
     std::printf ("pantalla: encendida %d, %llu ventanas, revisión %u; audio %zu tramas (%.2f s); resets %u\n", soc.lcd.displayOn ? 1 : 0,
                  (unsigned long long) soc.lcd.frames, soc.lcd.revision, soc.periph.audio.size() / 2,
                  (double) soc.periph.audio.size() / 2 / 44117.65, soc.resets);
@@ -192,6 +206,40 @@ int main (int argc, char** argv)
     std::printf ("accesos desconocidos (últimos %zu, %zu direcciones):\n", soc.unknownAccesses().size(), top.size());
     for (size_t i = 0; i < std::min<size_t> (top.size(), 24); ++i)
         std::printf ("  %8zu  %s 0x%08x\n", top[i].first, top[i].second.second ? "esc" : "lee", top[i].second.first);
+    if (profile > 0)
+    {
+        std::vector<std::pair<uint64_t, const Fm1IsaEntry*>> h;
+        uint64_t total = 0;
+        for (const auto& [e, c] : hist) { h.push_back ({ c, e }); total += c; }
+        std::sort (h.rbegin(), h.rend());
+        std::printf ("perfil de cpu0 (%llu instrucciones, %zu clases; ruta aproximada):\n", (unsigned long long) total, h.size());
+        double acc = 0;
+        for (size_t i = 0; i < std::min<size_t> (h.size(), (size_t) profile); ++i)
+        {
+            Fm1Pre pre;
+            computePre (*h[i].second, 0, pre);
+            acc += 100.0 * (double) h[i].first / (double) total;
+            std::printf ("  %6.2f %%  (acum %6.2f %%)  ruta %2u%s %-28s %s\n", 100.0 * (double) h[i].first / (double) total, acc, pre.route, pre.fast != Fm1Pre::FastNone ? "*" : " ",
+                         h[i].second->name, h[i].second->syntax);
+        }
+    }
+    {
+        // hash FNV-1a del estado final: RAM, registros de los dos núcleos, pantalla y audio (prueba diferencial)
+        uint64_t hsh = 0xcbf29ce484222325ull;
+        const auto mix = [&hsh] (const void* p, size_t n)
+        {
+            const auto* b = (const uint8_t*) p;
+            for (size_t i = 0; i < n; ++i) { hsh ^= b[i]; hsh *= 0x100000001b3ull; }
+        };
+        mix (soc.ram.ptr(), soc.ram.size());
+        mix (cpu.regs, sizeof cpu.regs);
+        mix (&cpu.pc, 4);
+        mix (&cpu.sp, 4);
+        if (m.cpu1) { mix (m.cpu1->regs, sizeof m.cpu1->regs); mix (&m.cpu1->pc, 4); }
+        mix (soc.lcd.fb.data(), soc.lcd.fb.size() * 2);
+        mix (soc.periph.audio.data(), soc.periph.audio.size() * 2);
+        std::printf ("hash del estado: %016llx (%s)\n", (unsigned long long) hsh, reference ? "referencia" : "ruta rápida");
+    }
     if (! soc.console.empty())
         std::printf ("consola: %s\n", soc.consoleString().c_str());
     if (! wav.empty())

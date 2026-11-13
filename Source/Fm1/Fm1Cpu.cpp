@@ -947,6 +947,8 @@ static uint16_t routeOf (const Fm1IsaEntry& e, uint64_t raw, bool alu4, bool bit
     return kRouteSyntax;
 }
 
+static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept;
+
 void computePre (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& pre) noexcept
 {
     pre = {};
@@ -974,6 +976,8 @@ void computePre (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& pre) noexcept
     sv s (e.syntax);
     while (! s.empty() && s.back() == ' ') s.remove_suffix (1);
     pre.pairHead = s.ends_with ('#');
+    if (pre.route == kRouteSyntax)
+        computeFast (e, raw, pre);
 }
 
 // ---- Cpu ----------------------------------------------------------------------------------------------------------------
@@ -1196,10 +1200,14 @@ bool Cpu::step (Bus& bus)
     const auto* l = fetch (bus, pc);
     if (l == nullptr)
         return false;
-    const auto line = *l;  // copia: execute puede escribir código y reemplazar la línea
+    // (sin copia: solo fetch reemplaza líneas de la caché, y execute no llama a fetch; blockEnd decodifica aparte)
+    const auto& line = *l;
+    if (hist != nullptr)
+        ++(*hist)[line.entry];
     const auto nextPc = pc + line.len;
     uint32_t before[16];
-    std::memcpy (before, regs, sizeof regs);
+    if (line.pre.pairHead)
+        std::memcpy (before, regs, sizeof regs);  // solo la cabeza de un par necesita los registros de antes
     const bool pending = pairPending;
     pairPending = false;
     const bool ok = execute (bus, line, nextPc);
@@ -1288,6 +1296,63 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             default:             return 1u << (regs[x.v & 15] & 31);
         }
     };
+
+    // Ruta rápida: las formas comunes de exec_syntax con sus operandos ya resueltos (misma semántica, ver computeFast)
+    if (fastPath && pre.fast != Fm1Pre::FastNone)
+    {
+        switch (pre.fast)
+        {
+            case Fm1Pre::FastLd:
+            {
+                const auto addr = pre.fsp ? sp + pre.fimm : pre.fidx ? regs[pre.fa] + (regs[pre.fb] << pre.fsh) : regs[pre.fa] + pre.fimm;
+                regs[pre.fd] = ldW (bus, pre.fw, pre.fsign, addr);
+                break;
+            }
+            case Fm1Pre::FastSt:
+            {
+                const auto addr = pre.fsp ? sp + pre.fimm : pre.fidx ? regs[pre.fa] + (regs[pre.fb] << pre.fsh) : regs[pre.fa] + pre.fimm;
+                stW (bus, pre.fw, addr, regs[pre.fd]);
+                break;
+            }
+            case Fm1Pre::FastBrI:
+                if (condEval ((Cond) pre.fcond, regs[pre.fa], pre.fimm))
+                    jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff));
+                break;
+            case Fm1Pre::FastBrR:
+                if (condEval ((Cond) pre.fcond, regs[pre.fa], regs[pre.fb]))
+                    jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff));
+                break;
+            case Fm1Pre::FastAluI: regs[pre.fd] = aluF ((Fm1Pre::AluOp) pre.fcond, regs[pre.fa], pre.fimm); break;
+            case Fm1Pre::FastAluR: regs[pre.fd] = aluF ((Fm1Pre::AluOp) pre.fcond, regs[pre.fa], regs[pre.fb]); break;
+            case Fm1Pre::FastMov: regs[pre.fd] = regs[pre.fa]; break;
+            case Fm1Pre::FastMovI: regs[pre.fd] = pre.fimm; break;
+            case Fm1Pre::FastGoto: jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff)); break;
+            case Fm1Pre::FastCall: rets = nextPc; jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff)); break;
+            case Fm1Pre::FastRts: jumpTo (rets); break;
+            case Fm1Pre::FastPart:
+            {
+                const auto x = regs[pre.fa];
+                uint32_t y;
+                switch (pre.fsh)
+                {
+                    case 0:  y = x & 0xff; break;
+                    case 1:  y = sx8 (x); break;
+                    case 2:  y = x & 0xffff; break;
+                    case 3:  y = sx16 (x); break;
+                    case 4:  y = x >> 16; break;
+                    case 5:  y = sx16 (x >> 16); break;
+                    case 6:  y = (x >> 8) & 0xff; break;
+                    case 7:  y = (x >> 16) & 0xff; break;
+                    default: y = x >> 24; break;
+                }
+                regs[pre.fd] = y;
+                break;
+            }
+            case Fm1Pre::FastNone: break;
+        }
+        finish (jumped, target, nextPc);
+        return true;
+    }
 
     switch (pre.route)
     {
@@ -2670,5 +2735,150 @@ bool Cpu::execSyntax (Bus& bus, const Line& l, uint32_t nextPc, bool& hasJump, u
     if (s == "pc = [sp++]") { const auto t = bus.read32 (sp); sp += 4; return J (t); }
     if (s == "rets = [sp++]") { rets = bus.read32 (sp); sp += 4; return true; }
     return false;
+}
+
+// ---- micro-ops (ruta rápida) --------------------------------------------------------------------------------------------
+// Las formas más ejecutadas que van por exec_syntax (perfil de la V15: cargas R = [R+#i], comparar y saltar, sumas), con
+// los mismos operandos de las mismas ranuras que exec_syntax y la misma semántica. Una forma sin las ranuras que necesita
+// se queda en exec_syntax (que la marca como no soportada). La prueba diferencial (KoniFm1Run --reference) compara la
+// ejecución con y sin esta ruta.
+static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
+{
+    const sv s (e.canon);
+    const int n = e.slotCount;
+    const auto sl = [&] (int i) { return slotValue (e.slots[i], raw); };
+    const auto rg = [&] (int i) { return (uint8_t) (sl (i) & 0xf); };
+
+    // cargas: R = <mem> [(u)|(s)]
+    {
+        sv rest = s;
+        if (stripPrefix (rest, "R = "))
+        {
+            bool sgn = false;
+            if (stripSuffix (rest, " (s)")) sgn = true;
+            else stripSuffix (rest, " (u)");
+            uint8_t w;
+            sv inner;
+            if (widthOf (rest, w, inner) && stripSuffix (inner, "]"))
+            {
+                if (inner == "R+#i" && n >= 3) { p.fd = rg (0); p.fa = rg (1); p.fimm = (uint32_t) sl (2); }
+                else if (inner == "sp+#i" && n >= 2) { p.fd = rg (0); p.fsp = true; p.fimm = (uint32_t) sl (1); }
+                else if (inner == "sp" && n >= 1) { p.fd = rg (0); p.fsp = true; p.fimm = 0; }
+                else if (inner == "R+R" && n >= 3) { p.fd = rg (0); p.fidx = true; p.fa = rg (1); p.fb = rg (2); p.fsh = 0; }
+                else if (inner == "R+R<<#i" && n >= 4) { p.fd = rg (0); p.fidx = true; p.fa = rg (1); p.fb = rg (2); p.fsh = (uint8_t) (sl (3) & 31); }
+                else return;
+                p.fw = w;
+                p.fsign = sgn;
+                p.fast = Fm1Pre::FastLd;
+                return;
+            }
+        }
+    }
+    // stores simples: <mem> = R
+    {
+        uint8_t w;
+        sv inner, addrTxt, rest;
+        if (widthOf (s, w, inner) && split2 (inner, "] ", addrTxt, rest) && rest == "= R")
+        {
+            if (addrTxt == "R+#i" && n >= 3) { p.fa = rg (0); p.fimm = (uint32_t) sl (1); p.fd = rg (2); }
+            else if (addrTxt == "sp+#i" && n >= 2) { p.fsp = true; p.fimm = (uint32_t) sl (0); p.fd = rg (1); }
+            else if (addrTxt == "sp" && n >= 1) { p.fsp = true; p.fimm = 0; p.fd = rg (0); }
+            else if (addrTxt == "R+R" && n >= 3) { p.fidx = true; p.fa = rg (0); p.fb = rg (1); p.fsh = 0; p.fd = rg (2); }
+            else if (addrTxt == "R+R<<#i" && n >= 4) { p.fidx = true; p.fa = rg (0); p.fb = rg (1); p.fsh = (uint8_t) (sl (2) & 31); p.fd = rg (3); }
+            else return;
+            p.fw = w;
+            p.fast = Fm1Pre::FastSt;
+            return;
+        }
+    }
+    // saltos: if[s] (R <op> R|#x) goto #i
+    if ((s.starts_with ("if (R ") || s.starts_with ("ifs (R ")) && s.ends_with (") goto #i") && n >= 3)
+    {
+        const bool sgn = s.starts_with ("ifs");
+        sv cond = s.substr (s.find ('(') + 3, s.size() - sv (") goto #i").size() - (s.find ('(') + 3));
+        const auto sp1 = cond.find (' ');
+        if (sp1 == sv::npos)
+            return;
+        const sv op = cond.substr (0, sp1), rhs = cond.substr (sp1 + 1);
+        Cond c;
+        if (op == "==") c = Cond::Eq;
+        else if (op == "!=") c = Cond::Ne;
+        else if (op == "<") c = sgn ? Cond::LtS : Cond::LtU;
+        else if (op == ">") c = sgn ? Cond::GtS : Cond::GtU;
+        else if (op == "<=") c = sgn ? Cond::LeS : Cond::LeU;
+        else if (op == ">=") c = sgn ? Cond::GeS : Cond::GeU;
+        else return;
+        p.fcond = (uint8_t) c;
+        p.fa = rg (0);
+        if (rhs == "R") { p.fb = rg (1); p.fast = Fm1Pre::FastBrR; }
+        else { p.fimm = (uint32_t) sl (1); p.fast = Fm1Pre::FastBrI; }
+        p.foff = sl (2);
+        return;
+    }
+    const auto aluOf = [] (char c, Fm1Pre::AluOp& op)
+    {
+        switch (c)
+        {
+            case '+': op = Fm1Pre::Add; return true;
+            case '-': op = Fm1Pre::Sub; return true;
+            case '&': op = Fm1Pre::And; return true;
+            case '|': op = Fm1Pre::Or; return true;
+            case '^': op = Fm1Pre::Xor; return true;
+            case '*': op = Fm1Pre::Mul; return true;
+            default: return false;
+        }
+    };
+    Fm1Pre::AluOp op;
+    // R op= #i / R op= R: exactamente las formas de exec_syntax (+= -= |= &= ^= *=, sin #h)
+    if ((s.size() == 6 || s.size() == 7) && s.starts_with ("R ") && s[3] == '=' && s[4] == ' ' && aluOf (s[2], op) && n >= 2)
+    {
+        const sv rhs = s.substr (5);
+        if (rhs == "#i") { p.fd = p.fa = rg (0); p.fimm = (uint32_t) sl (1); p.fast = Fm1Pre::FastAluI; }
+        else if (rhs == "R") { p.fd = p.fa = rg (0); p.fb = rg (1); p.fast = Fm1Pre::FastAluR; }
+        else return;
+        p.fcond = (uint8_t) op;
+        return;
+    }
+    // R = R op #x: la lista de exec_syntax
+    static const char* const aluImm[] = { "R = R + #i", "R = R + #h", "R = R - #i", "R = R & #h", "R = R | #h", "R = R ^ #h",
+                                          "R = R * #h", "R = R & #i", "R = R | #i", "R = R ^ #i" };
+    for (const auto* f : aluImm)
+        if (s == f && n >= 3 && aluOf (s[6], op))
+        {
+            p.fd = rg (0);
+            p.fa = rg (1);
+            p.fimm = (uint32_t) sl (2);
+            p.fcond = (uint8_t) op;
+            p.fast = Fm1Pre::FastAluI;
+            return;
+        }
+    // R = R op R (sin divisiones ni restos)
+    static const char* const aluReg[] = { "R = R + R", "R = R - R", "R = R & R", "R = R | R", "R = R ^ R", "R = R * R" };
+    for (const auto* f : aluReg)
+        if (s == f && n >= 3 && aluOf (s[6], op))
+        {
+            p.fd = rg (0);
+            p.fa = rg (1);
+            p.fb = rg (2);
+            p.fcond = (uint8_t) op;
+            p.fast = Fm1Pre::FastAluR;
+            return;
+        }
+    if (s == "R = R" && n >= 2) { p.fd = rg (0); p.fa = rg (1); p.fast = Fm1Pre::FastMov; return; }
+    if ((s == "R = #i" || s == "R = #h") && n >= 2) { p.fd = rg (0); p.fimm = (uint32_t) sl (1); p.fast = Fm1Pre::FastMovI; return; }
+    if (s == "goto #i" && n >= 1) { p.foff = sl (0); p.fast = Fm1Pre::FastGoto; return; }
+    if (s == "call #i" && n >= 1) { p.foff = sl (0); p.fast = Fm1Pre::FastCall; return; }
+    if (s == "rts") { p.fast = Fm1Pre::FastRts; return; }
+    static const char* const parts[] = { "R = R.b0 (u)", "R = R.b0 (s)", "R = R.l (u)", "R = R.l (s)", "R = R.h (u)", "R = R.h (s)",
+                                         "R = R.b1 (u)", "R = R.b2 (u)", "R = R.b3 (u)" };
+    for (uint8_t k = 0; k < 9; ++k)
+        if (s == parts[k] && n >= 2)
+        {
+            p.fd = rg (0);
+            p.fa = rg (1);
+            p.fsh = k;
+            p.fast = Fm1Pre::FastPart;
+            return;
+        }
 }
 } // namespace fm1

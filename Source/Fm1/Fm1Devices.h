@@ -170,6 +170,13 @@ public:
     uint32_t read (uint32_t a) const noexcept { return (a & ~3u) == kCon ? (con & ~0x12u) : dat; }  // nunca ocupado
     void write (uint32_t a, uint32_t value);
     uint64_t changed = 0;  // escrituras que cambiaron un valor
+    // El puerto en resumen: dos instantáneas iguales son el mismo puerto (sus registros solo cambian junto con changed)
+    struct Snap
+    {
+        uint32_t con, dat; uint8_t step, cmd; uint16_t addr; uint64_t changed;
+        bool operator== (const Snap&) const = default;
+    };
+    Snap snap() const noexcept { return { con, dat, stepN, cmd, addr, changed }; }
 
 private:
     static size_t index (uint16_t a, bool rtc) noexcept { return (size_t) (a & 0x3ff) | (rtc ? 0x400u : 0u); }
