@@ -8,6 +8,8 @@
 //   y compara la longitud con la del listado (lo mismo que tools/fm1/check_isa.py, ahora con el decodificador C++).
 #include "../Source/Fm1/Fm1Cpu.h"
 #include "../Source/Fm1/Fm1Fwsc.h"
+#include "../Source/Fm1/Fm1Devices.h"
+#include "../Source/Fm1/Fm1Periph.h"
 
 #include <algorithm>
 #include <bit>
@@ -921,6 +923,204 @@ void checkFwsc (const char* path, const char* appBin)
         std::printf ("    app.bin idéntico a %s (%zu B)\n", appBin, ref.size());
 }
 
+// ---- dispositivos y periféricos (pruebas de fm1-soc: ram.rs, lcd.rs, p33.rs, periph.rs) ----------------------------------
+void ramRoundtrip()
+{
+    Ram ram (64);
+    ram.write32 (0, 0xdeadbeef);
+    CHECK_EQ (ram.read32 (0), 0xdeadbeef, "read32");
+    CHECK_EQ (ram.read16 (0), 0xbeef, "read16");
+    CHECK_EQ (ram.read8 (1), 0xbe, "read8");
+    ram.write16 (8, 0x1234);
+    CHECK (ram.read8 (8) == 0x34 && ram.read8 (9) == 0x12, "write16 little-endian");
+}
+
+void lcdRevision()
+{
+    Lcd lcd;
+    lcd.feed (0x2c, false);
+    lcd.feed (0x12, true);
+    CHECK_EQ (lcd.revision, 0, "medio píxel");
+    lcd.feed (0x34, true);
+    CHECK_EQ (lcd.revision, 1, "un píxel");
+    CHECK_EQ (lcd.frames, 0, "una ventana parcial también llega a la pantalla");
+    lcd.feed (0x2c, false);
+    lcd.feed (0x12, true);
+    lcd.feed (0x34, true);
+    CHECK_EQ (lcd.revision, 1, "redibujo idéntico");
+    lcd.feed (0x01, false);
+    CHECK_EQ (lcd.revision, 2, "reset");
+    CHECK_EQ (lcd.fb[0], 0, "framebuffer borrado");
+}
+
+uint8_t p33Access (P33& p, uint8_t cmd, uint8_t addr, uint8_t data, bool rtc)
+{
+    const uint32_t cs = 1 | (rtc ? 0x100u : 0u);
+    p.write (P33::kCon, cs);
+    uint8_t last = 0;
+    for (uint8_t b : { cmd, addr, data })
+    {
+        p.write (P33::kDat, b);
+        p.write (P33::kCon, p.read (P33::kCon) | 0x10);
+        CHECK_EQ (p.read (P33::kCon) & 2, 0, "nunca ocupado");
+        last = (uint8_t) p.read (P33::kDat);
+    }
+    p.write (P33::kCon, p.read (P33::kCon) & ~0x101u);
+    return last;
+}
+
+void p33ReadsBack()
+{
+    P33 p;
+    CHECK_EQ (p33Access (p, 0x80, 0x05, 0x5e, false), 0, "0 al encender");
+    p33Access (p, 0x00, 0x05, 0x40, false);
+    p33Access (p, 0x20, 0x05, 0x04, false);
+    CHECK_EQ (p33Access (p, 0x80, 0x05, 0x5e, false), 0x44, "escribir y or");
+    p33Access (p, 0x40, 0x05, 0xfb, false);
+    p33Access (p, 0x60, 0x05, 0x30, false);
+    CHECK_EQ (p33Access (p, 0x80, 0x05, 0x5e, false), 0x70, "and y xor");
+    p33Access (p, 0x01, 0x05, 0x11, false);
+    p33Access (p, 0x00, 0x05, 0x22, true);
+    CHECK (p.reg (0x105, false) == 0x11 && p.reg (0x05, false) == 0x70 && p.reg (0x05, true) == 0x22, "bits altos y banco RTC");
+}
+} // namespace
+
+namespace fm1
+{
+// Acceso al estado interno de Periph para las pruebas (amiga de la clase)
+struct PeriphTest
+{
+    static uint16_t& srLatched (Periph& p) { return p.srLatched; }
+    static uint32_t& paOut (Periph& p) { return p.paOut; }
+    static uint64_t& ledLast (Periph& p) { return p.ledLast; }
+    static std::array<uint64_t, 41>& ledAcc (Periph& p) { return p.ledAcc; }
+    static uint64_t nextEvent (const Periph& p) { return p.nextEvent(); }
+    static uint64_t midiByteTime (const Periph& p) { return p.midiByteTime(); }
+};
+} // namespace fm1
+
+namespace
+{
+uint32_t adcConvert (Periph& p, uint32_t ch)
+{
+    p.write (0x13100, 0x40 | ch << 8 | 0x0e);
+    p.write (0x13100, 0x40 | 0x10 | ch << 8 | 0x0e);
+    return *p.read (0x13104);
+}
+
+void periphRowsReadPill()
+{
+    Periph p;
+    const auto ms = p.hz / 1000;
+    p.write (0x50008, 1 << 7);  // fila PA7 de entrada con su pull-up, columna 0 fijada: la tecla 9 (id 23)
+    p.write (0x50010, 1 << 7);
+    PeriphTest::srLatched (p) = (uint16_t) ~1;
+    CHECK_EQ (adcConvert (p, 0), 1023, "abierta");
+    p.apply ({ PanelAction::KeyVel, 0, 127 });
+    p.apply ({ PanelAction::Key, 23, 1 });
+    p.cycles += 2 * ms;
+    auto v = adcConvert (p, 0);
+    CHECK (v >= 193 && v <= 196, "a fondo con pull-up: el diodo y poco más");
+    p.write (0x50008, 0);
+    PeriphTest::paOut (p) |= 1 << 7;
+    p.write (0x50018, 1 << 7);
+    p.write (0x5001c, 1 << 7);
+    v = adcConvert (p, 0);
+    CHECK (v >= 804 && v <= 808, "conducida alta con el driver más fuerte: ~806");
+    p.apply ({ PanelAction::Key, 23, 0 });
+    p.cycles += 10 * ms;
+    CHECK_EQ (adcConvert (p, 0), 1023, "levantada");
+    p.apply ({ PanelAction::KeyVel, 0, 1 });
+    p.apply ({ PanelAction::Key, 23, 1 });
+    p.cycles += 2 * ms;
+    v = adcConvert (p, 0);
+    CHECK (v >= 1004 && v <= 1012, "una pulsación ligera lee más alto");
+    p.apply ({ PanelAction::Pressure, 23, 127 });
+    p.cycles += 25 * ms;
+    CHECK (adcConvert (p, 0) < 810, "apretada más fuerte");
+    PeriphTest::srLatched (p) = (uint16_t) ~2;
+    CHECK_EQ (adcConvert (p, 0), 1023, "otra columna: su tecla está abierta");
+    PeriphTest::paOut (p) &= ~(1u << 7);
+    CHECK_EQ (adcConvert (p, 0), 0, "conducida baja");
+    CHECK_EQ (adcConvert (p, 4), 900, "el potenciómetro MASTER");
+}
+
+void runTo (Periph& p, uint64_t cycle, std::vector<std::pair<uint32_t, uint8_t>>& got)
+{
+    while (p.cycles < cycle)
+    {
+        const auto stepN = std::max (std::min (PeriphTest::nextEvent (p), cycle), p.cycles + 1) - p.cycles;
+        if (const auto w = p.advance (stepN).uartRx)
+            got.push_back (*w);
+    }
+}
+
+void periphUartMidiIn()
+{
+    Periph p;
+    p.write (0x1211c, 0x1000);  // la configuración de Felucca con un anillo de 4 bytes y las IRQ de RX y timeout
+    p.write (0x12120, 0x1004);
+    p.write (0x12124, 4);
+    p.write (0x12110, 48'000);  // 1 ms de silencio
+    p.write (0x12100, 0x40 | 0x08 | 0x20 | 1);
+    for (int b : { 0x90, 0x3c, 0x64, 0x80, 0x3c })
+        p.apply ({ PanelAction::Midi, 0, b });
+    const auto byte = PeriphTest::midiByteTime (p);
+    std::vector<std::pair<uint32_t, uint8_t>> got;
+    runTo (p, 3 * byte, got);
+    CHECK (got.size() == 3 && got[0] == std::make_pair (0x1000u, (uint8_t) 0x90) && got[1] == std::make_pair (0x1001u, (uint8_t) 0x3c)
+               && got[2] == std::make_pair (0x1002u, (uint8_t) 0x64),
+           "un tiempo de byte entre bytes");
+    CHECK (! p.pendingIrqFor (0) && ! p.anyPending(), "IRQ 20 aún sin habilitar");
+    p.icfg[kIrqUart1 >> 3] |= 1u << ((kIrqUart1 & 7) * 4);
+    runTo (p, 5 * byte, got);
+    CHECK (got.size() == 5 && got[3] == std::make_pair (0x1003u, (uint8_t) 0x80) && got[4] == std::make_pair (0x1000u, (uint8_t) 0x3c),
+           "el anillo da la vuelta");
+    CHECK_EQ (*p.read (0x12100) & 0x4000, 0x4000, "RXCNT bytes: RX pendiente");
+    CHECK (p.pendingIrqFor (0) && p.pendingIrqFor (0)->first == kIrqUart1, "IRQ 20");
+    auto con = *p.read (0x12100);
+    p.write (0x12100, con | 0x80);
+    con = *p.read (0x12100);
+    p.write (0x12100, con | 0x1000);
+    CHECK_EQ (*p.read (0x12128), 5, "HRXCNT");
+    CHECK (! p.pendingIrqFor (0), "reconocida");
+    const auto ms = p.hz / 1000;
+    runTo (p, 5 * byte + ms + 1, got);
+    CHECK_EQ (*p.read (0x12100) & 0x800, 0x800, "timeout tras 1 ms de silencio");
+    CHECK (p.pendingIrqFor (0) && p.pendingIrqFor (0)->first == kIrqUart1, "IRQ 20 del timeout");
+    con = *p.read (0x12100);
+    p.write (0x12100, con | 0x80 | 0x400);
+    CHECK_EQ (*p.read (0x12128), 0, "HRXCNT a 0");
+    CHECK (! p.pendingIrqFor (0), "timeout reconocido");
+    p.write (0x12100, 0);
+    p.apply ({ PanelAction::Midi, 0, 0xf8 });
+    runTo (p, 7 * byte + ms, got);
+    CHECK (got.size() == 5 && p.midiDropped() == 1, "con la UART apagada el byte se descarta");
+}
+
+void periphAudioFrames()
+{
+    CHECK_EQ (Periph::audioFramesAt (0, kCpuHz), 0, "0");
+    CHECK_EQ (Periph::audioFramesAt (5440, kCpuHz), 1, "una trama");
+    CHECK_EQ (Periph::audioFramesAt (kCpuHz, kCpuHz), 44117, "44 117 tramas por segundo");
+    CHECK_EQ (Periph::audioFramesAt (160'000'000, 160'000'000), 44117, "sea cual sea el reloj de CPU");
+    CHECK_EQ (Periph::audioFramesAt (3600 * kCpuHz, kCpuHz), 3600ull * 44117 + 2329, "una hora");
+}
+
+void periphLedPeek()
+{
+    Periph p;
+    p.cycles = 1000;
+    PeriphTest::ledLast (p) = 1000;
+    PeriphTest::ledAcc (p)[5] = 500;
+    CHECK (p.ledPeek()[5] == 0.5f, "mitad del tiempo");
+    CHECK (p.ledPeek()[5] == 0.5f, "mirar no reinicia la ventana");
+    CHECK (p.ledTake()[5] == 0.5f, "tomar cubre todo");
+    p.cycles = 2000;
+    PeriphTest::ledLast (p) = 2000;
+    CHECK (p.ledTake()[5] == 0.0f, "tomar reinicia");
+}
+
 // ---- decodificador contra un listado del objdump de JieLi --------------------------------------------------------------
 bool parseObjdumpLine (const std::string& line, uint32_t& addr, std::vector<uint8_t>& bytes)
 {
@@ -1038,6 +1238,13 @@ int main (int argc, char** argv)
         { "block_moves_up_and_down (step)", blockMovesUpAndDown },
         { "fwsc container_counts_blocks_and_reads_the_identity", fwscContainerIdentity },
         { "fwsc default_bank_in_each_boards_usr_layout", fwscDefaultBank },
+        { "ram roundtrip_all_widths", ramRoundtrip },
+        { "lcd revision_tracks_partial_updates_and_reset", lcdRevision },
+        { "p33 reads_back_what_was_written_and_combined", p33ReadsBack },
+        { "periph the_rows_read_a_keys_pill", periphRowsReadPill },
+        { "periph uart_midi_in_dma_latch_and_timeout", periphUartMidiIn },
+        { "periph audio_frames_follow_the_dac_clock", periphAudioFrames },
+        { "periph led_peek_reads_the_fractions_without_taking_them", periphLedPeek },
     };
     std::printf ("Tabla pi32v2: %zu clases\n", entryCount());
     for (const auto& t : tests)
