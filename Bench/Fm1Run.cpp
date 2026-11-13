@@ -11,7 +11,8 @@
 //   --wav FICHERO       guarda el audio (WAV estéreo de 16 bits)
 //   --syx FICHERO       un banco DX7 de 32 voces en el área USR
 //   --profile N         las N clases de instrucción más ejecutadas por cpu0
-//   --hostprofile N     perfil del propio emulador por muestreo (Windows; necesita el PDB): N funciones y líneas
+//   --pcprofile N       los N pc de cpu0 más ejecutados, con su instrucción (incluye las de los sondeos del salto de bucles)
+//   --hostprofile N    perfil del propio emulador por muestreo (Windows; necesita el PDB): N funciones y líneas
 //   --reference 1       sin la ruta rápida de la CPU ni el salto de bucles (para la prueba diferencial: el hash del estado final debe coincidir)
 // El WAV se escribe a 44 118 Hz: el FM-1 saca tramas a 24 MHz / 544 = 44 117,65 Hz (el entero más cercano; error 0,008 ct).
 #include "../Source/Fm1/Fm1Soc.h"
@@ -193,6 +194,7 @@ int main (int argc, char** argv)
     std::string wav;
     bool reference = false;  // --reference 1: sin la ruta rápida de la CPU (prueba diferencial)
     int profile = 0;  // --profile N: las N clases de instrucción más ejecutadas por cpu0
+    int pcProfile = 0;  // --pcprofile N: los N pc de cpu0 más ejecutados
     int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
     bool haveSyx = false;
@@ -208,6 +210,7 @@ int main (int argc, char** argv)
         else if (opt == "--profile") profile = std::atoi (v);
         else if (opt == "--reference") reference = std::atoi (v) != 0;
         else if (opt == "--hostprofile") hostProfile = std::atoi (v);
+        else if (opt == "--pcprofile") pcProfile = std::atoi (v);
         else if (opt == "--wav") wav = v;
         else if (opt == "--syx") { syx = readFile (v); haveSyx = true; }
         else if (opt == "--key" && std::sscanf (v, "%llu:%63[^:]:%d", &at, name, &d) == 3)
@@ -256,6 +259,8 @@ int main (int argc, char** argv)
     std::printf ("%s: \"%s\", entrada 0x%08x, XIP %zu B, clave 0x%04x\n", argv[1], st.identity.c_str(), st.entry, st.xip.size(), st.key);
     std::unordered_map<const Fm1IsaEntry*, uint64_t> hist;
     if (profile > 0) cpu.hist = &hist;
+    std::unordered_map<uint32_t, uint64_t> pcHist;
+    if (pcProfile > 0) cpu.pcHist = &pcHist;
     cpu.fastPath = ! reference;
     Machine m (soc, cpu);
     m.fastPath = ! reference;
@@ -295,6 +300,8 @@ int main (int argc, char** argv)
                  100.0 * (double) soc.periph.skipped / (double) std::max<uint64_t> (soc.periph.cycles, 1));
     std::printf ("salto de bucles: %llu sondeos, %llu con bucle, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.probes,
                  (unsigned long long) m.loopSkip.hits, (unsigned long long) m.loopSkip.skipped);
+    std::printf ("bucles de retardo contados: %llu saltos, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.counted,
+                 (unsigned long long) m.loopSkip.countedSkipped);
     std::printf ("pantalla: encendida %d, %llu ventanas, revisión %u; audio %zu tramas (%.2f s); resets %u\n", soc.lcd.displayOn ? 1 : 0,
                  (unsigned long long) soc.lcd.frames, soc.lcd.revision, soc.periph.audio.size() / 2,
                  (double) soc.periph.audio.size() / 2 / 44117.65, soc.resets);
@@ -323,6 +330,23 @@ int main (int argc, char** argv)
             acc += 100.0 * (double) h[i].first / (double) total;
             std::printf ("  %6.2f %%  (acum %6.2f %%)  ruta %2u%s %-28s %s\n", 100.0 * (double) h[i].first / (double) total, acc, pre.route, pre.fast != Fm1Pre::FastNone ? "*" : " ",
                          h[i].second->name, h[i].second->syntax);
+        }
+    }
+    if (pcProfile > 0)
+    {
+        std::vector<std::pair<uint64_t, uint32_t>> h;
+        uint64_t total = 0;
+        for (const auto& [a, c] : pcHist) { h.push_back ({ c, a }); total += c; }
+        std::sort (h.rbegin(), h.rend());
+        std::printf ("perfil por pc de cpu0 (%llu instrucciones, %zu pc):\n", (unsigned long long) total, h.size());
+        double acc = 0;
+        for (size_t i = 0; i < std::min<size_t> (h.size(), (size_t) pcProfile); ++i)
+        {
+            uint64_t raw = 0;
+            const auto* e = decodeAny (((uint64_t) soc.fetch32 (h[i].second + 4) << 32) | soc.fetch32 (h[i].second), raw);
+            acc += 100.0 * (double) h[i].first / (double) total;
+            std::printf ("  %6.2f %%  (acum %6.2f %%)  0x%08x  %-28s raw 0x%llx\n", 100.0 * (double) h[i].first / (double) total, acc,
+                         h[i].second, e != nullptr ? e->syntax : "?", (unsigned long long) raw);
         }
     }
     {

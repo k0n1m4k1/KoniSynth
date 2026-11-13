@@ -112,6 +112,14 @@ public:
         bool operator== (const PlainState&) const = default;
     };
     bool plainState (PlainState& out) const noexcept;  // false si no está en un estado simple
+
+    // Bucle de retardo contado en pc: un cuerpo de nop (ruta 2) con una sola suma "R += #d" y el cierre
+    // "if (R != #C) goto pc". Salta vueltas enteras (las que caben en room y dejan al menos una por hacer): R y las
+    // banderas quedan como tras la última suma saltada. room = instrucciones que pueden pasar sin evento. Devuelve las
+    // instrucciones saltadas; 0 si ahora no hay nada que saltar; -1 si el código en pc no tiene esa forma
+    int64_t skipCountedLoop (Bus& bus, uint32_t room);
+    uint32_t loopHint = 0xffffffffu;  // destino del último "if (R != #C) goto" hacia atrás tomado (dónde mirar)
+    uint32_t notCounted = 0xffffffffu;  // el último pc que no tenía la forma (no volver a mirarlo)
     void setPlainState (const PlainState& s) noexcept;
 
     // Límites de PC (las guardas de la CPU): el código corre dentro de alguna de las dos ventanas; una instrucción
@@ -159,6 +167,7 @@ public:
     bool fastPath = true;  // micro-ops para las formas comunes (false = solo exec_syntax: la referencia)
     // Perfil opcional (nullptr = apagado): instrucciones ejecutadas por clase
     std::unordered_map<const Fm1IsaEntry*, uint64_t>* hist = nullptr;
+    std::unordered_map<uint32_t, uint64_t>* pcHist = nullptr;  // instrucciones ejecutadas por pc (también las de los sondeos)
     bool hasPcWin = false;
     uint32_t pcWin[2][2] {};  // (bajo, alto) de cada ventana
     bool pcOut = false;

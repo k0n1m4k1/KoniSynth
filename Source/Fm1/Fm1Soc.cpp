@@ -834,6 +834,7 @@ namespace
 {
 constexpr uint32_t kProbeMax = 2048;  // lo más que un sondeo sigue a cpu0 buscando una vuelta
 constexpr uint32_t kProbeMin = 1024;  // solo con al menos estas instrucciones y ciclos por delante
+constexpr uint32_t kProbeKnown = 64;  // lo mismo en un pc con bucle conocido (un sondeo de un bucle corto cuesta ~10-20)
 constexpr int64_t kCreditMax = 1 << 16;
 constexpr size_t kVisits = 8;         // visitas al pc inicial que se guardan para comparar
 
@@ -894,9 +895,11 @@ struct ProbeBus : Bus
 };
 } // namespace
 
-bool Machine::LoopSkip::mayProbe (uint64_t now)
+bool Machine::LoopSkip::mayProbe (uint64_t now, uint32_t pc, uint32_t room)
 {
     if (now < nextTry)
+        return false;
+    if (loopAt (pc) == pc ? room < kProbeKnown : (room < kProbeMin || now < backoffUntil))
         return false;
     const auto earned = (int64_t) std::min<uint64_t> ((now > creditAt ? now - creditAt : 0) / 2048, (uint64_t) kCreditMax);
     credit = std::min (credit + earned, kCreditMax);
@@ -904,11 +907,11 @@ bool Machine::LoopSkip::mayProbe (uint64_t now)
     return credit > 0;
 }
 
-// Sin sondeos un tiempo (doblando hasta ~17 ms a 240 MHz)
+// Sin sondeos un tiempo (doblando hasta ~17 ms a 240 MHz), salvo en los pc con bucle conocido
 void Machine::LoopSkip::backOff (uint64_t now)
 {
     backoff = std::clamp<uint64_t> (backoff * 2, 1u << 11, 1u << 22);
-    nextTry = now + backoff;
+    backoffUntil = now + backoff;
 }
 
 // Busca un bucle de sondeo en el pc de cpu0 con el tick de esa instrucción pagado. Devuelve las instrucciones ejecutadas,
@@ -926,10 +929,12 @@ uint32_t Machine::probeLoop (uint32_t budget)
     ++ls.probes;
     ls.log.clear();
     ls.seen.clear();
+    ls.pcs.clear();
     std::optional<P33> p33Was;
     uint32_t i = 0;
     size_t visits = 0;
-    int result = 0;  // 1 = vuelta encontrada (len en roundLen); -1 = no; -2 = un evento vence (mirar después de él)
+    int result = 0;  // 1 = vuelta encontrada (len en roundLen); -1 = no; -2 = un evento vence (mirar después de él);
+                     // -3 = interrupción o reset pendiente (sin espera)
     uint32_t roundLen = 0;
     while (true)
     {
@@ -974,12 +979,18 @@ uint32_t Machine::probeLoop (uint32_t budget)
             result = -2;
             break;
         }
+        ls.pcs.push_back (cpu0.pc);
         ProbeBus bus (soc, ls.log, p33Was);
         const bool ok = cpu0.step (bus);
         // (un reset pedido: llega tras esta vuelta, no tras las saltadas)
-        if (! ok || bus.bad || soc.periph.anyPending() || soc.resetDue())
+        if (! ok || bus.bad)
         {
             result = -1;
+            break;
+        }
+        if (soc.periph.anyPending() || soc.resetDue())
+        {
+            result = -3;  // la cortó una interrupción o un reset: no dice nada de si hay bucle
             break;
         }
         ++i;
@@ -998,9 +1009,12 @@ uint32_t Machine::probeLoop (uint32_t budget)
         ls.credit = std::min<int64_t> (ls.credit + (int64_t) (k * l / 4) - (int64_t) i, kCreditMax);
         ++ls.hits;
         ls.skipped += k * l;
+        for (size_t q = i - roundLen; q < i; ++q)  // todos los pc de la vuelta: un tramo puede empezar en cualquiera
+            ls.loopAt (ls.pcs[q]) = ls.pcs[q];
         if (k * l >= 8ull * i)
         {
             ls.backoff = 0;
+            ls.backoffUntil = 0;
             ls.nextTry = 0;
         }
         else if (byEvent < byBudget)
@@ -1024,8 +1038,9 @@ uint32_t Machine::probeLoop (uint32_t budget)
     ls.credit -= i;
     if (result == -2)
         ls.nextTry = due0;
-    else
+    else if (result == -1 && ls.loopAt (pc0) != pc0)
         ls.backOff (cycles0);
+    // (en un pc con bucle conocido un fallo es casi siempre cpu0 saliendo del bucle, despertada: solo cuesta crédito)
     return 0;
 }
 
@@ -1056,15 +1071,33 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
         }
         cpu0Between();
         // (no con una liberación de cpu1 retenida: el tramo debe cortarse donde lo haría sin el salto)
-        if (loopSkip.enabled && ! soc.cpu1Release && n - done >= kProbeMin && ! soc.periph.anyPending()
-            && loopSkip.mayProbe (soc.periph.cycles))
+        if (loopSkip.enabled && ! soc.cpu1Release && n - done >= kProbeKnown && ! soc.periph.anyPending()
+            && loopSkip.mayProbe (soc.periph.cycles, cpu0.pc, n - done))
         {
-            if (soc.periph.nextDue < soc.periph.cycles + kProbeMin)
+            if (soc.periph.nextDue < soc.periph.cycles + kProbeKnown)
                 loopSkip.nextTry = soc.periph.nextDue;  // demasiado cerca del siguiente evento
             else if (const auto k = probeLoop (n - done); k > 0)
             {
                 done += k;
                 continue;  // (el tick de la siguiente instrucción, sin pagar)
+            }
+        }
+        // bucle de retardo contado: vueltas enteras hasta antes del siguiente evento, exacto (ver Cpu::skipCountedLoop). El tick
+        // de esta instrucción está pagado: k instrucciones dejan el reloj k - 1 más allá, y el tick de la siguiente lo paga el bucle
+        if (cpu0.pc == cpu0.loopHint && cpu0.pc != cpu0.notCounted && loopSkip.enabled && ! soc.cpu1Release && ! soc.periph.anyPending())
+        {
+            const auto c = soc.periph.cycles, due = soc.periph.nextDue;
+            const auto room = (uint32_t) std::min<uint64_t> (n - done, due > c ? due - c : 0);
+            const auto k = cpu0.skipCountedLoop (soc, room);
+            if (k < 0)
+                cpu0.notCounted = cpu0.pc;
+            else if (k > 0)
+            {
+                soc.periph.cycles += (uint64_t) k - 1;
+                done += (uint32_t) k;
+                ++loopSkip.counted;
+                loopSkip.countedSkipped += (uint64_t) k;
+                continue;
             }
         }
         const bool trip = cpu0.pcEnter (cpu0.pc);

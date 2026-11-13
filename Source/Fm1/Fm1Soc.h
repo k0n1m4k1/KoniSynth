@@ -20,6 +20,7 @@
 #include "Fm1Fwsc.h"
 #include "Fm1Periph.h"
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <string>
@@ -180,14 +181,23 @@ public:
     struct LoopSkip
     {
         bool enabled = true;
-        uint64_t nextTry = 0, backoff = 0;
+        uint64_t nextTry = 0;                     // sin sondeos hasta este ciclo (un evento cerca)
+        uint64_t backoff = 0, backoffUntil = 0;   // espera creciente tras un sondeo fallido (como fm1-emu)
+        // pc donde un sondeo encontró vuelta (mapeo directo de 64): ahí se sondea aunque haya espera y con poco tramo por
+        // delante. fm1-emu no lo tiene: con cpu1 en marcha, los fallos en otro código (ISR...) y el tramo de 1024 dejaban el
+        // bucle de espera de 6 instrucciones de la V15 sin saltar: 140 M de sus 150 M instrucciones en 2,6 s (medido)
+        std::array<uint32_t, 64> loops;
+        LoopSkip() { loops.fill (0xffffffffu); }
+        uint32_t& loopAt (uint32_t pc) noexcept { return loops[(pc >> 1) & 63]; }
         int64_t credit = 1 << 16;
         uint64_t creditAt = 0;
         uint64_t skipped = 0, probes = 0, hits = 0;  // ciclos (= instrucciones) saltados, sondeos, sondeos con bucle
+        uint64_t counted = 0, countedSkipped = 0;  // saltos de bucles de retardo contados (Cpu::skipCountedLoop) y sus instrucciones
         struct Visit { Cpu::PlainState core; P33::Snap p33; Periph::AdcState adc; uint32_t at; size_t log; };
         std::vector<std::pair<uint32_t, uint32_t>> log, scratch;
         std::vector<Visit> seen;
-        bool mayProbe (uint64_t now);
+        std::vector<uint32_t> pcs;  // el pc de cada instrucción del sondeo en curso
+        bool mayProbe (uint64_t now, uint32_t pc, uint32_t room);  // room: instrucciones del tramo por delante
         void backOff (uint64_t now);
     } loopSkip;
 

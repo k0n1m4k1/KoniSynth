@@ -1077,6 +1077,65 @@ void Cpu::setPlainState (const PlainState& s) noexcept
     holdIrq = 0;
 }
 
+int64_t Cpu::skipCountedLoop (Bus& bus, uint32_t room)
+{
+    if (! fastPath || repEnd != 0 || ! predSkips.empty() || pairPending)
+        return 0;
+    const auto head = pc;
+    int reg = -1;
+    uint32_t d = 0, len = 0, at = head;
+    for (int i = 0; i < 4; ++i)
+    {
+        const Line* l = fetch (bus, at);
+        if (l == nullptr)
+        {
+            fault = Fault::None;  // (la instrucción fallará igual al ejecutarla)
+            return -1;
+        }
+        const auto& p = l->pre;
+        if (p.pairHead)
+            return -1;
+        ++len;
+        const auto next = at + l->len;
+        if (p.fast == Fm1Pre::FastAluI && p.fcond == Fm1Pre::Add && p.fd == p.fa)
+        {
+            if (reg >= 0)
+                return -1;  // una sola suma
+            reg = p.fd;
+            d = p.fimm;
+        }
+        else if (p.fast == Fm1Pre::FastBrI && (Cond) p.fcond == Cond::Ne)
+        {
+            if (reg < 0 || p.fa != reg || (uint32_t) ((int64_t) next + p.foff) != head || d == 0)
+                return -1;
+            // Vueltas hasta salir desde la cabeza: el menor m >= 1 con R + m·d == C (mod 2^32). Con d = 2^t·u (u impar):
+            // hace falta que 2^t divida C - R, y m = ((C - R) >> t)·u^-1 mod 2^(32-t)
+            const auto diff = p.fimm - regs[reg];
+            const auto t = (unsigned) std::countr_zero (d);
+            if (diff == 0 || (diff & ((1u << t) - 1)) != 0)
+                return 0;  // no sale en esta vuelta de 2^32 (o ya está en C): el intérprete
+            const uint32_t u = d >> t;
+            uint32_t inv = u;  // inverso de u módulo 2^32 (Newton: cada paso dobla los bits correctos)
+            for (int k = 0; k < 5; ++k)
+                inv *= 2u - u * inv;
+            const uint64_t mask = (1ull << (32 - t)) - 1;
+            const auto m = ((uint64_t) (diff >> t) * inv) & mask;
+            const auto rounds = std::min<uint64_t> (m - 1, room / len);  // al menos la última vuelta, en el intérprete
+            if (rounds == 0)
+                return 0;
+            regs[reg] += (uint32_t) (rounds - 1) * d;
+            regs[reg] = aluF (Fm1Pre::Add, regs[reg], d);  // la última suma saltada, con sus banderas
+            insnCount += rounds * len;
+            holdIrq = 0;
+            return (int64_t) (rounds * len);
+        }
+        else if (! (p.route == 2 && p.fast == Fm1Pre::FastNone))
+            return -1;  // solo nop / csync en el cuerpo
+        at = next;
+    }
+    return -1;
+}
+
 bool Cpu::pcEnter (uint32_t at) noexcept
 {
     const bool outside = hasPcWin && ! (pcWin[0][0] <= at && at <= pcWin[0][1]) && ! (pcWin[1][0] <= at && at <= pcWin[1][1]);
@@ -1225,6 +1284,8 @@ bool Cpu::step (Bus& bus)
     const auto& line = *l;
     if (hist != nullptr)
         ++(*hist)[line.entry];
+    if (pcHist != nullptr)
+        ++(*pcHist)[pc];
     const auto nextPc = pc + line.len;
     if (line.pre.pairHead)
         std::memcpy (pairBefore, regs, sizeof regs);  // solo la cabeza de un par necesita los registros de antes
@@ -1335,7 +1396,11 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             }
             case Fm1Pre::FastBrI:
                 if (condEval ((Cond) pre.fcond, regs[pre.fa], pre.fimm))
+                {
                     jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff));
+                    if (pre.foff < 0 && (Cond) pre.fcond == Cond::Ne)
+                        loopHint = target;  // quizá un bucle de retardo contado (skipCountedLoop)
+                }
                 break;
             case Fm1Pre::FastBrR:
                 if (condEval ((Cond) pre.fcond, regs[pre.fa], regs[pre.fb]))
