@@ -356,18 +356,21 @@ void Soc::advance (uint64_t n)
 // ---- Bus --------------------------------------------------------------------------------------------------------------------
 void Soc::idle (uint32_t core)
 {
+    ++sideEffects;
     if (core == 0) periph.idle();
     else cpu1Idle = true;
 }
 
 void Soc::spin (uint32_t core, uint32_t addr)
 {
+    ++sideEffects;
     if (cpu1Running)
         waits[core & 1] = Wait { Wait::Byte, addr };
 }
 
 bool Soc::hwLock (uint32_t core, bool set)
 {
+    ++sideEffects;
     if (set)
     {
         if (lockOwner && *lockOwner != core)
@@ -457,6 +460,7 @@ uint32_t Soc::timerRead (uint32_t addr)
 
 uint32_t Soc::read32Slow (uint32_t addr)
 {
+    ++sideEffects;
     switch (region (addr))
     {
         case Region::Xip:
@@ -612,6 +616,7 @@ void Soc::spi2Write (uint32_t addr, uint32_t v)
 
 void Soc::write32Slow (uint32_t addr, uint32_t v)
 {
+    ++sideEffects;
     switch (region (addr))
     {
         case Region::Xip: case Region::XipFlash: logUnknown (addr, 4, true, v); break;  // la flash se escribe por SPI0
@@ -1100,6 +1105,9 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
                 continue;
             }
         }
+        // (lo que vale al empezar la instrucción: si nada está pendiente y no hay accesos con efectos, sigue igual)
+        const bool calm = fastPath && ! soc.periph.anyPending() && ! soc.cpu1Release && ! soc.waits[0];
+        const auto side0 = soc.sideEffects;
         const bool trip = cpu0.pcEnter (cpu0.pc);
         if (! cpu0.step (soc))
         {
@@ -1109,10 +1117,46 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
         ++done;
         if (trip)
             soc.guardTrip (12);  // la primera instrucción fuera de los límites corre, luego la excepción
+        // Ráfaga: las instrucciones siguientes sin las comprobaciones de arriba, mientras no puedan cambiar su resultado.
+        // Un reset, una interrupción pendiente, la liberación de cpu1, un cerrojo o las guardas de pc solo cambian con un tick
+        // que vence o con un acceso de Soc::sideEffects; y se para donde arriba actuaría un salto de bucle (pc de bucle
+        // conocido, hueco de sondeo, bucle contado). El tick de cada una se paga aquí: no vence
+        if (calm && ! trip)
+            while (soc.sideEffects == side0 && done < n && ! soc.periph.nextTickDue() && ! burstStop (n - done))
+            {
+                ++soc.periph.cycles;
+                soc.periph.inIsr = ! cpu0.irqLevels.empty();
+                const bool t = cpu0.pcEnter (cpu0.pc);
+                if (! cpu0.step (soc))
+                {
+                    error = faultText (cpu0, "cpu0");
+                    return false;
+                }
+                ++done;
+                if (t)
+                {
+                    soc.guardTrip (12);
+                    break;
+                }
+            }
         if (soc.cpu1Release || soc.waits[0])
             break;
     }
     return true;
+}
+
+// ¿Actuaría aquí el bucle de runBlocks antes de ejecutar (sondeo de bucle o bucle contado)? Con el tick de la instrucción
+// aún sin pagar, como lo mira la ráfaga
+bool Machine::burstStop (uint32_t room) const noexcept
+{
+    if (! loopSkip.enabled)
+        return false;
+    const auto pc = cpu0.pc;
+    if (pc == cpu0.loopHint && pc != cpu0.notCounted)
+        return true;
+    const auto now = soc.periph.cycles + 1;
+    return room >= kProbeKnown && now >= loopSkip.nextTry
+        && (loopSkip.loops[(pc >> 1) & 63] == pc || (room >= kProbeMin && now >= loopSkip.backoffUntil));
 }
 
 // cpu1 cuando cpu0 la libera: su entrada es la palabra de 0x01C7FFF8 (imágenes antiguas sin ella: el bucle de trabajos en

@@ -91,6 +91,9 @@ public:
     std::optional<Wait> waits[2];
     std::optional<uint32_t> lockOwner;
     uint32_t resets = 0;
+    // Accesos que pueden cambiar lo que el bucle de cpu0 mira entre instrucciones (MMIO por la ruta lenta, cerrojos,
+    // espera de byte, idle): sin ellos ni un tick vencido, nada de eso cambia (las ráfagas de Machine::runBlocks)
+    uint64_t sideEffects = 0;
     uint64_t ticks = 0;
 
 private:
@@ -204,6 +207,7 @@ public:
 
 private:
     uint32_t probeLoop (uint32_t budget);
+    bool burstStop (uint32_t room) const noexcept;
     void cpu0Between();
     bool runBlocks (uint32_t n, uint32_t& done, std::string& error);  // el bucle de bloques de cpu0
     std::unique_ptr<Cpu> releasedCpu1();

@@ -203,6 +203,9 @@ private:
         uint64_t raw = 0;   // el raw que ve la ejecución (la ventana o sus 4 bytes bajos, según decode_any)
         const Fm1IsaEntry* entry = nullptr;
         Fm1Pre pre;
+        // if {} predicado en la XIP (no cambia): los finales de sus partes, calculados la primera vez que se ejecuta
+        mutable bool ifKnown = false;
+        mutable uint32_t ifThenEnd = 0, ifElseEnd = 0;
     };
     std::vector<Line> icache;
 

@@ -1270,6 +1270,7 @@ Cpu::Line* Cpu::fetch (Bus& bus, uint32_t at)
     line.win = win;
     line.raw = raw;
     line.entry = e;
+    line.ifKnown = false;
     computePre (*e, raw, line.pre);
     return &line;
 }
@@ -1653,8 +1654,23 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             const auto a = regs[blk.reg];
             const auto b = rhsVal (blk.rhs);
             const bool taken = blk.fam == 2 ? (((a & b) != 0) == blk.alt) : cmpCond (blk.fam, blk.alt, a, b);
-            const auto thenEnd = blockEnd (bus, nextPc, blk.thenUnits);
-            const auto elseEnd = blockEnd (bus, thenEnd, blk.elseUnits);
+            uint32_t thenEnd, elseEnd;
+            if (l.ifKnown)
+            {
+                thenEnd = l.ifThenEnd;
+                elseEnd = l.ifElseEnd;
+            }
+            else
+            {
+                thenEnd = blockEnd (bus, nextPc, blk.thenUnits);
+                elseEnd = blockEnd (bus, thenEnd, blk.elseUnits);
+                if (l.pc >= 0x02000000u && l.pc < 0x04000000u)  // (en la XIP el código no cambia, como supone fetch)
+                {
+                    l.ifThenEnd = thenEnd;
+                    l.ifElseEnd = elseEnd;
+                    l.ifKnown = true;
+                }
+            }
             if (taken)
             {
                 if (blk.elseUnits > 0)
@@ -2972,14 +2988,16 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
     {
         uint8_t w;
         sv inner, addrTxt, rest;
-        if (widthOf (s, w, inner) && split2 (inner, "] ", addrTxt, rest) && rest == "= R")
+        // (otros direccionamientos: el bloque general de abajo)
+        if (widthOf (s, w, inner) && split2 (inner, "] ", addrTxt, rest) && rest == "= R"
+            && (addrTxt == "R+#i" || addrTxt == "sp+#i" || addrTxt == "sp" || addrTxt == "R+R" || addrTxt == "R+R<<#i"))
         {
             if (addrTxt == "R+#i" && n >= 3) { p.fa = rg (0); p.fimm = (uint32_t) sl (1); p.fd = rg (2); }
             else if (addrTxt == "sp+#i" && n >= 2) { p.fsp = true; p.fimm = (uint32_t) sl (0); p.fd = rg (1); }
             else if (addrTxt == "sp" && n >= 1) { p.fsp = true; p.fimm = 0; p.fd = rg (0); }
             else if (addrTxt == "R+R" && n >= 3) { p.fidx = true; p.fa = rg (0); p.fb = rg (1); p.fsh = 0; p.fd = rg (2); }
             else if (addrTxt == "R+R<<#i" && n >= 4) { p.fidx = true; p.fa = rg (0); p.fb = rg (1); p.fsh = (uint8_t) (sl (2) & 31); p.fd = rg (3); }
-            else return;
+            else return;  // (le falta una ranura)
             p.fw = w;
             p.fast = Fm1Pre::FastSt;
             return;
