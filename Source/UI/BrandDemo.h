@@ -381,7 +381,7 @@ private:
     // 9) Sine scroller sobre 3 barras de cobre; sonando, cada barra brilla con su zona (graves, medios, agudos)
     void sceneScroller()
     {
-        static constexpr const char* msg = "  KONISYNTH  *  15 ENGINES  *  60s TO 90s SYNTH LAB  *  ";
+        static constexpr const char* msg = "  KONISYNTH  *  16 ENGINES  *  60s TO 90s SYNTH LAB  *  ";
         static const int len = (int) std::strlen (msg);
         const auto u = seconds();
         for (int k = 0; k < 3; ++k)
