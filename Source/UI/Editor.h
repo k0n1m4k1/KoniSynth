@@ -570,7 +570,7 @@ public:
                            p.add ("MIDI Delay").withKnob (st, "mt32MidiDelay", "Cable");
                        }))
                    .withKnob (s, "mt32Mode", "Keys").withList (s, "mt32Program", "Program", 3.0f).withKnob (s, "mt32Reverb", "Reverb")
-                   .withKnob (s, "mt32Dac", "DAC"); // 5 posiciones: conmutador por pasos (Knob con detents)
+                   .withKnob (s, "mt32Dac", "DAC").withKnob (s, "mt32Rom", "ROM"); // 5 y 13 posiciones: conmutador por pasos (Knob con detents)
         gusSection.withCombo (s, "gusModel").withExtraToggle (s, "gusMulti", "Multitimbral")
                   .withHeaderButton ("Patches...", "The Gravis patch set is not included: put your .PAT files (with Gravis' ULTRAMID.INI, "
                                      "a timidity.cfg or DEFAULT.CFG) in a folder and choose it here.", [this] { gusPatchMenu(); })
@@ -1904,6 +1904,7 @@ private:
         filter.setHeaderControlAlpha ((int) v ("filterMode") < VoiceFilters::svfLp ? 1.0f : 0.6f);
         const auto mt32Multi = v ("mt32Multi") > 0.5f; // MT-32: con Multi el teclado no se enruta; Program solo en Part 1
         dim (mt32Section.knobFor ("mt32Mode"), mt32Multi);
+        dim (&mt32Section.comboComponent(), (int) v ("mt32Rom") != 0); // una versión concreta fija el modelo
         dim (mt32Section.listFor ("mt32Program"), mt32Multi || (int) v ("mt32Mode") == 1);
         const auto gusMulti = v ("gusMulti") > 0.5f; // Gravis: igual que el MT-32; la Extreme lleva 1 MB fijo (RAM sin efecto)
         dim (gusSection.knobFor ("gusMode"), gusMulti);

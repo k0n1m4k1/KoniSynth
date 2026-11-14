@@ -31,11 +31,18 @@ struct Mt32Machine
         if (pcm != nullptr)     MT32Emu::ROMImage::freeROMImage (pcm);
     }
 
+    // ROM de control por índice del parámetro mt32Rom - 1 (nombres cortos de ROMInfo.cpp de Munt; los pares Mux _a/_b se
+    // fusionan en la completa, que da este nombre)
+    static constexpr const char* romNames[] = { "ctrl_mt32_1_04", "ctrl_mt32_1_05", "ctrl_mt32_1_06", "ctrl_mt32_1_07", "ctrl_mt32_bluer",
+                                                "ctrl_mt32_2_03", "ctrl_mt32_2_04", "ctrl_mt32_2_06", "ctrl_mt32_2_07",
+                                                "ctrl_cm32l_1_00", "ctrl_cm32l_1_02", "ctrl_cm32ln_1_00" };
+
     // Busca y abre una pareja control + PCM. model: 0 = MT-32 (1.ª generación primero), 1 = CM-32L. Si falta el modelo pedido
-    // y hay el otro, abre el otro y lo dice en 'report'. nullptr si no hay pareja válida. queueSize: eventos de la cola MIDI de
+    // y hay el otro, abre el otro y lo dice en 'report'. rom: 0 = Auto; 1-12 = romNames[rom - 1], que manda sobre el modelo; si
+    // no está en la carpeta, Auto y 'report' lo dice. nullptr si no hay pareja válida. queueSize: eventos de la cola MIDI de
     // Munt (parámetro mt32Queue; solo aquí: redimensionarla reserva memoria y la vacía, no se puede en el hilo de audio)
     static std::unique_ptr<Mt32Machine> open (const juce::File& folder, int model, double hostRate, juce::String& report,
-                                              MT32Emu::Bit32u queueSize = 1024)
+                                              MT32Emu::Bit32u queueSize = 1024, int rom = 0)
     {
         using namespace MT32Emu;
         auto m = std::make_unique<Mt32Machine>();
@@ -85,8 +92,14 @@ struct Mt32Machine
             return 1000;
         };
         const Found* control = nullptr;
+        const juce::String wanted = rom >= 1 && rom <= (int) std::size (romNames) ? romNames[rom - 1] : "";
         for (const auto& c : full)
-            if (c.info->type == ROMInfo::Control && rank (c.info->shortName, model) < 1000
+            if (c.info->type == ROMInfo::Control && wanted == c.info->shortName)
+                control = &c;
+        if (control != nullptr)
+            model = wanted.startsWith ("ctrl_cm32l") ? 1 : 0; // la versión elegida fija el modelo (y el aviso de abajo)
+        for (const auto& c : full)
+            if (control == nullptr && c.info->type == ROMInfo::Control && rank (c.info->shortName, model) < 1000
                 && (control == nullptr || rank (c.info->shortName, model) < rank (control->info->shortName, model)))
                 control = &c;
         const Found* pcm = nullptr;
@@ -130,6 +143,8 @@ struct Mt32Machine
         m->converter = std::make_unique<SampleRateConverter> (m->synth, hostRate, SamplerateConversionQuality_GOOD);
         m->description = juce::String (control->info->description) + " + " + pcm->info->description;
         report = (model == 1) != m->cm32l ? m->description + juce::String (" (the other model was not found)") : m->description;
+        if (wanted.isNotEmpty() && wanted != name)
+            report += " (the chosen ROM version is not in the folder: Auto)";
         return m;
     }
 };

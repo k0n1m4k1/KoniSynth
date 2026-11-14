@@ -156,7 +156,7 @@ struct Params
         { int d = 0; for (const auto* id : { "oplBdTl", "oplSdTl", "oplTomTl", "oplCyTl", "oplHhTl" }) oplDrumTl[(size_t) d++] = get (id); }
         oplGold = get ("oplGold"); oplGoldBass = get ("oplGoldBass"); oplGoldTreble = get ("oplGoldTreble"); oplGoldStereo = get ("oplGoldStereo");
         oplGoldSurround = get ("oplGoldSurround"); oplGoldLevel = get ("oplGoldLevel");
-        mt32Model = get ("mt32Model"); mt32Mode = get ("mt32Mode"); mt32Multi = get ("mt32Multi"); mt32Program = get ("mt32Program"); mt32Reverb = get ("mt32Reverb");
+        mt32Model = get ("mt32Model"); mt32Rom = get ("mt32Rom"); mt32Mode = get ("mt32Mode"); mt32Multi = get ("mt32Multi"); mt32Program = get ("mt32Program"); mt32Reverb = get ("mt32Reverb");
         mt32Dac = get ("mt32Dac"); mt32Queue = get ("mt32Queue"); mt32NiceAmp = get ("mt32NiceAmp"); mt32NicePan = get ("mt32NicePan"); mt32NiceMix = get ("mt32NiceMix"); mt32MidiDelay = get ("mt32MidiDelay");
         gusModel = get ("gusModel"); gusRam = get ("gusRam"); gusVoices = get ("gusVoices"); gusMode = get ("gusMode"); gusMulti = get ("gusMulti");
         gusProgram = get ("gusProgram"); gusPatchBits = get ("gusPatchBits");
@@ -302,7 +302,7 @@ struct Params
     std::atomic<float> *oplModel {}, *oplFourOp {}, *oplGm {}, *oplAlgorithm {}, *oplFeedback {}, *oplDeepTremolo {}, *oplDeepVibrato {},
                        *oplVelocity {}, *oplPan {}, *oplOutput {},
                        *oplRhythm {}, *oplGold {}, *oplGoldBass {}, *oplGoldTreble {}, *oplGoldStereo {}, *oplGoldSurround {}, *oplGoldLevel {},
-                       *mt32Model {}, *mt32Mode {}, *mt32Multi {}, *mt32Program {}, *mt32Reverb {}, *mt32Dac {}, *mt32Queue {}, *mt32NiceAmp {}, *mt32NicePan {}, *mt32NiceMix {}, *mt32MidiDelay {};
+                       *mt32Model {}, *mt32Rom {}, *mt32Mode {}, *mt32Multi {}, *mt32Program {}, *mt32Reverb {}, *mt32Dac {}, *mt32Queue {}, *mt32NiceAmp {}, *mt32NicePan {}, *mt32NiceMix {}, *mt32MidiDelay {};
     std::atomic<float> *gusModel {}, *gusRam {}, *gusVoices {}, *gusMode {}, *gusMulti {}, *gusProgram {}, *gusPatchBits {};
     std::atomic<float> *mdVoice {}, *mdPsgNoise {}, *mdPsgNoiseRate {}, *mdPsgAttack {}, *mdPsgDecay {}, *mdPsgSustain {}, *mdPsgRelease {}, *mdDacRate {};
     std::array<std::atomic<float>*, 3> mdCh3Op {};

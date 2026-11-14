@@ -812,6 +812,11 @@ static APVTS::ParameterLayout createLayout()
 
     // Roland MT-32 / CM-32L (Engines/Mt32.h, Munt): modelo de ROM, destino del teclado, programa, reverb del aparato y DAC
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Model", 1 },   "MT-32 Model", StringArray { "MT-32", "CM-32L" }, 0));
+    // ROM de control concreta (las 12 que reconoce Munt, ROMInfo.cpp); Auto: la preferida del modelo. En el orden de
+    // Mt32Machine::romNames (el índice - 1 es su posición)
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Rom", 1 },     "MT-32 ROM", StringArray { "Auto",
+               "MT-32 1.04", "MT-32 1.05", "MT-32 1.06", "MT-32 1.07", "MT-32 Blue Ridge", "MT-32 2.03", "MT-32 2.04", "MT-32 2.06",
+               "MT-32 2.07", "CM-32L 1.00", "CM-32L 1.02", "CM-32LN 1.00" }, 0));
     // Teclado -> parte 1 o ritmo; Multi (enrutado aparte): canales MIDI tal cual, para ficheros .mid
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "mt32Mode", 1 },    "MT-32 Keys", StringArray { "Part 1", "Rhythm" }, 0));
     l.add (std::make_unique<AudioParameterBool>   (ParameterID { "mt32Multi", 1 },   "MT-32 Multitimbral", false));

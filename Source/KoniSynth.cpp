@@ -268,9 +268,11 @@ public:
     {
         mt32BuiltModel = (int) params.mt32Model->load();
         mt32BuiltQueue = (int) params.mt32Queue->load();
+        mt32BuiltRom = (int) params.mt32Rom->load();
         mt32Rate = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
         juce::String report;
-        auto machine = Mt32Machine::open (mt32RomFolder(), mt32BuiltModel, mt32Rate, report, 512u << juce::jlimit (0, 3, mt32BuiltQueue));
+        auto machine = Mt32Machine::open (mt32RomFolder(), mt32BuiltModel, mt32Rate, report, 512u << juce::jlimit (0, 3, mt32BuiltQueue),
+                                      mt32BuiltRom);
         mt32Engine.slot.replace (std::move (machine));
         const juce::ScopedLock sl (sampleInfoLock);
         mt32Status = report;
@@ -2146,7 +2148,7 @@ private:
     bool fm1Tried = false; // se intentó arrancar el firmware con el motor elegido (Rescan lo repite)
     bool gusBuilt = false; // se intentó leer la carpeta de patches (una vez; Rescan lo repite)
     double mt32Rate = 0.0;
-    int mt32BuiltModel = -1, mt32BuiltQueue = 0; // con qué se construyó la máquina: si cambian, se reconstruye
+    int mt32BuiltModel = -1, mt32BuiltQueue = 0, mt32BuiltRom = 0; // con qué se construyó la máquina: si cambian, se reconstruye
     juce::String mt32Status; // protegido por sampleInfoLock
     juce::String gusStatus;  // protegido por sampleInfoLock
     juce::String fm1StartError; // protegido por sampleInfoLock
@@ -2341,6 +2343,7 @@ private:
             updateUserRhythms();
         }
         if ((int) params.engine->load() == 14 && ((int) params.mt32Model->load() != mt32BuiltModel || (int) params.mt32Queue->load() != mt32BuiltQueue
+                                                  || (int) params.mt32Rom->load() != mt32BuiltRom
                                                   || getSampleRate() != mt32Rate))
             rebuildMt32(); // solo con el motor elegido: desactivado no carga ROM ni ocupa memoria
         if ((int) params.engine->load() == 15 && ! gusBuilt)

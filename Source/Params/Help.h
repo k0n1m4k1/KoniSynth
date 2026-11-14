@@ -748,6 +748,10 @@ static juce::String paramHelp (const juce::String& id)
         { "mt32Model", "Which Roland ROM set to use from your ROM folder: MT-32 (first-generation control ROM preferred, the one most "
                        "late-80s PC games were written for) or CM-32L (more sound effects, the later DAC). Falls back to the other "
                        "if only that one is present." },
+        { "mt32Rom", "Exact control ROM version from your ROM folder, saved with the preset (the unit's firmware changes "
+                     "reverb, LCD messages, sound names and some bugs). Auto: the preferred one for the Model (MT-32 1.07 first, "
+                     "CM-32L 1.02 first). A version sets the model itself; if it is not in your folder, Auto is used and the ROMs "
+                     "menu says so. Default: Auto." },
         { "mt32Mode", "What the keyboard plays. Part 1: MIDI channel 2 of the MT-32 with the Program next to it. Rhythm: channel 10, "
                       "the drum kit. Not used with Multitimbral on." },
         { "mt32Multi", "MIDI channels as they come instead of the keyboard routing, for MT-32 .mid files (parts on channels 2-9, "
