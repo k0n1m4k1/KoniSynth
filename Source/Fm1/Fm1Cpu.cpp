@@ -1075,6 +1075,27 @@ static void computeFastRaw (uint64_t raw, Fm1Pre& pre, uint8_t len) noexcept
         case 2:  // nop / csync / sti R / cli R
             pre.fast = Fm1Pre::FastNop;
             return;
+        case 37:  // R = b|h[sp+#i] (raw): la carga, FastLd sobre sp (ldW, como execRaw); el store (write16), por execRaw
+        {
+            SpMem m {};
+            if (spMemRaw (raw, m) && ! m.store)
+            {
+                pre.fast = Fm1Pre::FastLd;
+                pre.fd = m.d;
+                pre.fimm = m.off;
+                pre.fw = m.w;
+                pre.fsign = m.sign;
+                pre.fsp = true;
+                pre.fidx = false;
+            }
+            else
+                pre.fast = Fm1Pre::FastExecRaw;
+            return;
+        }
+        case 16: case 18: case 19: case 21: case 22: case 32: case 33: case 34: case 35: case 36: case 38: case 39:
+        case 40: case 41:  // (las de execRoute que van a execRaw: datos, sin salto)
+            pre.fast = Fm1Pre::FastExecRaw;
+            return;
         case 8:  // R = #h (composedImm, como su caso en execRoute)
             pre.fast = Fm1Pre::FastMovI;
             pre.fd = (uint8_t) ((raw >> 28) & 0xf);
@@ -2157,6 +2178,34 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     for (uint32_t j = 0; j < n; ++j)
     {
         const auto& l = *lines[j];
+        if (l.pre.pairHead)
+        {
+            // par de emisión doble (jitAt: las dos en nativo). Como stepImpl: la cabeza escribe como mucho su registro
+            // fd (nop y sp += no escriben ninguno); se guarda su resultado (r8d) y se deja el de antes (edx) para la
+            // segunda; después, si la segunda no cambió ese registro (sigue con el de antes), queda el de la cabeza
+            const auto& s = *lines[j + 1];
+            const int d = l.pre.fast == Fm1Pre::FastNop || l.pre.fast == Fm1Pre::FastSpAdd ? -1 : l.pre.fd;
+            const auto rd = off (&regs[d & 15]);
+            if (d >= 0)
+                memOp (e, { 0x8b }, 2, rd);                        // mov edx, [rd]
+            jitNative (e, l);
+            if (d >= 0)
+            {
+                e.bytes ({ 0x45, 0x8b, 0x84, 0x24 }); e.u32 (rd);  // mov r8d, [r12 + rd]
+                memOp (e, { 0x89 }, 2, rd);                        // mov [rd], edx
+            }
+            jitNative (e, s);
+            if (d >= 0)
+            {
+                memOp (e, { 0x39 }, 2, rd);                        // cmp [rd], edx
+                e.bytes ({ 0x75, 0x08 });                          // jne +8
+                e.bytes ({ 0x45, 0x89, 0x84, 0x24 }); e.u32 (rd);  // mov [r12 + rd], r8d  (8 bytes)
+            }
+            pend += 2;
+            pendPc = s.pc + s.len;
+            ++j;
+            continue;
+        }
         if (j + 1 == n && jitBranch (e, l, pend))
         {
             pend = 0;  // (apuntado con el salto)
@@ -2286,18 +2335,74 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     slot = 1;  // (hasta que se compile)
     std::vector<const Line*> lines;
     uint32_t a = at;
-    while (lines.size() < kJitMax && (inRam ? a - jitRam.base + 8 <= jitRam.size : a - 0x02000000u < kJitSpan))
+    const auto inSpan = [&] (uint32_t x) { return inRam ? x - jitRam.base + 8 <= jitRam.size : x - 0x02000000u < kJitSpan; };
+    const auto decodeAt = [&] (uint32_t x, Line& l)
     {
-        Line l;
-        l.win = ((uint64_t) bus.fetch32 (a + 4) << 32) | bus.fetch32 (a);
+        l.win = ((uint64_t) bus.fetch32 (x + 4) << 32) | bus.fetch32 (x);
         l.entry = decodeAny (l.win, l.raw);
         if (l.entry == nullptr)
-            break;
-        l.pc = a;
+            return false;
+        l.pc = x;
         l.len = l.entry->len;
         computePre (*l.entry, l.raw, l.pre);
+        return true;
+    };
+    while (lines.size() < kJitMax && inSpan (a))
+    {
+        Line l;
+        if (! decodeAt (a, l))
+            break;
+        if (l.pre.pairHead)
+        {
+            // par de emisión doble (como stepImpl: la segunda lee los registros de antes de la cabeza): solo con las dos
+            // en nativo (de registros, sin memoria ni salto) y la segunda sin ser cabeza; jitEmit hace la confirmación
+            Line s;
+            Emitter probe;
+            if (lines.size() + 2 > kJitMax || ! inSpan (a + l.len) || ! decodeAt (a + l.len, s) || s.pre.pairHead
+                || ! jitNative (probe, l) || ! jitNative (probe, s))
+                break;
+            jitLines.push_back (l);
+            lines.push_back (&jitLines.back());
+            jitLines.push_back (s);
+            lines.push_back (&jitLines.back());
+            a += l.len + s.len;
+            continue;
+        }
+        if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 14 && l.pre.ibElse == 0 && ! inRam)
+        {
+            // bloque predicado sin else, en la XIP: "si no se cumple, a thenEnd" (execRoute, ruta 14; sin predSkips ni rep,
+            // que el JIT exige vacíos, finish no hace nada más). Como salto hacia delante con la condición negada:
+            // condOfFam (fam, !alt) es la negación de condOfFam (fam, alt) en todas las familias (cmpCond)
+            const auto nextPc = a + l.len;
+            const auto thenEnd = blockEnd (bus, nextPc, l.pre.ibThen);
+            auto& p = l.pre;
+            const auto rk = p.ibRhs.kind;
+            p.foff = (int64_t) thenEnd - (int64_t) nextPc;
+            p.fa = p.cbA;
+            if (p.cbFam == 2)
+            {
+                // prueba de bits: se cumple si ((a & rhs) != 0) == alt; FastBitBr salta si ((a & m) != 0) == (fcond != 0)
+                p.fast = Fm1Pre::FastBitBr;
+                p.fmode = (uint8_t) rk;
+                p.fb = (uint8_t) (p.ibRhs.v & 15);
+                p.fimm = p.ibRhs.v;
+                p.fcond = p.cbAlt ? 0 : 1;
+            }
+            else if (rk == Fm1Pre::RhsImm)
+            {
+                p.fast = Fm1Pre::FastBrI;
+                p.fimm = p.ibRhs.v;
+                p.fcond = (uint8_t) condOfFam (p.cbFam, ! p.cbAlt);
+            }
+            else if (rk == Fm1Pre::RhsReg)
+            {
+                p.fast = Fm1Pre::FastBrR;
+                p.fb = (uint8_t) (p.ibRhs.v & 15);
+                p.fcond = (uint8_t) condOfFam (p.cbFam, ! p.cbAlt);
+            }
+        }
         const auto f = l.pre.fast;
-        if (f == Fm1Pre::FastNone || l.pre.pairHead)
+        if (f == Fm1Pre::FastNone)
             break;
         jitLines.push_back (l);
         lines.push_back (&jitLines.back());
@@ -2799,6 +2904,7 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                 break;
             }
             case Fm1Pre::FastNop: break;
+            case Fm1Pre::FastExecRaw: execRaw (bus, (uint8_t) pre.route, (uint32_t) raw); break;
             case Fm1Pre::FastNone: break;
         }
         finish (jumped, target, nextPc);

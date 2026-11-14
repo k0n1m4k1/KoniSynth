@@ -110,7 +110,10 @@ struct Fm1Pre
                             FastBitBr,    // if ((R & rhs) != 0) == fcond goto: fmode = clase de rhs (Fm1Pre::RhsKind),
                                           // fb = su registro, fimm = su inmediato
                             // quinta tanda (cobertura del JIT, medida con el osciloscopio de la V15): ruta cruda 2
-                            FastNop       // nop / csync / sti R / cli R: sin efecto (como su caso en execRoute)
+                            FastNop,      // nop / csync / sti R / cli R: sin efecto (como su caso en execRoute)
+                            // sexta tanda: las rutas crudas de datos (16, 18, 19, 21, 22, 32..41), sin saltos ni estado de
+                            // interrupciones: el mismo Cpu::execRaw que execRoute
+                            FastExecRaw
     };
     // Direccionamientos de FastLdX / FastStX (los de exec_syntax)
     enum MemMode : uint8_t { MemRImm, MemSpImm, MemSp, MemRR, MemRRShl, MemPostImm, MemPostR, MemPreImm, MemPreR, MemPushSp };
