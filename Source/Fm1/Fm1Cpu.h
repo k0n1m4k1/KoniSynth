@@ -42,6 +42,10 @@ struct Bus
     // puntero de apuntado de escrituras (Ram::log). false: sin acceso en línea (todo por el bus)
     struct RamView { uint8_t* data; uint32_t base, size; const uint8_t* code; void* const* log; };
     virtual bool ramView (RamView&) { return false; }
+    // (JIT) marca como código las palabras de RAM de [lo, hi) y cuenta las escrituras a palabras marcadas: si cambia,
+    // los bloques hechos desde RAM ya no valen
+    virtual void markCode (uint32_t /*lo*/, uint32_t /*hi*/) {}
+    virtual uint64_t codeWrites() { return 0; }
 };
 
 enum class Fault : uint8_t
@@ -257,6 +261,13 @@ public:
     // misma semántica. Solo con la ruta rápida, sin perfiles y en las plataformas con JIT (jitSupported)
     bool jitOn = true;
     uint64_t jitRuns = 0, jitInsns = 0, jitCompiled = 0;  // bloques ejecutados, sus instrucciones, bloques compilados
+    uint64_t jitRamFlushes = 0, jitResets = 0;  // vaciados de los bloques de RAM (código reescrito) y del búfer entero
+    // Un bloque del JIT en pc fuera de la ráfaga (el bucle de cpu1, Machine::runCpu1): como mucho maxN instrucciones, sin
+    // ninguna de avoidA / avoidB ni del rango [avoidLo, avoidHi] después de la primera (ganchos del HLE, pc de sondeo) y
+    // parando tras un acceso que cambie *side. Devuelve las instrucciones hechas; 0 = ningún bloque (y ok = false si
+    // falló la primera). ok = false: falló una (fault ...)
+    uint32_t runJit (Bus& bus, uint32_t maxN, uint32_t avoidA, uint32_t avoidB, uint32_t avoidLo, uint32_t avoidHi,
+                     const uint64_t* side, bool& ok);
     // Perfil opcional (nullptr = apagado): instrucciones ejecutadas por clase
     std::unordered_map<const Fm1IsaEntry*, uint64_t>* hist = nullptr;
     // con hist: instrucciones por ruta (ruta rápida: el índice 255) y cabezas de par de emisión doble
@@ -302,6 +313,8 @@ private:
     // 1 sin bloque, k + 2 = jitBlocks[k]. 4 MiB; la consulta "sin bloque" no toca los bloques
     static constexpr uint32_t kJitSpan = 1u << 21, kJitMax = 64;
     std::vector<uint32_t> jitIndex;
+    std::vector<uint32_t> jitIndexRam;  // lo mismo para la RAM de datos (código copiado ahí); se vacía si cambia codeWrites
+    uint64_t jitRamCw = 0;
     std::vector<JitBlock> jitBlocks;
     std::deque<Line> jitLines;  // las líneas de los bloques (el código nativo apunta a ellas: no se mueven)
     std::unique_ptr<CodeBuffer> jitCode;

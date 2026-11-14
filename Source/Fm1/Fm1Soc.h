@@ -58,6 +58,12 @@ public:
     bool hwLock (uint32_t core, bool set) override;
     void spin (uint32_t core, uint32_t addr) override;
     void idle (uint32_t core) override;
+    void markCode (uint32_t lo, uint32_t hi) override
+    {
+        if (lo >= kRamBase && hi > lo && hi - kRamBase <= ram.size())
+            ram.markCode (lo - kRamBase, hi - kRamBase);
+    }
+    uint64_t codeWrites() override { return ram.codeWrites; }
     bool ramView (RamView& v) override
     {
         v = { ram.ptr(), kRamBase, (uint32_t) ram.size(), ram.codeMarks(), (void* const*) &ram.log };

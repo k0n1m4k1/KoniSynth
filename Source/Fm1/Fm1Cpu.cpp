@@ -2127,18 +2127,31 @@ void Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines)
 // Código (x86-64): prólogo, por instrucción "jitOp (ctx, j, línea); si devuelve != 0, salir", epílogo
 const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
 {
-    const uint32_t o = at - 0x02000000u;
-    if (o >= kJitSpan)
-        return nullptr;
     if (jitIndex.empty())
     {
         jitRamOk = bus.ramView (jitRam) && jitRam.size >= 8;
         jitIndex.assign (kJitSpan / 2, 0);
+        jitIndexRam.assign (jitRamOk ? jitRam.size / 2 : 0, 0);
+        jitRamCw = bus.codeWrites();
         jitCode = std::make_unique<CodeBuffer>();
         if (! jitCode->init ((size_t) 16 << 20))
             jitFailed = true;
     }
-    auto& slot = jitIndex[o >> 1];
+    // XIP (no cambia) o RAM (vale mientras no se escriba ninguna palabra marcada como código: codeWrites)
+    const uint32_t o = at - 0x02000000u;
+    const bool inRam = o >= kJitSpan;
+    if (inRam)
+    {
+        if (! jitRamOk || at - jitRam.base >= jitRam.size)
+            return nullptr;
+        if (const auto cw = bus.codeWrites(); cw != jitRamCw)
+        {
+            std::fill (jitIndexRam.begin(), jitIndexRam.end(), 0u);  // (sus bloques quedan sin usar en el búfer)
+            jitRamCw = cw;
+            ++jitRamFlushes;
+        }
+    }
+    auto& slot = inRam ? jitIndexRam[(at - jitRam.base) >> 1] : jitIndex[o >> 1];
     if (slot >= 2)
         return &jitBlocks[slot - 2];
     if (slot == 1 || jitFailed)
@@ -2146,7 +2159,7 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     slot = 1;  // (hasta que se compile)
     std::vector<const Line*> lines;
     uint32_t a = at;
-    while (lines.size() < kJitMax && a - 0x02000000u < kJitSpan)
+    while (lines.size() < kJitMax && (inRam ? a - jitRam.base + 8 <= jitRam.size : a - 0x02000000u < kJitSpan))
     {
         Line l;
         l.win = ((uint64_t) bus.fetch32 (a + 4) << 32) | bus.fetch32 (a);
@@ -2173,10 +2186,27 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     Emitter e;
     jitEmit (e, lines);
     void* fn = jitCode->add (e.b.data(), e.b.size());
+    if (fn == nullptr && jitCode->used() > 0)
+    {
+        // búfer lleno (16 MiB; p. ej. código en RAM reescrito muchas veces): se vacía todo y se vuelve a empezar. Nada
+        // de lo anterior se está ejecutando (se compila fuera del código nativo); el bloque se compila en la próxima visita
+        std::fill (jitIndex.begin(), jitIndex.end(), 0u);
+        std::fill (jitIndexRam.begin(), jitIndexRam.end(), 0u);
+        jitBlocks.clear();
+        jitLines.clear();
+        jitCode->reset();
+        ++jitResets;
+        return nullptr;
+    }
     if (fn == nullptr)
     {
-        jitFailed = true;  // búfer lleno (16 MiB): lo que queda, interpretado
+        jitFailed = true;  // sin memoria ejecutable: lo que queda, interpretado
         return nullptr;
+    }
+    if (inRam)
+    {
+        bus.markCode (at, lines.back()->pc + lines.back()->len);
+        jitRamCw = bus.codeWrites();
     }
     ++jitCompiled;
     JitBlock b;
@@ -2187,6 +2217,30 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     jitBlocks.push_back (b);
     slot = (uint32_t) jitBlocks.size() + 1;
     return &jitBlocks.back();
+}
+
+uint32_t Cpu::runJit (Bus& bus, uint32_t maxN, uint32_t avoidA, uint32_t avoidB, uint32_t avoidLo, uint32_t avoidHi,
+                      const uint64_t* side, bool& ok)
+{
+    ok = true;
+    if (! jitOn || ! jitSupported() || ! fastPath || hist != nullptr || pcHist != nullptr || pairPending || ! predSkips.empty()
+        || repEnd != 0)
+        return 0;
+    const auto* b = jitAt (bus, pc);
+    if (b == nullptr)
+        return 0;
+    const uint32_t n = b->n, lo = pc + 1, hi = b->last;
+    const auto inside = [lo, hi] (uint32_t x) { return x >= lo && x <= hi; };
+    if (n > maxN || inside (avoidA) || inside (avoidB) || (avoidLo <= hi && avoidHi >= lo))
+        return 0;
+    uint64_t cycles = 0;  // (cpu1 no lleva el reloj de periféricos)
+    JitCtx c { this, &bus, 0, &cycles, side, *side };
+    b->fn (&c);
+    ++jitRuns;
+    jitInsns += c.done;
+    if (c.status == 2)
+        ok = false;
+    return c.done;
 }
 
 uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
@@ -2218,7 +2272,7 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
             break;
         // un bloque del JIT, si ninguna parada de arriba puede saltar dentro de él (ver jitOn)
         if (jitOn && jitSupported() && fastPath && hist == nullptr && pcHist == nullptr && ! pairPending && predSkips.empty()
-            && repEnd == 0 && pc >= 0x02000000u && pc < 0x04000000u)
+            && repEnd == 0)
         {
             if (const auto* b = jitAt (bus, pc); b != nullptr)
             {

@@ -34,6 +34,7 @@ public:
     // Copia el código y devuelve dónde quedó (ejecutable), o nullptr si no cabe
     void* add (const uint8_t* code, size_t n);
     size_t used() const noexcept { return top; }
+    void reset() noexcept { top = 0; }  // (todo el código anterior deja de usarse: el JIT vacía sus índices antes)
 
 private:
     uint8_t* base = nullptr;

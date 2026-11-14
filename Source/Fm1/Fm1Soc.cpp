@@ -812,6 +812,9 @@ struct Core1Bus : Bus
     }
     void spin (uint32_t core, uint32_t addr) override { soc.spin (core, addr); }
     void idle (uint32_t) override { soc.cpu1Idle = true; stop = true; }
+    bool ramView (RamView& v) override { return soc.ramView (v); }
+    void markCode (uint32_t lo, uint32_t hi) override { soc.markCode (lo, hi); }
+    uint64_t codeWrites() override { return soc.codeWrites(); }
 };
 
 std::string faultText (const Cpu& c, const char* who)
@@ -1633,6 +1636,7 @@ std::unique_ptr<Cpu> Machine::releasedCpu1()
     auto c1 = std::make_unique<Cpu> (inCode ? entry : kRamBase + 0x22b6);
     c1->coreId = 1;
     c1->fastPath = fastPath;
+    c1->jitOn = cpu0.jitOn;  // (el mismo interruptor que cpu0)
     c1->synHist = synHist1;
     c1->pcHist = pcHist1;
     c1->usp = kRamBase + 0x15eb4;
@@ -1693,12 +1697,32 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
                 continue;  // el nativo ya está en el epílogo
             }
         Core1Bus bus (soc, until);
-        if (! c1.step (bus))
+        // un bloque del JIT si ninguna de las comprobaciones de este bucle puede saltar dentro de él: sin espera de cerrojo
+        // ni comprobación del HLE en curso, sin el pc de sondeo ni los ganchos del HLE después de su primera instrucción
+        // (las interrupciones y lo demás solo cambian con un acceso con efectos, tras el que el bloque para)
+        uint32_t jr = 0;
+        if (! until && ! hle.pending && ! hle.kPending)
         {
-            error = faultText (c1, "cpu1");
-            return false;
+            bool okj = true;
+            jr = c1.runJit (bus, (uint32_t) std::min<uint64_t> (left, 1u << 20), probePc, hle.site ? hle.site.entry : 0xffffffffu,
+                            hle.nKern > 0 ? hle.kMin : 1u, hle.nKern > 0 ? hle.kMax : 0u, &soc.sideEffects, okj);
+            if (! okj)
+            {
+                error = faultText (c1, "cpu1");
+                return false;
+            }
         }
-        --left;
+        if (jr > 0)
+            left -= jr;
+        else
+        {
+            if (! c1.step (bus))
+            {
+                error = faultText (c1, "cpu1");
+                return false;
+            }
+            --left;
+        }
         if (hle.pending && c1.pc == hle.retPc && c1.sp == hle.retSp)
             hleCompare (c1);
         if (hle.kPending && c1.pc == hle.kExit && c1.sp == hle.kSp)

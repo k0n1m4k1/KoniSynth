@@ -404,8 +404,13 @@ int main (int argc, char** argv)
                 std::printf ("%d %.1f %%  ", r, 100.0 * (double) cpu.routeCount[r] / (double) tot);
         std::printf ("; cabezas de par %.1f %%\n", tot > 0 ? 100.0 * (double) cpu.pairHeads / (double) tot : 0.0);
     }
-    std::printf ("JIT: %llu bloques ejecutados, %llu instrucciones, %llu compilados\n", (unsigned long long) cpu.jitRuns,
-                 (unsigned long long) cpu.jitInsns, (unsigned long long) cpu.jitCompiled);
+    std::printf ("JIT: cpu0 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer\n",
+                 (unsigned long long) cpu.jitRuns, (unsigned long long) cpu.jitInsns, (unsigned long long) cpu.jitCompiled,
+                 (unsigned long long) cpu.jitRamFlushes, (unsigned long long) cpu.jitResets);
+    if (m.cpu1)
+        std::printf ("JIT: cpu1 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer\n",
+                     (unsigned long long) m.cpu1->jitRuns, (unsigned long long) m.cpu1->jitInsns, (unsigned long long) m.cpu1->jitCompiled,
+                     (unsigned long long) m.cpu1->jitRamFlushes, (unsigned long long) m.cpu1->jitResets);
     std::printf ("salto de bucles: %llu sondeos, %llu con bucle, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.probes,
                  (unsigned long long) m.loopSkip.hits, (unsigned long long) m.loopSkip.skipped);
     std::printf ("  con el contador del TIMER4: %llu saltos; %llu vueltas comprobadas en sombra, %llu rechazadas\n",
