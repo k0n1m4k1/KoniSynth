@@ -1082,6 +1082,84 @@ int64_t Cpu::skipCountedLoop (Bus& bus, uint32_t room)
     if (! fastPath || repEnd != 0 || ! predSkips.empty() || pairPending)
         return 0;
     const auto head = pc;
+    // Segunda forma: contador volátil en la RAM, "[A] += 1; R = [A]; if (R < L) goto cabeza" (el delay de GHOULBOX:
+    // for (volatile uint32_t i = 0; i < n; i++)). Ni la suma en memoria ni la carga tocan las banderas
+    {
+        const Line* l0 = fetch (bus, head);
+        const Line* l1 = l0 != nullptr ? fetch (bus, head + l0->len) : nullptr;
+        const Line* l2 = l1 != nullptr ? fetch (bus, head + l0->len + l1->len) : nullptr;
+        if (l0 == nullptr || l1 == nullptr || l2 == nullptr)
+        {
+            fault = Fault::None;
+            return -1;
+        }
+        const auto &a = l0->pre, &b = l1->pre, &c = l2->pre;
+        // la suma: micro-op de almacenamiento (FastStX) o ALU de 4 bytes con destino en memoria (ruta 1; alu() sin banderas)
+        int baseReg = -1;  // -1: sp
+        uint32_t off = 0;
+        bool addOne = false;
+        if (a.fast == Fm1Pre::FastStX)
+        {
+            addOne = a.fcond == Fm1Pre::OpAdd && a.fsrc == Fm1Pre::SrcImm && a.foff == 1 && a.fw == 4
+                && (a.fmode == Fm1Pre::MemRImm || a.fmode == Fm1Pre::MemSpImm || a.fmode == Fm1Pre::MemSp);
+            baseReg = a.fmode == Fm1Pre::MemRImm ? a.fa : -1;
+            off = a.fmode == Fm1Pre::MemSp ? 0 : a.fimm;
+        }
+        else if (a.fast == Fm1Pre::FastNone && a.route == 1)
+        {
+            addOne = a.aluDstMem && a.aluOp == Fm1Pre::Add && a.aluRhs.kind == Fm1Pre::RhsImm && a.aluRhs.v == 1;
+            baseReg = a.aluSrc;
+            off = (uint32_t) a.aluMemOff;
+        }
+        if (addOne && ! a.pairHead && ! b.pairHead && ! c.pairHead)
+        {
+            const auto end = head + l0->len + l1->len + l2->len;
+            const bool load = b.fast == Fm1Pre::FastLd && b.fw == 4 && ! b.fidx;
+            // el salto: micro-op (FastBrR) o comparación entre registros de la ruta 13
+            Cond cond = Cond::Eq;
+            int ra = -1, rb = -1;
+            int64_t boff = 0;
+            if (c.fast == Fm1Pre::FastBrR)
+            {
+                cond = (Cond) c.fcond;
+                ra = c.fa;
+                rb = c.fb;
+                boff = c.foff;
+            }
+            else if (c.fast == Fm1Pre::FastNone && c.route == 13)
+            {
+                uint64_t fam;
+                bool alt;
+                if (! decodeCmpRrBranch (l2->raw, l2->len, fam, alt, ra, rb, boff))
+                    return -1;
+                cond = condOfFam (fam, alt);
+            }
+            const bool less = (cond == Cond::LtU || cond == Cond::LtS) && ra == b.fd && rb != b.fd && rb >= 0
+                && (uint32_t) ((int64_t) end + boff) == head;
+            if (! load || ! less || baseReg == b.fd || (! b.fsp && b.fa == b.fd))
+                return -1;
+            const auto addr = (baseReg >= 0 ? regs[baseReg] : sp) + off;
+            const auto addrLd = (b.fsp ? sp : regs[b.fa]) + b.fimm;
+            // solo la RAM de datos (0x01C00000, 1 MiB: kRamBase de Fm1Soc.h): sin efectos al leerla ni al escribirla
+            if (addr != addrLd || (addr & 3) != 0 || addr < 0x01c00000u || addr >= 0x01d00000u)
+                return -1;
+            // vueltas que quedan desde la cabeza: el menor m >= 1 con !(i + m < L), con i el contador actual
+            const auto i = bus.read32 (addr), lim = regs[rb];
+            const bool sgn = cond == Cond::LtS;
+            const int64_t iv = sgn ? (int64_t) (int32_t) i : (int64_t) i, lv = sgn ? (int64_t) (int32_t) lim : (int64_t) lim;
+            const uint64_t m = iv + 1 < lv ? (uint64_t) (lv - iv) : 1;
+            constexpr uint64_t len3 = 3;
+            const auto rounds = std::min<uint64_t> (m - 1, room / len3);  // al menos la última vuelta, en el intérprete
+            if (rounds == 0)
+                return 0;
+            const auto v = i + (uint32_t) rounds;
+            bus.write32 (addr, v);
+            regs[b.fd] = v;
+            insnCount += rounds * len3;
+            holdIrq = 0;
+            return (int64_t) (rounds * len3);
+        }
+    }
     int reg = -1;
     uint32_t d = 0, len = 0, at = head;
     for (int i = 0; i < 4; ++i)
@@ -1405,7 +1483,13 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
                 break;
             case Fm1Pre::FastBrR:
                 if (condEval ((Cond) pre.fcond, regs[pre.fa], regs[pre.fb]))
+                {
                     jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff));
+                    // un salto atrás corto con "<": quizá un retardo con el contador en memoria (skipCountedLoop). Solo
+                    // cuerpos de hasta 16 B, para no mirar en cada vuelta los bucles de DSP
+                    if (pre.foff < 0 && pre.foff >= -16 && ((Cond) pre.fcond == Cond::LtU || (Cond) pre.fcond == Cond::LtS))
+                        loopHint = target;
+                }
                 break;
             case Fm1Pre::FastAluI: regs[pre.fd] = aluF ((Fm1Pre::AluOp) pre.fcond, regs[pre.fa], pre.fimm); break;
             case Fm1Pre::FastAluR: regs[pre.fd] = aluF ((Fm1Pre::AluOp) pre.fcond, regs[pre.fa], regs[pre.fb]); break;
@@ -1645,7 +1729,13 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             uint64_t fam; bool alt; int a, b; int64_t off;
             decodeCmpRrBranch (raw, l.len, fam, alt, a, b, off);
             if (cmpCond (fam, alt, regs[a], regs[b]))
+            {
                 jumpTo ((uint32_t) ((int64_t) nextPc + off));
+                // salto atrás corto con "<": quizá un retardo con el contador en memoria (skipCountedLoop); solo cuerpos de
+                // hasta 16 B, para no mirar en cada vuelta los bucles de DSP
+                if (off < 0 && off >= -16 && (fam == 1 || fam == 5) && alt)
+                    loopHint = target;
+            }
             break;
         }
         case 14:
