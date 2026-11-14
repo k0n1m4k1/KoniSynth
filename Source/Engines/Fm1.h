@@ -222,7 +222,11 @@ private:
     static constexpr int kAudioCap = 1 << 16;       // tramas (1,49 s)
     static constexpr int kMidiCap = 1 << 14;        // bytes MIDI en vuelo
     static constexpr int kPanelCap = 1024;
-    static constexpr uint32_t kChunk = 16384;       // instrucciones de cpu0 por paso de la máquina (≈ 0,07 ms del chip)
+    // Instrucciones de cpu0 por paso de la máquina. Cada llamada a Machine::run corta los saltos de bucle en su borde: con
+    // 16384, Felucca 1.8.2 iba un 13 % más lenta que con 65536 (KoniFm1Run --chunk, régimen de 4 a 8 s: 0,903x frente a
+    // 1,036x; la V15, la V16 y GHOULBOX, ±3 %). El mayor avance de un paso medido es 35,9 ms de máquina (GHOULBOX y
+    // Felucca, 6 s): muy por debajo de las 8192 tramas (186 ms) libres que pide pump antes de cada paso
+    static constexpr uint32_t kChunk = 65536;
 
     // Arranque del firmware de un paquete (como KoniFm1Run): su flash, los parámetros del SPL y la clave del SFC
     static std::unique_ptr<Emu> boot (const std::vector<uint8_t>& pkg, juce::String& error)

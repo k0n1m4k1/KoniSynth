@@ -15,6 +15,7 @@
 //   --pcprofile1 N      lo mismo para cpu1 (los dos con el mismo formato, cpu1 detrás)
 //   --hostprofile N    perfil del propio emulador por muestreo (Windows; necesita el PDB): N funciones y líneas
 //   --reference 1       sin la ruta rápida de la CPU ni el salto de bucles (para la prueba diferencial: el hash del estado final debe coincidir)
+//   --chunk N           instrucciones de cpu0 por llamada a Machine::run (65536; el hash depende de él: comparar con el mismo)
 // El WAV se escribe a 44 118 Hz: el FM-1 saca tramas a 24 MHz / 544 = 44 117,65 Hz (el entero más cercano; error 0,008 ct).
 #include "../Source/Fm1/Fm1Soc.h"
 
@@ -205,6 +206,7 @@ int main (int argc, char** argv)
     // (cpu1) en su búfer doble, para la prueba diferencial. ÍNDICE: el byte del búfer en uso; búferes en BÚFER + 256·índice
     std::string dumpCpu1;
     uint32_t probeMax = 0;
+    uint32_t chunk = 65536;  // --chunk N: instrucciones de cpu0 por llamada a Machine::run (el plugin: Fm1Engine::kChunk)
     bool loopTimer = true;
     bool observeOn = true;
     bool jitOn = true;  // --jit off: sin el JIT (Cpu::jitOn)
@@ -241,6 +243,7 @@ int main (int argc, char** argv)
                    : std::string (v) == "auto" ? Machine::CcPoll::Auto : Machine::CcPoll::Off;
         else if (opt == "--dumpcpu1") dumpCpu1 = v;
         else if (opt == "--probemax") probeMax = (uint32_t) std::strtoul (v, nullptr, 10);
+        else if (opt == "--chunk") chunk = std::max (1ul, std::strtoul (v, nullptr, 10));
         else if (opt == "--looptimer") loopTimer = std::string (v) != "off";
         else if (opt == "--timerskip") timerSkip = std::string (v) != "off";
         else if (opt == "--jit") jitOn = std::string (v) != "off";
@@ -336,16 +339,19 @@ int main (int argc, char** argv)
     uint8_t lastIdx = dump != nullptr ? *ramAt (dumpIdx) : 0;
     uint64_t blocks = 0, skippedBlocks = 0;
     bool ok = true;
+    uint64_t maxStep = 0;  // el mayor avance del reloj en una llamada a Machine::run (ciclos de CPU)
     while (soc.periph.ms() < ms)
     {
         // con volcado, tramos de 2048 ciclos: un bloque de cpu1 son ~11 000 instrucciones (estimado), así que entre dos
         // lecturas del índice no caben dos bloques; si el índice no cambia en ±1 se cuenta como bloque perdido
-        if (! m.run (dump != nullptr ? 2048 : 65536, err))
+        const auto before = soc.periph.cycles;
+        if (! m.run (dump != nullptr ? 2048 : chunk, err))
         {
             std::printf ("PARADA en %llu ms: %s\n", (unsigned long long) soc.periph.ms(), err.c_str());
             ok = false;
             break;
         }
+        maxStep = std::max (maxStep, soc.periph.cycles - before);
         // el firmware hace índice + 1 y, si llega a 2, lo pone a 0: el 2 es transitorio y no marca un bloque
         if (dump != nullptr && *ramAt (dumpIdx) != lastIdx && *ramAt (dumpIdx) < 2)
         {
@@ -394,6 +400,8 @@ int main (int argc, char** argv)
                  (unsigned long long) soc.periph.ms(), wall, (double) soc.periph.ms() / 1000.0 / wall, (unsigned long long) cpu.insnCount,
                  m.cpu1 ? "en marcha," : "sin arrancar,", (unsigned long long) (m.cpu1 ? m.cpu1->insnCount : 0),
                  100.0 * (double) soc.periph.skipped / (double) std::max<uint64_t> (soc.periph.cycles, 1));
+    std::printf ("paso de %u instrucciones: el mayor avance de una llamada, %.3f ms de máquina\n", chunk,
+                 1000.0 * (double) maxStep / (double) kCpuHz);
     if (profile > 0)
     {
         uint64_t tot = 0;
