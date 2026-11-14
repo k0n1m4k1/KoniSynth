@@ -373,6 +373,8 @@ int main (int argc, char** argv)
     std::printf ("pantalla: encendida %d, %llu ventanas, revisión %u; audio %zu tramas (%.2f s); resets %u\n", soc.lcd.displayOn ? 1 : 0,
                  (unsigned long long) soc.lcd.frames, soc.lcd.revision, soc.periph.audio.size() / 2,
                  (double) soc.periph.audio.size() / 2 / 44117.65, soc.resets);
+    std::printf ("UART MIDI: con0 0x%08x, búfer de recepción %u B, bytes descartados %llu\n", soc.periph.uartCon0(),
+                 soc.periph.uartRxLen(), (unsigned long long) soc.periph.midiDropped());
     // accesos desconocidos por dirección (la hoja de ruta de lo que falta)
     std::map<std::pair<uint32_t, bool>, size_t> unk;
     for (const auto& u : soc.unknownAccesses())

@@ -96,6 +96,8 @@ public:
     void setAdcState (const AdcState& s) noexcept { adcCon = s.con; adcDone = s.done; adcIrq = s.irq; adcSample = s.sample; adcNoise = s.noise; }
     size_t midiQueued() const noexcept { return uart.q.size(); }
     uint64_t midiDropped() const noexcept { return uart.dropped; }
+    uint32_t uartCon0() const noexcept { return uart.con0; }                        // diagnóstico (KoniFm1Run)
+    uint32_t uartRxLen() const noexcept { return uart.rxeadr - uart.rxsadr; }
 
     // ---- estado público (el SoC y el ejecutor lo usan) ----
     uint64_t cycles = 0;
