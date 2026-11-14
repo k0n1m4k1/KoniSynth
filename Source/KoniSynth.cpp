@@ -1372,6 +1372,12 @@ public:
                     map->setAttribute ("cc", cc);
                     map->setAttribute ("param", juce::String ("action:") + MidiLearn::actionId (index - MidiLearn::actionBase));
                 }
+                else if (index >= MidiLearn::fm1Base && index < MidiLearn::fm1Base + MidiLearn::fm1Count)
+                {
+                    auto* map = learnXml->createNewChildElement ("MAP");
+                    map->setAttribute ("cc", cc);
+                    map->setAttribute ("param", MidiLearn::fm1Id (index - MidiLearn::fm1Base));
+                }
             }
             // KSL de los operadores OPL en dB/oct (PresetManager::swapOplKsl) y sample propio de los motores de consola
             // (PresetManager::engineSamples): un estado sin estas marcas es anterior
@@ -1441,6 +1447,8 @@ public:
                             for (int k = 0; k < MidiLearn::numActions; ++k)
                                 if (id.fromFirstOccurrenceOf (":", false, false) == MidiLearn::actionId (k))
                                     midiLearn.assign (cc, MidiLearn::actionBase + k);
+                        else if (const auto k = MidiLearn::fm1FromId (id); k >= 0)
+                            midiLearn.assign (cc, MidiLearn::fm1Base + k);
                     }
                     xml->removeChildElement (learnXml, true); // no debe entrar en el ValueTree de parámetros
                 }
@@ -1904,6 +1912,18 @@ public:
         }
         if (midiLearn.takeAction (MidiLearn::actionRevoke))
             agentSession.revoke ("Control taken back (MIDI), agent session closed.");
+        // mandos del panel del FM-1 asignados a un CC (MidiLearn::handleFm1): al aparato
+        for (int k = 0; k < 14; ++k)
+            if (const auto down = midiLearn.fm1KeyState[(size_t) k].exchange (-1); down >= 0)
+                fm1Engine.panel ({ fm1::PanelAction::Key, (uint8_t) k, down });
+        for (int e = 0; e < 7; ++e)
+            if (const auto clicks = midiLearn.fm1Clicks[(size_t) e].exchange (0); clicks != 0)
+                fm1Engine.panel ({ fm1::PanelAction::Enc, (uint8_t) e, clicks });
+        if (const auto v = midiLearn.fm1MasterValue.exchange (-1); v >= 0)
+        {
+            fm1Engine.panel ({ fm1::PanelAction::Adc, 4, v });
+            fm1MasterFromMidi.store (v); // (la perilla de la interfaz lo sigue)
+        }
         agentSession.tick(); // caducidad, señal de vida y notas del usuario mientras el agente tiene el control
     }
     struct ActionPoll : juce::Timer { std::function<void()> tick; void timerCallback() override { tick(); } };
@@ -2159,6 +2179,9 @@ private:
     static constexpr const char* fm1FirmwareProp = "fm1Firmware"; // ruta del .fwsc (preset y proyecto); vacía: el primero
     juce::String fm1StartedChoice; // la ruta con la que arrancó (para rearrancar si el estado trae otra)
     juce::String fm1StartedMemory; // y la memoria (fm1MemoryProp), o la última que publicó la máquina
+public:
+    std::atomic<int> fm1MasterFromMidi { -1 }; // MASTER del FM-1 movido por un CC (la interfaz lo recoge); -1 nada
+private:
     juce::StringArray gusPatchNames; // nombres por índice del banco; protegido por sampleInfoLock
     AnsSlot ansSlot;
     MacroSlot chipMacroSlot, mdMacroSlot, snesMacroSlot;

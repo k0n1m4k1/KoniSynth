@@ -958,17 +958,9 @@ private:
 };
 
 //==============================================================================
-// La pantalla del M-VAVE FM-1 (ST7789, 240 × 240 RGB565) tal como la pinta el firmware en el emulador, a escala entera para
-// que los píxeles queden nítidos y con sus colores (no se tiñe con el skin: es la del aparato). Sin firmware en marcha, el
-// estado (dónde poner los .fwsc o por qué no arrancó). Pie: velocidad del emulador (1.00x = tiempo real) y cortes
-static juce::Rectangle<int> fm1ScreenArea (juce::Rectangle<int> area)
-{
-    const auto side = std::min (area.getWidth(), area.getHeight());
-    const auto scale = side / Fm1Engine::kScreen;
-    const auto px = scale >= 1 ? scale * Fm1Engine::kScreen : side;
-    return juce::Rectangle<int> (px, px).withCentre (area.getCentre());
-}
-
+// La pantalla del M-VAVE FM-1 (ST7789, 240 × 240 RGB565) tal como la pinta el firmware en el emulador, ampliada con el
+// píxel más cercano y con sus colores (no se tiñe con el skin: es la del aparato). Sin firmware en marcha, el estado (dónde
+// poner los .fwsc o por qué no arrancó). Pie: velocidad del emulador (1.00x = tiempo real) y cortes
 class Fm1Screen : public juce::Component, public juce::SettableTooltipClient, private juce::Timer
 {
 public:
@@ -982,9 +974,12 @@ public:
     void paint (juce::Graphics& g) override
     {
         g.fillAll (juce::Colours::black);
+        // la imagen arriba, a todo el lado que quepa (escala no entera: con el panel al lado, 240 px a escala 1 quedaba
+        // pequeña), y el pie justo debajo
         auto area = getLocalBounds().reduced (4);
-        const auto footer = area.removeFromBottom (18);
-        const auto screen = fm1ScreenArea (area);
+        const auto side = std::min (area.getWidth(), area.getHeight() - kFooter);
+        const auto screen = juce::Rectangle<int> (side, side).withCentre ({ area.getCentreX(), area.getY() + side / 2 });
+        const auto footer = juce::Rectangle<int> (area.getX(), screen.getBottom(), area.getWidth(), kFooter);
         if (view.live && on && hasImage)
         {
             g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality); // píxeles nítidos
@@ -1008,6 +1003,8 @@ public:
         }
         g.drawText (info, footer, juce::Justification::centred);
     }
+
+    static constexpr int kFooter = 18; // el pie (velocidad y cortes)
 
 private:
     void timerCallback() override
@@ -1039,4 +1036,345 @@ private:
     uint64_t rev = 0;
     bool on = false, hasImage = false;
     juce::Image image { juce::Image::RGB, Fm1Engine::kScreen, Fm1Engine::kScreen, true };
+};
+
+//==============================================================================
+// Un encoder del panel del FM-1: arrastrar en vertical o la rueda; + = horario. Se dibuja con las perillas del skin
+// (KoniLookAndFeel::drawRotarySlider). Tres modos:
+//   Endless: sin fin y sin arco (propiedad "endless"), un clic cada 8 px
+//   Stepped: sin fin, con marcas de detención (elegir una opción concreta): un clic cada 24 px y uno por muesca de rueda
+//   Bounded: con tope y arco, de 0 a kRange clics desde el centro; cada movimiento manda la diferencia en clics. El
+//            aparato tiene encoders: la posición dibujada no sabe del valor del firmware (cambia con la página)
+class Fm1Encoder : public juce::Component, public juce::SettableTooltipClient
+{
+public:
+    enum class Mode { endless, stepped, bounded };
+    Fm1Encoder (juce::String name, Mode m, std::function<void (int)> turnFn)
+        : label (std::move (name)), mode (m), stepped (m == Mode::stepped), turn (std::move (turnFn))
+    {
+        shape.getProperties().set ("endless", mode != Mode::bounded);
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        auto r = getLocalBounds();
+        const auto text = r.removeFromBottom (14);
+        const auto side = std::min (r.getWidth(), r.getHeight());
+        const auto k = juce::Rectangle<int> (side, side).withCentre (r.getCentre());
+        if (mode == Mode::bounded)
+        {
+            // el arco de las perillas del plugin (de -135° a +135°)
+            const auto pi = juce::MathConstants<float>::pi;
+            getLookAndFeel().drawRotarySlider (g, k.getX(), k.getY(), k.getWidth(), k.getHeight(), (float) clicks / (float) kRange,
+                                               -0.75f * pi, 0.75f * pi, shape);
+        }
+        else
+        {
+            const auto pos = (float) (((clicks % kPerTurn) + kPerTurn) % kPerTurn) / (float) kPerTurn;
+            getLookAndFeel().drawRotarySlider (g, k.getX(), k.getY(), k.getWidth(), k.getHeight(), pos, 0.0f,
+                                               juce::MathConstants<float>::twoPi, shape);
+        }
+        if (stepped)
+        {
+            // una marca por clic (kPerTurn por vuelta, como gira el dibujo), entre el cuerpo y el borde: la geometría de
+            // drawRotarySlider (radio = lado / 2 - 2, cuerpo 0,62 del radio)
+            const auto c = k.toFloat().getCentre();
+            const auto radius = (float) side * 0.5f - 2.0f, r0 = radius * 0.70f, r1 = radius * 0.92f;
+            g.setColour (Skin::white().withAlpha (0.45f));
+            for (int i = 0; i < kPerTurn; ++i)
+            {
+                const auto a = juce::MathConstants<float>::twoPi * (float) i / (float) kPerTurn - juce::MathConstants<float>::halfPi;
+                g.drawLine (c.x + std::cos (a) * r0, c.y + std::sin (a) * r0, c.x + std::cos (a) * r1, c.y + std::sin (a) * r1, 1.2f);
+            }
+        }
+        g.setColour (Skin::white().withAlpha (0.8f));
+        g.setFont (juce::FontOptions (11.0f));
+        g.drawText (label, text, juce::Justification::centred);
+    }
+
+    std::function<void()> onPopup; // clic derecho: el menú (MIDI Learn...)
+    void recentre() { if (mode == Mode::bounded) { clicks = kRange / 2; repaint(); } } // (solo el dibujo)
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        popup = e.mods.isPopupMenu();
+        if (popup && onPopup)
+            onPopup();
+        lastY = e.position.y;
+    }
+    void mouseDrag (const juce::MouseEvent& e) override
+    {
+        if (popup)
+            return;
+        const auto px = stepped ? 24.0f : mode == Mode::bounded ? 5.0f : 8.0f; // (Bounded: 240 px de tope a tope)
+        const auto d = (int) ((lastY - e.position.y) / px);
+        if (d != 0)
+        {
+            lastY -= (float) d * px;
+            step (d);
+        }
+    }
+    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    {
+        wheel += w.deltaY * (w.isReversed ? -1.0f : 1.0f) / 0.05f; // ~0,05 por muesca de rueda en Windows
+        auto d = (int) wheel;
+        if (d != 0)
+        {
+            wheel = 0.0f;
+            if (stepped)
+                d = d > 0 ? 1 : -1; // con pasos, uno por muesca
+            step (d);
+        }
+    }
+
+private:
+    static constexpr int kPerTurn = 24; // clics por vuelta dibujada (solo el giro del dibujo y sus marcas)
+    static constexpr int kRange = 48;   // Bounded: clics de tope a tope
+    void step (int d)
+    {
+        if (mode == Mode::bounded)
+            d = juce::jlimit (0, kRange, clicks + d) - clicks; // en el tope no se manda nada
+        if (d == 0)
+            return;
+        clicks += d;
+        turn (d);
+        repaint();
+    }
+
+    juce::String label;
+    Mode mode = Mode::endless;
+    bool stepped = false;
+    std::function<void (int)> turn;
+    juce::Slider shape; // (no se muestra: solo lleva las propiedades del dibujo)
+    int clicks = mode == Mode::bounded ? kRange / 2 : 0;
+    float lastY = 0.0f, wheel = 0.0f;
+    bool popup = false;
+};
+
+// Botón y potenciómetro del panel con su menú contextual (el clic derecho no pulsa ni mueve)
+struct Fm1Button : juce::TextButton
+{
+    using juce::TextButton::TextButton;
+    std::function<void()> onPopup;
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu() && onPopup) { onPopup(); return; }
+        juce::TextButton::mouseDown (e);
+    }
+    void mouseUp (const juce::MouseEvent& e) override
+    {
+        if (! e.mods.isPopupMenu()) juce::TextButton::mouseUp (e);
+    }
+};
+
+struct Fm1Pot : juce::Slider
+{
+    std::function<void()> onPopup;
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        popup = e.mods.isPopupMenu();
+        if (popup && onPopup) { onPopup(); return; }
+        juce::Slider::mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override { if (! popup) juce::Slider::mouseDrag (e); }
+    void mouseUp (const juce::MouseEvent& e) override { if (! popup) juce::Slider::mouseUp (e); }
+    bool popup = false;
+};
+
+//==============================================================================
+// El aparato: la pantalla en el centro y, a los lados, los mandos del panel del FM-1 en su sitio (disposición del dibujo
+// de controles de Felucca, como fm1-emu crates/fm1-live/src/panel.rs, MIT): a la izquierda MASTER (potenciómetro, ADC
+// canal 4), SELECT, PRESETS y ALGORITHM; a la derecha K1-K4 y dos filas de seis botones. Las 27 teclas y OCT- / OCT+ no:
+// las notas y la octava llegan por MIDI. Los botones se mantienen mientras se pulsan; los encoders mandan clics (Fm1Engine::panel)
+class Fm1Device : public juce::Component, private juce::Timer
+{
+public:
+    explicit Fm1Device (KoniSynthProcessor& p) : processor (p), screen (p)
+    {
+        addAndMakeVisible (screen);
+        // botones: (rótulo, tecla de la matriz, ayuda). OCT- y OCT+ (0 y 1) no se muestran: la octava ya la llevan el
+        // teclado y el controlador MIDI
+        static const std::array<std::tuple<const char*, int, const char*>, 12> buttons { {
+            { "FX", 2, "Effects page" }, { "SCL", 3, "Scale page" }, { "ENV", 4, "Envelope page" }, { "LFO", 5, "LFO page" },
+            { "EDIT", 6, "Edit page" }, { "GLO", 7, "Global settings page" }, { "HOME", 8, "Home screen" }, { "SAVE", 9, "Save" },
+            { "ARP", 10, "Arpeggiator" }, { "SEQ", 11, "Sequencer" }, { "PLAY", 12, "Play / stop" }, { "REC", 13, "Record" } } };
+        for (const auto& [name, id, help] : buttons)
+        {
+            auto* b = keys.add (new Fm1Button (name));
+            b->onPopup = [this, b, id = id] { learnMenu (id, b, nullptr); };
+            learnTargets.push_back ({ b, id });
+            b->setTooltip (juce::String (help) + " (the FM-1's " + name + " button; held while the mouse is down). What it does "
+                           "depends on the firmware.");
+            b->onStateChange = [this, b, id = id]
+            {
+                const bool down = b->isDown();
+                if (down != held[(size_t) id])
+                {
+                    held[(size_t) id] = down;
+                    processor.fm1Panel ({ fm1::PanelAction::Key, (uint8_t) id, down ? 1 : 0 });
+                }
+            };
+            addAndMakeVisible (b);
+        }
+        // encoders: (rótulo, encoder de la matriz)
+        static const std::array<std::pair<const char*, int>, 7> encs { { { "SELECT", 0 }, { "PRESETS", 6 }, { "ALGORITHM", 1 },
+                                                                          { "K1", 2 }, { "K2", 3 }, { "K3", 4 }, { "K4", 5 } } };
+        for (const auto& [name, id] : encs)
+        {
+            // SELECT, ALGORITHM y PRESETS eligen opciones: con pasos. K1-K4, con tope
+            const bool knob = id >= 2 && id <= 5;
+            auto* e = encoders.add (new Fm1Encoder (name, knob ? Fm1Encoder::Mode::bounded : Fm1Encoder::Mode::stepped,
+                                                    [this, id = id] (int clicks)
+            {
+                processor.fm1Panel ({ fm1::PanelAction::Enc, (uint8_t) id, clicks });
+            }));
+            e->onPopup = [this, e, id = id, knob]
+            {
+                learnMenu (MidiLearn::fm1EncFirst + id, e, knob ? std::function<void()> ([e] { e->recentre(); }) : nullptr);
+            };
+            learnTargets.push_back ({ e, MidiLearn::fm1EncFirst + id });
+            e->setTooltip (juce::String ("The FM-1's ") + name
+                           + (knob ? " knob: drag up / down or use the mouse wheel; each move turns the device's encoder by the "
+                                     "same amount. Its position here does not follow the firmware's value (it changes with the "
+                                     "page). "
+                                   : " encoder, in steps: drag up / down (one step every 24 px) or one step per mouse-wheel notch. ")
+                           + "What it does depends on the firmware.");
+            addAndMakeVisible (e);
+        }
+        master.setSliderStyle (juce::Slider::RotaryVerticalDrag);
+        master.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
+        master.setRange (0.0, 1023.0, 1.0);
+        master.setValue (kMasterDefault, juce::dontSendNotification);
+        master.setDoubleClickReturnValue (true, kMasterDefault);
+        master.setTooltip ("The FM-1's MASTER volume pot (10-bit ADC, 0-1023; default 900). Double-click to reset.");
+        master.onValueChange = [this] { sendMaster(); };
+        master.onPopup = [this] { learnMenu (MidiLearn::fm1Master, &master, [this] { master.setValue (kMasterDefault); }); };
+        learnTargets.push_back ({ &master, MidiLearn::fm1Master });
+        addAndMakeVisible (master);
+        masterLabel.setText ("MASTER", juce::dontSendNotification);
+        masterLabel.setJustificationType (juce::Justification::centred);
+        masterLabel.setFont (juce::FontOptions (11.0f));
+        addAndMakeVisible (masterLabel);
+        startTimerHz (10);
+    }
+
+    ~Fm1Device() override
+    {
+        // un botón que se quedara pulsado al cerrar el editor se suelta
+        for (size_t i = 0; i < held.size(); ++i)
+            if (held[i])
+                processor.fm1Panel ({ fm1::PanelAction::Key, (uint8_t) i, 0 });
+    }
+
+    void paint (juce::Graphics& g) override { g.fillAll (Skin::c (0xff17191c)); }
+
+    // marco ámbar en el mando que espera su CC (MIDI Learn), como los botones de acción (MidiActionButton)
+    void paintOverChildren (juce::Graphics& g) override
+    {
+        const auto waiting = processor.midiLearn.learning.load();
+        for (const auto& [c, k] : learnTargets)
+            if (waiting == MidiLearn::fm1Base + k)
+            {
+                g.setColour (Skin::c (0xffffb000));
+                g.drawRoundedRectangle (c->getBounds().toFloat().reduced (1.0f), 4.0f, 2.0f);
+            }
+    }
+
+    void resized() override
+    {
+        auto r = getLocalBounds().reduced (6);
+        // la pantalla, lo más grande que quepa a lo alto (con su pie) dejando a los lados su ancho mínimo; lo que sobre de
+        // ancho se reparte entre los lados (40 % / 60 %). Arriba del todo: sin margen encima
+        constexpr int kGap = 20, kPad = 8; // hueco entre columnas; marco de Fm1Screen (4 px por lado)
+        const auto side = std::max (120, std::min (r.getHeight() - Fm1Screen::kFooter - kPad,
+                                                   r.getWidth() - kLeftMin - kRightMin - 2 * kGap - kPad));
+        const auto extra = std::max (0, r.getWidth() - (side + kPad) - 2 * kGap - kLeftMin - kRightMin);
+        auto left = r.removeFromLeft (kLeftMin + extra * 2 / 5);
+        r.removeFromLeft (kGap);
+        auto right = r.removeFromRight (r.getWidth() - (side + kPad) - kGap);
+        screen.setBounds (r.getX(), r.getY(), side + kPad, side + kPad + Fm1Screen::kFooter);
+        constexpr int kSpace = 12; // entre mandos
+        left.removeFromTop (kSpace); // (separados del marco)
+        right.removeFromTop (kSpace);
+        // izquierda: MASTER y SELECT; PRESETS y ALGORITHM
+        const auto colW = left.getWidth() / 2;
+        const auto knob = std::min ({ colW - kSpace, (left.getHeight() - 28 - 2 * kSpace) / 2, 100 });
+        auto row1 = left.removeFromTop (knob + 14);
+        left.removeFromTop (2 * kSpace);
+        auto row2 = left.removeFromTop (knob + 14);
+        auto masterArea = row1.removeFromLeft (colW).reduced (kSpace / 2, 0);
+        masterLabel.setBounds (masterArea.removeFromBottom (14));
+        master.setBounds (masterArea);
+        encoders[0]->setBounds (row1.reduced (kSpace / 2, 0));
+        encoders[1]->setBounds (row2.removeFromLeft (colW).reduced (kSpace / 2, 0));
+        encoders[2]->setBounds (row2.reduced (kSpace / 2, 0));
+        // derecha: K1-K4 y dos filas de seis botones, con hueco para su rótulo entero
+        auto kRow = right.removeFromTop (std::min (right.getWidth() / 4 - kSpace, 84) + 14);
+        const auto kw = kRow.getWidth() / 4;
+        for (int i = 0; i < 4; ++i)
+            encoders[3 + i]->setBounds (kRow.removeFromLeft (kw).reduced (kSpace / 2, 0));
+        right.removeFromTop (2 * kSpace);
+        for (int row = 0; row < 2; ++row)
+        {
+            auto line = right.removeFromTop (34);
+            const auto bw = line.getWidth() / 6;
+            for (int i = 0; i < 6; ++i)
+                keys[row * 6 + i]->setBounds (line.removeFromLeft (bw).reduced (kSpace / 2, 0));
+            right.removeFromTop (kSpace + 4);
+        }
+    }
+
+    // anchos mínimos de los lados (Editor: el del cuerpo = los dos + la pantalla a 240 px)
+    static constexpr int kLeftMin = 190, kRightMin = 420;
+
+private:
+    static constexpr double kMasterDefault = 900.0; // Fm1Periph.cpp: adcValue[4] al encender
+
+    void sendMaster() { processor.fm1Panel ({ fm1::PanelAction::Adc, 4, (int32_t) master.getValue() }); }
+
+    // al arrancar (o cambiar) el firmware la máquina vuelve a 900: se le manda la posición del mando. MASTER movido por un
+    // CC asignado: la perilla lo sigue (sin volver a mandarlo). El marco de MIDI Learn, al cambiar
+    void timerCallback() override
+    {
+        const auto live = processor.getFm1View().live;
+        if (live && ! wasLive && master.getValue() != kMasterDefault)
+            sendMaster();
+        wasLive = live;
+        if (const auto v = processor.fm1MasterFromMidi.exchange (-1); v >= 0)
+            master.setValue (v, juce::dontSendNotification);
+        if (const auto waiting = processor.midiLearn.learning.load(); waiting != shownLearning)
+        {
+            shownLearning = waiting;
+            repaint();
+        }
+    }
+
+    // Menú contextual de un mando del panel (MidiLearn::fm1Base + k): MIDI Learn, Clear MIDI y, si tiene, Reset
+    void learnMenu (int k, juce::Component* target, std::function<void()> reset)
+    {
+        auto& learn = processor.midiLearn;
+        const auto index = MidiLearn::fm1Base + k;
+        const auto cc = learn.ccFor (index);
+        juce::PopupMenu m;
+        m.addItem ("MIDI Learn", [&learn, index] { learn.learning = index; });
+        m.addItem (cc >= 0 ? "Clear MIDI (CC " + juce::String (cc) + ")" : juce::String ("Clear MIDI"), cc >= 0, false,
+                   [&learn, index] { learn.clear (index); });
+        if (reset)
+        {
+            m.addSeparator();
+            m.addItem ("Reset", std::move (reset));
+        }
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (target));
+    }
+
+    KoniSynthProcessor& processor;
+    Fm1Screen screen;
+    juce::OwnedArray<Fm1Button> keys;
+    juce::OwnedArray<Fm1Encoder> encoders;
+    Fm1Pot master;
+    std::vector<std::pair<juce::Component*, int>> learnTargets; // mando y su k de MidiLearn (fm1Base + k)
+    int shownLearning = -1;
+    juce::Label masterLabel;
+    std::array<bool, 14> held {};
+    bool wasLive = false;
 };

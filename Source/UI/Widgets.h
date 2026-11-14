@@ -1256,7 +1256,11 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         const auto lightA = -0.75f * pi; // dirección de la luz (pantalla, y hacia abajo): arriba a la izquierda
 
         const int detents = slider.getProperties().getWithDefault ("detents", 0);
-        if (detents > 0)
+        const bool endless = slider.getProperties().getWithDefault ("endless", false); // encoder sin fin: solo el cuerpo
+        if (endless)
+        {
+        }
+        else if (detents > 0)
         {
             // Conmutador por pasos (Knob: elecciones de 3 a 10 opciones): una marca radial por posición en el hueco, en lugar
             // del arco; la elegida, en el acento con halo

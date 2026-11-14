@@ -583,7 +583,9 @@ public:
                                      "KoniSynth does not include any. The preset saves which firmware it uses, as with samples.",
                                      [this] { chooseFm1Fwsc(); })
                   .withHeaderControl ("Firmware", fm1FirmwareBox, 220) // los .fwsc de la carpeta de firmwares (no es un parámetro)
-                  .withBody (fm1Screen, 0, 500); // la pantalla de 240 px a escala 2 (480) y su pie
+                  // la pantalla (240 px, a escala 2 si cabe) con los mandos del panel a los lados
+                  .withBody (fm1Device, 0, Fm1Device::kLeftMin + Fm1Device::kRightMin + 240 + 40);
+        fm1Section.stretchToFill = true; // todo el ancho de la fila: la pantalla llega a todo el alto y sobra para los mandos
         if (auto* list = gusSection.listFor ("gusProgram")) list->setPhosphor (56); // lista grande, letra de 30 px
         if (auto* list = mt32Section.listFor ("mt32Program")) list->setPhosphor (48); // igual, en la fila de perillas: 3 de ancho
         mt32DisplaySection.withBody (mt32Lcd, 0, 900); // todo el alto; 900 px: ~6,4 px por punto (121 × 6,4 + márgenes) y el LED
@@ -3681,7 +3683,7 @@ private:
     LfoView lfoView { koni.apvts, false }, lfo2View { koni.apvts, true }; // ídem, LFO 1 y LFO 2
     Mt32Lcd mt32Lcd { koni }; // antes que mt32DisplaySection (cuerpo de la sección): se destruye después
     GusDisplay gusDisplay { koni }; // antes que gusSection (componente de la sección): se destruye después
-    Fm1Screen fm1Screen { koni }; // antes que fm1Section (cuerpo de la sección): se destruye después
+    Fm1Device fm1Device { koni }; // antes que fm1Section (cuerpo de la sección): se destruye después
     juce::ComboBox dx7VoiceBox; // igual, antes que fmSection
     juce::ComboBox fm1FirmwareBox; // ídem, antes que fm1Section
     juce::Array<juce::File> fm1BoxFiles;

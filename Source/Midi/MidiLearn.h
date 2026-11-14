@@ -57,7 +57,9 @@ struct MidiLearn
             assign (cc, target);
 
         const auto index = ccToParam[(size_t) cc].load();
-        if (index >= actionBase && index < actionBase + numActions) // botón de acción: se dispara al cruzar 64 hacia arriba
+        if (index >= fm1Base && index < fm1Base + fm1Count)
+            handleFm1 (index - fm1Base, m.getControllerValue());
+        else if (index >= actionBase && index < actionBase + numActions) // botón de acción: se dispara al cruzar 64 hacia arriba
         {
             const auto k = (size_t) (index - actionBase);
             const auto v = m.getControllerValue();
@@ -79,6 +81,60 @@ struct MidiLearn
     bool takeAction (int k) { return actionPending[(size_t) k].exchange (false); }
     std::array<std::atomic<bool>, numActions> actionPending {};
     std::array<int, numActions> actionLast {}; // último valor del CC (solo hilo de audio)
+
+    // Mandos del panel del FM-1 (Engines/Fm1.h; no son parámetros): índices fm1Base + k. k 0-13 botones (tecla de la
+    // matriz: pulsado mientras el CC >= 64), 16-22 encoders (el CC absoluto se toma como diferencia: kFm1EncSpan clics de 0
+    // a 127), 24 MASTER (0-127 -> ADC 0-1023). El hilo de audio deja lo pendiente; el de mensajes lo manda al aparato
+    // (KoniSynthProcessor::pollActions). Se guardan por su id ("fm1:key:N", "fm1:enc:N", "fm1:master")
+    static constexpr int fm1Base = 1 << 21, fm1Count = 25, fm1EncFirst = 16, fm1Master = 24;
+    static constexpr float kFm1EncSpan = 48.0f;
+    static juce::String fm1Id (int k)
+    {
+        return k < 14 ? "fm1:key:" + juce::String (k) : k < fm1Master ? "fm1:enc:" + juce::String (k - fm1EncFirst) : juce::String ("fm1:master");
+    }
+    static int fm1FromId (const juce::String& id)
+    {
+        if (id == "fm1:master") return fm1Master;
+        if (id.startsWith ("fm1:key:")) return juce::jlimit (0, 13, id.getTrailingIntValue());
+        if (id.startsWith ("fm1:enc:")) return fm1EncFirst + juce::jlimit (0, 6, id.getTrailingIntValue());
+        return -1;
+    }
+    std::array<std::atomic<int>, 14> fm1KeyState = [] { std::array<std::atomic<int>, 14> a; for (auto& x : a) x = -1; return a; }(); // -1 nada
+    std::array<std::atomic<int>, 7> fm1Clicks {};          // clics pendientes por encoder
+    std::atomic<int> fm1MasterValue { -1 };                // ADC pendiente; -1 nada
+    std::array<int, 7> fm1EncLast = [] { std::array<int, 7> a; a.fill (-1); return a; }(); // (solo hilo de audio)
+    std::array<float, 7> fm1EncAcc {};
+    std::array<int, 14> fm1KeyLast {};
+
+    void handleFm1 (int k, int v)
+    {
+        if (k < 14)
+        {
+            const auto down = v >= 64 ? 1 : 0;
+            if (down != fm1KeyLast[(size_t) k])
+            {
+                fm1KeyLast[(size_t) k] = down;
+                fm1KeyState[(size_t) k].store (down);
+            }
+        }
+        else if (k < fm1Master)
+        {
+            const auto e = (size_t) (k - fm1EncFirst);
+            if (fm1EncLast[e] >= 0)
+            {
+                fm1EncAcc[e] += (float) (v - fm1EncLast[e]) * kFm1EncSpan / 127.0f;
+                const auto d = (int) fm1EncAcc[e]; // (hacia cero: el resto queda para el siguiente)
+                if (d != 0)
+                {
+                    fm1EncAcc[e] -= (float) d;
+                    fm1Clicks[e].fetch_add (d);
+                }
+            }
+            fm1EncLast[e] = v; // (el primer valor solo sitúa el mando)
+        }
+        else
+            fm1MasterValue.store (juce::roundToInt ((float) v * 1023.0f / 127.0f));
+    }
 
     std::array<std::atomic<int>, 120> ccToParam;
     std::atomic<int> learning { -1 }; // índice del parámetro esperando un CC; -1 = ninguno
