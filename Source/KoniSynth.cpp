@@ -1447,8 +1447,8 @@ public:
                             for (int k = 0; k < MidiLearn::numActions; ++k)
                                 if (id.fromFirstOccurrenceOf (":", false, false) == MidiLearn::actionId (k))
                                     midiLearn.assign (cc, MidiLearn::actionBase + k);
-                        else if (const auto k = MidiLearn::fm1FromId (id); k >= 0)
-                            midiLearn.assign (cc, MidiLearn::fm1Base + k);
+                        else if (const auto fk = MidiLearn::fm1FromId (id); fk >= 0)
+                            midiLearn.assign (cc, MidiLearn::fm1Base + fk);
                     }
                     xml->removeChildElement (learnXml, true); // no debe entrar en el ValueTree de parámetros
                 }

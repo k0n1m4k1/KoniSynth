@@ -11,6 +11,8 @@ struct MidiLearn
     {
         for (auto& p : ccToParam)
             p = -1;
+        for (auto& k : fm1KeyState)
+            k = -1;
     }
 
     int ccFor (int paramIndex) const
@@ -99,7 +101,7 @@ struct MidiLearn
         if (id.startsWith ("fm1:enc:")) return fm1EncFirst + juce::jlimit (0, 6, id.getTrailingIntValue());
         return -1;
     }
-    std::array<std::atomic<int>, 14> fm1KeyState = [] { std::array<std::atomic<int>, 14> a; for (auto& x : a) x = -1; return a; }(); // -1 nada
+    std::array<std::atomic<int>, 14> fm1KeyState; // -1 nada (MidiLearn())
     std::array<std::atomic<int>, 7> fm1Clicks {};          // clics pendientes por encoder
     std::atomic<int> fm1MasterValue { -1 };                // ADC pendiente; -1 nada
     std::array<int, 7> fm1EncLast = [] { std::array<int, 7> a; a.fill (-1); return a; }(); // (solo hilo de audio)
