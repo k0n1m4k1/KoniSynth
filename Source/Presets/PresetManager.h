@@ -326,10 +326,10 @@ public:
     // (array estático: un std::initializer_list devuelto por valor apuntaría a un array temporal ya destruido)
     // y el orden de la cadena de efectos ("fxOrder"; vacío = el de siempre) y la receta de Math Models > Modal ("modalRecipe";
     // vacía = Soft Key, Engines/SynthData.h)
-    static const std::array<const char*, 9>& textProperties()
+    static const std::array<const char*, 10>& textProperties()
     {
-        static const std::array<const char*, 9> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder",
-                                                       "modalRecipe", "dx7Bank" };
+        static const std::array<const char*, 10> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder",
+                                                        "modalRecipe", "dx7Bank", "fm1Firmware" };
         return list;
     }
 

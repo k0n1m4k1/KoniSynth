@@ -417,6 +417,12 @@ public:
         for (int op = 1; op <= 6; ++op)
             fmSection.withKnob (s, "fm" + juce::String (op) + "Level", "OP" + juce::String (op));
         dx7VoiceBox.onChange = [this] { if (const auto id = dx7VoiceBox.getSelectedId(); id > 0) koni.selectDx7Voice (id - 1); };
+        fm1FirmwareBox.onChange = [this]
+        {
+            const auto id = fm1FirmwareBox.getSelectedId();
+            if (id > 0 && id <= fm1BoxFiles.size() && fm1BoxFiles[id - 1] != koni.fm1Loaded())
+                koni.chooseFm1 (fm1BoxFiles[id - 1]);
+        };
         refreshDx7Voices();
         fmLfoSection.withCombo (s, "fmLfoWave").withExtraToggle (s, "fmLfoSync", "Sync")
                     .withKnob (s, "fmLfoSpeed", "Speed").withKnob (s, "fmLfoDelay", "Delay").withKnob (s, "fmLfoPmd", "PMD")
@@ -573,8 +579,10 @@ public:
                   .withKnob (s, "gusPatchBits", "Bits")
                   .withRowBreak (1).withRightBody (gusDisplay, 560); // a la derecha, el mapa de voces (4 columnas desde 560 px)
         gusSection.stretchToFill = true; // el display se queda con el ancho que sobre en la fila
-        fm1Section.withHeaderButton ("Firmware...", "KoniSynth does not include any FM-1 firmware: put your .fwsc files (M-VAVE's own or a "
-                                     "community one) in a folder, one subfolder per firmware, and choose it here.", [this] { fm1FirmwareMenu(); })
+        fm1Section.withHeaderButton ("Load .fwsc...", "Load an M-VAVE FM-1 firmware package (.fwsc): M-VAVE's own or a community one. "
+                                     "KoniSynth does not include any. The preset saves which firmware it uses, as with samples.",
+                                     [this] { chooseFm1Fwsc(); })
+                  .withHeaderControl ("Firmware", fm1FirmwareBox, 220) // los .fwsc de la carpeta de firmwares (no es un parámetro)
                   .withBody (fm1Screen, 0, 500); // la pantalla de 240 px a escala 2 (480) y su pie
         if (auto* list = gusSection.listFor ("gusProgram")) list->setPhosphor (56); // lista grande, letra de 30 px
         if (auto* list = mt32Section.listFor ("mt32Program")) list->setPhosphor (48); // igual, en la fila de perillas: 3 de ancho
@@ -985,25 +993,54 @@ private:
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&gusSection));
     }
 
-    void fm1FirmwareMenu()
+    // FM-1: el firmware es un fichero, como el .syx del DX7 (el preset guarda su ruta). Load .fwsc... abre el selector en la
+    // carpeta de firmwares; la lista Firmware muestra los .fwsc de esa carpeta y el cargado
+    void chooseFm1Fwsc()
     {
-        juce::PopupMenu m;
-        const auto status = koni.getFm1View().status;
-        m.addSectionHeader (status.isEmpty() ? juce::String ("Not started yet") : status);
-        m.addItem ("Choose firmware folder...", [this]
-        {
-            fileChooser = std::make_unique<juce::FileChooser> ("M-VAVE FM-1 firmware folder (.fwsc files, one subfolder per firmware)",
-                                                               fm1FirmwareFolder());
-            fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
-                [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
+        const auto loaded = koni.fm1Loaded();
+        const auto start = loaded.existsAsFile() ? loaded.getParentDirectory() : fm1FirmwareFolder();
+        fileChooser = std::make_unique<juce::FileChooser> ("Load M-VAVE FM-1 firmware (.fwsc)", start, "*.fwsc");
+        fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+            [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
+            {
+                if (safe != nullptr && fc.getResult() != juce::File())
                 {
-                    if (safe != nullptr && fc.getResult() != juce::File())
-                        safe->koni.setFm1Folder (fc.getResult());
-                });
-        });
-        m.addItem ("Open firmware folder", [] { const auto f = fm1FirmwareFolder(); f.createDirectory(); f.startAsProcess(); });
-        m.addItem ("Restart", [this] { koni.rescanFm1(); });
-        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&fm1Section));
+                    safe->koni.chooseFm1 (fc.getResult());
+                    safe->fm1BoxTicks = 0; // la lista, al momento
+                }
+            });
+    }
+
+    // Lista Firmware: los .fwsc de la carpeta de firmwares (por subcarpeta: "M-VAVE / FM-1_016") y, si el cargado está en
+    // otro sitio, también él. Se rehace cada ~2 s con el FM-1 elegido (el temporizador va a 2 Hz)
+    void refreshFm1Firmwares()
+    {
+        if (fm1BoxTicks-- > 0 && fm1BoxFiles.contains (koni.fm1Loaded()))
+            return;
+        fm1BoxTicks = 4;
+        const auto folder = fm1FirmwareFolder();
+        const auto loaded = koni.fm1Loaded();
+        auto files = koni.fm1Firmwares();
+        if (loaded.existsAsFile() && ! files.contains (loaded))
+            files.add (loaded);
+        if (files != fm1BoxFiles)
+        {
+            fm1BoxFiles = files;
+            fm1FirmwareBox.clear (juce::dontSendNotification);
+            for (int i = 0; i < files.size(); ++i)
+            {
+                const auto& f = files.getReference (i);
+                const auto dir = f.isAChildOf (folder) && f.getParentDirectory() != folder ? f.getParentDirectory().getRelativePathFrom (folder) + " / "
+                                                                                          : juce::String();
+                fm1FirmwareBox.addItem (dir + f.getFileNameWithoutExtension(), i + 1);
+            }
+            fm1FirmwareBox.setTextWhenNothingSelected (files.isEmpty() ? "Load a .fwsc" : "-");
+            fm1FirmwareBox.setTooltip ("FM-1 firmwares in " + folder.getFullPathName() + " (and the loaded one). Pick one to start it; "
+                                       "the preset saves which firmware it uses.");
+        }
+        const auto id = fm1BoxFiles.indexOf (loaded) + 1;
+        if (fm1FirmwareBox.getSelectedId() != id)
+            fm1FirmwareBox.setSelectedId (id, juce::dontSendNotification);
     }
 
     // Skin (UI/Skin.h): ajuste global; se aplica al momento en esta ventana y en las flotantes (las demás instancias, al repintar)
@@ -2010,6 +2047,8 @@ private:
         }
         if (engine == 6)
             refreshDx7Voices();
+        if (engine == 16)
+            refreshFm1Firmwares();
         if (engine == 15) // Gravis: por qué no suena
             gusSection.setInfo (koni.hasGusBank() ? juce::String() : juce::String ("no patches: see Patches..."));
         refreshCabIrInfo();
@@ -2046,7 +2085,7 @@ private:
         using Kind = KoniSynthProcessor::MissingFile::Kind;
         const auto sampleWhich = KoniSynthProcessor::sampleWhichFor (m.kind);
         const juce::String what = sampleWhich >= 0 ? juce::String (SampleIds::of (sampleWhich).title)
-                                : m.kind == Kind::dx7Bank ? "DX7 bank"
+                                : m.kind == Kind::dx7Bank ? "DX7 bank" : m.kind == Kind::fm1Firmware ? "FM-1 firmware"
                                 : m.kind == Kind::cabIr ? "Cabinet IR" : m.kind == Kind::osc2Wavetable ? "Osc 2 wavetable"
                                 : m.kind == Kind::osc3Wavetable ? "Osc 3 wavetable" : "Wavetable";
         const auto heading = what + (m.unreadable ? " file can't be read" : " file not found");
@@ -2063,6 +2102,18 @@ private:
 
     void locateMissing (const KoniSynthProcessor::MissingFile& m)
     {
+        if (m.kind == KoniSynthProcessor::MissingFile::Kind::fm1Firmware)
+        {
+            const auto start = m.file.getParentDirectory().isDirectory() ? m.file.getParentDirectory() : fm1FirmwareFolder();
+            fileChooser = std::make_unique<juce::FileChooser> ("Locate FM-1 firmware: " + m.file.getFileName(), start, "*.fwsc");
+            fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
+                {
+                    if (safe != nullptr && fc.getResult() != juce::File())
+                        safe->koni.chooseFm1 (fc.getResult());
+                });
+            return;
+        }
         if (m.kind == KoniSynthProcessor::MissingFile::Kind::dx7Bank)
         {
             // Solo el banco: los parámetros de la voz ya vienen en el preset
@@ -3626,6 +3677,9 @@ private:
     GusDisplay gusDisplay { koni }; // antes que gusSection (componente de la sección): se destruye después
     Fm1Screen fm1Screen { koni }; // antes que fm1Section (cuerpo de la sección): se destruye después
     juce::ComboBox dx7VoiceBox; // igual, antes que fmSection
+    juce::ComboBox fm1FirmwareBox; // ídem, antes que fm1Section
+    juce::Array<juce::File> fm1BoxFiles;
+    int fm1BoxTicks = 0;
     int shownDx7Bank = -1;
     Dx7Display dx7Display { koni }; // ídem con fmDisplaySection
     Vl1Display vl1Display { koni }; // ídem con vl1DisplaySection

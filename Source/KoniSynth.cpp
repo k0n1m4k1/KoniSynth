@@ -162,7 +162,7 @@ public:
         monoSynth.setMinimumRenderingSubdivisionSize (1, true);
         perfMacros.attach (apvts);
         undoHistory.attach (*this, apvts, { PerfMacros::mapProp, PerfMacros::namesProp, chipMacrosProp, mdMacrosProp, snesMacrosProp,
-                                            "presetName", "presetFactory", "dx7Voice", "dx7Bank", ansUserProp });
+                                            "presetName", "presetFactory", "dx7Voice", "dx7Bank", "fm1Firmware", ansUserProp });
         presetManager.onBulkChange = [this] (bool begin) { if (begin) undoHistory.beginGroup(); else undoHistory.endGroup(); };
 
         migrateLegacyConfig(); // .txt de ajustes de versiones anteriores -> config.settings (Settings/Config.h)
@@ -277,14 +277,28 @@ public:
     }
     void setMt32Folder (const juce::File& folder) { setMt32RomFolder (folder); rebuildMt32(); }
 
-    // FM-1 (hilo de mensajes): arranca el firmware elegido (fm1Choice: ruta relativa a la carpeta de firmwares) o, sin
-    // elección, el primero de la carpeta en orden alfabético. Un intento al elegir el motor; Rescan lo repite
+    // FM-1 (hilo de mensajes). El firmware es un fichero del usuario, como un sample o el .syx del DX7: su ruta va en la
+    // propiedad de estado "fm1Firmware" (preset y proyecto). Sin ella (presets de fábrica), el primero de la carpeta de
+    // firmwares en orden alfabético; si la del preset falta o no se lee, aviso (Locate... / Ignore) y el motor queda sin
+    // firmware. Un intento al elegir el motor; Rescan lo repite, y el temporizador si la propiedad cambia (preset, proyecto)
     void startFm1()
     {
         fm1Tried = true;
         const auto folder = fm1FirmwareFolder();
-        auto file = fm1Choice.isNotEmpty() ? folder.getChildFile (fm1Choice) : juce::File();
-        if (! file.existsAsFile())
+        fm1StartedChoice = apvts.state.getProperty (fm1FirmwareProp).toString();
+        juce::File file;
+        if (fm1StartedChoice.isNotEmpty())
+        {
+            file = juce::File::isAbsolutePath (fm1StartedChoice) ? juce::File (fm1StartedChoice) : juce::File();
+            if (! file.existsAsFile())
+            {
+                reportMissing (MissingFile::Kind::fm1Firmware, file, false);
+                const juce::ScopedLock sl (sampleInfoLock);
+                fm1StartError = "Firmware not found: " + fm1StartedChoice;
+                return;
+            }
+        }
+        else
         {
             auto all = folder.findChildFiles (juce::File::findFiles, true, "*.fwsc");
             all.sort();
@@ -299,7 +313,21 @@ public:
         fm1StartError = status;
     }
     void rescanFm1() { fm1Engine.stop(); startFm1(); }
-    void setFm1Folder (const juce::File& folder) { setFm1FirmwareFolder (folder); fm1Choice = {}; rescanFm1(); }
+    void setFm1Folder (const juce::File& folder) { setFm1FirmwareFolder (folder); rescanFm1(); }
+    // los .fwsc de la carpeta de firmwares (el menú Firmware...) y el que está cargado
+    juce::Array<juce::File> fm1Firmwares() const
+    {
+        auto all = fm1FirmwareFolder().findChildFiles (juce::File::findFiles, true, "*.fwsc");
+        all.sort();
+        return all;
+    }
+    juce::File fm1Loaded() const { return fm1Engine.loadedFile(); }
+    // elegir un firmware (menú o Locate): su ruta entra en el estado (preset y proyecto) y arranca
+    void chooseFm1 (const juce::File& file)
+    {
+        apvts.state.setProperty (fm1FirmwareProp, file.getFullPathName(), nullptr);
+        rescanFm1();
+    }
 
     // Gravis UltraSound (cualquier hilo salvo el de audio): lee los patches de la carpeta y publica el juego. Una vez al elegir
     // el motor; "Rescan" o una carpeta nueva lo repiten
@@ -1692,7 +1720,7 @@ public:
     struct MissingFile
     {
         enum class Kind { sample, wavetable, cabIr, osc2Sample, osc2Wavetable, dpcmSample, mdSample, snesSample, n64Sample, osc3Sample, osc3Wavetable,
-                          dx7Bank };
+                          dx7Bank, fm1Firmware };
         Kind kind;
         juce::File file;
         bool unreadable = false;
@@ -2122,7 +2150,8 @@ private:
     juce::String mt32Status; // protegido por sampleInfoLock
     juce::String gusStatus;  // protegido por sampleInfoLock
     juce::String fm1StartError; // protegido por sampleInfoLock
-    juce::String fm1Choice; // firmware elegido: ruta relativa a la carpeta de firmwares (vacío: el primero)
+    static constexpr const char* fm1FirmwareProp = "fm1Firmware"; // ruta del .fwsc (preset y proyecto); vacía: el primero
+    juce::String fm1StartedChoice; // la ruta con la que arrancó (para rearrancar si el estado trae otra)
     juce::StringArray gusPatchNames; // nombres por índice del banco; protegido por sampleInfoLock
     AnsSlot ansSlot;
     MacroSlot chipMacroSlot, mdMacroSlot, snesMacroSlot;
@@ -2320,6 +2349,8 @@ private:
         {
             if (! fm1Tried)
                 startFm1();
+            else if (apvts.state.getProperty (fm1FirmwareProp).toString() != fm1StartedChoice)
+                rescanFm1(); // un proyecto cargado con otro firmware
         }
         else if (fm1Tried)
         {
