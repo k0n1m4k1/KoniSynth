@@ -66,7 +66,7 @@ public:
     uint64_t codeWrites() override { return ram.codeWrites; }
     bool ramView (RamView& v) override
     {
-        v = { ram.ptr(), kRamBase, (uint32_t) ram.size(), ram.codeMarks(), (void* const*) &ram.log };
+        v = { ram.ptr(), kRamBase, (uint32_t) ram.size(), ram.codeMarks(), (void* const*) &ram.log, &ram.codeWrites };
         return true;
     }
 
@@ -211,6 +211,7 @@ public:
         // bucle de espera de 6 instrucciones de la V15 sin saltar: 140 M de sus 150 M instrucciones en 2,6 s (medido)
         std::array<uint32_t, 64> loops;
         bool hasLoops = false;  // alguna entrada en loops (Cpu::BurstStop::anyLoops)
+        uint64_t loopsMask = 0;  // sus entradas ocupadas (bit = (pc >> 1) & 63)
         LoopSkip() { loops.fill (0xffffffffu); }
         uint32_t& loopAt (uint32_t pc) noexcept { return loops[(pc >> 1) & 63]; }
         int64_t credit = 1 << 16;

@@ -40,7 +40,7 @@ struct Bus
     virtual void idle (uint32_t /*core*/) {}                      // "idle": el núcleo para hasta una interrupción
     // (JIT) la RAM de datos para accesos en línea: sus bytes, dirección y tamaño, la marca de código por palabra y el
     // puntero de apuntado de escrituras (Ram::log). false: sin acceso en línea (todo por el bus)
-    struct RamView { uint8_t* data; uint32_t base, size; const uint8_t* code; void* const* log; };
+    struct RamView { uint8_t* data; uint32_t base, size; const uint8_t* code; void* const* log; const uint64_t* codeWrites; };
     virtual bool ramView (RamView&) { return false; }
     // (JIT) marca como código las palabras de RAM de [lo, hi) y cuenta las escrituras a palabras marcadas: si cambia,
     // los bloques hechos desde RAM ya no valen
@@ -169,6 +169,7 @@ public:
         // de bucles tiene alguno (si no, no se mira por pc)
         uint64_t probeAnyAt = 0;
         bool anyLoops = true;
+        uint64_t loopsMask = ~0ull;  // entradas ocupadas de loops (bit = (pc >> 1) & 63; el JIT encadenado lo mira)
     };
     // Devuelve las instrucciones hechas; ok = false si la última falló (no cuenta); trip = la última salió de las
     // ventanas de pc (la excepción la lanza Machine)
@@ -261,7 +262,7 @@ public:
     // misma semántica. Solo con la ruta rápida, sin perfiles y en las plataformas con JIT (jitSupported)
     bool jitOn = true;
     uint64_t jitRuns = 0, jitInsns = 0, jitCompiled = 0;  // bloques ejecutados, sus instrucciones, bloques compilados
-    uint64_t jitRamFlushes = 0, jitResets = 0;  // vaciados de los bloques de RAM (código reescrito) y del búfer entero
+    uint64_t jitRamFlushes = 0, jitResets = 0, jitLinked = 0;  // (y enlaces hechos entre bloques)  // vaciados de los bloques de RAM (código reescrito) y del búfer entero
     // Un bloque del JIT en pc fuera de la ráfaga (el bucle de cpu1, Machine::runCpu1): como mucho maxN instrucciones, sin
     // ninguna de avoidA / avoidB ni del rango [avoidLo, avoidHi] después de la primera (ganchos del HLE, pc de sondeo) y
     // parando tras un acceso que cambie *side. Devuelve las instrucciones hechas; 0 = ningún bloque (y ok = false si
@@ -304,11 +305,33 @@ private:
         uint64_t* cycles;
         const uint64_t* sideEffects;
         uint64_t side0;
-        uint32_t done = 0;          // instrucciones acabadas
+        uint32_t done = 0;          // instrucciones acabadas (todas las de la cadena)
         uint32_t status = 0;        // 0 bloque entero, 1 parada tras un acceso con efectos, 2 fallo
+        // encadenado (la segunda entrada de cada bloque lo mira antes de seguir; si algo no vale, vuelve)
+        uint32_t base = 0;          // instrucciones de la cadena antes del bloque en curso
+        uint32_t budget = 0;        // cuántas puede hacer la cadena (tramo, siguiente evento, hueco de sondeo)
+        uint32_t stopA = 0xffffffffu, stopB = 0xffffffffu;  // pc donde la ráfaga pararía
+        uint32_t avoidLo = 1, avoidHi = 0;                  // rango que ningún bloque encadenado puede tocar
+        uint32_t win[4] = { 0, 0xffffffffu, 0, 0xffffffffu };  // ventanas de pc (Cpu::pcWin): el bloque, dentro de una
+        uint64_t loopsMask = 0;     // entradas ocupadas de la tabla de bucles (con loopEnabled)
+        uint64_t ramCw = 0;         // Ram::codeWrites cuando se miraron los bloques de RAM
+        void* lastLink = nullptr;   // el último enlace por el que salió un bloque
+        uint8_t loopEnabled = 0;
     };
+    // enlace de una salida de un bloque a otro (en memoria de datos: enlazar no toca el código): to = la segunda entrada
+    // del bloque de pc, o el epílogo (unlinked) mientras no se enlaza
+    struct JitLink { void* to; void* unlinked; uint32_t pc; };
     using JitFn = void (*) (JitCtx*);
-    struct JitBlock { uint32_t pc = 0xffffffffu, last = 0, n = 0; JitFn fn = nullptr; };
+    struct JitBlock
+    {
+        uint32_t pc = 0xffffffffu, last = 0, n = 0;
+        JitFn fn = nullptr;
+        void* entryB = nullptr;  // la entrada encadenada (con las comprobaciones)
+        uint64_t slotMask = 0;   // entradas de la tabla de bucles que podrían caer en sus pc
+    };
+    std::deque<JitLink> jitLinks;
+    JitLink* jitPending = nullptr;  // salida sin enlazar del último bloque: se enlaza con el siguiente si es su pc
+    void jitUnlinkAll() noexcept;
     // índice por media palabra de los primeros 2 MiB de la XIP (la aplicación de Felucca ocupa 586 KB): 0 sin mirar,
     // 1 sin bloque, k + 2 = jitBlocks[k]. 4 MiB; la consulta "sin bloque" no toca los bloques
     static constexpr uint32_t kJitSpan = 1u << 21, kJitMax = 64;
@@ -329,7 +352,9 @@ private:
     bool jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
     Bus::RamView jitRam {};
     bool jitRamOk = false;
-    void jitEmit (Emitter& e, const std::vector<const Line*>& lines);
+    // el código de un bloque; devuelve dónde empieza la segunda entrada y añade sus enlaces (con el desplazamiento del
+    // epílogo en "to", que jitAt convierte en dirección)
+    size_t jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inRam, uint64_t slotMask, std::vector<JitLink*>& links);
 
     Line* fetch (Bus& bus, uint32_t at);
     bool execute (Bus& bus, const Line& l, uint32_t nextPc);

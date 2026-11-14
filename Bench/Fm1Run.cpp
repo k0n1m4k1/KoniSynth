@@ -404,9 +404,9 @@ int main (int argc, char** argv)
                 std::printf ("%d %.1f %%  ", r, 100.0 * (double) cpu.routeCount[r] / (double) tot);
         std::printf ("; cabezas de par %.1f %%\n", tot > 0 ? 100.0 * (double) cpu.pairHeads / (double) tot : 0.0);
     }
-    std::printf ("JIT: cpu0 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer\n",
+    std::printf ("JIT: cpu0 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer, %llu enlaces\n",
                  (unsigned long long) cpu.jitRuns, (unsigned long long) cpu.jitInsns, (unsigned long long) cpu.jitCompiled,
-                 (unsigned long long) cpu.jitRamFlushes, (unsigned long long) cpu.jitResets);
+                 (unsigned long long) cpu.jitRamFlushes, (unsigned long long) cpu.jitResets, (unsigned long long) cpu.jitLinked);
     if (m.cpu1)
         std::printf ("JIT: cpu1 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer\n",
                      (unsigned long long) m.cpu1->jitRuns, (unsigned long long) m.cpu1->jitInsns, (unsigned long long) m.cpu1->jitCompiled,

@@ -1137,10 +1137,15 @@ uint32_t Machine::probeLoop (uint32_t budget)
         ls.credit = std::min<int64_t> (ls.credit + (int64_t) (k * l / 4) - (int64_t) i, kCreditMax);
         ++ls.hits;
         ls.skipped += k * l;
-        if (k > 0 || ls.tReads == ls.seen[found].tReads)
+        // (solo las vueltas sin contador: las que lo leen son largas, las lleva Observe, y sus pc llenarían la tabla de 64:
+        // la ráfaga pararía en ellos y el JIT no encadenaría)
+        if (ls.tReads == ls.seen[found].tReads)
         {
             for (size_t q = i - roundLen; q < i; ++q)  // todos los pc de la vuelta: un tramo puede empezar en cualquiera
+            {
                 ls.loopAt (ls.pcs[q]) = ls.pcs[q];
+                ls.loopsMask |= 1ull << ((ls.pcs[q] >> 1) & 63);
+            }
             ls.hasLoops = true;
         }
         if (k == 0 && ls.tReads > ls.seen[found].tReads)
@@ -1585,6 +1590,7 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
             static_assert (kProbeMin >= kProbeKnown);
             bs.probeAnyAt = std::max (loopSkip.nextTry, loopSkip.backoffUntil);
             bs.anyLoops = loopSkip.hasLoops;
+            bs.loopsMask = loopSkip.loopsMask;
             bool ok = true, tripped = false;
             const auto k = cpu0.burst (soc, bs, ok, tripped);
             done += k;
