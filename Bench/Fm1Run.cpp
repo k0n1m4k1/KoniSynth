@@ -201,11 +201,10 @@ int main (int argc, char** argv)
     int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
     bool haveSyx = false;
-    // --dumpcpu1 FICHERO: cada bloque de 64 float que deja dx7note_compute_block (cpu1) en su búfer doble, para la prueba
-    // diferencial del núcleo de sonido. Direcciones de la V13 (FM-1-RE): índice b[0x01c0e685], búferes 0x01c10694 + 256·índice;
-    // otra versión: --dumpaddr ÍNDICE:BÚFER en hexadecimal.
+    // --dumpcpu1 FICHERO con --dumpaddr ÍNDICE:BÚFER (hexadecimal): cada bloque de 64 float que deja el núcleo de sonido
+    // (cpu1) en su búfer doble, para la prueba diferencial. ÍNDICE: el byte del búfer en uso; búferes en BÚFER + 256·índice
     std::string dumpCpu1;
-    uint32_t dumpIdx = 0x01c0e685, dumpBuf = 0x01c10694;
+    uint32_t dumpIdx = 0, dumpBuf = 0;
     std::vector<std::pair<uint64_t, std::string>> ramDumps;  // --dumpram MS:FICHERO: la RAM entera en ese ms
     // --hle off|check|on: FmCore::render nativo (Fm1Hle.h); check lo compara con la emulada en cada llamada
     auto hleMode = Machine::Hle::Off;
@@ -304,6 +303,11 @@ int main (int argc, char** argv)
     const auto t0 = std::chrono::steady_clock::now();
     size_t nextShot = 0, nextRam = 0;
     std::sort (ramDumps.begin(), ramDumps.end());
+    if (! dumpCpu1.empty() && dumpIdx == 0)
+    {
+        std::printf ("--dumpcpu1 necesita --dumpaddr ÍNDICE:BÚFER\n");
+        return 2;
+    }
     std::FILE* dump = dumpCpu1.empty() ? nullptr : std::fopen (dumpCpu1.c_str(), "wb");
     const auto ramAt = [&soc] (uint32_t a) { return soc.ram.ptr() + (a - kRamBase); };
     uint8_t lastIdx = dump != nullptr ? *ramAt (dumpIdx) : 0;
@@ -322,7 +326,7 @@ int main (int argc, char** argv)
         // el firmware hace índice + 1 y, si llega a 2, lo pone a 0: el 2 es transitorio y no marca un bloque
         if (dump != nullptr && *ramAt (dumpIdx) != lastIdx && *ramAt (dumpIdx) < 2)
         {
-            // registro (780 B): tramas de DAC ya emitidas (uint64), índice del búfer escrito (uint32), sus 64 float
+            // registro (268 B): tramas de DAC ya emitidas (uint64), índice del búfer escrito (uint32), sus 64 float
             const uint8_t idx = *ramAt (dumpIdx);
             if (((lastIdx + 1) & 1) != idx) ++skippedBlocks;
             const uint64_t frames = soc.periph.audio.size() / 2;
@@ -330,19 +334,6 @@ int main (int argc, char** argv)
             std::fwrite (&frames, 8, 1, dump);
             std::fwrite (&which, 4, 1, dump);
             std::fwrite (ramAt (dumpBuf + 256u * which), 1, 256, dump);
-            // y los dos búferes int32 de 64 muestras del núcleo antes de la etapa float: [r12+24] y [r12+28], con
-            // r12 = [0x01c0e670 + 252] (V13); a cero si el puntero no cae en la RAM
-            uint32_t r12 = 0;
-            std::memcpy (&r12, ramAt (0x01c0e670 + 252), 4);
-            for (const uint32_t off : { 24u, 28u })
-            {
-                uint32_t p = 0;
-                if (r12 >= kRamBase && r12 + off + 4 <= kRamBase + soc.ram.size())
-                    std::memcpy (&p, ramAt (r12 + off), 4);
-                static const uint8_t zeros[256] = {};
-                const bool inRam = p >= kRamBase && p + 256 <= kRamBase + soc.ram.size();
-                std::fwrite (inRam ? ramAt (p) : zeros, 1, 256, dump);
-            }
             lastIdx = idx;
             ++blocks;
         }
@@ -388,11 +379,10 @@ int main (int argc, char** argv)
                  (unsigned long long) soc.lcd.frames, soc.lcd.revision, soc.periph.audio.size() / 2,
                  (double) soc.periph.audio.size() / 2 / 44117.65, soc.resets);
     if (hleMode != Machine::Hle::Off)
-        std::printf ("HLE FmCore::render (modo final %s): %s en 0x%08x (tabla 0x%08x, cadena %s); %llu llamadas, %llu comprobadas, %llu distintas, "
+        std::printf ("HLE FmCore::render (modo final %s): %s en 0x%08x (tabla 0x%08x); %llu llamadas, %llu comprobadas, %llu distintas, "
                      "%.0f instrucciones emuladas por llamada%s%s\n",
                      m.hle.mode == Machine::Hle::On ? "on" : m.hle.mode == Machine::Hle::Check ? "check" : m.hle.mode == Machine::Hle::Auto ? "auto" : "off",
                      m.hle.site ? "encontrada" : "NO encontrada", m.hle.site.entry, m.hle.site.algTable,
-                     m.hle.site.chainReadsGain ? "con el error de la V13" : "corregida",
                      (unsigned long long) m.hle.calls, (unsigned long long) m.hle.checked, (unsigned long long) m.hle.mismatches,
                      m.hle.avgCost(), m.hle.firstMismatch.empty() ? "" : "; primera: ", m.hle.firstMismatch.c_str());
     std::printf ("cpu0 por la ruta de arriba %llu (con interrupción pendiente %llu), en ráfaga %llu\n", (unsigned long long) m.statTop,

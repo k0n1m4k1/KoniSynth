@@ -105,18 +105,10 @@ void computeFb (const MkiTables& t, int32_t* out, int32_t phase0, int32_t freq, 
     fb[1] = y;
 }
 
-// Ganancia inicial y paso por muestra de un operador interior de las cadenas (escribe la ganancia nueva en +4).
-// V13 (readsGain): lee +0 (una ganancia) como nivel y, como compute_fb3 de Synth_Dexed, la deja fija en el bloque: mudo.
-// V15: ganancia anterior (+0) → nueva (del nivel en +4) con la rampa de los demás operadores
-inline void chainRamp (Op& o, bool readsGain, int32_t& gain, int32_t& dg) noexcept
+// Ganancia inicial y paso por muestra de un operador interior de las cadenas (escribe la ganancia nueva en +4): de la
+// ganancia anterior (+0) a la nueva (del nivel en +4) con la rampa de los demás operadores (V15)
+inline void chainRamp (Op& o, int32_t& gain, int32_t& dg) noexcept
 {
-    if (readsGain)
-    {
-        o.level = kEnvMax - (o.gainOut >> 14);
-        gain = o.level == 0 ? kEnvMax - 1 : o.level;
-        dg = o.level - gain;
-        return;
-    }
     const int32_t g1 = o.gainOut == 0 ? kEnvMax - 1 : o.gainOut;
     const int32_t g2 = kEnvMax - (o.level >> 14);
     o.level = g2;
@@ -125,12 +117,12 @@ inline void chainRamp (Op& o, bool readsGain, int32_t& gain, int32_t& dg) noexce
 }
 
 // compute_fb2 (algoritmo 6 con realimentación): operadores op y op + 1
-void computeFb2 (const MkiTables& t, int32_t* out, Op* p, int32_t g01, int32_t g02, int32_t* fb, int32_t shift, bool readsGain)
+void computeFb2 (const MkiTables& t, int32_t* out, Op* p, int32_t g01, int32_t g02, int32_t* fb, int32_t shift)
 {
     int32_t y0 = fb[0], y = fb[1];
     int32_t ph0 = p[0].phase, ph1 = p[1].phase;
     int32_t gain0 = g01, gain1, dg1;
-    chainRamp (p[1], readsGain, gain1, dg1);
+    chainRamp (p[1], gain1, dg1);
     const int32_t dg0 = (g02 - g01 + (kN >> 1)) >> 6;
     for (int i = 0; i < kN; i++)
     {
@@ -149,13 +141,13 @@ void computeFb2 (const MkiTables& t, int32_t* out, Op* p, int32_t g01, int32_t g
 }
 
 // compute_fb3 (algoritmo 4 con realimentación): operadores op, op + 1 y op + 2
-void computeFb3 (const MkiTables& t, int32_t* out, Op* p, int32_t g01, int32_t g02, int32_t* fb, int32_t shift, bool readsGain)
+void computeFb3 (const MkiTables& t, int32_t* out, Op* p, int32_t g01, int32_t g02, int32_t* fb, int32_t shift)
 {
     int32_t y0 = fb[0], y = fb[1];
     int32_t ph0 = p[0].phase, ph1 = p[1].phase, ph2 = p[2].phase;
     int32_t gain0 = g01, gain1, dg1, gain2, dg2;
-    chainRamp (p[1], readsGain, gain1, dg1);
-    chainRamp (p[2], readsGain, gain2, dg2);
+    chainRamp (p[1], gain1, dg1);
+    chainRamp (p[2], gain2, dg2);
     const int32_t dg0 = (g02 - g01 + (kN >> 1)) >> 6;
     for (int i = 0; i < kN; i++)
     {
@@ -182,7 +174,7 @@ inline void wr32 (uint8_t* p, uint32_t v) noexcept { std::memcpy (p, &v, 4); }
 
 HleRenderSite findFmCoreRender (const uint8_t* ram, uint32_t ramBase, size_t ramSize) noexcept
 {
-    // prólogo: [--sp] = {rets, r15-r4}; sp += -68; r5 = r2 # [sp+20] = r3 (igual en V13 y V15)
+    // prólogo: [--sp] = {rets, r15-r4}; sp += -68; r5 = r2 # [sp+20] = r3 (V15)
     static const uint8_t sig[] = { 0x7f, 0x04, 0xe2, 0x8f, 0x25, 0xd6, 0x83, 0x25 };
     static const uint8_t alg1[] = { 0xc1, 0x11, 0x11, 0x14, 0x01, 0x14 }; // algoritmo 1 de FmCore::algorithms
     const size_t limit = std::min<size_t> (ramSize, 0x10000);
@@ -197,21 +189,7 @@ HleRenderSite findFmCoreRender (const uint8_t* ram, uint32_t ramBase, size_t ram
         const uint32_t table = rd32 (c + 2);
         if (table < ramBase || table - ramBase + 32 * 6 > ramSize || std::memcmp (ram + (table - ramBase), alg1, sizeof alg1) != 0)
             continue;
-        HleRenderSite s { ramBase + (uint32_t) i, table };
-        // el kernel de la cadena: el prólogo 7f 04 e2 9a más cercano antes de la rutina (V13 y V15: 0x204 bytes antes)
-        for (size_t k = i >= 2 ? i - 2 : 0; k + 2 > 0 && i - k < 0x800; k -= 2)
-        {
-            if (ram[k] == 0x7f && ram[k + 1] == 0x04 && ram[k + 2] == 0xe2 && ram[k + 3] == 0x9a)
-            {
-                for (size_t j = k; j < k + 32; j += 2)
-                    if (ram[j] == 0x14 && ram[j + 1] == 0x64)  // r4 = [r1+16]
-                        s.chainReadsGain = true;
-                break;
-            }
-            if (k == 0)
-                break;
-        }
-        return s;
+        return { ramBase + (uint32_t) i, table };
     }
     return {};
 }
@@ -258,13 +236,13 @@ bool hleFmCoreRender (uint8_t* ram, uint32_t ramBase, size_t ramSize, const HleR
                     switch (a.algo)
                     {
                         case 3:
-                            computeFb3 (t, outptr, &p[op], gain1, gain2, fb, std::min (fbShift + 2, 16), a.chainReadsGain);
+                            computeFb3 (t, outptr, &p[op], gain1, gain2, fb, std::min (fbShift + 2, 16));
                             p[op + 1].phase += p[op + 1].freq << 6;
                             p[op + 2].phase += p[op + 2].freq << 6;
                             op += 2;
                             break;
                         case 5:
-                            computeFb2 (t, outptr, &p[op], gain1, gain2, fb, std::min (fbShift + 2, 16), a.chainReadsGain);
+                            computeFb2 (t, outptr, &p[op], gain1, gain2, fb, std::min (fbShift + 2, 16));
                             p[op + 1].phase += p[op + 1].freq << 6;
                             op += 1;
                             break;

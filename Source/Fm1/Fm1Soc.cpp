@@ -1494,7 +1494,7 @@ bool Machine::hleEnter (Cpu& c1)
     const auto shift = word (c1.sp), n = word (c1.sp + 4);
     if (! shift || ! n)
         return false;
-    HleRenderArgs a { c1.regs[0], c1.regs[1], c1.regs[2], c1.regs[3], *shift, *n, hle.site.algTable, hle.site.chainReadsGain };
+    HleRenderArgs a { c1.regs[0], c1.regs[1], c1.regs[2], c1.regs[3], *shift, *n, hle.site.algTable };
     ++hle.calls;
     if (hle.mode == Hle::On)
     {
