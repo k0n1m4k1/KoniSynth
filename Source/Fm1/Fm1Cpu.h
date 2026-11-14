@@ -82,7 +82,16 @@ struct Fm1Pre
                             FastDecBr,  // if (--R <op> #i) goto #i
                             FastPopPc,  // pc = [sp++]
                             FastIcfgRd, // R = icfg (prioridades en curso y habilitación global: Cpu::icfg)
-                            FastIcfgWr  // icfg = R (Cpu::setIcfg)
+                            FastIcfgWr, // icfg = R (Cpu::setIcfg)
+                            // tercera tanda: la cola de exec_syntax medida con GHOULBOX 2.4 y la V15 (2026-11-14)
+                            FastDiv,    // R = R / R | R % R (fcond: 0 / (u), 1 / (s), 2 % (u), 3 % (s); entre 0 = 0)
+                            FastAbs,    // R = abs(R) (wrapping)
+                            FastNot,    // R = ~R
+                            FastTb,     // tbb [R] / tbh [R] (fw = 1 / 2): pc = siguiente + 2·tabla[R]
+                            FastCallR,  // call R
+                            FastRti,    // rti (Cpu::doRti)
+                            FastPushList, // [--sp] = {R*N}: fimm = máscara de registros, del mayor al menor
+                            FastPopList   // {R*N} = [sp++]: fimm = máscara, del menor al mayor
     };
     // Direccionamientos de FastLdX / FastStX (los de exec_syntax)
     enum MemMode : uint8_t { MemRImm, MemSpImm, MemSp, MemRR, MemRRShl, MemPostImm, MemPostR, MemPreImm, MemPreR, MemPushSp };
@@ -96,6 +105,15 @@ struct Fm1Pre
     bool fsign = false, fsp = false, fidx = false, fflags = false;
     uint32_t fimm = 0;
     int64_t foff = 0;                // desplazamiento del salto desde el pc siguiente
+    // ruta 13 (comparación de registros con salto) y 14 (if {} predicado), decodificadas una vez: familia de comparación,
+    // invertida, registros (13: a, b; 14: reg y rhs), desplazamiento (13) y unidades then / else (14)
+    uint8_t cbFam = 0, cbA = 0, cbB = 0, ibThen = 0, ibElse = 0;
+    // lo que unas rutas crudas leían del nombre en cada ejecución: 3 lockset, 9 "and", 10 1 lsr / 2 asr, 25 "ne",
+    // 29 rep_i_r (1 = sí)
+    uint8_t nameKind = 0;
+    bool cbAlt = false;
+    int64_t cbOff = 0;
+    Rhs ibRhs {};
     // salto por prueba de bits (decode_bittest)
     uint8_t btReg = 0;
     Rhs btMask {};
@@ -110,6 +128,34 @@ public:
 
     // Ejecuta una instrucción. false = fallo (fault, faultName, faultPc, faultRaw); el pc no avanza.
     bool step (Bus& bus);
+
+    // Ráfaga de Machine::runBlocks: instrucciones seguidas sin las comprobaciones de su ruta de arriba mientras no puedan
+    // cambiar su resultado (las condiciones, aquí; las razones, en runBlocks). Antes de cada instrucción: un acceso con
+    // efectos (sideEffects), el tramo (room), el próximo evento (cycles + 1 >= due), un pc donde la ruta de arriba
+    // actuaría (HLE, bucle contado, sondeo de bucles: Machine::burstStop) o la interrupción bloqueada que ya entraría.
+    // Paga el tick de cada instrucción (++cycles) y deja inIsr al día
+    struct BurstStop
+    {
+        const uint64_t* sideEffects = nullptr;
+        uint64_t side0 = 0;
+        uint64_t* cycles = nullptr;
+        uint64_t due = 0;
+        bool* inIsr = nullptr;
+        uint32_t room = 0;
+        int blockedPrio = -1;
+        uint32_t stopA = 0xffffffffu, stopB = 0xffffffffu;
+        bool loopEnabled = false;
+        uint64_t nextTry = 0, backoffUntil = 0;
+        const uint32_t* loops = nullptr;  // 64 pc (mapeo directo por (pc >> 1) & 63)
+        uint32_t probeKnown = 0, probeMin = 0;
+        // (precalculado) el sondeo en cualquier pc: now >= max (nextTry, backoffUntil) con room >= probeMin; y si la tabla
+        // de bucles tiene alguno (si no, no se mira por pc)
+        uint64_t probeAnyAt = 0;
+        bool anyLoops = true;
+    };
+    // Devuelve las instrucciones hechas; ok = false si la última falló (no cuenta); trip = la última salió de las
+    // ventanas de pc (la excepción la lanza Machine)
+    uint32_t burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip);
 
     // ¿Se atendería ahora una interrupción de prioridad prio? Solo entre construcciones completas: no dentro de un
     // bloque rep, de un if {} predicado ni de un par de emisión doble, cuyo estado vive en el núcleo y no en la pila.
@@ -145,7 +191,13 @@ public:
 
     // Límites de PC (las guardas de la CPU): el código corre dentro de alguna de las dos ventanas; una instrucción
     // traída fuera de ambas dispara la excepción. Devuelve si esta entrada es la que sale (trip)
-    bool pcEnter (uint32_t at) noexcept;
+    bool pcEnter (uint32_t at) noexcept  // (en línea: se mira antes de cada instrucción con ventanas de pc)
+    {
+        const bool outside = hasPcWin && ! (pcWin[0][0] <= at && at <= pcWin[0][1]) && ! (pcWin[1][0] <= at && at <= pcWin[1][1]);
+        const bool trip = outside && ! pcOut;
+        pcOut = outside;
+        return trip;
+    }
 
     // ---- estado arquitectónico (público, como en fm1-emu: el SoC y las pruebas lo leen y lo escriben) ----
     uint32_t coreId = 0;  // lo que devuelve cnum (el AC791N tiene dos núcleos)
@@ -213,10 +265,15 @@ private:
 
     Line* fetch (Bus& bus, uint32_t at);
     bool execute (Bus& bus, const Line& l, uint32_t nextPc);
+    bool execFast (Bus& bus, const Line& l, uint32_t nextPc);
+    bool execRoute (Bus& bus, const Line& l, uint32_t nextPc);
     // Devuelve false si la forma no tiene semántica; jump/hasJump = salto tomado
     bool execSyntax (Bus& bus, const Line& l, uint32_t nextPc, bool& hasJump, uint32_t& jump);
     void execRaw (Bus& bus, uint8_t route, uint32_t raw);
     void finish (bool hasJump, uint32_t jump, uint32_t nextPc);
+    void finishSlow (bool hasJump, uint32_t at, uint32_t nextPc);  // bloques if {} y rep en curso
+    bool stepImpl (Bus& bus);
+    Line* fetchSlow (Bus& bus, uint32_t at, Line& line, bool hit);
     uint32_t blockEnd (Bus& bus, uint32_t pc, uint32_t units) const;
 
     // Ranuras de operando (las de exec_syntax): si falta una, missingSlot y 0
@@ -229,6 +286,7 @@ private:
     void setSregNamed (const char* n, size_t len, uint32_t v) noexcept;
     void setSreg (const char* n, size_t len, uint32_t v) noexcept;
     void setIcfg (uint32_t v) noexcept { sregStore[0] = v; ie = (v & 0x200) != 0; }
+    uint32_t doRti() noexcept;  // rti: sale de la ISR en curso y devuelve el destino (reti)
     uint32_t aluF (Fm1Pre::AluOp op, uint32_t a, uint32_t b) noexcept;
     bool fail (Fault f, const Line* l);
 };

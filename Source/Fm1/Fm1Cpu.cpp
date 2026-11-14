@@ -994,6 +994,42 @@ void computePre (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& pre) noexcept
         pre.btOff = bt.off;
     }
     pre.route = routeOf (e, raw, pre.hasAlu4, pre.hasBitTest);
+    if (pre.route == 13)
+    {
+        uint64_t fam = 0;
+        bool alt = false;
+        int a = 0, b = 0;
+        int64_t off = 0;
+        decodeCmpRrBranch (raw, e.len, fam, alt, a, b, off);
+        pre.cbFam = (uint8_t) fam;
+        pre.cbAlt = alt;
+        pre.cbA = (uint8_t) a;
+        pre.cbB = (uint8_t) b;
+        pre.cbOff = off;
+    }
+    {
+        const sv nm (e.name);
+        switch (pre.route)
+        {
+            case 3:  pre.nameKind = nm == "lockset" ? 1 : 0; break;
+            case 9:  pre.nameKind = has (nm, "and") ? 1 : 0; break;
+            case 10: pre.nameKind = has (nm, "lsr") ? 1 : has (nm, "asr") ? 2 : 0; break;
+            case 25: pre.nameKind = has (nm, "ne") ? 1 : 0; break;
+            case 29: pre.nameKind = nm == "rep_i_r" ? 1 : 0; break;
+            default: break;
+        }
+    }
+    if (pre.route == 14)
+    {
+        IfBlock blk {};
+        decodeIfBlock (raw, blk);
+        pre.cbFam = (uint8_t) blk.fam;
+        pre.cbAlt = blk.alt;
+        pre.cbA = (uint8_t) blk.reg;
+        pre.ibRhs = blk.rhs;
+        pre.ibThen = (uint8_t) blk.thenUnits;
+        pre.ibElse = (uint8_t) blk.elseUnits;
+    }
     sv s (e.syntax);
     while (! s.empty() && s.back() == ' ') s.remove_suffix (1);
     pre.pairHead = s.ends_with ('#');
@@ -1128,11 +1164,10 @@ int64_t Cpu::skipCountedLoop (Bus& bus, uint32_t room)
             }
             else if (c.fast == Fm1Pre::FastNone && c.route == 13)
             {
-                uint64_t fam;
-                bool alt;
-                if (! decodeCmpRrBranch (l2->raw, l2->len, fam, alt, ra, rb, boff))
-                    return -1;
-                cond = condOfFam (fam, alt);
+                cond = condOfFam (c.cbFam, c.cbAlt);
+                ra = c.cbA;
+                rb = c.cbB;
+                boff = c.cbOff;
             }
             const bool less = (cond == Cond::LtU || cond == Cond::LtS) && ra == b.fd && rb != b.fd && rb >= 0
                 && (uint32_t) ((int64_t) end + boff) == head;
@@ -1214,12 +1249,23 @@ int64_t Cpu::skipCountedLoop (Bus& bus, uint32_t room)
     return -1;
 }
 
-bool Cpu::pcEnter (uint32_t at) noexcept
+uint32_t Cpu::doRti() noexcept
 {
-    const bool outside = hasPcWin && ! (pcWin[0][0] <= at && at <= pcWin[0][1]) && ! (pcWin[1][0] <= at && at <= pcWin[1][1]);
-    const bool trip = outside && ! pcOut;
-    pcOut = outside;
-    return trip;
+    // vuelve al modo del que vino la interrupción; sin ninguna en curso, a usuario
+    bool toUser = true;
+    if (! irqLevels.empty())
+    {
+        irqLevels.pop_back();
+        toUser = ((userIrq >> std::min<size_t> (irqLevels.size(), 31)) & 1) != 0;
+    }
+    if (toUser && ! user)
+    {
+        ssp = sp;
+        sp = usp;
+        user = true;
+    }
+    nestOk = ! irqLevels.empty();  // de vuelta en una ISR externa: se interrumpió con reti en su pila
+    return sregStore[1];           // reti
 }
 
 // icfg al leerlo: byte bajo, las prioridades de ISR en curso; bit 9, la habilitación global de sti / cli
@@ -1314,7 +1360,13 @@ bool Cpu::fail (Fault f, const Line* l)
     return false;
 }
 
-Cpu::Line* Cpu::fetch (Bus& bus, uint32_t at)
+#if defined(_MSC_VER)
+#define FM1_INLINE __forceinline
+#else
+#define FM1_INLINE inline __attribute__ ((always_inline))
+#endif
+
+FM1_INLINE Cpu::Line* Cpu::fetch (Bus& bus, uint32_t at)
 {
     if (icache.empty())
         icache.resize (kIcacheLines);
@@ -1322,6 +1374,11 @@ Cpu::Line* Cpu::fetch (Bus& bus, uint32_t at)
     const bool hit = line.pc == at && line.entry != nullptr;
     if (hit && at >= 0x02000000u && at < 0x04000000u)
         return &line;  // la XIP no cambia
+    return fetchSlow (bus, at, line, hit);
+}
+
+Cpu::Line* Cpu::fetchSlow (Bus& bus, uint32_t at, Line& line, bool hit)
+{
     const uint64_t win = ((uint64_t) bus.fetch32 (at + 4) << 32) | bus.fetch32 (at);
     if (hit)
     {
@@ -1353,7 +1410,9 @@ Cpu::Line* Cpu::fetch (Bus& bus, uint32_t at)
     return &line;
 }
 
-bool Cpu::step (Bus& bus)
+bool Cpu::step (Bus& bus) { return stepImpl (bus); }
+
+FM1_INLINE bool Cpu::stepImpl (Bus& bus)
 {
     fault = Fault::None;
     const auto* l = fetch (bus, pc);
@@ -1386,6 +1445,54 @@ bool Cpu::step (Bus& bus)
         pairPending = true;
     }
     return ok;
+}
+
+uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
+{
+    ok = true;
+    trip = false;
+    uint32_t k = 0;
+    for (;; ++k)
+    {
+        // (el mismo orden que el while de Machine::runBlocks y Machine::burstStop)
+        if (*s.sideEffects != s.side0 || k >= s.room)
+            break;
+        const uint32_t room = s.room - k;
+        const uint64_t now = *s.cycles + 1;
+        if (now >= s.due || pc == s.stopA || pc == s.stopB)
+            break;
+        if (s.loopEnabled)
+        {
+            if (pc == loopHint && pc != notCounted)
+                break;
+            // (room >= probeKnown && now >= nextTry && (loops[...] == pc || (room >= probeMin && now >= backoffUntil)),
+            // con probeMin >= probeKnown: en dos partes)
+            if (now >= s.probeAnyAt && room >= s.probeMin)
+                break;
+            if (s.anyLoops && room >= s.probeKnown && now >= s.nextTry && s.loops[(pc >> 1) & 63] == pc)
+                break;
+        }
+        if (s.blockedPrio >= 0 && irqReady ((uint8_t) s.blockedPrio))
+            break;
+        *s.cycles = now;
+        *s.inIsr = ! irqLevels.empty();
+        bool t = false;
+        if (hasPcWin)
+            t = pcEnter (pc);
+        else
+            pcOut = false;  // (pcEnter sin ventanas)
+        if (! stepImpl (bus))
+        {
+            ok = false;
+            return k;
+        }
+        if (t)
+        {
+            trip = true;
+            return k + 1;
+        }
+    }
+    return k;
 }
 
 // Dirección justo después de units instrucciones desde pc; un if predicado cuenta como una unidad con sus partes y un
@@ -1439,7 +1546,13 @@ static void stW (Bus& bus, uint8_t w, uint32_t a, uint32_t val)
     else bus.write32 (a, val);
 }
 
-bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
+// Ruta rápida: las formas comunes de exec_syntax con sus operandos ya resueltos (misma semántica, ver computeFast). En
+// línea en step y en la ráfaga; el resto (rutas crudas, exec_syntax) en execRoute, fuera de línea: su marco de pila es
+// mucho mayor y no lo paga cada instrucción
+#if defined(_MSC_VER)
+__declspec(noinline)
+#endif
+bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
 {
     const auto raw = l.raw;
     const auto& pre = l.pre;
@@ -1455,9 +1568,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             default:             return 1u << (regs[x.v & 15] & 31);
         }
     };
-
-    // Ruta rápida: las formas comunes de exec_syntax con sus operandos ya resueltos (misma semántica, ver computeFast)
-    if (fastPath && pre.fast != Fm1Pre::FastNone)
+    (void) raw;
     {
         switch (pre.fast)
         {
@@ -1611,14 +1722,78 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
                 jumpTo (t);
                 break;
             }
+            case Fm1Pre::FastDiv:
+            {
+                // división entre 0 = 0 (como fm1-emu); INT32_MIN / -1 da INT32_MIN (wrapping_div) y su resto 0
+                const auto a = regs[pre.fa], b = regs[pre.fb];
+                const bool sgn = (pre.fcond & 1) != 0, rem = (pre.fcond & 2) != 0;
+                uint32_t y;
+                if (b == 0) y = 0;
+                else if (! sgn) y = rem ? a % b : a / b;
+                else if ((int32_t) a == INT32_MIN && (int32_t) b == -1) y = rem ? 0u : a;
+                else y = rem ? (uint32_t) ((int32_t) a % (int32_t) b) : (uint32_t) ((int32_t) a / (int32_t) b);
+                regs[pre.fd] = y;
+                break;
+            }
+            case Fm1Pre::FastAbs: { const auto x = regs[pre.fa]; regs[pre.fd] = (int32_t) x < 0 ? 0u - x : x; break; }
+            case Fm1Pre::FastNot: regs[pre.fd] = ~regs[pre.fa]; break;
+            case Fm1Pre::FastTb:
+            {
+                const auto idx = regs[pre.fa];
+                const auto e = pre.fw == 1 ? (uint32_t) bus.read8 (nextPc + idx) : (uint32_t) bus.read16 (nextPc + idx);
+                jumpTo (nextPc + 2 * e);
+                break;
+            }
+            case Fm1Pre::FastCallR: { const auto t = regs[pre.fa]; rets = nextPc; jumpTo (t); break; }
+            case Fm1Pre::FastRti: jumpTo (doRti()); break;
+            case Fm1Pre::FastPushList:
+                for (int i = 15; i >= 0; --i)
+                    if (((pre.fimm >> i) & 1) != 0)
+                    {
+                        sp -= 4;
+                        bus.write32 (sp, regs[i]);
+                    }
+                break;
+            case Fm1Pre::FastPopList:
+                for (int i = 0; i < 16; ++i)
+                    if (((pre.fimm >> i) & 1) != 0)
+                    {
+                        regs[i] = bus.read32 (sp);
+                        sp += 4;
+                    }
+                break;
             case Fm1Pre::FastNone: break;
         }
         finish (jumped, target, nextPc);
         return true;
     }
+}
 
-    // el nombre solo lo miran unas pocas rutas: strlen en cada instrucción era el 9 % del tiempo (--hostprofile)
-    const auto name = [&l] { return sv (l.entry->name); };
+FM1_INLINE bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
+{
+    if (fastPath && l.pre.fast != Fm1Pre::FastNone)
+        return execFast (bus, l, nextPc);
+    return execRoute (bus, l, nextPc);
+}
+
+bool Cpu::execRoute (Bus& bus, const Line& l, uint32_t nextPc)
+{
+    const auto raw = l.raw;
+    const auto& pre = l.pre;
+    bool jumped = false;
+    uint32_t target = 0;
+    const auto jumpTo = [&] (uint32_t t) { jumped = true; target = t; };
+    const auto rhsVal = [this] (Rhs x) -> uint32_t
+    {
+        switch (x.kind)
+        {
+            case Fm1Pre::RhsReg: return regs[x.v & 15];
+            case Fm1Pre::RhsImm: return x.v;
+            default:             return 1u << (regs[x.v & 15] & 31);
+        }
+    };
+
+    // (lo que unas rutas leían del nombre está en pre.nameKind: strlen en cada instrucción era el 9 % del tiempo)
     switch (pre.route)
     {
         case 0:
@@ -1644,7 +1819,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
         case 2: break;
         case 3:
             // lockset / lockclr: el cerrojo hardware que comparten los núcleos; si lo tiene el otro, se reintenta
-            if (! bus.hwLock (coreId, name() == "lockset"))
+            if (! bus.hwLock (coreId, pre.nameKind == 1))
                 jumpTo (pc);
             break;
         case 4:
@@ -1667,7 +1842,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             const auto addr = regs[(raw >> 28) & 0xf] + (uint32_t) ((raw >> 8) & 0xff);
             const auto cur = bus.read32 (addr);
             const auto src = regs[(raw >> 24) & 0xf];
-            bus.write32 (addr, has (name(), "and") ? (cur & src) : (cur | src));
+            bus.write32 (addr, pre.nameKind == 1 ? (cur & src) : (cur | src));
             break;
         }
         case 10:
@@ -1677,8 +1852,8 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             auto shc = (uint32_t) ((raw >> 8) & 0x1f);
             if (shc == 0) shc = 32;
             const auto x = regs[(raw >> 4) & 7];
-            if (has (name(), "lsr")) regs[d] = shc >= 32 ? 0 : x >> shc;
-            else if (has (name(), "asr")) regs[d] = (uint32_t) ((int32_t) x >> std::min<uint32_t> (shc, 31));
+            if (pre.nameKind == 1) regs[d] = shc >= 32 ? 0 : x >> shc;
+            else if (pre.nameKind == 2) regs[d] = (uint32_t) ((int32_t) x >> std::min<uint32_t> (shc, 31));
             else regs[d] = shc >= 32 ? 0 : x << shc;
             break;
         }
@@ -1726,9 +1901,11 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
         }
         case 13:
         {
-            uint64_t fam; bool alt; int a, b; int64_t off;
-            decodeCmpRrBranch (raw, l.len, fam, alt, a, b, off);
-            if (cmpCond (fam, alt, regs[a], regs[b]))
+            // (decodificada en computePre)
+            const auto fam = (uint64_t) pre.cbFam;
+            const bool alt = pre.cbAlt;
+            const auto off = pre.cbOff;
+            if (cmpCond (fam, alt, regs[pre.cbA], regs[pre.cbB]))
             {
                 jumpTo ((uint32_t) ((int64_t) nextPc + off));
                 // salto atrás corto con "<": quizá un retardo con el contador en memoria (skipCountedLoop); solo cuerpos de
@@ -1740,12 +1917,10 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
         }
         case 14:
         {
-            // bloque predicado if (rA <op> x) { then... } [else { ... }]
-            IfBlock blk;
-            decodeIfBlock (raw, blk);
-            const auto a = regs[blk.reg];
-            const auto b = rhsVal (blk.rhs);
-            const bool taken = blk.fam == 2 ? (((a & b) != 0) == blk.alt) : cmpCond (blk.fam, blk.alt, a, b);
+            // bloque predicado if (rA <op> x) { then... } [else { ... }] (decodificado en computePre)
+            const auto a = regs[pre.cbA];
+            const auto b = rhsVal (pre.ibRhs);
+            const bool taken = pre.cbFam == 2 ? (((a & b) != 0) == pre.cbAlt) : cmpCond (pre.cbFam, pre.cbAlt, a, b);
             uint32_t thenEnd, elseEnd;
             if (l.ifKnown)
             {
@@ -1754,8 +1929,8 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             }
             else
             {
-                thenEnd = blockEnd (bus, nextPc, blk.thenUnits);
-                elseEnd = blockEnd (bus, thenEnd, blk.elseUnits);
+                thenEnd = blockEnd (bus, nextPc, pre.ibThen);
+                elseEnd = blockEnd (bus, thenEnd, pre.ibElse);
                 if (l.pc >= 0x02000000u && l.pc < 0x04000000u)  // (en la XIP el código no cambia, como supone fetch)
                 {
                     l.ifThenEnd = thenEnd;
@@ -1765,7 +1940,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             }
             if (taken)
             {
-                if (blk.elseUnits > 0)
+                if (pre.ibElse > 0)
                 {
                     std::erase_if (predSkips, [thenEnd] (const PredSkip& p) { return p.thenEnd == thenEnd; });
                     if (predSkips.size() >= kMaxPred)
@@ -1862,7 +2037,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
         case 25:
         {
             const auto val = (uint32_t) slot (l, 0);
-            const bool cond = has (name(), "ne") ? rets != val : rets == val;
+            const bool cond = pre.nameKind == 1 ? rets != val : rets == val;
             if (cond)
             {
                 const auto off = slot (l, 1);
@@ -1931,7 +2106,7 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             const auto n = 2 * ((uint32_t) ((raw >> 4) & 0xf) + 1);
             repStart = nextPc;
             repEnd = nextPc + n;
-            if (name() == "rep_i_r")
+            if (pre.nameKind == 1)  // rep_i_r
             {
                 repCount = regs[raw & 0xf];
                 regs[raw & 0xf] = 0;
@@ -2248,12 +2423,18 @@ void Cpu::execRaw (Bus& bus, uint8_t route, uint32_t raw32)
 }
 
 // Retira una instrucción: pc siguiente, saltos de bloques predicados y bucles rep
-void Cpu::finish (bool hasJump, uint32_t jump, uint32_t nextPc)
+FM1_INLINE void Cpu::finish (bool hasJump, uint32_t jump, uint32_t nextPc)
 {
     ++insnCount;
     holdIrq = 0;
     const auto at = pc;
     pc = hasJump ? jump : nextPc;
+    if (! predSkips.empty() || repEnd != 0)
+        finishSlow (hasJump, at, nextPc);
+}
+
+void Cpu::finishSlow (bool hasJump, uint32_t at, uint32_t nextPc)
+{
     if (! predSkips.empty())
     {
         for (size_t i = 0; i < predSkips.size(); ++i)
@@ -2715,23 +2896,7 @@ bool Cpu::execSyntax (Bus& bus, const Line& l, uint32_t nextPc, bool& hasJump, u
     if (s == "cc = #i") { cc = v (l, 0) != 0; return true; }
     if (s == "callns R") { rets = nextPc; return J (regs[r (l, 0)]); }
     if (s == "rti")
-    {
-        // vuelve al modo del que vino la interrupción; sin ninguna en curso, a usuario
-        bool toUser = true;
-        if (! irqLevels.empty())
-        {
-            irqLevels.pop_back();
-            toUser = ((userIrq >> std::min<size_t> (irqLevels.size(), 31)) & 1) != 0;
-        }
-        if (toUser && ! user)
-        {
-            ssp = sp;
-            sp = usp;
-            user = true;
-        }
-        nestOk = ! irqLevels.empty();  // de vuelta en una ISR externa: se interrumpió con reti en su pila
-        return J (sreg ("reti"));
-    }
+        return J (doRti());
     if (s == "R = sextra(R, p:#i, l:#i)")
     {
         const auto d = r (l, 0);
@@ -3273,6 +3438,48 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
     // icfg: la guarda de interrupciones de GHOULBOX (motion_guard) la lee y la escribe millones de veces por segundo
     if (s == "R = icfg" && n >= 1) { p.fd = rg (0); p.fast = Fm1Pre::FastIcfgRd; return; }
     if (s == "icfg = R" && n >= 1) { p.fd = rg (0); p.fast = Fm1Pre::FastIcfgWr; return; }
+    // tercera tanda (misma semántica que sus manejadores de exec_syntax)
+    if ((s == "R <<= R" || s == "R >>= R" || s == "R >>>= R" || s == "R <<= #i" || s == "R >>= #i" || s == "R >>>= #i") && n >= 2)
+    {
+        // R op= x es R = R op x con la cuenta del registro & 31 o el inmediato tal cual (FastShift: 0 <<, 1 >>, 2 >>>)
+        p.fd = p.fa = rg (0);
+        p.fcond = s.starts_with ("R <<") ? 0 : s.starts_with ("R >>>") ? 2 : 1;
+        p.fidx = s.ends_with ('R');
+        if (p.fidx) p.fb = rg (1);
+        else p.fimm = (uint32_t) sl (1);
+        p.fast = Fm1Pre::FastShift;
+        return;
+    }
+    if ((s == "R = R / R (u)" || s == "R = R / R (s)" || s == "R = R % R (u)" || s == "R = R % R (s)") && n >= 3)
+    {
+        p.fd = rg (0);
+        p.fa = rg (1);
+        p.fb = rg (2);
+        p.fcond = (uint8_t) ((s[6] == '%' ? 2 : 0) + (s.ends_with ("(s)") ? 1 : 0));
+        p.fast = Fm1Pre::FastDiv;
+        return;
+    }
+    if (s == "R = abs(R)" && n >= 2) { p.fd = rg (0); p.fa = rg (1); p.fast = Fm1Pre::FastAbs; return; }
+    if (s == "R = ~R" && n >= 2) { p.fd = rg (0); p.fa = rg (1); p.fast = Fm1Pre::FastNot; return; }
+    if ((s == "tbb [R]" || s == "tbh [R]") && n >= 1) { p.fa = rg (0); p.fw = s[2] == 'b' ? 1 : 2; p.fast = Fm1Pre::FastTb; return; }
+    if (s == "call R" && n >= 1) { p.fa = rg (0); p.fast = Fm1Pre::FastCallR; return; }
+    if (s == "rti") { p.fast = Fm1Pre::FastRti; return; }
+    if (s == "[--sp] = {R*2}" || s == "{R*2} = [sp++]" || s == "[--sp] = {R*1}" || s == "{R*1} = [sp++]")
+    {
+        // 2 bytes 6n 04 / 4n 04 con la lista [max(n,3) .. min(n,4)]; 4 bytes d8 e8 / d4 e8 con máscara en bits 16-31
+        uint32_t mask = 0;
+        if (e.len == 2)
+        {
+            const auto m = (int) (raw & 0xf);
+            for (int i = std::max (m, 3); i >= std::min (m, 4); --i)
+                mask |= 1u << i;
+        }
+        else
+            mask = (uint32_t) ((raw >> 16) & 0xffff);
+        p.fimm = mask;
+        p.fast = s.starts_with ("[--sp]") ? Fm1Pre::FastPushList : Fm1Pre::FastPopList;
+        return;
+    }
     if (s == "sp += #i")
     {
         if (e.len == 4 && (raw & 0xffff) == 0xe8f0)

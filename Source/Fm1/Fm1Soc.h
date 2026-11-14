@@ -193,6 +193,7 @@ public:
         // delante. fm1-emu no lo tiene: con cpu1 en marcha, los fallos en otro código (ISR...) y el tramo de 1024 dejaban el
         // bucle de espera de 6 instrucciones de la V15 sin saltar: 140 M de sus 150 M instrucciones en 2,6 s (medido)
         std::array<uint32_t, 64> loops;
+        bool hasLoops = false;  // alguna entrada en loops (Cpu::BurstStop::anyLoops)
         LoopSkip() { loops.fill (0xffffffffu); }
         uint32_t& loopAt (uint32_t pc) noexcept { return loops[(pc >> 1) & 63]; }
         int64_t credit = 1 << 16;
@@ -254,6 +255,10 @@ public:
         uint32_t expRegs[16] {}, expRets = 0, expIcfg = 0, expFlags = 0;
         bool expIe = false;
     } ccPoll;
+
+    // reparto de las instrucciones de cpu0 (medida del intérprete): por la ruta de arriba de runBlocks, de ellas con una
+    // interrupción pendiente (anyPending), y en ráfaga
+    uint64_t statTop = 0, statTopPending = 0, statBurst = 0;
 
 private:
     void ccPollFind();

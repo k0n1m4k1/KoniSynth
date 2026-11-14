@@ -1016,6 +1016,7 @@ uint32_t Machine::probeLoop (uint32_t budget)
         ls.skipped += k * l;
         for (size_t q = i - roundLen; q < i; ++q)  // todos los pc de la vuelta: un tramo puede empezar en cualquiera
             ls.loopAt (ls.pcs[q]) = ls.pcs[q];
+        ls.hasLoops = true;
         if (k * l >= 8ull * i)
         {
             ls.backoff = 0;
@@ -1125,7 +1126,24 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
             }
         }
         // (lo que vale al empezar la instrucción: si nada está pendiente y no hay accesos con efectos, sigue igual)
-        const bool calm = fastPath && ! soc.periph.anyPending() && ! soc.cpu1Release && ! soc.waits[0];
+        // Con una interrupción pendiente que la CPU aún no acepta (otra ISR de prioridad igual o mayor en curso, cli...), la
+        // ráfaga también vale: lo pendiente solo cambia con un tick que vence o un acceso con efectos (la ráfaga se para en
+        // los dos), y la CPU la aceptaría en cuanto irqReady (prioridad) sea cierto, que la ráfaga mira antes de cada
+        // instrucción (sin ninguna habilitada en el banco de cpu0, nada puede entrar: sin mirar)
+        bool calm = fastPath && ! soc.cpu1Release && ! soc.waits[0];
+        int blockedPrio = -1;
+        ++statTop;
+        if (calm && soc.periph.anyPending())
+        {
+            ++statTopPending;
+            if (const auto p = soc.periph.pendingIrqFor (0); p)
+            {
+                if (cpu0.irqReady (p->second))
+                    calm = false;
+                else
+                    blockedPrio = p->second;
+            }
+        }
         const auto side0 = soc.sideEffects;
         const bool trip = cpu0.pcEnter (cpu0.pc);
         if (! cpu0.step (soc))
@@ -1141,23 +1159,43 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
         // que vence o con un acceso de Soc::sideEffects; y se para donde arriba actuaría un salto de bucle (pc de bucle
         // conocido, hueco de sondeo, bucle contado). El tick de cada una se paga aquí: no vence
         if (calm && ! trip)
-            while (soc.sideEffects == side0 && done < n && ! soc.periph.nextTickDue() && ! burstStop (n - done))
+        {
+            // (en Cpu::burst; las paradas son las de burstStop)
+            Cpu::BurstStop bs;
+            bs.sideEffects = &soc.sideEffects;
+            bs.side0 = side0;
+            bs.cycles = &soc.periph.cycles;
+            bs.due = soc.periph.nextDue;
+            bs.inIsr = &soc.periph.inIsr;
+            bs.room = n - done;
+            bs.blockedPrio = blockedPrio;
+            if (ccPoll.mode != CcPoll::Off && ccPoll.entry != 0)
             {
-                ++soc.periph.cycles;
-                soc.periph.inIsr = ! cpu0.irqLevels.empty();
-                const bool t = cpu0.pcEnter (cpu0.pc);
-                if (! cpu0.step (soc))
-                {
-                    error = faultText (cpu0, "cpu0");
-                    return false;
-                }
-                ++done;
-                if (t)
-                {
-                    soc.guardTrip (12);
-                    break;
-                }
+                bs.stopA = ccPoll.entry;
+                if (ccPoll.pending)
+                    bs.stopB = ccPoll.exit;
             }
+            bs.loopEnabled = loopSkip.enabled;
+            bs.nextTry = loopSkip.nextTry;
+            bs.backoffUntil = loopSkip.backoffUntil;
+            bs.loops = loopSkip.loops.data();
+            bs.probeKnown = kProbeKnown;
+            bs.probeMin = kProbeMin;
+            static_assert (kProbeMin >= kProbeKnown);
+            bs.probeAnyAt = std::max (loopSkip.nextTry, loopSkip.backoffUntil);
+            bs.anyLoops = loopSkip.hasLoops;
+            bool ok = true, tripped = false;
+            const auto k = cpu0.burst (soc, bs, ok, tripped);
+            done += k;
+            statBurst += k;
+            if (! ok)
+            {
+                error = faultText (cpu0, "cpu0");
+                return false;
+            }
+            if (tripped)
+                soc.guardTrip (12);
+        }
         if (soc.cpu1Release || soc.waits[0])
             break;
     }

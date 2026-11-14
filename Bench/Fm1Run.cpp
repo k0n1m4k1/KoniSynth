@@ -395,6 +395,8 @@ int main (int argc, char** argv)
                      m.hle.site.chainReadsGain ? "con el error de la V13" : "corregida",
                      (unsigned long long) m.hle.calls, (unsigned long long) m.hle.checked, (unsigned long long) m.hle.mismatches,
                      m.hle.avgCost(), m.hle.firstMismatch.empty() ? "" : "; primera: ", m.hle.firstMismatch.c_str());
+    std::printf ("cpu0 por la ruta de arriba %llu (con interrupción pendiente %llu), en ráfaga %llu\n", (unsigned long long) m.statTop,
+                 (unsigned long long) m.statTopPending, (unsigned long long) m.statBurst);
     if (ccMode != Machine::CcPoll::Off)
         std::printf ("HLE midi_cc_apply (modo final %s): %s en 0x%08x (salida 0x%08x, %u x %u colas, %u instrucciones); %llu saltadas, "
                      "%llu comprobadas, %llu distintas%s%s\n",
