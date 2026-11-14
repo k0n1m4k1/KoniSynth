@@ -196,6 +196,7 @@ int main (int argc, char** argv)
     bool reference = false;  // --reference 1: sin la ruta rápida de la CPU (prueba diferencial)
     int profile = 0;  // --profile N: las N clases de instrucción más ejecutadas por cpu0
     int pcProfile1 = 0;  // --pcprofile1 N: lo mismo para cpu1
+    uint32_t disIni = 0, disFin = 0;  // --disasm INI:FIN (hex): desensamblado con el valor de cada ranura (registros, inmediatos)
     int pcProfile = 0;  // --pcprofile N: los N pc de cpu0 más ejecutados
     int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
@@ -208,6 +209,8 @@ int main (int argc, char** argv)
     std::vector<std::pair<uint64_t, std::string>> ramDumps;  // --dumpram MS:FICHERO: la RAM entera en ese ms
     // --hle off|check|on: FmCore::render nativo (Fm1Hle.h); check lo compara con la emulada en cada llamada
     auto hleMode = Machine::Hle::Off;
+    // --ccpoll off|check|on|auto: la pasada vacía de midi_cc_apply de GHOULBOX, saltada al mismo ciclo (Machine::CcPoll)
+    auto ccMode = Machine::CcPoll::Off;
     for (int i = 2; i + 1 < argc; i += 2)
     {
         const std::string opt = argv[i];
@@ -222,11 +225,15 @@ int main (int argc, char** argv)
         else if (opt == "--hostprofile") hostProfile = std::atoi (v);
         else if (opt == "--pcprofile") pcProfile = std::atoi (v);
         else if (opt == "--pcprofile1") pcProfile1 = std::atoi (v);
+        else if (opt == "--disasm" && std::sscanf (v, "%x:%x", &disIni, &disFin) == 2) {}
         else if (opt == "--wav") wav = v;
         else if (opt == "--syx") { syx = readFile (v); haveSyx = true; }
         else if (opt == "--hle")
             hleMode = std::string (v) == "on" ? Machine::Hle::On : std::string (v) == "check" ? Machine::Hle::Check
                     : std::string (v) == "auto" ? Machine::Hle::Auto : Machine::Hle::Off;
+        else if (opt == "--ccpoll")
+            ccMode = std::string (v) == "on" ? Machine::CcPoll::On : std::string (v) == "check" ? Machine::CcPoll::Check
+                   : std::string (v) == "auto" ? Machine::CcPoll::Auto : Machine::CcPoll::Off;
         else if (opt == "--dumpcpu1") dumpCpu1 = v;
         else if (opt == "--dumpaddr" && std::sscanf (v, "%x:%x", &dumpIdx, &dumpBuf) == 2) {}
         else if (opt == "--dumpram" && std::sscanf (v, "%llu:", &at) == 1 && std::strchr (v, ':') != nullptr)
@@ -289,6 +296,7 @@ int main (int argc, char** argv)
     if (pcProfile1 > 0) m.pcHist1 = &pcHist1;
     m.loopSkip.enabled = ! reference;
     m.hle.mode = hleMode;
+    m.ccPoll.mode = ccMode;
 #ifdef _WIN32
     HostSampler sampler;
     if (hostProfile > 0) sampler.start();
@@ -387,6 +395,15 @@ int main (int argc, char** argv)
                      m.hle.site.chainReadsGain ? "con el error de la V13" : "corregida",
                      (unsigned long long) m.hle.calls, (unsigned long long) m.hle.checked, (unsigned long long) m.hle.mismatches,
                      m.hle.avgCost(), m.hle.firstMismatch.empty() ? "" : "; primera: ", m.hle.firstMismatch.c_str());
+    if (ccMode != Machine::CcPoll::Off)
+        std::printf ("HLE midi_cc_apply (modo final %s): %s en 0x%08x (salida 0x%08x, %u x %u colas, %u instrucciones); %llu saltadas, "
+                     "%llu comprobadas, %llu distintas%s%s\n",
+                     m.ccPoll.mode == Machine::CcPoll::On ? "on" : m.ccPoll.mode == Machine::CcPoll::Check ? "check"
+                         : m.ccPoll.mode == Machine::CcPoll::Auto ? "auto" : "off",
+                     m.ccPoll.entry != 0 ? "encontrada" : "NO encontrada", m.ccPoll.entry, m.ccPoll.exit, m.ccPoll.ntrk, m.ccPoll.ncc,
+                     m.ccPoll.insns, (unsigned long long) m.ccPoll.skipped, (unsigned long long) m.ccPoll.checked,
+                     (unsigned long long) m.ccPoll.mismatches, m.ccPoll.firstMismatch.empty() ? "" : "; primera: ",
+                     m.ccPoll.firstMismatch.c_str());
     std::printf ("UART MIDI: con0 0x%08x, búfer de recepción %u B, bytes descartados %llu\n", soc.periph.uartCon0(),
                  soc.periph.uartRxLen(), (unsigned long long) soc.periph.midiDropped());
     // accesos desconocidos por dirección (la hoja de ruta de lo que falta)
@@ -427,6 +444,17 @@ int main (int argc, char** argv)
             std::printf ("  %6.2f %%  (acum %6.2f %%)  %10llu  %-28s %s\n", 100.0 * (double) h[i].first / (double) std::max<uint64_t> (syn, 1), acc,
                          (unsigned long long) h[i].first, h[i].second->name, h[i].second->canon);
         }
+    }
+    for (uint32_t pc = disIni; pc < disFin;)
+    {
+        uint64_t raw = 0;
+        const auto* e = decodeAny (((uint64_t) soc.fetch32 (pc + 4) << 32) | soc.fetch32 (pc), raw);
+        std::printf ("0x%08x  %-34s", pc, e != nullptr ? e->syntax : "?");
+        if (e != nullptr)
+            for (int k = 0; k < e->slotCount; ++k)
+                std::printf (" %lld", (long long) slotValue (e->slots[k], raw));
+        std::printf ("   [%s, %d B]\n", e != nullptr ? e->name : "?", e != nullptr ? e->len : 2);
+        pc += e != nullptr && e->len > 0 ? e->len : 2u;
     }
     for (int core = 0; core < 2; ++core)
     {

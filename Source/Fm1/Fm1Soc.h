@@ -231,7 +231,34 @@ public:
         double avgCost() const noexcept { return checked > 0 ? (double) emulatedInsns / (double) checked : 0.0; }
     } hle;
 
+    // HLE de cpu0 para GHOULBOX (firmware de la comunidad): la pasada vacía de midi_cc_apply (su ui_input.c), el sondeo
+    // de NTRK x NCC colas de CC MIDI que su bucle principal repite sin pausa, cada cola leída y borrada entre una guarda y
+    // su restauración de icfg. Con todas las colas a 0, sin interrupción pendiente ni evento de periférico antes de su
+    // final y sin cpu1, la pasada emulada no depende del tiempo: deja r0 r1 r2 r8 r9 r11 r12 r15, rets, banderas e icfg con
+    // valores que se calculan aquí, y la RAM igual. Se salta entera al mismo ciclo (exacto, como un bucle contado).
+    // Se localiza por su código (ccPollFind); si no aparece, no hace nada. Check: se predice el estado al salir y se
+    // compara con el de la pasada emulada. Auto: Check durante autoChecks pasadas; sin diferencias, On; con una, Off
+    struct CcPoll
+    {
+        enum Mode : uint8_t { Off, Check, On, Auto };
+        Mode mode = Off;
+        uint32_t autoChecks = 200;
+        bool searched = false;
+        uint32_t entry = 0, exit = 0;  // cabeza del bucle de pistas y primera instrucción tras él
+        uint32_t stride = 0, offset = 0, trkBase = 0, ncc = 0, ntrk = 0, insns = 0;  // sacados del código
+        uint32_t guardRet = 0;         // rets que deja la llamada a la guarda
+        uint64_t skipped = 0, checked = 0, mismatches = 0;
+        std::string firstMismatch;
+        bool pending = false;
+        uint64_t insnAtEntry = 0, cycAtEntry = 0, dueAtEntry = 0;
+        uint32_t expRegs[16] {}, expRets = 0, expIcfg = 0, expFlags = 0;
+        bool expIe = false;
+    } ccPoll;
+
 private:
+    void ccPollFind();
+    bool ccPollEnter (uint32_t room);  // en la cabeza: true = pasada saltada (On) y pc ya en exit
+    void ccPollCompare();              // en exit tras la pasada emulada en Check
     bool hleEnter (Cpu& c1);     // en la entrada de la rutina: true = la ejecutó el nativo (On) y cpu1 ya ha vuelto
     void hleCompare (Cpu& c1);   // de vuelta de la rutina emulada en Check
     uint32_t probeLoop (uint32_t budget);

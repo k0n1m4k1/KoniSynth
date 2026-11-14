@@ -1075,6 +1075,25 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
             break;
         }
         cpu0Between();
+        // GHOULBOX: la pasada vacía de midi_cc_apply, entera y al mismo ciclo (ver CcPoll). El tick de esta instrucción está
+        // pagado, como en el bucle contado de abajo
+        if (ccPoll.mode != CcPoll::Off)
+        {
+            if (! ccPoll.searched)
+                ccPollFind();
+            if (ccPoll.pending && cpu0.pc == ccPoll.exit)
+                ccPollCompare();
+            else if (ccPoll.entry != 0 && cpu0.pc == ccPoll.entry && ! ccPoll.pending)
+            {
+                const auto c = soc.periph.cycles, due = soc.periph.nextDue;
+                if (ccPollEnter ((uint32_t) std::min<uint64_t> (n - done, due > c ? due - c : 0)))
+                {
+                    soc.periph.cycles += (uint64_t) ccPoll.insns - 1;
+                    done += ccPoll.insns;
+                    continue;
+                }
+            }
+        }
         // (no con una liberación de cpu1 retenida: el tramo debe cortarse donde lo haría sin el salto)
         if (loopSkip.enabled && ! soc.cpu1Release && n - done >= kProbeKnown && ! soc.periph.anyPending()
             && loopSkip.mayProbe (soc.periph.cycles, cpu0.pc, n - done))
@@ -1149,6 +1168,9 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
 // aún sin pagar, como lo mira la ráfaga
 bool Machine::burstStop (uint32_t room) const noexcept
 {
+    if (ccPoll.mode != CcPoll::Off && ccPoll.entry != 0
+        && (cpu0.pc == ccPoll.entry || (ccPoll.pending && cpu0.pc == ccPoll.exit)))
+        return true;
     if (! loopSkip.enabled)
         return false;
     const auto pc = cpu0.pc;
@@ -1260,6 +1282,164 @@ namespace
 struct HleZones { uint32_t at[4]; size_t len[4]; };
 HleZones hleZones (const HleRenderArgs& a) { return { { a.out, a.params, a.fb, a.algTable + 6 * a.algo }, { 4u * a.n, 96, 8, 6 } }; }
 } // namespace
+
+// midi_cc_apply de GHOULBOX 2.4 (cabeza H = 0x0201ceb6; el bucle interno, ui_input.c de GHOULBOX):
+//   H     r0 = STRIDE; r0 *= r8; r9 = r0 + r12; r15 = r9 + OFF; r0 = 0       (pista t = r8, r12 = &trk[0])
+//   H+16  r11 = r0; r0 = r8 << 5; r0 += r11; r2 = r0 + r7; call guarda       (cola i = r11; la guarda: r0 = icfg; cli; rts)
+//   H+30  r1 = b[r2 + r4]; b[r2 + r4] = r14; icfg = r0; if (r1 == 0) goto X  (r14 = 0: leer y borrar)
+//   X     r0 = r11 + 1; if (r0 != NCC) goto H+16; r8 = r8 + 1; r12 = TRK; if (r8 != NTRK) goto H
+// Se busca por los bytes del bucle interno (sin inmediatos ni desplazamientos) y el resto se comprueba decodificando
+void Machine::ccPollFind()
+{
+    auto& p = ccPoll;
+    p.searched = true;
+    static const uint8_t inner[] = { 0x0b, 0x16, 0xc0, 0xe1, 0x85, 0x00, 0xb0, 0x18, 0x8a, 0x1d };
+    static const uint8_t test[] = { 0xd8, 0xee, 0x20, 0x14, 0xd8, 0xee, 0x21, 0xe4, 0x64, 0xe0, 0x80, 0x0b };
+    const auto& x = soc.xip;
+    struct D { const Fm1IsaEntry* e = nullptr; uint64_t raw = 0; uint32_t pc = 0; };
+    const auto dec = [this] (uint32_t pc)
+    {
+        D d;
+        d.pc = pc;
+        d.e = decodeAny (((uint64_t) soc.fetch32 (pc + 4) << 32) | soc.fetch32 (pc), d.raw);
+        return d;
+    };
+    const auto sv = [] (const D& d, int k) { return slotValue (d.e->slots[k], d.raw); };
+    constexpr int64_t any = INT64_MIN;
+    const auto is = [&] (const D& d, const char* name, std::initializer_list<int64_t> want)
+    {
+        if (d.e == nullptr || std::strcmp (d.e->name, name) != 0 || d.e->slotCount < (int) want.size())
+            return false;
+        int k = 0;
+        for (auto w : want)
+            if (w != any && sv (d, k++) != w)
+                return false;
+            else if (w == any)
+                ++k;
+        return true;
+    };
+    const auto target = [&] (const D& d, int k) { return (uint32_t) ((int64_t) d.pc + d.e->len + sv (d, k)); };
+    for (size_t o = 16; o + 14 + sizeof test <= x.size(); o += 2)
+    {
+        if (std::memcmp (&x[o], inner, sizeof inner) != 0 || std::memcmp (&x[o + 14], test, sizeof test) != 0)
+            continue;
+        const auto h = kXipBase + (uint32_t) o - 16;
+        const auto a = dec (h), mul = dec (h + 4), add = dec (h + 6), off = dec (h + 10), zero = dec (h + 14);
+        const auto call = dec (h + 26), br = dec (h + 42);
+        if (! is (a, "r_mov_i_l4", { 0, any }) || ! is (mul, "r_mul_r", { 0, 8 }) || ! is (add, "r_mov_r_r_4", { 9, 0, 12 })
+            || ! is (off, "r_mov_r_i_3", { 15, 9, any }) || ! is (zero, "r_mov_i_l2", { 0, 0 }) || ! is (call, "call_i_l4", { any })
+            || ! is (br, "if_r_eq_i_goto_i_l4", { 1, 0, any }))
+            continue;
+        const auto g = target (call, 0);
+        const auto g0 = dec (g), g1 = dec (g + 4), g2 = dec (g + 6);
+        if (g0.e == nullptr || std::strcmp (g0.e->syntax, "R = icfg") != 0 || sv (g0, 0) != 0 || ! is (g1, "cli", {})
+            || ! is (g2, "rts", {}))
+            continue;
+        const auto xb = target (br, 2);
+        const auto inc = dec (xb), loopI = dec (xb + 4), incT = dec (xb + 8), trk = dec (xb + 12), loopT = dec (xb + 18);
+        if (! is (inc, "r_mov_r_i_3", { 0, 11, 1 }) || ! is (loopI, "if_r_ne_i_goto_i_3", { 0, any, any })
+            || ! is (incT, "r_mov_r_i_3", { 8, 8, 1 }) || ! is (trk, "r_mov_i", { 12, any }) || ! is (loopT, "if_r_ne_i_goto_i_3", { 8, any, any })
+            || target (loopI, 2) != h + 16 || target (loopT, 2) != h)
+            continue;
+        const auto ncc = sv (loopI, 1), ntrk = sv (loopT, 1);
+        if (ncc < 1 || ncc > 32 || ntrk < 1 || ntrk > 16)
+            continue;
+        p.entry = h;
+        p.exit = xb + 22;
+        p.stride = (uint32_t) sv (a, 1);
+        p.offset = (uint32_t) sv (off, 2);
+        p.trkBase = (uint32_t) sv (trk, 1);
+        p.ncc = (uint32_t) ncc;
+        p.ntrk = (uint32_t) ntrk;
+        p.guardRet = h + 30;
+        p.insns = p.ntrk * (5 + p.ncc * 14 + 3);
+        return;
+    }
+}
+
+bool Machine::ccPollEnter (uint32_t room)
+{
+    auto& p = ccPoll;
+    auto& c = cpu0;
+    // (room > insns: con un evento justo en la instrucción de salida, la emulada entra en la ISR antes de ella y Check
+    // compararía tras la ISR; saltar también sería exacto, pero así Check y On cubren los mismos casos)
+    if (p.insns >= room || cpu1 != nullptr || soc.cpu1Release || soc.waits[0] || soc.periph.anyPending() || ! c.irqLevels.empty()
+        || c.repEnd != 0 || ! c.predSkips.empty() || c.pairPending || c.regs[8] != 0 || c.regs[12] != p.trkBase || c.regs[14] != 0)
+        return false;
+    const uint64_t q = (uint64_t) c.regs[7] + c.regs[4];
+    if (q < kRamBase || q + (uint64_t) (p.ntrk - 1) * 32 + p.ncc > kRamBase + soc.ram.size())
+        return false;
+    const auto* b = soc.ram.ptr() + (q - kRamBase);
+    for (uint32_t t = 0; t < p.ntrk; ++t)
+        for (uint32_t i = 0; i < p.ncc; ++i)
+            if (b[t * 32 + i] != 0)
+                return false;  // un CC pendiente: lo aplica el firmware
+    uint32_t r[16];
+    std::memcpy (r, c.regs, sizeof r);
+    const auto last = p.ntrk - 1;
+    r[0] = p.ncc;
+    r[1] = 0;
+    r[2] = c.regs[7] + last * 32 + (p.ncc - 1);
+    r[8] = p.ntrk;
+    r[9] = p.stride * last + p.trkBase;
+    r[11] = p.ncc - 1;
+    r[12] = p.trkBase;
+    r[15] = r[9] + p.offset;
+    const auto icfgVal = c.icfg();  // la guarda lee icfg y lo vuelve a escribir tal cual (sin ISR en curso)
+    // banderas: las de la última suma con banderas, r8 = (NTRK - 1) + 1 (positivo y pequeño: N C Z V a 0; medido en Check)
+    const uint32_t flagsOut = 0;
+    if (p.mode == CcPoll::On)
+    {
+        std::memcpy (c.regs, r, sizeof r);
+        c.flags = flagsOut;
+        c.rets = p.guardRet;
+        c.sregStore[0] = icfgVal;
+        c.ie = (icfgVal & 0x200) != 0;
+        c.pc = p.exit;
+        c.insnCount += p.insns;
+        ++p.skipped;
+        return true;
+    }
+    std::memcpy (p.expRegs, r, sizeof r);
+    p.expRets = p.guardRet;
+    p.expIcfg = icfgVal;
+    p.expIe = (icfgVal & 0x200) != 0;
+    p.expFlags = flagsOut;
+    p.insnAtEntry = c.insnCount;
+    p.cycAtEntry = soc.periph.cycles;
+    p.dueAtEntry = soc.periph.nextDue;
+    p.pending = true;
+    return false;
+}
+
+void Machine::ccPollCompare()
+{
+    auto& p = ccPoll;
+    const auto& c = cpu0;
+    p.pending = false;
+    ++p.checked;
+    char buf[160] {};
+    const auto ran = c.insnCount - p.insnAtEntry;
+    if (ran != p.insns)
+        std::snprintf (buf, sizeof buf, "pasada %llu: %llu instrucciones, esperadas %u (ciclo de entrada %llu, nextDue +%lld, ciclos %llu)",
+                       (unsigned long long) p.checked, (unsigned long long) ran, p.insns, (unsigned long long) p.cycAtEntry,
+                       (long long) (p.dueAtEntry - p.cycAtEntry), (unsigned long long) (soc.periph.cycles - p.cycAtEntry));
+    for (int k = 0; k < 16 && buf[0] == 0; ++k)
+        if (c.regs[k] != p.expRegs[k])
+            std::snprintf (buf, sizeof buf, "pasada %llu: r%d 0x%08x, esperado 0x%08x", (unsigned long long) p.checked, k, c.regs[k], p.expRegs[k]);
+    if (buf[0] == 0 && (c.rets != p.expRets || c.flags != p.expFlags || c.sregStore[0] != p.expIcfg || c.ie != p.expIe))
+        std::snprintf (buf, sizeof buf, "pasada %llu: rets 0x%08x/0x%08x flags %x/%x icfg 0x%x/0x%x ie %d/%d", (unsigned long long) p.checked,
+                       c.rets, p.expRets, c.flags, p.expFlags, c.sregStore[0], p.expIcfg, (int) c.ie, (int) p.expIe);
+    if (buf[0] != 0 && p.mismatches++ == 0)
+        p.firstMismatch = buf;
+    if (p.mode == CcPoll::Auto)
+    {
+        if (p.mismatches > 0)
+            p.mode = CcPoll::Off;
+        else if (p.checked >= p.autoChecks)
+            p.mode = CcPoll::On;
+    }
+}
 
 bool Machine::hleEnter (Cpu& c1)
 {

@@ -245,6 +245,8 @@ private:
         e->machine = std::make_unique<fm1::Machine> (*e->soc, *e->cpu);
         // núcleo de operadores nativo (Fm1Hle.h): se comprueba bit a bit en las primeras llamadas y solo entonces se usa
         e->machine->hle.mode = fm1::Machine::Hle::Auto;
+        // GHOULBOX: la pasada vacía de su sondeo de CC MIDI, saltada al mismo ciclo (Machine::CcPoll); otros firmwares no la tienen
+        e->machine->ccPoll.mode = fm1::Machine::CcPoll::Auto;
         return e;
     }
 
