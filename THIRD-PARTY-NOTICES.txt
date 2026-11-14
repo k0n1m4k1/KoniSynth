@@ -10,7 +10,8 @@ components listed below, each under its own licence, all compatible with the
 AGPLv3: JUCE (used under the AGPLv3), Nuked-OPLL (GPL-2.0 or later), Munt
 mt32emu (LGPL-2.1 or later), formulas from msfa (Apache-2.0) and from STK
 (MIT-STK), the MTS-ESP client (0BSD), ScummVM's General MIDI to MT-32
-program table (GPL-3.0 or later), the DMXOPL3 General MIDI bank (MIT) and the
+program table (GPL-3.0 or later), the EngineMkI operator kernel of Dexed /
+Synth_Dexed (GPL-3.0 or later), the DMXOPL3 General MIDI bank (MIT) and the
 DMX driver tables as documented by Chocolate Doom (GPL-2.0 or later), and
 the TDA8425 and YM7128B emulators by Andrea Zoppi (BSD-2-Clause). Their licence texts are reproduced verbatim in this file, as
 their terms require.
@@ -41,6 +42,7 @@ MTS-ESP client (ODDSound Ltd)                   0BSD
 Munt mt32emu 2.8.3 (Roland MT-32 / CM-32L)      LGPL-2.1-or-later
 STK (Perry R. Cook, Gary P. Scavone)            MIT-STK
 ScummVM GM to MT-32 program table               GPL-3.0-or-later
+Dexed EngineMkI (Pascal Gauthier, FM-1 kernel)  GPL-3.0-or-later
 DMXOPL3 GM bank for OPL3 (sneakernets)          MIT
 Chocolate Doom DMX driver tables (OPL GM)       GPL-2.0-or-later
 TDA8425_emu 0.2.0 (Andrea Zoppi, AdLib Gold)    BSD-2-Clause
@@ -2408,6 +2410,15 @@ IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR
 ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
 CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
 WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+===============================================================================
+Dexed / Synth_Dexed - EngineMkI operator kernel (EngineMkI.cpp), adapted in
+Source/Fm1/Fm1Hle.cpp (native operator kernel of the M-VAVE FM-1 engine, laid out
+as in the FM-1 stock firmware)
+Copyright (C) 2015-2017 Pascal Gauthier
+https://github.com/asb2m10/dexed, https://codeberg.org/dcoredump/Synth_Dexed
+Licensed under the GNU General Public License, version 3 or (at your option)
+any later version. Full text: see the ScummVM section below.
 
 ===============================================================================
 ScummVM - General MIDI to MT-32 program table (_gmToMt32, audio/mididrv.cpp) and

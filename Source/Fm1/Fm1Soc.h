@@ -18,6 +18,7 @@
 #include "Fm1Cpu.h"
 #include "Fm1Devices.h"
 #include "Fm1Fwsc.h"
+#include "Fm1Hle.h"
 #include "Fm1Periph.h"
 
 #include <array>
@@ -206,7 +207,33 @@ public:
         void backOff (uint64_t now);
     } loopSkip;
 
+    // HLE de cpu1 (Fm1Hle.h): FmCore::render nativo en lugar del emulado. Check: el nativo calcula aparte (la RAM se
+    // restaura), el firmware ejecuta su código y a la vuelta se comparan salida, FmOpParams, fb_buf y tabla de algoritmos
+    // bit a bit. On: el nativo sustituye a la rutina y cpu1 descuenta del tramo las instrucciones medias de la emulada.
+    // Auto (el plugin): Check durante las primeras autoChecks llamadas; sin ninguna diferencia pasa a On, con una a Off
+    // (un firmware con el mismo prólogo y otra semántica se queda emulado)
+    struct Hle
+    {
+        enum Mode : uint8_t { Off, Check, On, Auto };
+        Mode mode = Off;
+        uint32_t autoChecks = 4000;
+        HleRenderSite site;           // se busca en la RAM cuando cpu1 ya corre (el firmware copia ahí su código caliente)
+        uint32_t searchIn = 0;        // tramos de cpu1 hasta volver a buscar
+        uint64_t calls = 0, mismatches = 0, emulatedInsns = 0, checked = 0;
+        uint32_t costPerCall = 8700;  // instrucciones que se descuentan en On: media de la emulada (Check, V13/V15: 8659-8976)
+        std::string firstMismatch;
+        // comprobación en curso
+        bool pending = false;
+        uint32_t retPc = 0, retSp = 0;
+        uint64_t insnAtEntry = 0;
+        HleRenderArgs args;
+        std::vector<uint8_t> expOut, expParams, expFb, expAlg;
+        double avgCost() const noexcept { return checked > 0 ? (double) emulatedInsns / (double) checked : 0.0; }
+    } hle;
+
 private:
+    bool hleEnter (Cpu& c1);     // en la entrada de la rutina: true = la ejecutó el nativo (On) y cpu1 ya ha vuelto
+    void hleCompare (Cpu& c1);   // de vuelta de la rutina emulada en Check
     uint32_t probeLoop (uint32_t budget);
     bool burstStop (uint32_t room) const noexcept;
     void cpu0Between();

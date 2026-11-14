@@ -206,6 +206,8 @@ int main (int argc, char** argv)
     std::string dumpCpu1;
     uint32_t dumpIdx = 0x01c0e685, dumpBuf = 0x01c10694;
     std::vector<std::pair<uint64_t, std::string>> ramDumps;  // --dumpram MS:FICHERO: la RAM entera en ese ms
+    // --hle off|check|on: FmCore::render nativo (Fm1Hle.h); check lo compara con la emulada en cada llamada
+    auto hleMode = Machine::Hle::Off;
     for (int i = 2; i + 1 < argc; i += 2)
     {
         const std::string opt = argv[i];
@@ -222,6 +224,9 @@ int main (int argc, char** argv)
         else if (opt == "--pcprofile1") pcProfile1 = std::atoi (v);
         else if (opt == "--wav") wav = v;
         else if (opt == "--syx") { syx = readFile (v); haveSyx = true; }
+        else if (opt == "--hle")
+            hleMode = std::string (v) == "on" ? Machine::Hle::On : std::string (v) == "check" ? Machine::Hle::Check
+                    : std::string (v) == "auto" ? Machine::Hle::Auto : Machine::Hle::Off;
         else if (opt == "--dumpcpu1") dumpCpu1 = v;
         else if (opt == "--dumpaddr" && std::sscanf (v, "%x:%x", &dumpIdx, &dumpBuf) == 2) {}
         else if (opt == "--dumpram" && std::sscanf (v, "%llu:", &at) == 1 && std::strchr (v, ':') != nullptr)
@@ -283,6 +288,7 @@ int main (int argc, char** argv)
     if (profile > 0) m.synHist1 = &synHist;
     if (pcProfile1 > 0) m.pcHist1 = &pcHist1;
     m.loopSkip.enabled = ! reference;
+    m.hle.mode = hleMode;
 #ifdef _WIN32
     HostSampler sampler;
     if (hostProfile > 0) sampler.start();
@@ -373,6 +379,14 @@ int main (int argc, char** argv)
     std::printf ("pantalla: encendida %d, %llu ventanas, revisión %u; audio %zu tramas (%.2f s); resets %u\n", soc.lcd.displayOn ? 1 : 0,
                  (unsigned long long) soc.lcd.frames, soc.lcd.revision, soc.periph.audio.size() / 2,
                  (double) soc.periph.audio.size() / 2 / 44117.65, soc.resets);
+    if (hleMode != Machine::Hle::Off)
+        std::printf ("HLE FmCore::render (modo final %s): %s en 0x%08x (tabla 0x%08x, cadena %s); %llu llamadas, %llu comprobadas, %llu distintas, "
+                     "%.0f instrucciones emuladas por llamada%s%s\n",
+                     m.hle.mode == Machine::Hle::On ? "on" : m.hle.mode == Machine::Hle::Check ? "check" : m.hle.mode == Machine::Hle::Auto ? "auto" : "off",
+                     m.hle.site ? "encontrada" : "NO encontrada", m.hle.site.entry, m.hle.site.algTable,
+                     m.hle.site.chainReadsGain ? "con el error de la V13" : "corregida",
+                     (unsigned long long) m.hle.calls, (unsigned long long) m.hle.checked, (unsigned long long) m.hle.mismatches,
+                     m.hle.avgCost(), m.hle.firstMismatch.empty() ? "" : "; primera: ", m.hle.firstMismatch.c_str());
     std::printf ("UART MIDI: con0 0x%08x, búfer de recepción %u B, bytes descartados %llu\n", soc.periph.uartCon0(),
                  soc.periph.uartRxLen(), (unsigned long long) soc.periph.midiDropped());
     // accesos desconocidos por dirección (la hoja de ruta de lo que falta)

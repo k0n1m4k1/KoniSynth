@@ -1198,6 +1198,11 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
             return true;
         soc.cpu1Idle = false;
     }
+    if (hle.mode != Hle::Off && ! hle.site && hle.searchIn-- == 0)
+    {
+        hle.site = findFmCoreRender (soc.ram.ptr(), kRamBase, soc.ram.size());
+        hle.searchIn = 4096;  // sin el código aún copiado: otra vez dentro de un rato
+    }
     const auto probePc = c1.pc;
     auto probeSp = c1.sp;
     uint32_t probeRegs[16];
@@ -1209,6 +1214,11 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
         if (soc.periph.anyPending())
             if (const auto p = soc.periph.pendingIrqFor (1); p && c1.irqReady (p->second))
                 c1.interrupt (soc.read32 (kVecBase + 4u * p->first), p->second);
+        if (hle.site && c1.pc == hle.site.entry && hle.mode != Hle::Off && ! hle.pending && hleEnter (c1))
+        {
+            left -= std::min<uint64_t> (left, hle.costPerCall);
+            continue;  // el nativo ya volvió a rets
+        }
         Core1Bus bus (soc, until);
         if (! c1.step (bus))
         {
@@ -1216,6 +1226,8 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
             return false;
         }
         --left;
+        if (hle.pending && c1.pc == hle.retPc && c1.sp == hle.retSp)
+            hleCompare (c1);
         if (soc.waits[1])
         {
             soc.waits[1].reset();
@@ -1239,6 +1251,100 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
     }
     ran = budget - left;
     return true;
+}
+
+// ---- HLE de FmCore::render ----------------------------------------------------------------------------------------
+namespace
+{
+// Las cuatro zonas que la rutina escribe: salida (n int32), FmOpParams[6], fb_buf[2] y la fila de su algoritmo
+struct HleZones { uint32_t at[4]; size_t len[4]; };
+HleZones hleZones (const HleRenderArgs& a) { return { { a.out, a.params, a.fb, a.algTable + 6 * a.algo }, { 4u * a.n, 96, 8, 6 } }; }
+} // namespace
+
+bool Machine::hleEnter (Cpu& c1)
+{
+    uint8_t* ram = soc.ram.ptr();
+    const auto ramSize = soc.ram.size();
+    const auto word = [&] (uint32_t at) -> std::optional<uint32_t>
+    {
+        if (at < kRamBase || at - kRamBase + 4 > ramSize)
+            return std::nullopt;
+        uint32_t v;
+        std::memcpy (&v, ram + (at - kRamBase), 4);
+        return v;
+    };
+    const auto shift = word (c1.sp), n = word (c1.sp + 4);
+    if (! shift || ! n)
+        return false;
+    HleRenderArgs a { c1.regs[0], c1.regs[1], c1.regs[2], c1.regs[3], *shift, *n, hle.site.algTable, hle.site.chainReadsGain };
+    ++hle.calls;
+    if (hle.mode == Hle::On)
+    {
+        if (! hleFmCoreRender (ram, kRamBase, ramSize, a))
+            return false;
+        c1.pc = c1.rets;
+        return true;
+    }
+    // Check: el nativo sobre la RAM, se guarda su resultado y se restaura lo que había; la rutina emulada sigue
+    const auto z = hleZones (a);
+    std::vector<uint8_t> before[4];
+    for (int k = 0; k < 4; ++k)
+    {
+        if (z.at[k] < kRamBase || z.at[k] - kRamBase + z.len[k] > ramSize)
+            return false;
+        before[k].assign (ram + (z.at[k] - kRamBase), ram + (z.at[k] - kRamBase) + z.len[k]);
+    }
+    if (! hleFmCoreRender (ram, kRamBase, ramSize, a))
+        return false;
+    std::vector<uint8_t>* exp[4] = { &hle.expOut, &hle.expParams, &hle.expFb, &hle.expAlg };
+    for (int k = 0; k < 4; ++k)
+    {
+        exp[k]->assign (ram + (z.at[k] - kRamBase), ram + (z.at[k] - kRamBase) + z.len[k]);
+        std::memcpy (ram + (z.at[k] - kRamBase), before[k].data(), z.len[k]);
+    }
+    hle.args = a;
+    hle.pending = true;
+    hle.retPc = c1.rets;
+    hle.retSp = c1.sp;
+    hle.insnAtEntry = c1.insnCount;
+    return false;  // la rutina emulada corre
+}
+
+void Machine::hleCompare (Cpu& c1)
+{
+    hle.pending = false;
+    ++hle.checked;
+    hle.emulatedInsns += c1.insnCount - hle.insnAtEntry;
+    const auto z = hleZones (hle.args);
+    const std::vector<uint8_t>* exp[4] = { &hle.expOut, &hle.expParams, &hle.expFb, &hle.expAlg };
+    static const char* const names[4] = { "salida", "FmOpParams", "fb_buf", "tabla de algoritmos" };
+    for (int k = 0; k < 4; ++k)
+    {
+        const uint8_t* got = soc.ram.ptr() + (z.at[k] - kRamBase);
+        if (std::memcmp (got, exp[k]->data(), z.len[k]) == 0)
+            continue;
+        if (hle.mismatches++ == 0)
+        {
+            size_t i = 0;
+            while (got[i] == (*exp[k])[i]) ++i;
+            const size_t w = i & ~(size_t) 3;
+            uint32_t g = 0, e = 0;
+            std::memcpy (&g, got + w, 4);
+            std::memcpy (&e, exp[k]->data() + w, 4);
+            char buf[200];
+            std::snprintf (buf, sizeof buf, "llamada %llu: %s, byte %zu (algoritmo %u, fb_shift %u): emulado 0x%08x, nativo 0x%08x",
+                           (unsigned long long) hle.calls, names[k], i, hle.args.algo, hle.args.fbShift, g, e);
+            hle.firstMismatch = buf;
+        }
+        break;
+    }
+    if (hle.mode == Hle::Auto)
+    {
+        if (hle.mismatches > 0)
+            hle.mode = Hle::Off;
+        else if (hle.checked >= hle.autoChecks)
+            hle.mode = Hle::On;
+    }
 }
 
 bool Machine::runCpu1On (uint64_t cycles, std::optional<Wait> until, uint64_t& ran, std::string& error)

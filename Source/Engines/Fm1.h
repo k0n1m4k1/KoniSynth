@@ -243,6 +243,8 @@ private:
         e->cpu->regs[0] = fm1::stockBoot (*e->soc, e->stock.flash, params);
         e->soc->sfcBoot (e->stock.key, e->stock.appEnd);
         e->machine = std::make_unique<fm1::Machine> (*e->soc, *e->cpu);
+        // núcleo de operadores nativo (Fm1Hle.h): se comprueba bit a bit en las primeras llamadas y solo entonces se usa
+        e->machine->hle.mode = fm1::Machine::Hle::Auto;
         return e;
     }
 
