@@ -60,7 +60,7 @@ public:
         Skin::screen (g, screen, compact ? 6.0f : 8.0f);
         const auto r = plot();
         const auto trace = Skin::trace();
-        g.drawImage (image, r);
+        g.drawImage (displayImage (r), r);
 
         if (! compact)
         {
@@ -262,9 +262,51 @@ private:
         cell = (std::uint8_t) (erasing ? std::max (0, (int) cell - v)
                                        : useMax ? std::max ((int) cell, v) : std::min (255, (int) cell + v));
         image.setPixelAt (col, AnsScore::kRows - 1 - row, shade (cell));
+        pooledDirty = true;
     }
 
-    juce::Colour shade (std::uint8_t v) const { return lcd.interpolatedWith (ink, (float) v / 255.0f); }
+    // Gamma 0,7: un trazo a media intensidad (128) sale al 62 % de la tinta en vez del 50 %
+    juce::Colour shade (std::uint8_t v) const { return lcd.interpolatedWith (ink, std::pow ((float) v / 255.0f, 0.7f)); }
+
+    // La partitura (512 × 720) a la resolución de la pantalla. Reducida, cada píxel toma el más brillante de las celdas que
+    // cubre (máximo, no promedio): un trazo de un tono (1 fila) sigue viéndose entero; promediado quedaba en ~1/1,8 de su
+    // brillo con 400 px de alto. Ampliada, la imagen tal cual. Se rehace solo si cambió la partitura o el tamaño
+    const juce::Image& displayImage (juce::Rectangle<float> r)
+    {
+        const auto w = juce::jmax (1, juce::roundToInt (r.getWidth())), h = juce::jmax (1, juce::roundToInt (r.getHeight()));
+        if (w >= image.getWidth() && h >= image.getHeight())
+            return image;
+        const auto pw = juce::jmin (w, image.getWidth()), ph = juce::jmin (h, image.getHeight());
+        if (! pooledDirty && pooled.getWidth() == pw && pooled.getHeight() == ph)
+            return pooled;
+        pooled = juce::Image (juce::Image::RGB, pw, ph, false);
+        const juce::Image::BitmapData src (image, juce::Image::BitmapData::readOnly);
+        const juce::Image::BitmapData dst (pooled, juce::Image::BitmapData::writeOnly);
+        const auto sw = image.getWidth(), sh = image.getHeight();
+        for (int y = 0; y < ph; ++y)
+        {
+            const auto y0 = y * sh / ph, y1 = juce::jmax (y0 + 1, (y + 1) * sh / ph);
+            for (int x = 0; x < pw; ++x)
+            {
+                const auto x0 = x * sw / pw, x1 = juce::jmax (x0 + 1, (x + 1) * sw / pw);
+                juce::Colour best = src.getPixelColour (x0, y0);
+                int bestSum = best.getRed() + best.getGreen() + best.getBlue();
+                for (int sy = y0; sy < y1; ++sy)
+                    for (int sx = x0; sx < x1; ++sx)
+                    {
+                        const auto c = src.getPixelColour (sx, sy);
+                        if (const auto sum = c.getRed() + c.getGreen() + c.getBlue(); sum > bestSum)
+                        {
+                            best = c;
+                            bestSum = sum;
+                        }
+                    }
+                dst.setPixelColour (x, y, best);
+            }
+        }
+        pooledDirty = false;
+        return pooled;
+    }
 
     // Contorno del pincel bajo el ratón, o la línea / el rectángulo que se está trazando
     void paintBrushPreview (juce::Graphics& g, juce::Rectangle<float> r)
@@ -317,6 +359,7 @@ private:
         for (int r = 0; r < AnsScore::kRows; ++r)
             for (int c = 0; c < AnsScore::kColumns; ++c)
                 image.setPixelAt (c, AnsScore::kRows - 1 - r, lut[s.at (r, c)]);
+        pooledDirty = true;
         shownVersion = koni.getAnsVersion();
     }
 
@@ -330,7 +373,8 @@ private:
 
     KoniSynthProcessor& koni;
     const bool compact;
-    juce::Image image;
+    juce::Image image, pooled; // la partitura (una celda por píxel) y reducida a la pantalla (displayImage)
+    bool pooledDirty = true;
     juce::Colour lcd, ink;
     std::unique_ptr<AnsScore> edit;
     juce::Point<float> anchor, last, mousePos;
