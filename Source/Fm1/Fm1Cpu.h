@@ -80,7 +80,9 @@ struct Fm1Pre
                             FastAndNot, // R = R & ~R
                             FastShift,  // R = R <<|>>|>>>|<<< #i|R (fcond = 0..3; fidx: la cuenta en un registro)
                             FastDecBr,  // if (--R <op> #i) goto #i
-                            FastPopPc   // pc = [sp++]
+                            FastPopPc,  // pc = [sp++]
+                            FastIcfgRd, // R = icfg (prioridades en curso y habilitación global: Cpu::icfg)
+                            FastIcfgWr  // icfg = R (Cpu::setIcfg)
     };
     // Direccionamientos de FastLdX / FastStX (los de exec_syntax)
     enum MemMode : uint8_t { MemRImm, MemSpImm, MemSp, MemRR, MemRRShl, MemPostImm, MemPostR, MemPreImm, MemPreR, MemPushSp };

@@ -1497,6 +1497,8 @@ bool Cpu::execute (Bus& bus, const Line& l, uint32_t nextPc)
             }
             case Fm1Pre::FastAdc: regs[pre.fd] = addFlags (regs[pre.fa], regs[pre.fb], (flags & kFlagC) != 0 ? 1u : 0u, flags); break;
             case Fm1Pre::FastIe: ie = pre.fimm != 0; break;
+            case Fm1Pre::FastIcfgRd: regs[pre.fd] = icfg(); break;
+            case Fm1Pre::FastIcfgWr: setIcfg (regs[pre.fd]); break;
             case Fm1Pre::FastAndNot: regs[pre.fd] = regs[pre.fa] & ~regs[pre.fb]; break;
             case Fm1Pre::FastShift:
             {
@@ -3178,6 +3180,9 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
         }
     // segunda tanda: la cola de exec_syntax con la V15 (sp += #i, R = cnum, campos de bits, desplazamientos...)
     if (s == "R = cnum" && n >= 1) { p.fd = rg (0); p.fast = Fm1Pre::FastCnum; return; }
+    // icfg: la guarda de interrupciones de GHOULBOX (motion_guard) la lee y la escribe millones de veces por segundo
+    if (s == "R = icfg" && n >= 1) { p.fd = rg (0); p.fast = Fm1Pre::FastIcfgRd; return; }
+    if (s == "icfg = R" && n >= 1) { p.fd = rg (0); p.fast = Fm1Pre::FastIcfgWr; return; }
     if (s == "sp += #i")
     {
         if (e.len == 4 && (raw & 0xffff) == 0xe8f0)
