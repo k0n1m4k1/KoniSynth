@@ -159,7 +159,7 @@ struct Params
         mt32Model = get ("mt32Model"); mt32Rom = get ("mt32Rom"); mt32Mode = get ("mt32Mode"); mt32Multi = get ("mt32Multi"); mt32Program = get ("mt32Program"); mt32Reverb = get ("mt32Reverb");
         mt32Dac = get ("mt32Dac"); mt32Queue = get ("mt32Queue"); mt32NiceAmp = get ("mt32NiceAmp"); mt32NicePan = get ("mt32NicePan"); mt32NiceMix = get ("mt32NiceMix"); mt32MidiDelay = get ("mt32MidiDelay");
         gusModel = get ("gusModel"); gusRam = get ("gusRam"); gusVoices = get ("gusVoices"); gusMode = get ("gusMode"); gusMulti = get ("gusMulti");
-        gusProgram = get ("gusProgram"); gusPatchBits = get ("gusPatchBits");
+        gusProgram = get ("gusProgram"); gusPatchBits = get ("gusPatchBits"); gusLibrary = get ("gusLibrary");
         for (int k = 0; k < 4; ++k)
         {
             const auto pre = "opl" + juce::String (k + 1);
@@ -303,7 +303,7 @@ struct Params
                        *oplVelocity {}, *oplPan {}, *oplOutput {},
                        *oplRhythm {}, *oplGold {}, *oplGoldBass {}, *oplGoldTreble {}, *oplGoldStereo {}, *oplGoldSurround {}, *oplGoldLevel {},
                        *mt32Model {}, *mt32Rom {}, *mt32Mode {}, *mt32Multi {}, *mt32Program {}, *mt32Reverb {}, *mt32Dac {}, *mt32Queue {}, *mt32NiceAmp {}, *mt32NicePan {}, *mt32NiceMix {}, *mt32MidiDelay {};
-    std::atomic<float> *gusModel {}, *gusRam {}, *gusVoices {}, *gusMode {}, *gusMulti {}, *gusProgram {}, *gusPatchBits {};
+    std::atomic<float> *gusModel {}, *gusRam {}, *gusVoices {}, *gusMode {}, *gusMulti {}, *gusProgram {}, *gusPatchBits {}, *gusLibrary {};
     std::atomic<float> *mdVoice {}, *mdPsgNoise {}, *mdPsgNoiseRate {}, *mdPsgAttack {}, *mdPsgDecay {}, *mdPsgSustain {}, *mdPsgRelease {}, *mdDacRate {};
     std::array<std::atomic<float>*, 3> mdCh3Op {};
     std::atomic<float> *snesPan {}, *snesSpread {};

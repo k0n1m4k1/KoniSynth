@@ -576,7 +576,7 @@ public:
                                      "a timidity.cfg or DEFAULT.CFG) in a folder and choose it here.", [this] { gusPatchMenu(); })
                   .withList (s, "gusProgram", "Program", 4.0f) // fila de arriba, del ancho de las 4 perillas de abajo
                   .withKnob (s, "gusMode", "Keys").withKnob (s, "gusRam", "RAM").withKnob (s, "gusVoices", "Voices")
-                  .withKnob (s, "gusPatchBits", "Bits")
+                  .withKnob (s, "gusPatchBits", "Bits").withKnob (s, "gusLibrary", "Library")
                   .withRowBreak (1).withRightBody (gusDisplay, 560); // a la derecha, el mapa de voces (4 columnas desde 560 px)
         gusSection.stretchToFill = true; // el display se queda con el ancho que sobre en la fila
         fm1Section.withHeaderButton ("Load .fwsc...", "Load an M-VAVE FM-1 firmware package (.fwsc): M-VAVE's own or a community one. "

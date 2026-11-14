@@ -336,10 +336,12 @@ struct GusEngine
         const auto ramIndex = model == 2 ? 3 : juce::jlimit (model == 1 ? 1 : 0, 3, juce::roundToInt (p.gusRam->load()));
         ramColumn = ramIndex;
         const auto bits8 = juce::roundToInt (p.gusPatchBits->load()) == 0;
-        if (const auto ram = ramSizes[ramIndex]; ram != ramBytes || bits8 != eightBit)
+        const auto all = juce::roundToInt (p.gusLibrary->load()) == 1;
+        if (const auto ram = ramSizes[ramIndex]; ram != ramBytes || bits8 != eightBit || all != allPatches)
         {
             ramBytes = ram;
             eightBit = bits8;
+            allPatches = all;
             resident.clear(); // otra memoria: el driver vuelve a cargar los patches
             residentBytes = 0;
             requested.fill (false);
@@ -771,6 +773,17 @@ private:
 
     const GusPatch* choosePatch (const GusBank& bank, int number)
     {
+        if (allPatches)
+        {
+            // All patches (opción, no lo hacía el aparato): el suyo, sin tabla ni límite de RAM (el display cuenta lo cargado)
+            const auto* p = bank.byNumber (number);
+            if (p != nullptr && std::none_of (resident.begin(), resident.end(), [p] (const Resident& r) { return r.patch == p; }))
+            {
+                resident.push_back ({ p, number < 128 ? number / 8 : 16 });
+                residentBytes += eightBit ? p->bytes8 : p->bytes;
+            }
+            return p;
+        }
         if (bank.hasSubstitutions)
         {
             const auto* sub = bank.byNumber (bank.substitute[(size_t) number][(size_t) ramColumn]);
@@ -1017,6 +1030,7 @@ private:
     juce::int64 residentBytes = 0, ramBytes = 1024 * 1024;
     int ramColumn = 3; // columna de ULTRAMID.INI: 256, 512, 768 o 1024 KB
     bool eightBit = true; // patches cargados en 8 bits (ULTRAMID sin -16)
+    bool allPatches = false; // gusLibrary = All patches
     std::array<bool, 256> requested {}; // números ya pedidos desde la última carga (para contar sustituciones)
     int substitutedCount = 0;           // de ellos, los que suenan con otro patch
     std::array<juce::uint32, maxVoices> stealCount {}; // robos por voz (el display destella al cambiar)

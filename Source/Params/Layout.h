@@ -1118,5 +1118,8 @@ static APVTS::ParameterLayout createLayout()
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusProgram", 1 }, "GUS Program", [] { StringArray names; for (int k = 0; k < 128; ++k)
         names.add (String (k + 1) + " - " + GeneralMidi::programName (k)); return names; }(), 0));
     l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusPatchBits", 1 }, "GUS Patch Bits", StringArray { "8-bit", "16-bit" }, 0));
+    // ULTRAMID (fiel): la tabla de ULTRAMID.INI para la RAM elegida, también sus silencios ("blank"); All patches (no lo hacía
+    // el aparato): cada programa con su propio patch, sin límite de RAM
+    l.add (std::make_unique<AudioParameterChoice> (ParameterID { "gusLibrary", 1 }, "GUS Library", StringArray { "ULTRAMID", "All patches" }, 0));
     return l;
 }

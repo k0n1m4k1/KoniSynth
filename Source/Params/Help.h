@@ -776,6 +776,11 @@ static juce::String paramHelp (const juce::String& id)
         { "gusPatchBits", "Sample depth the driver loads the patches with. 8-bit: Gravis' ULTRAMID driver by default keeps only the "
                           "high byte of each 16-bit sample (more noise, half the card memory). 16-bit: its -16 option, the patches "
                           "as recorded. Default: 8-bit." },
+        { "gusLibrary", "Which patch each General MIDI program plays. ULTRAMID: Gravis' driver table (ULTRAMID.INI) for the chosen "
+                        "memory, as the card did: with it some programs share a patch and some effects are silent even with 1 MB "
+                        "(120-122, 124-126, 128: Reverse Cymbal, Guitar Fret Noise, Breath Noise, Bird Tweet, Telephone Ring, "
+                        "Helicopter, Gunshot). All patches: every program plays its own patch, with no memory limit (the real card "
+                        "could not). Default: ULTRAMID." },
         { "mt32MidiDelay", "Delay of the emulated MIDI cable (31,250 baud: about 1 ms per 3-byte message). Short Messages "
                            "(default, the emulator's own): notes and controllers arrive at cable speed, so a chord of simultaneous "
                            "notes is spread as on the real unit; SysEx is applied at once. All: SysEx is delayed too, as on a real "
