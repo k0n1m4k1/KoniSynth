@@ -1,0 +1,54 @@
+// JIT del núcleo pi32v2 (J2, diseño en User/FM1/JIT-DESIGN.md): búfer de código ejecutable con W^X y un emisor x86-64
+// mínimo. Solo Windows x64 y Linux x86-64; en el resto (macOS, ARM) jitSupported() es false y se queda el intérprete.
+// Cabecera independiente (sin JUCE ni windows.h): la usan el motor FM-1, KoniFm1Run y KoniFm1Tests.
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <initializer_list>
+#include <vector>
+
+namespace fm1
+{
+constexpr bool jitSupported() noexcept
+{
+#if (defined(_WIN32) && defined(_M_X64)) || (defined(__linux__) && defined(__x86_64__))
+    return true;
+#else
+    return false;
+#endif
+}
+
+// Memoria para código nativo: se reserva de una vez; cada bloque se copia con sus páginas en lectura-escritura y luego
+// pasan a lectura-ejecución (nunca escribibles y ejecutables a la vez)
+class CodeBuffer
+{
+public:
+    CodeBuffer() = default;
+    CodeBuffer (const CodeBuffer&) = delete;
+    CodeBuffer& operator= (const CodeBuffer&) = delete;
+    ~CodeBuffer();
+
+    bool init (size_t bytes);  // false: sin memoria ejecutable (o plataforma sin JIT)
+    // Copia el código y devuelve dónde quedó (ejecutable), o nullptr si no cabe
+    void* add (const uint8_t* code, size_t n);
+    size_t used() const noexcept { return top; }
+
+private:
+    uint8_t* base = nullptr;
+    size_t size = 0, top = 0;
+};
+
+// Emisor: los bytes de las pocas formas que usa el JIT (codificación x86-64, Intel SDM vol. 2)
+struct Emitter
+{
+    std::vector<uint8_t> b;
+    void u8 (uint8_t v) { b.push_back (v); }
+    void u32 (uint32_t v) { for (int i = 0; i < 4; ++i) b.push_back ((uint8_t) (v >> (8 * i))); }
+    void u64 (uint64_t v) { for (int i = 0; i < 8; ++i) b.push_back ((uint8_t) (v >> (8 * i))); }
+    void bytes (std::initializer_list<uint8_t> l) { b.insert (b.end(), l); }
+    size_t pos() const noexcept { return b.size(); }
+    void patch32 (size_t at, uint32_t v) { for (int i = 0; i < 4; ++i) b[at + (size_t) i] = (uint8_t) (v >> (8 * i)); }
+};
+} // namespace fm1

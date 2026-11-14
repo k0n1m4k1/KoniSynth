@@ -12,6 +12,10 @@
 #pragma once
 
 #include "Fm1Isa.h"
+#include "Fm1Jit.h"
+
+#include <deque>
+#include <memory>
 
 #include <cstdint>
 #include <unordered_map>
@@ -34,6 +38,10 @@ struct Bus
     virtual bool hwLock (uint32_t /*core*/, bool /*set*/) { return true; }
     virtual void spin (uint32_t /*core*/, uint32_t /*addr*/) {}  // el núcleo espera en un cerrojo de byte (testset)
     virtual void idle (uint32_t /*core*/) {}                      // "idle": el núcleo para hasta una interrupción
+    // (JIT) la RAM de datos para accesos en línea: sus bytes, dirección y tamaño, la marca de código por palabra y el
+    // puntero de apuntado de escrituras (Ram::log). false: sin acceso en línea (todo por el bus)
+    struct RamView { uint8_t* data; uint32_t base, size; const uint8_t* code; void* const* log; };
+    virtual bool ramView (RamView&) { return false; }
 };
 
 enum class Fault : uint8_t
@@ -238,6 +246,12 @@ public:
     uint64_t faultRaw = 0;
     uint64_t decodes = 0;  // fallos de la caché de instrucciones desde el reset
     bool fastPath = true;  // micro-ops para las formas comunes (false = solo exec_syntax: la referencia)
+    // JIT (User/FM1/JIT-DESIGN.md). En la ráfaga, un bloque de la XIP (instrucciones con micro-op, sin pares ni bloques
+    // if {} / rep, hasta el primer cambio de flujo o del estado de interrupciones) corre como código nativo; las paradas de
+    // la ráfaga se miran una vez para todo su rango. Fase J2.0: cada instrucción es una llamada a jitOp (execFast), la
+    // misma semántica. Solo con la ruta rápida, sin perfiles y en las plataformas con JIT (jitSupported)
+    bool jitOn = true;
+    uint64_t jitRuns = 0, jitInsns = 0, jitCompiled = 0;  // bloques ejecutados, sus instrucciones, bloques compilados
     // Perfil opcional (nullptr = apagado): instrucciones ejecutadas por clase
     std::unordered_map<const Fm1IsaEntry*, uint64_t>* hist = nullptr;
     // con hist: instrucciones por ruta (ruta rápida: el índice 255) y cabezas de par de emisión doble
@@ -264,6 +278,35 @@ private:
         mutable uint32_t ifThenEnd = 0, ifElseEnd = 0;
     };
     std::vector<Line> icache;
+
+    // ---- JIT ----
+    struct JitCtx
+    {
+        Cpu* cpu;
+        Bus* bus;
+        uint64_t now;               // ciclo de la primera instrucción del bloque
+        uint64_t* cycles;
+        const uint64_t* sideEffects;
+        uint64_t side0;
+        uint32_t done = 0;          // instrucciones acabadas
+        uint32_t status = 0;        // 0 bloque entero, 1 parada tras un acceso con efectos, 2 fallo
+    };
+    using JitFn = void (*) (JitCtx*);
+    struct JitBlock { uint32_t pc = 0xffffffffu, last = 0, n = 0; JitFn fn = nullptr; };
+    static constexpr uint32_t kJitBits = 18, kJitMax = 64;  // 2^18 medias palabras: 512 KiB de XIP sin solaparse
+    std::vector<JitBlock> jitTable;
+    std::deque<Line> jitLines;  // las líneas de los bloques (el código nativo apunta a ellas: no se mueven)
+    std::unique_ptr<CodeBuffer> jitCode;
+    bool jitFailed = false;     // sin memoria ejecutable o búfer lleno: el intérprete
+    const JitBlock* jitAt (Bus& bus, uint32_t at);
+    static int jitOp (JitCtx* c, uint32_t j, const Line* l);
+    bool jitNative (Emitter& e, const Line& l);  // una instrucción en código nativo (false: la hace jitOp)
+    // carga o almacenamiento con la RAM en línea; el resto de direcciones, por jitOp (j: índice en el bloque; pend y
+    // pendPc: las nativas pendientes de apuntar antes de ella). false: esta forma no
+    bool jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
+    Bus::RamView jitRam {};
+    bool jitRamOk = false;
+    void jitEmit (Emitter& e, const std::vector<const Line*>& lines);
 
     Line* fetch (Bus& bus, uint32_t at);
     bool execute (Bus& bus, const Line& l, uint32_t nextPc);

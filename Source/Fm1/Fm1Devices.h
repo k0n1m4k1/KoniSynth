@@ -30,6 +30,7 @@ public:
             code[w] = 1;
     }
     bool isCode (uint32_t a) const noexcept { return (a >> 2) < code.size() && code[a >> 2] != 0; }
+    const uint8_t* codeMarks() const noexcept { return code.data(); }  // (JIT: la marca de cada palabra)
     size_t size() const noexcept { return data.size(); }
     uint8_t* ptr() noexcept { return data.data(); }
 

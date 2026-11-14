@@ -207,6 +207,7 @@ int main (int argc, char** argv)
     uint32_t probeMax = 0;
     bool loopTimer = true;
     bool observeOn = true;
+    bool jitOn = true;  // --jit off: sin el JIT (Cpu::jitOn)
     bool timerSkip = true;  // --timerskip off: las vueltas con contador se comprueban en sombra pero no se saltan  // --observe off: sin vueltas observadas (Machine::Observe)
     uint32_t forcePc = 0xffffffffu;  // --probeat PC (hex): sondear siempre ahí (diagnóstico)  // --looptimer off: el salto de bucles no admite vueltas que leen el contador del TIMER4  // --probemax N: lo más que sigue un sondeo del salto de bucles (0: el de serie)
     uint32_t dumpIdx = 0, dumpBuf = 0;
@@ -242,6 +243,7 @@ int main (int argc, char** argv)
         else if (opt == "--probemax") probeMax = (uint32_t) std::strtoul (v, nullptr, 10);
         else if (opt == "--looptimer") loopTimer = std::string (v) != "off";
         else if (opt == "--timerskip") timerSkip = std::string (v) != "off";
+        else if (opt == "--jit") jitOn = std::string (v) != "off";
         else if (opt == "--observe") observeOn = std::string (v) != "off";
         else if (opt == "--probeat") forcePc = (uint32_t) std::strtoul (v, nullptr, 16);
         else if (opt == "--dumpaddr" && std::sscanf (v, "%x:%x", &dumpIdx, &dumpBuf) == 2) {}
@@ -312,6 +314,7 @@ int main (int argc, char** argv)
     m.loopSkip.forcePc = forcePc;
     m.observe.enabled = observeOn;
     m.loopSkip.timerSkip = timerSkip;
+    cpu.jitOn = jitOn;
     std::map<std::tuple<uint32_t, uint32_t, uint32_t>, std::pair<uint64_t, uint64_t>> hitsAt;
     m.loopSkip.hitsAt = &hitsAt;
     m.hle.mode = hleMode;
@@ -401,6 +404,8 @@ int main (int argc, char** argv)
                 std::printf ("%d %.1f %%  ", r, 100.0 * (double) cpu.routeCount[r] / (double) tot);
         std::printf ("; cabezas de par %.1f %%\n", tot > 0 ? 100.0 * (double) cpu.pairHeads / (double) tot : 0.0);
     }
+    std::printf ("JIT: %llu bloques ejecutados, %llu instrucciones, %llu compilados\n", (unsigned long long) cpu.jitRuns,
+                 (unsigned long long) cpu.jitInsns, (unsigned long long) cpu.jitCompiled);
     std::printf ("salto de bucles: %llu sondeos, %llu con bucle, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.probes,
                  (unsigned long long) m.loopSkip.hits, (unsigned long long) m.loopSkip.skipped);
     std::printf ("  con el contador del TIMER4: %llu saltos; %llu vueltas comprobadas en sombra, %llu rechazadas\n",

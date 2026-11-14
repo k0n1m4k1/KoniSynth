@@ -58,6 +58,11 @@ public:
     bool hwLock (uint32_t core, bool set) override;
     void spin (uint32_t core, uint32_t addr) override;
     void idle (uint32_t core) override;
+    bool ramView (RamView& v) override
+    {
+        v = { ram.ptr(), kRamBase, (uint32_t) ram.size(), ram.codeMarks(), (void* const*) &ram.log };
+        return true;
+    }
 
     // ---- SoC ----
     void advance (uint64_t n);  // avanza el reloj de periféricos y saca de la RAM una mitad de audio acabada

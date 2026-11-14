@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstddef>
 #include <cstring>
 #include <limits>
 #include <string_view>
@@ -1603,6 +1604,449 @@ FM1_INLINE bool Cpu::stepImpl (Bus& bus)
     return ok;
 }
 
+// ---- JIT (fase J2.0) ---------------------------------------------------------------------------------------------------
+// Una instrucción del bloque: lo que haría la ráfaga con ella (su ciclo, execFast) y la parada tras un acceso con efectos
+int Cpu::jitOp (JitCtx* c, uint32_t j, const Line* l)
+{
+    auto& cpu = *c->cpu;
+    *c->cycles = c->now + j;
+    cpu.fault = Fault::None;
+    c->done = j;
+    if (! cpu.execFast (*c->bus, *l, l->pc + l->len))
+    {
+        c->status = 2;
+        return 1;
+    }
+    c->done = j + 1;
+    if (*c->sideEffects != c->side0)
+    {
+        c->status = 1;
+        return 1;
+    }
+    return 0;
+}
+
+// ---- código nativo (x86-64; codificaciones del Intel SDM vol. 2) ----
+// Registros del host: rbx = JitCtx*, r12 = Cpu* (los dos se conservan en las dos ABI); eax, ecx y r10/r11 de trabajo.
+// Los registros del pi32v2 viven en el objeto Cpu ([r12 + desplazamiento]). Las instrucciones que se hacen en nativo
+// acumulan lo que finish haría en cada una (insnCount, holdIrq = 0, pc) y se apunta junto antes de llamar a jitOp y al
+// final del bloque, con el ciclo de la última; nada de eso se mira entre medias
+namespace
+{
+// [r12 + disp32] con el campo reg (0 eax, 1 ecx): REX.B (+W), opcode, modrm 10 reg 100, SIB 0x24
+void memOp (Emitter& e, std::initializer_list<uint8_t> op, int reg, uint32_t disp, bool w = false)
+{
+    e.u8 ((uint8_t) (0x41 | (w ? 0x08 : 0)));
+    for (const auto x : op) e.u8 (x);
+    e.u8 ((uint8_t) (0x80 | ((reg & 7) << 3) | 4));
+    e.u8 (0x24);
+    e.u32 (disp);
+}
+
+// banderas N C Z V de addFlags tras un add / sub de x86 con el resultado en eax (C = sin acarreo en la resta)
+void packFlags (Emitter& e, bool sub, uint32_t flagsOff)
+{
+    e.bytes ({ 0x41, 0x0f, (uint8_t) (sub ? 0x93 : 0x92), 0xc2 });  // setae / setb r10b   (C)
+    e.bytes ({ 0x41, 0x0f, 0x90, 0xc3 });                          // seto r11b            (V)
+    e.bytes ({ 0x89, 0xc1 });                                      // mov ecx, eax
+    e.bytes ({ 0xc1, 0xe9, 0x1f });                                // shr ecx, 31          (N)
+    e.bytes ({ 0x45, 0x0f, 0xb6, 0xd2 });                          // movzx r10d, r10b
+    e.bytes ({ 0x41, 0xd1, 0xe2 });                                // shl r10d, 1
+    e.bytes ({ 0x44, 0x09, 0xd1 });                                // or ecx, r10d
+    e.bytes ({ 0x85, 0xc0 });                                      // test eax, eax
+    e.bytes ({ 0x41, 0x0f, 0x94, 0xc2 });                          // setz r10b            (Z)
+    e.bytes ({ 0x45, 0x0f, 0xb6, 0xd2 });                          // movzx r10d, r10b
+    e.bytes ({ 0x41, 0xc1, 0xe2, 0x02 });                          // shl r10d, 2
+    e.bytes ({ 0x44, 0x09, 0xd1 });                                // or ecx, r10d
+    e.bytes ({ 0x45, 0x0f, 0xb6, 0xdb });                          // movzx r11d, r11b
+    e.bytes ({ 0x41, 0xc1, 0xe3, 0x03 });                          // shl r11d, 3
+    e.bytes ({ 0x44, 0x09, 0xd9 });                                // or ecx, r11d
+    memOp (e, { 0x89 }, 1, flagsOff);                              // mov [flags], ecx
+}
+} // namespace
+
+// Una instrucción en nativo, con la semántica de su caso en execFast; false si esta fase no la tiene (va por jitOp)
+bool Cpu::jitNative (Emitter& e, const Line& l)
+{
+    const auto& p = l.pre;
+    const auto R = [this] (int r) { return (uint32_t) ((const uint8_t*) &regs[r & 15] - (const uint8_t*) this); };
+    const auto spOff = (uint32_t) ((const uint8_t*) &sp - (const uint8_t*) this);
+    const auto flagsOff = (uint32_t) ((const uint8_t*) &flags - (const uint8_t*) this);
+    const auto ldEax = [&] (uint32_t off) { memOp (e, { 0x8b }, 0, off); };
+    const auto stEax = [&] (uint32_t off) { memOp (e, { 0x89 }, 0, off); };
+    switch (p.fast)
+    {
+        case Fm1Pre::FastMovI:
+            memOp (e, { 0xc7 }, 0, R (p.fd));  // mov dword [rd], imm32
+            e.u32 (p.fimm);
+            return true;
+        case Fm1Pre::FastMov:
+            ldEax (R (p.fa));
+            stEax (R (p.fd));
+            return true;
+        case Fm1Pre::FastNot:
+            ldEax (R (p.fa));
+            e.bytes ({ 0xf7, 0xd0 });  // not eax
+            stEax (R (p.fd));
+            return true;
+        case Fm1Pre::FastAndNot:
+            ldEax (R (p.fa));
+            memOp (e, { 0x8b }, 1, R (p.fb));  // mov ecx, [rb]
+            e.bytes ({ 0xf7, 0xd1 });          // not ecx
+            e.bytes ({ 0x21, 0xc8 });          // and eax, ecx
+            stEax (R (p.fd));
+            return true;
+        case Fm1Pre::FastSpAdd:
+            memOp (e, { 0x81 }, 0, spOff);  // add dword [sp], imm32
+            e.u32 (p.fimm);
+            return true;
+        case Fm1Pre::FastSpPlus:
+            ldEax (spOff);
+            e.u8 (0x05); e.u32 (p.fimm);  // add eax, imm32
+            stEax (R (p.fd));
+            return true;
+        case Fm1Pre::FastPart:
+            ldEax (R (p.fa));
+            switch (p.fsh)
+            {
+                case 0:  e.bytes ({ 0x0f, 0xb6, 0xc0 }); break;                      // movzx eax, al
+                case 1:  e.bytes ({ 0x0f, 0xbe, 0xc0 }); break;                      // movsx eax, al
+                case 2:  e.bytes ({ 0x0f, 0xb7, 0xc0 }); break;                      // movzx eax, ax
+                case 3:  e.bytes ({ 0x0f, 0xbf, 0xc0 }); break;                      // movsx eax, ax
+                case 4:  e.bytes ({ 0xc1, 0xe8, 0x10 }); break;                      // shr eax, 16
+                case 5:  e.bytes ({ 0xc1, 0xe8, 0x10, 0x0f, 0xbf, 0xc0 }); break;    // shr 16; movsx eax, ax
+                case 6:  e.bytes ({ 0xc1, 0xe8, 0x08, 0x0f, 0xb6, 0xc0 }); break;    // shr 8; movzx eax, al
+                case 7:  e.bytes ({ 0xc1, 0xe8, 0x10, 0x0f, 0xb6, 0xc0 }); break;    // shr 16; movzx eax, al
+                default: e.bytes ({ 0xc1, 0xe8, 0x18 }); break;                      // shr eax, 24
+            }
+            stEax (R (p.fd));
+            return true;
+        case Fm1Pre::FastShift:
+        {
+            if (p.fidx || p.fcond > 2)
+                return false;  // (cuenta en registro, qasl: jitOp)
+            const auto c = p.fimm;
+            if (c >= 32 && p.fcond != 2)
+            {
+                memOp (e, { 0xc7 }, 0, R (p.fd));  // << o >> 32 o más: 0
+                e.u32 (0);
+                return true;
+            }
+            ldEax (R (p.fa));
+            const uint8_t ext = p.fcond == 0 ? 0xe0 : p.fcond == 1 ? 0xe8 : 0xf8;  // shl / shr / sar eax, imm8
+            e.bytes ({ 0xc1, ext, (uint8_t) (c >= 32 ? 31 : c) });
+            stEax (R (p.fd));
+            return true;
+        }
+        case Fm1Pre::FastAluI:
+        case Fm1Pre::FastAluR:
+        {
+            const bool reg = p.fast == Fm1Pre::FastAluR;
+            const auto op = (Fm1Pre::AluOp) p.fcond;
+            // la segunda fuente: un registro ([rb]) o el inmediato
+            const auto rhsOp = [&] (uint8_t memOpc, uint8_t immOpc)
+            {
+                if (reg) memOp (e, { memOpc }, 0, R (p.fb));
+                else { e.u8 (immOpc); e.u32 (p.fimm); }
+            };
+            switch (op)
+            {
+                case Fm1Pre::Add: ldEax (R (p.fa)); rhsOp (0x03, 0x05); packFlags (e, false, flagsOff); break;
+                case Fm1Pre::Sub: ldEax (R (p.fa)); rhsOp (0x2b, 0x2d); packFlags (e, true, flagsOff); break;
+                case Fm1Pre::RSub:  // b - a
+                    if (reg) ldEax (R (p.fb));
+                    else { e.u8 (0xb8); e.u32 (p.fimm); }  // mov eax, imm32
+                    memOp (e, { 0x2b }, 0, R (p.fa));      // sub eax, [ra]
+                    packFlags (e, true, flagsOff);
+                    break;
+                case Fm1Pre::And: ldEax (R (p.fa)); rhsOp (0x23, 0x25); break;
+                case Fm1Pre::Or:  ldEax (R (p.fa)); rhsOp (0x0b, 0x0d); break;
+                case Fm1Pre::Xor: ldEax (R (p.fa)); rhsOp (0x33, 0x35); break;
+                case Fm1Pre::AndNot:
+                    ldEax (R (p.fa));
+                    if (reg)
+                    {
+                        memOp (e, { 0x8b }, 1, R (p.fb));
+                        e.bytes ({ 0xf7, 0xd1, 0x21, 0xc8 });  // not ecx; and eax, ecx
+                    }
+                    else { e.u8 (0x25); e.u32 (~p.fimm); }
+                    break;
+                case Fm1Pre::Mul:
+                    ldEax (R (p.fa));
+                    if (reg) memOp (e, { 0x0f, 0xaf }, 0, R (p.fb));   // imul eax, [rb]
+                    else { e.bytes ({ 0x69, 0xc0 }); e.u32 (p.fimm); } // imul eax, eax, imm32
+                    break;
+                case Fm1Pre::Shl:
+                case Fm1Pre::Shr:
+                case Fm1Pre::Sar:
+                {
+                    const uint8_t ext = op == Fm1Pre::Shl ? 0xe0 : op == Fm1Pre::Shr ? 0xe8 : 0xf8;
+                    ldEax (R (p.fa));
+                    if (reg)
+                    {
+                        memOp (e, { 0x8b }, 1, R (p.fb));  // mov ecx, [rb] (x86 toma cl & 31, como alu)
+                        e.bytes ({ 0xd3, ext });
+                    }
+                    else
+                        e.bytes ({ 0xc1, ext, (uint8_t) (p.fimm & 31) });
+                    break;
+                }
+                default: return false;
+            }
+            stEax (R (p.fd));
+            return true;
+        }
+        default:
+            return false;
+    }
+}
+
+// FastLd / FastSt con la RAM en línea, como Soc::read* / write* en su ruta de RAM: palabra en cualquier dirección, media
+// en addr & ~1 (Soc::read16 toma la media de la palabra alineada), byte. Solo si el desplazamiento cabe con 4 bytes (la
+// condición de Soc::read32; más estricta que la de las demás). Almacenar además pide, como Ram::wrote, que la palabra no
+// sea código ni haya apuntado de escrituras, y una media en dirección par. Lo demás va por la ruta lenta: lo pendiente
+// se apunta, jitOp hace la instrucción entera (el bus, los efectos, la parada) y, si sigue el bloque, se vuelve a la
+// cuenta de pendientes de la ruta rápida (insnCount menos pend + 1: jitOp y el apunte la habían sumado)
+bool Cpu::jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits)
+{
+    const auto& p = l.pre;
+    if (! jitRamOk || (p.fast != Fm1Pre::FastLd && p.fast != Fm1Pre::FastSt) || (p.fw != 1 && p.fw != 2 && p.fw != 4))
+        return false;
+    const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
+    const auto R = [&] (int r) { return off (&regs[r & 15]); };
+    const bool store = p.fast == Fm1Pre::FastSt;
+    // dirección -> eax
+    if (p.fsp)
+    {
+        memOp (e, { 0x8b }, 0, off (&sp));
+        e.u8 (0x05); e.u32 (p.fimm);                                // add eax, imm32
+    }
+    else if (p.fidx)
+    {
+        memOp (e, { 0x8b }, 0, R (p.fb));
+        if (p.fsh != 0) e.bytes ({ 0xc1, 0xe0, p.fsh });            // shl eax, fsh
+        memOp (e, { 0x03 }, 0, R (p.fa));                           // add eax, [ra]
+    }
+    else
+    {
+        memOp (e, { 0x8b }, 0, R (p.fa));
+        if (p.fimm != 0) { e.u8 (0x05); e.u32 (p.fimm); }
+    }
+    std::vector<size_t> slow;
+    const auto jcc = [&] (uint8_t cc) { e.bytes ({ 0x0f, cc }); slow.push_back (e.pos()); e.u32 (0); };
+    e.bytes ({ 0x89, 0xc1 });                                       // mov ecx, eax
+    e.bytes ({ 0x81, 0xe9 }); e.u32 (jitRam.base);                  // sub ecx, base
+    e.bytes ({ 0x81, 0xf9 }); e.u32 (jitRam.size - 4);              // cmp ecx, size - 4
+    jcc (0x87);                                                     // ja lenta
+    if (p.fw == 2 && store)
+    {
+        e.bytes ({ 0xa8, 0x01 });                                   // test al, 1
+        jcc (0x85);                                                 // jnz lenta (media impar: Soc lo hace por palabra)
+    }
+    if (p.fw == 2 && ! store)
+        e.bytes ({ 0x83, 0xe1, 0xfe });                             // and ecx, ~1
+    e.bytes ({ 0x49, 0xbb }); e.u64 ((uint64_t) (uintptr_t) jitRam.data);  // mov r11, RAM
+    if (store)
+    {
+        e.bytes ({ 0x49, 0xba }); e.u64 ((uint64_t) (uintptr_t) jitRam.code);  // mov r10, marcas de código
+        e.bytes ({ 0x89, 0xca, 0xc1, 0xea, 0x02 });                 // mov edx, ecx; shr edx, 2
+        e.bytes ({ 0x41, 0x80, 0x3c, 0x12, 0x00 });                 // cmp byte [r10 + rdx], 0
+        jcc (0x85);                                                 // jne lenta (código: Ram::wrote cuenta)
+        e.bytes ({ 0x49, 0xba }); e.u64 ((uint64_t) (uintptr_t) jitRam.log);   // mov r10, &Ram::log
+        e.bytes ({ 0x49, 0x83, 0x3a, 0x00 });                       // cmp qword [r10], 0
+        jcc (0x85);                                                 // jne lenta (se apuntan escrituras)
+        memOp (e, { 0x8b }, 2, R (p.fd));                           // mov edx, [rd]
+        if (p.fw == 4) e.bytes ({ 0x41, 0x89, 0x14, 0x0b });        // mov [r11 + rcx], edx
+        else if (p.fw == 2) e.bytes ({ 0x66, 0x41, 0x89, 0x14, 0x0b });
+        else e.bytes ({ 0x41, 0x88, 0x14, 0x0b });
+    }
+    else
+    {
+        if (p.fw == 4) e.bytes ({ 0x41, 0x8b, 0x04, 0x0b });        // mov eax, [r11 + rcx]
+        else if (p.fw == 2) e.bytes ({ 0x41, 0x0f, (uint8_t) (p.fsign ? 0xbf : 0xb7), 0x04, 0x0b });  // movsx/movzx eax, word
+        else e.bytes ({ 0x41, 0x0f, (uint8_t) (p.fsign ? 0xbe : 0xb6), 0x04, 0x0b });                  // movsx/movzx eax, byte
+        memOp (e, { 0x89 }, 0, R (p.fd));                           // mov [rd], eax
+    }
+    e.u8 (0xe9);                                                    // jmp sigue
+    const auto cont = e.pos();
+    e.u32 (0);
+    // ruta lenta
+    const auto slowAt = e.pos();
+    for (const auto x : slow)
+        e.patch32 (x, (uint32_t) (slowAt - (x + 4)));
+    if (pend > 0)
+    {
+        memOp (e, { 0x81 }, 0, off (&insnCount), true); e.u32 (pend);  // add qword [insnCount], pend
+        memOp (e, { 0xc7 }, 0, off (&holdIrq)); e.u32 (0);              // mov dword [holdIrq], 0
+        memOp (e, { 0xc7 }, 0, off (&pc)); e.u32 (pendPc);              // mov dword [pc], siguiente
+    }
+    else
+    {
+        memOp (e, { 0xc7 }, 0, off (&pc)); e.u32 (l.pc);                // (pc ya es el de esta si no hay pendientes)
+    }
+#if defined(_WIN32)
+    e.bytes ({ 0x48, 0x89, 0xd9 });  // mov rcx, rbx
+    e.u8 (0xba); e.u32 (j);          // mov edx, j
+    e.bytes ({ 0x49, 0xb8 });        // mov r8, línea
+#else
+    e.bytes ({ 0x48, 0x89, 0xdf });  // mov rdi, rbx
+    e.u8 (0xbe); e.u32 (j);          // mov esi, j
+    e.bytes ({ 0x48, 0xba });        // mov rdx, línea
+#endif
+    e.u64 ((uint64_t) (uintptr_t) &l);
+    e.bytes ({ 0x48, 0xb8 });        // mov rax, jitOp
+    e.u64 ((uint64_t) (uintptr_t) &Cpu::jitOp);
+    e.bytes ({ 0xff, 0xd0 });        // call rax
+    e.bytes ({ 0x85, 0xc0 });        // test eax, eax
+    e.bytes ({ 0x0f, 0x85 });        // jnz salida
+    exits.push_back (e.pos());
+    e.u32 (0);
+    // sigue el bloque: otra vez pendientes (esta incluida), como en la ruta rápida
+    memOp (e, { 0x81 }, 5, off (&insnCount), true); e.u32 (pend + 1);  // sub qword [insnCount], pend + 1
+    e.patch32 (cont, (uint32_t) (e.pos() - (cont + 4)));
+    return true;
+}
+
+// El código de un bloque: prólogo, cada instrucción en nativo (jitNative) o como llamada a jitOp, epílogo
+void Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines)
+{
+    const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
+    const auto insnOff = off (&insnCount), holdOff = off (&holdIrq), pcOff = off (&pc);
+    e.bytes ({ 0x53 });                    // push rbx
+    e.bytes ({ 0x41, 0x54 });              // push r12
+    e.bytes ({ 0x48, 0x83, 0xec, 0x28 });  // sub rsp, 40 (sombra de 32 B de Windows; pila alineada a 16)
+#if defined(_WIN32)
+    e.bytes ({ 0x48, 0x89, 0xcb });        // mov rbx, rcx
+#else
+    e.bytes ({ 0x48, 0x89, 0xfb });        // mov rbx, rdi
+#endif
+    e.bytes ({ 0x4c, 0x8b, 0x23 });        // mov r12, [rbx] (JitCtx::cpu)
+    uint32_t pend = 0, pendPc = 0;
+    // lo que finish haría en las instrucciones nativas pendientes
+    const auto sync = [&]
+    {
+        if (pend == 0)
+            return;
+        memOp (e, { 0x81 }, 0, insnOff, true);  // add qword [insnCount], pend
+        e.u32 (pend);
+        memOp (e, { 0xc7 }, 0, holdOff);        // mov dword [holdIrq], 0
+        e.u32 (0);
+        memOp (e, { 0xc7 }, 0, pcOff);          // mov dword [pc], siguiente
+        e.u32 (pendPc);
+        pend = 0;
+    };
+    std::vector<size_t> exits;
+    const auto n = (uint32_t) lines.size();
+    for (uint32_t j = 0; j < n; ++j)
+    {
+        const auto& l = *lines[j];
+        if (jitMem (e, l, j, pend, pendPc, exits))
+        {
+            ++pend;
+            pendPc = l.pc + l.len;
+            continue;
+        }
+        if (jitNative (e, l))
+        {
+            ++pend;
+            pendPc = l.pc + l.len;
+            continue;
+        }
+        sync();
+#if defined(_WIN32)
+        e.bytes ({ 0x48, 0x89, 0xd9 });    // mov rcx, rbx
+        e.u8 (0xba); e.u32 (j);            // mov edx, j
+        e.bytes ({ 0x49, 0xb8 });          // mov r8, línea
+#else
+        e.bytes ({ 0x48, 0x89, 0xdf });    // mov rdi, rbx
+        e.u8 (0xbe); e.u32 (j);            // mov esi, j
+        e.bytes ({ 0x48, 0xba });          // mov rdx, línea
+#endif
+        e.u64 ((uint64_t) (uintptr_t) lines[j]);
+        e.bytes ({ 0x48, 0xb8 });          // mov rax, jitOp
+        e.u64 ((uint64_t) (uintptr_t) &Cpu::jitOp);
+        e.bytes ({ 0xff, 0xd0 });          // call rax
+        e.bytes ({ 0x85, 0xc0 });          // test eax, eax
+        e.bytes ({ 0x0f, 0x85 });          // jnz salida (jitOp ya dejó done, status y el ciclo)
+        exits.push_back (e.pos());
+        e.u32 (0);
+    }
+    sync();
+    // el bloque entero: el ciclo de la última instrucción y done = n
+    e.bytes ({ 0x48, 0x8b, 0x43, (uint8_t) offsetof (JitCtx, now) });     // mov rax, [rbx + now]
+    e.bytes ({ 0x48, 0x05 }); e.u32 (n - 1);                               // add rax, n - 1
+    e.bytes ({ 0x48, 0x8b, 0x4b, (uint8_t) offsetof (JitCtx, cycles) });  // mov rcx, [rbx + cycles]
+    e.bytes ({ 0x48, 0x89, 0x01 });                                        // mov [rcx], rax
+    e.bytes ({ 0xc7, 0x43, (uint8_t) offsetof (JitCtx, done) }); e.u32 (n);  // mov dword [rbx + done], n
+    const auto out = e.pos();
+    for (const auto x : exits)
+        e.patch32 (x, (uint32_t) (out - (x + 4)));
+    e.bytes ({ 0x48, 0x83, 0xc4, 0x28 });  // add rsp, 40
+    e.bytes ({ 0x41, 0x5c });              // pop r12
+    e.bytes ({ 0x5b });                    // pop rbx
+    e.bytes ({ 0xc3 });                    // ret
+}
+
+// El bloque que empieza en at (XIP), compilado la primera vez; nullptr si tiene menos de 2 instrucciones o no hay JIT.
+// Código (x86-64): prólogo, por instrucción "jitOp (ctx, j, línea); si devuelve != 0, salir", epílogo
+const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
+{
+    if (jitTable.empty())
+    {
+        jitRamOk = bus.ramView (jitRam) && jitRam.size >= 8;
+        jitTable.resize ((size_t) 1 << kJitBits);
+        jitCode = std::make_unique<CodeBuffer>();
+        if (! jitCode->init ((size_t) 16 << 20))
+            jitFailed = true;
+    }
+    auto& b = jitTable[(at >> 1) & ((1u << kJitBits) - 1)];
+    if (b.pc == at)
+        return b.fn != nullptr ? &b : nullptr;
+    b = JitBlock {};
+    b.pc = at;
+    if (jitFailed)
+        return nullptr;
+    std::vector<const Line*> lines;
+    uint32_t a = at;
+    while (lines.size() < kJitMax && a >= 0x02000000u && a < 0x04000000u)
+    {
+        Line l;
+        l.win = ((uint64_t) bus.fetch32 (a + 4) << 32) | bus.fetch32 (a);
+        l.entry = decodeAny (l.win, l.raw);
+        if (l.entry == nullptr)
+            break;
+        l.pc = a;
+        l.len = l.entry->len;
+        computePre (*l.entry, l.raw, l.pre);
+        const auto f = l.pre.fast;
+        if (f == Fm1Pre::FastNone || l.pre.pairHead)
+            break;
+        jitLines.push_back (l);
+        lines.push_back (&jitLines.back());
+        a += l.len;
+        // cambian el flujo, o lo que miran irqReady / inIsr: la última del bloque
+        if (f == Fm1Pre::FastBrI || f == Fm1Pre::FastBrR || f == Fm1Pre::FastGoto || f == Fm1Pre::FastCall || f == Fm1Pre::FastRts
+            || f == Fm1Pre::FastTb || f == Fm1Pre::FastCallR || f == Fm1Pre::FastRti || f == Fm1Pre::FastPopPc || f == Fm1Pre::FastDecBr
+            || f == Fm1Pre::FastIe || f == Fm1Pre::FastIcfgWr)
+            break;
+    }
+    if (lines.size() < 2)
+        return nullptr;
+    Emitter e;
+    jitEmit (e, lines);
+    void* fn = jitCode->add (e.b.data(), e.b.size());
+    if (fn == nullptr)
+    {
+        jitFailed = true;  // búfer lleno (16 MiB): lo que queda, interpretado
+        return nullptr;
+    }
+    ++jitCompiled;
+    b.fn = (JitFn) fn;
+    b.n = (uint32_t) lines.size();
+    b.last = lines.back()->pc;
+    return &b;
+}
+
 uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
 {
     ok = true;
@@ -1630,6 +2074,42 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
         }
         if (s.blockedPrio >= 0 && irqReady ((uint8_t) s.blockedPrio))
             break;
+        // un bloque del JIT, si ninguna parada de arriba puede saltar dentro de él (ver jitOn)
+        if (jitOn && jitSupported() && fastPath && hist == nullptr && pcHist == nullptr && ! pairPending && predSkips.empty()
+            && repEnd == 0 && pc >= 0x02000000u && pc < 0x04000000u)
+        {
+            if (const auto* b = jitAt (bus, pc); b != nullptr)
+            {
+                const uint32_t n = b->n, lo = pc + 1, hi = b->last;
+                const auto inside = [lo, hi] (uint32_t x) { return x >= lo && x <= hi; };
+                bool fits = n <= room && now + n - 1 < s.due && ! inside (s.stopA) && ! inside (s.stopB);
+                if (fits && s.loopEnabled)
+                {
+                    fits = ! inside (loopHint) && ! (now + n - 1 >= s.probeAnyAt && room >= s.probeMin);
+                    if (fits && s.anyLoops)
+                        for (uint32_t a = lo + 1; a <= hi && fits; a += 2)  // (las instrucciones empiezan en media palabra)
+                            fits = s.loops[(a >> 1) & 63] != a;
+                }
+                if (fits && hasPcWin)
+                    fits = (pcWin[0][0] <= pc && hi <= pcWin[0][1]) || (pcWin[1][0] <= pc && hi <= pcWin[1][1]);
+                if (fits)
+                {
+                    *s.inIsr = ! irqLevels.empty();  // (solo la última, rti, lo cambia)
+                    pcOut = false;
+                    JitCtx c { this, &bus, now, s.cycles, s.sideEffects, s.side0 };
+                    b->fn (&c);
+                    ++jitRuns;
+                    jitInsns += c.done;
+                    if (c.status == 2)
+                    {
+                        ok = false;
+                        return k + c.done;
+                    }
+                    k += c.done - 1;  // (más el ++k del for)
+                    continue;
+                }
+            }
+        }
         *s.cycles = now;
         *s.inIsr = ! irqLevels.empty();
         bool t = false;
