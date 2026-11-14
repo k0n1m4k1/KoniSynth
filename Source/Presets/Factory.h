@@ -707,7 +707,7 @@ static const std::vector<FactoryPreset>& factoryPresets()
         // 24 voces)
         { "GUS Piano", "Keys", { { "engine", 15 }, { "gusMode", 0 }, { "gusProgram", 0 } }, {}, "Needs your GUS patches (see the Gravis UltraSound manual)" },
         // M-VAVE FM-1 (firmware del usuario): el primero de la carpeta de firmwares, con su preset de arranque
-        { "FM-1 Firmware", "Keys", { { "engine", 16 } }, {}, "Needs your FM-1 firmware (.fwsc) in Documents/KoniSynth/Firmware/FM-1" },
+        { "FM-1 Firmware", "Keys", { { "engine", 16 } }, {}, "Needs your FM-1 firmware (.fwsc) in Documents/KoniSynth/ROMs/FM-1" },
         // OPLL: instrumento 7 "Trumpet" de la ROM del YM2413 (volcado del silicio, Nuked-OPLL) con SUS
         { "OPLL Trumpet", "Brass", { { "gain", 0.189f }, { "engine", 13 }, { "oplModel", 3 }, { "opllInstrument", 7 }, { "opllSustain", 1 } }, {}, "Mono melody, C4-C6", 60, 84 },
         // Stab de metales polifónico: 2 sierras + sub-octava del Osc 2, filtro que abre en 40 ms. Diseño propio

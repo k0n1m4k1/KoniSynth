@@ -1562,7 +1562,11 @@ private:
     // which: KoniSynthProcessor::sourceSample (pestaña Sample), osc2Sample u osc3Sample (Osc 2 / Osc 3 en modo Sample) o el de un motor
     void chooseSample (int which)
     {
-        fileChooser = std::make_unique<juce::FileChooser> ("Load sample, SoundFont (.sf2), SNES BRR or SPC, NES DMC", juce::File(), SampleImport::fileFilter);
+        fileChooser = std::make_unique<juce::FileChooser> ("Load sample, SoundFont (.sf2), SNES BRR or SPC, NES DMC",
+                                                           // (el SNES empieza en ROMs/SNES, si existe)
+                                                           which == KoniSynthProcessor::snesSample && romsFolder ("SNES").isDirectory()
+                                                               ? romsFolder ("SNES") : juce::File(),
+                                                           SampleImport::fileFilter);
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
             [safe = SafePointer<KoniSynthEditor> (this), which] (const juce::FileChooser& fc)
             {
@@ -1661,7 +1665,8 @@ private:
     // DX7: voz única o banco de 32 (SysEx) -> parámetros del FM 6-Op
     void chooseDx7Syx()
     {
-        fileChooser = std::make_unique<juce::FileChooser> ("Load DX7 voice or bank (SysEx)", juce::File(), "*.syx");
+        const auto dx7Dir = dx7BankFolder();
+        fileChooser = std::make_unique<juce::FileChooser> ("Load DX7 voice or bank (SysEx)", dx7Dir.isDirectory() ? dx7Dir : juce::File(), "*.syx");
         fileChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
             [safe = SafePointer<KoniSynthEditor> (this)] (const juce::FileChooser& fc)
             {

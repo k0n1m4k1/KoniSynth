@@ -52,47 +52,56 @@ static void migrateLegacyConfig()
     juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("KoniSynth").getChildFile ("simd-selftest.txt").deleteFile();
 }
 
-// Carpeta de ROM del MT-32 / CM-32L: la elegida por el usuario (clave mt32Roms) o Documentos/KoniSynth/ROMs/MT-32.
-// KONI_MT32_ROMS (pruebas y KoniBench) la sustituye sin tocar el ajuste del usuario
+// Lo que aporta el usuario para los motores que emulan un aparato, todo bajo Documentos/KoniSynth/ROMs/<aparato>: MT-32
+// (ROM), FM-1 (firmwares .fwsc y sus memorias), DX7 (.syx), GUS (.PAT) y SNES (.brr / .spc)
+static juce::File romsFolder (const char* device)
+{
+    return juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("KoniSynth/ROMs").getChildFile (device);
+}
+
+// La carpeta elegida (si es absoluta y existe) o la de por defecto: una carpeta movida o borrada por el usuario vuelve a la
+// de ROMs/ sin tocar su ajuste
+static juce::File chosenOr (const juce::String& path, const char* device)
+{
+    const auto p = path.trim();
+    return p.isNotEmpty() && juce::File::isAbsolutePath (p) && juce::File (p).isDirectory() ? juce::File (p) : romsFolder (device);
+}
+
+// Carpeta de ROM del MT-32 / CM-32L: la elegida por el usuario (clave mt32Roms) o ROMs/MT-32. KONI_MT32_ROMS (pruebas y
+// KoniBench) la sustituye sin tocar el ajuste del usuario
 static juce::File mt32RomFolder()
 {
     if (const auto env = juce::SystemStats::getEnvironmentVariable ("KONI_MT32_ROMS", {}); env.isNotEmpty())
         return juce::File (env);
-    const auto path = configText ("mt32Roms", "mt32-roms.txt").trim();
-    return path.isNotEmpty() && juce::File::isAbsolutePath (path)
-               ? juce::File (path)
-               : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("KoniSynth/ROMs/MT-32");
+    return chosenOr (configText ("mt32Roms", "mt32-roms.txt"), "MT-32");
 }
 
 static void setMt32RomFolder (const juce::File& folder) { setConfigText ("mt32Roms", folder.getFullPathName()); }
 
 // Carpeta de patches del Gravis UltraSound (.PAT con timidity.cfg o DEFAULT.CFG): la elegida (clave gusPatches) o
-// Documentos/KoniSynth/Patches/GUS. KONI_GUS_PATCHES (pruebas y KoniBench) la sustituye sin tocar el ajuste del usuario
+// ROMs/GUS. KONI_GUS_PATCHES (pruebas y KoniBench) la sustituye sin tocar el ajuste del usuario
 static juce::File gusPatchFolder()
 {
     if (const auto env = juce::SystemStats::getEnvironmentVariable ("KONI_GUS_PATCHES", {}); env.isNotEmpty())
         return juce::File (env);
     auto config = openConfig();
-    const auto path = config != nullptr ? config->getValue ("gusPatches").trim() : juce::String();
-    return path.isNotEmpty() && juce::File::isAbsolutePath (path)
-               ? juce::File (path)
-               : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("KoniSynth/Patches/GUS");
+    return chosenOr (config != nullptr ? config->getValue ("gusPatches") : juce::String(), "GUS");
 }
 
 static void setGusPatchFolder (const juce::File& folder) { setConfigText ("gusPatches", folder.getFullPathName()); }
 
 // Carpeta de firmwares del M-VAVE FM-1: una subcarpeta por firmware con sus versiones (.fwsc), p. ej. M-VAVE/FM-1_015.fwsc o
-// GHOULBOX/ghoulbox-2.4.fwsc. La elegida (clave fm1Firmware) o Documentos/KoniSynth/Firmware/FM-1. KONI_FM1_FIRMWARE (pruebas y
-// KoniBench) la sustituye sin tocar el ajuste del usuario. KoniSynth no incluye ningún firmware: los aporta el usuario
+// GHOULBOX/ghoulbox-2.4.fwsc. La elegida (clave fm1Firmware) o ROMs/FM-1. KONI_FM1_FIRMWARE (pruebas y KoniBench) la sustituye
+// sin tocar el ajuste del usuario. KoniSynth no incluye ningún firmware: los aporta el usuario
 static juce::File fm1FirmwareFolder()
 {
     if (const auto env = juce::SystemStats::getEnvironmentVariable ("KONI_FM1_FIRMWARE", {}); env.isNotEmpty())
         return juce::File (env);
     auto config = openConfig();
-    const auto path = config != nullptr ? config->getValue ("fm1Firmware").trim() : juce::String();
-    return path.isNotEmpty() && juce::File::isAbsolutePath (path)
-               ? juce::File (path)
-               : juce::File::getSpecialLocation (juce::File::userDocumentsDirectory).getChildFile ("KoniSynth/Firmware/FM-1");
+    return chosenOr (config != nullptr ? config->getValue ("fm1Firmware") : juce::String(), "FM-1");
 }
+
+// Donde empieza el selector de bancos DX7 (.syx): ROMs/DX7 (el .syx elegido va en el preset; no es un ajuste)
+static juce::File dx7BankFolder() { return romsFolder ("DX7"); }
 
 static void setFm1FirmwareFolder (const juce::File& folder) { setConfigText ("fm1Firmware", folder.getFullPathName()); }
