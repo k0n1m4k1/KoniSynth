@@ -293,14 +293,19 @@ private:
     };
     using JitFn = void (*) (JitCtx*);
     struct JitBlock { uint32_t pc = 0xffffffffu, last = 0, n = 0; JitFn fn = nullptr; };
-    static constexpr uint32_t kJitBits = 18, kJitMax = 64;  // 2^18 medias palabras: 512 KiB de XIP sin solaparse
-    std::vector<JitBlock> jitTable;
+    // índice por media palabra de los primeros 2 MiB de la XIP (la aplicación de Felucca ocupa 586 KB): 0 sin mirar,
+    // 1 sin bloque, k + 2 = jitBlocks[k]. 4 MiB; la consulta "sin bloque" no toca los bloques
+    static constexpr uint32_t kJitSpan = 1u << 21, kJitMax = 64;
+    std::vector<uint32_t> jitIndex;
+    std::vector<JitBlock> jitBlocks;
     std::deque<Line> jitLines;  // las líneas de los bloques (el código nativo apunta a ellas: no se mueven)
     std::unique_ptr<CodeBuffer> jitCode;
     bool jitFailed = false;     // sin memoria ejecutable o búfer lleno: el intérprete
     const JitBlock* jitAt (Bus& bus, uint32_t at);
     static int jitOp (JitCtx* c, uint32_t j, const Line* l);
     bool jitNative (Emitter& e, const Line& l);  // una instrucción en código nativo (false: la hace jitOp)
+    // el salto que cierra el bloque, en nativo, con lo pendiente apuntado (pend nativas antes): false si no
+    bool jitBranch (Emitter& e, const Line& l, uint32_t pend);
     // carga o almacenamiento con la RAM en línea; el resto de direcciones, por jitOp (j: índice en el bloque; pend y
     // pendPc: las nativas pendientes de apuntar antes de ella). false: esta forma no
     bool jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);

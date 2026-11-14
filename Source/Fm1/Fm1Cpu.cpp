@@ -1907,6 +1907,86 @@ bool Cpu::jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t
     return true;
 }
 
+// El salto que cierra un bloque (FastBrI, FastBrR, FastDecBr, FastGoto, FastCall, FastRts), como su caso en execFast y
+// finish: lo pendiente más esta instrucción apuntados, el pc de destino o el siguiente, y loopHint donde execFast lo pone
+bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
+{
+    const auto& p = l.pre;
+    const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
+    const auto R = [&] (int r) { return off (&regs[r & 15]); };
+    const auto nextPc = l.pc + l.len;
+    const auto target = (uint32_t) ((int64_t) nextPc + p.foff);
+    const bool cond = p.fast == Fm1Pre::FastBrI || p.fast == Fm1Pre::FastBrR || p.fast == Fm1Pre::FastDecBr;
+    uint8_t jcc = 0;  // jcc de x86 tras cmp a, b
+    if (cond)
+    {
+        switch ((Cond) p.fcond)
+        {
+            case Cond::Eq:  jcc = 0x84; break;
+            case Cond::Ne:  jcc = 0x85; break;
+            case Cond::LtU: jcc = 0x82; break;
+            case Cond::GtU: jcc = 0x87; break;
+            case Cond::LeU: jcc = 0x86; break;
+            case Cond::GeU: jcc = 0x83; break;
+            case Cond::LtS: jcc = 0x8c; break;
+            case Cond::GtS: jcc = 0x8f; break;
+            case Cond::LeS: jcc = 0x8e; break;
+            case Cond::GeS: jcc = 0x8d; break;
+            default: return false;  // (comparaciones de coma flotante: jitOp)
+        }
+    }
+    else if (p.fast != Fm1Pre::FastGoto && p.fast != Fm1Pre::FastCall && p.fast != Fm1Pre::FastRts)
+        return false;
+    memOp (e, { 0x81 }, 0, off (&insnCount), true); e.u32 (pend + 1);  // add qword [insnCount], pend + 1
+    memOp (e, { 0xc7 }, 0, off (&holdIrq)); e.u32 (0);                // mov dword [holdIrq], 0
+    const auto setPc = [&] (uint32_t v) { memOp (e, { 0xc7 }, 0, off (&pc)); e.u32 (v); };
+    switch (p.fast)
+    {
+        case Fm1Pre::FastGoto: setPc (target); return true;
+        case Fm1Pre::FastCall:
+            memOp (e, { 0xc7 }, 0, off (&rets)); e.u32 (nextPc);  // rets = siguiente
+            setPc (target);
+            return true;
+        case Fm1Pre::FastRts:
+            memOp (e, { 0x8b }, 0, off (&rets));                   // mov eax, [rets]
+            memOp (e, { 0x89 }, 0, off (&pc));                     // mov [pc], eax
+            return true;
+        default: break;
+    }
+    if (p.fast == Fm1Pre::FastDecBr)
+    {
+        memOp (e, { 0x81 }, 5, R (p.fa)); e.u32 (1);              // sub dword [ra], 1
+    }
+    if (p.fast == Fm1Pre::FastBrR)
+    {
+        memOp (e, { 0x8b }, 0, R (p.fa));                          // mov eax, [ra]
+        memOp (e, { 0x3b }, 0, R (p.fb));                          // cmp eax, [rb]
+    }
+    else
+    {
+        memOp (e, { 0x81 }, 7, R (p.fa)); e.u32 (p.fimm);         // cmp dword [ra], imm32
+    }
+    e.bytes ({ 0x0f, jcc });                                        // jcc tomado
+    const auto taken = e.pos();
+    e.u32 (0);
+    setPc (nextPc);
+    e.u8 (0xe9);                                                   // jmp fin
+    const auto end = e.pos();
+    e.u32 (0);
+    e.patch32 (taken, (uint32_t) (e.pos() - (taken + 4)));
+    setPc (target);
+    // loopHint, como execFast: "!=" hacia atrás (BrI); "<" hacia atrás corto, hasta 16 B (BrR)
+    const bool hint = (p.fast == Fm1Pre::FastBrI && p.foff < 0 && (Cond) p.fcond == Cond::Ne)
+                   || (p.fast == Fm1Pre::FastBrR && p.foff < 0 && p.foff >= -16
+                       && ((Cond) p.fcond == Cond::LtU || (Cond) p.fcond == Cond::LtS));
+    if (hint)
+    {
+        memOp (e, { 0xc7 }, 0, off (&loopHint)); e.u32 (target);
+    }
+    e.patch32 (end, (uint32_t) (e.pos() - (end + 4)));
+    return true;
+}
+
 // El código de un bloque: prólogo, cada instrucción en nativo (jitNative) o como llamada a jitOp, epílogo
 void Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines)
 {
@@ -1940,6 +2020,11 @@ void Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines)
     for (uint32_t j = 0; j < n; ++j)
     {
         const auto& l = *lines[j];
+        if (j + 1 == n && jitBranch (e, l, pend))
+        {
+            pend = 0;  // (apuntado con el salto)
+            continue;
+        }
         if (jitMem (e, l, j, pend, pendPc, exits))
         {
             ++pend;
@@ -1991,24 +2076,26 @@ void Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines)
 // Código (x86-64): prólogo, por instrucción "jitOp (ctx, j, línea); si devuelve != 0, salir", epílogo
 const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
 {
-    if (jitTable.empty())
+    const uint32_t o = at - 0x02000000u;
+    if (o >= kJitSpan)
+        return nullptr;
+    if (jitIndex.empty())
     {
         jitRamOk = bus.ramView (jitRam) && jitRam.size >= 8;
-        jitTable.resize ((size_t) 1 << kJitBits);
+        jitIndex.assign (kJitSpan / 2, 0);
         jitCode = std::make_unique<CodeBuffer>();
         if (! jitCode->init ((size_t) 16 << 20))
             jitFailed = true;
     }
-    auto& b = jitTable[(at >> 1) & ((1u << kJitBits) - 1)];
-    if (b.pc == at)
-        return b.fn != nullptr ? &b : nullptr;
-    b = JitBlock {};
-    b.pc = at;
-    if (jitFailed)
+    auto& slot = jitIndex[o >> 1];
+    if (slot >= 2)
+        return &jitBlocks[slot - 2];
+    if (slot == 1 || jitFailed)
         return nullptr;
+    slot = 1;  // (hasta que se compile)
     std::vector<const Line*> lines;
     uint32_t a = at;
-    while (lines.size() < kJitMax && a >= 0x02000000u && a < 0x04000000u)
+    while (lines.size() < kJitMax && a - 0x02000000u < kJitSpan)
     {
         Line l;
         l.win = ((uint64_t) bus.fetch32 (a + 4) << 32) | bus.fetch32 (a);
@@ -2041,10 +2128,14 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
         return nullptr;
     }
     ++jitCompiled;
+    JitBlock b;
+    b.pc = at;
     b.fn = (JitFn) fn;
     b.n = (uint32_t) lines.size();
     b.last = lines.back()->pc;
-    return &b;
+    jitBlocks.push_back (b);
+    slot = (uint32_t) jitBlocks.size() + 1;
+    return &jitBlocks.back();
 }
 
 uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
