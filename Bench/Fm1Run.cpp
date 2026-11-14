@@ -204,6 +204,11 @@ int main (int argc, char** argv)
     // --dumpcpu1 FICHERO con --dumpaddr ÍNDICE:BÚFER (hexadecimal): cada bloque de 64 float que deja el núcleo de sonido
     // (cpu1) en su búfer doble, para la prueba diferencial. ÍNDICE: el byte del búfer en uso; búferes en BÚFER + 256·índice
     std::string dumpCpu1;
+    uint32_t probeMax = 0;
+    bool loopTimer = true;
+    bool observeOn = true;
+    bool timerSkip = true;  // --timerskip off: las vueltas con contador se comprueban en sombra pero no se saltan  // --observe off: sin vueltas observadas (Machine::Observe)
+    uint32_t forcePc = 0xffffffffu;  // --probeat PC (hex): sondear siempre ahí (diagnóstico)  // --looptimer off: el salto de bucles no admite vueltas que leen el contador del TIMER4  // --probemax N: lo más que sigue un sondeo del salto de bucles (0: el de serie)
     uint32_t dumpIdx = 0, dumpBuf = 0;
     std::vector<std::pair<uint64_t, std::string>> ramDumps;  // --dumpram MS:FICHERO: la RAM entera en ese ms
     // --hle off|check|on: FmCore::render nativo (Fm1Hle.h); check lo compara con la emulada en cada llamada
@@ -234,6 +239,11 @@ int main (int argc, char** argv)
             ccMode = std::string (v) == "on" ? Machine::CcPoll::On : std::string (v) == "check" ? Machine::CcPoll::Check
                    : std::string (v) == "auto" ? Machine::CcPoll::Auto : Machine::CcPoll::Off;
         else if (opt == "--dumpcpu1") dumpCpu1 = v;
+        else if (opt == "--probemax") probeMax = (uint32_t) std::strtoul (v, nullptr, 10);
+        else if (opt == "--looptimer") loopTimer = std::string (v) != "off";
+        else if (opt == "--timerskip") timerSkip = std::string (v) != "off";
+        else if (opt == "--observe") observeOn = std::string (v) != "off";
+        else if (opt == "--probeat") forcePc = (uint32_t) std::strtoul (v, nullptr, 16);
         else if (opt == "--dumpaddr" && std::sscanf (v, "%x:%x", &dumpIdx, &dumpBuf) == 2) {}
         else if (opt == "--dumpram" && std::sscanf (v, "%llu:", &at) == 1 && std::strchr (v, ':') != nullptr)
             ramDumps.push_back ({ at, std::strchr (v, ':') + 1 });
@@ -294,6 +304,16 @@ int main (int argc, char** argv)
     if (profile > 0) m.synHist1 = &synHist;
     if (pcProfile1 > 0) m.pcHist1 = &pcHist1;
     m.loopSkip.enabled = ! reference;
+    std::unordered_map<uint32_t, uint64_t> badAt;
+    m.loopSkip.badAt = &badAt;
+    if (probeMax > 0)
+        m.loopSkip.probeMax = probeMax;
+    m.loopSkip.timerOk = loopTimer;
+    m.loopSkip.forcePc = forcePc;
+    m.observe.enabled = observeOn;
+    m.loopSkip.timerSkip = timerSkip;
+    std::map<std::tuple<uint32_t, uint32_t, uint32_t>, std::pair<uint64_t, uint64_t>> hitsAt;
+    m.loopSkip.hitsAt = &hitsAt;
     m.hle.mode = hleMode;
     m.ccPoll.mode = ccMode;
 #ifdef _WIN32
@@ -373,6 +393,41 @@ int main (int argc, char** argv)
                  100.0 * (double) soc.periph.skipped / (double) std::max<uint64_t> (soc.periph.cycles, 1));
     std::printf ("salto de bucles: %llu sondeos, %llu con bucle, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.probes,
                  (unsigned long long) m.loopSkip.hits, (unsigned long long) m.loopSkip.skipped);
+    std::printf ("  con el contador del TIMER4: %llu saltos; %llu vueltas comprobadas en sombra, %llu rechazadas\n",
+                 (unsigned long long) m.loopSkip.timerHits, (unsigned long long) m.loopSkip.timerVerified,
+                 (unsigned long long) m.loopSkip.timerRejected);
+    std::printf ("  ciclos hasta el siguiente evento al sondear: <2k %llu, <8k %llu, <32k %llu, <128k %llu, más %llu\n",
+                 (unsigned long long) m.loopSkip.roomHist[0], (unsigned long long) m.loopSkip.roomHist[1], (unsigned long long) m.loopSkip.roomHist[2],
+                 (unsigned long long) m.loopSkip.roomHist[3], (unsigned long long) m.loopSkip.roomHist[4]);
+    {
+        std::vector<std::pair<uint64_t, std::tuple<uint32_t, uint32_t, uint32_t>>> hits;
+        for (const auto& [key, c] : hitsAt)
+            hits.push_back ({ c.first, key });
+        std::sort (hits.rbegin(), hits.rend());
+        for (size_t q = 0; q < hits.size() && q < 8; ++q)
+        {
+            const auto& [pc, len, reads] = hits[q].second;
+            std::printf ("    vuelta en 0x%08x: %u instrucciones, %u lecturas del contador; %llu veces, %llu vueltas saltadas\n", pc, len, reads,
+                         (unsigned long long) hits[q].first, (unsigned long long) hitsAt[hits[q].second].second);
+        }
+    }
+    std::printf ("  vueltas observadas: %zu conocidas, %llu observadas, %llu con salto, %llu distintas, %llu instrucciones saltadas\n",
+                 m.observe.known.size(), (unsigned long long) m.observe.rounds, (unsigned long long) m.observe.hits,
+                 (unsigned long long) m.observe.misses, (unsigned long long) m.observe.skipped);
+    for (const auto& kn : m.observe.known)
+        std::printf ("    0x%08x: %u instrucciones, %u lecturas del contador, %u escrituras, registros muertos 0x%04x%s\n", kn.pc0, kn.len,
+                     kn.reads, kn.writes, kn.deadRegs, kn.deadFlags ? " y banderas" : "");
+    std::printf ("  sondeos fallidos: %llu por un acceso, %llu sin vuelta, %llu por un evento, %llu por una interrupción\n",
+                 (unsigned long long) m.loopSkip.failBad, (unsigned long long) m.loopSkip.failNoRound,
+                 (unsigned long long) m.loopSkip.failEvent, (unsigned long long) m.loopSkip.failIrq);
+    {
+        std::vector<std::pair<uint64_t, uint32_t>> bad;
+        for (const auto& [a, c] : badAt)
+            bad.push_back ({ c, a });
+        std::sort (bad.rbegin(), bad.rend());
+        for (size_t q = 0; q < bad.size() && q < 24; ++q)
+            std::printf ("    %llu  0x%08x\n", (unsigned long long) bad[q].first, bad[q].second);
+    }
     std::printf ("bucles de retardo contados: %llu saltos, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.counted,
                  (unsigned long long) m.loopSkip.countedSkipped);
     std::printf ("pantalla: encendida %d, %llu ventanas, revisión %u; audio %zu tramas (%.2f s); resets %u\n", soc.lcd.displayOn ? 1 : 0,

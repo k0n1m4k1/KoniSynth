@@ -108,6 +108,9 @@ public:
     uint64_t nextDue = 0;
     uint64_t roomCap = kNever;
     uint64_t skipped = 0;
+    // racha de lecturas del contador del TIMER4 fuera de una ISR (skipIdle); públicas: el sondeo de bucles las guarda y repone
+    uint64_t lastCntRead = 0;
+    uint32_t cntStreak = 0;
     std::vector<int16_t> audio;  // muestras L/R intercaladas de 16 bits reproducidas
     uint64_t audioHalves = 0;
     std::array<uint16_t, 16> adcValue {};
@@ -161,8 +164,6 @@ private:
     uint32_t paIn() const noexcept;
     uint32_t pbIn() const noexcept;
 
-    uint64_t lastCntRead = 0;
-    uint32_t cntStreak = 0;
     uint32_t t4Con = 0;
     uint64_t t4Base = 0;
     uint32_t t5Con = 0, t5Prd = 0;

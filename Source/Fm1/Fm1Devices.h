@@ -41,9 +41,9 @@ public:
         std::memcpy (&v, &data[a], 4);  // little-endian en x86 y ARM
         return v;
     }
-    void write8 (uint32_t a, uint8_t v) noexcept { wrote (a); data[a] = v; }
-    void write16 (uint32_t a, uint16_t v) noexcept { wrote (a); data[a] = (uint8_t) v; data[a + 1] = (uint8_t) (v >> 8); }
-    void write32 (uint32_t a, uint32_t v) noexcept { wrote (a); std::memcpy (&data[a], &v, 4); }
+    void write8 (uint32_t a, uint8_t v) noexcept { wrote (a, 1); data[a] = v; }
+    void write16 (uint32_t a, uint16_t v) noexcept { wrote (a, 2); data[a] = (uint8_t) v; data[a + 1] = (uint8_t) (v >> 8); }
+    void write32 (uint32_t a, uint32_t v) noexcept { wrote (a, 4); std::memcpy (&data[a], &v, 4); }
     void restore32 (uint32_t a, uint32_t v) noexcept { std::memcpy (&data[a], &v, 4); }  // sin contar (deshacer una sonda)
     void load (uint32_t offset, const uint8_t* bytes, size_t n)
     {
@@ -52,12 +52,22 @@ public:
     }
 
     uint64_t codeWrites = 0;
+    // (Machine, vuelta observada del salto de bucles) cada palabra que se va a escribir con lo que tenía, como las apunta
+    // el sondeo: la de la dirección y, si la escritura se sale de ella, la siguiente. nullptr: nada
+    std::vector<std::pair<uint32_t, uint32_t>>* log = nullptr;
 
 private:
-    void wrote (uint32_t a) noexcept
+    void wrote (uint32_t a, uint32_t width) noexcept
     {
         if (code[a >> 2] != 0)
             ++codeWrites;
+        if (log != nullptr) [[unlikely]]
+        {
+            const auto w = a & ~3u;
+            log->push_back ({ w, read32 (w) });
+            if ((a & 3) + width > 4)
+                log->push_back ({ w + 4, read32 (w + 4) });
+        }
     }
     std::vector<uint8_t> data, code;
 };

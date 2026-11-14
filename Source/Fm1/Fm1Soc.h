@@ -22,7 +22,9 @@
 #include "Fm1Periph.h"
 
 #include <array>
+#include <map>
 #include <memory>
+#include <tuple>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -96,6 +98,10 @@ public:
     // espera de byte, idle): sin ellos ni un tick vencido, nada de eso cambia (las ráfagas de Machine::runBlocks)
     uint64_t sideEffects = 0;
     uint64_t ticks = 0;
+    // (Machine, vuelta observada) con observing: lecturas del contador del TIMER4 y accesos que una vuelta saltada no
+    // repetiría (MMIO con efectos, escrituras fuera de la RAM, cerrojos, idle); advances: veces que se atendió el SoC
+    bool observing = false;
+    uint64_t obsT4 = 0, obsImpure = 0, advances = 0;
 
 private:
     enum class Region : uint8_t
@@ -200,7 +206,39 @@ public:
         uint64_t creditAt = 0;
         uint64_t skipped = 0, probes = 0, hits = 0;  // ciclos (= instrucciones) saltados, sondeos, sondeos con bucle
         uint64_t counted = 0, countedSkipped = 0;  // saltos de bucles de retardo contados (Cpu::skipCountedLoop) y sus instrucciones
-        struct Visit { Cpu::PlainState core; P33::Snap p33; Periph::AdcState adc; uint32_t at; size_t log; };
+        // lo más que un sondeo sigue a cpu0 buscando una vuelta: 8192 deja ver dos vueltas seguidas de la espera de trama de
+        // Felucca (2091 instrucciones; con contador hacen falta dos para ver el periodo). Medido: 0,48x -> 0,74x en Felucca 1.8.2
+        uint32_t probeMax = 8192;
+        uint32_t forcePc = 0xffffffffu;  // (diagnóstico) sondear siempre en este pc
+        // por qué falló cada sondeo: un acceso que no se puede repetir, sin vuelta en probeMax, un evento, una interrupción
+        uint64_t failBad = 0, failNoRound = 0, failEvent = 0, failIrq = 0;
+        std::array<uint64_t, 5> roomHist {};  // ciclos hasta el siguiente evento al empezar cada sondeo: <2k <8k <32k <128k más
+        // (diagnóstico) vueltas encontradas: (pc inicial, longitud, lecturas del contador) -> (veces, vueltas saltadas)
+        std::map<std::tuple<uint32_t, uint32_t, uint32_t>, std::pair<uint64_t, uint64_t>>* hitsAt = nullptr;
+        std::unordered_map<uint32_t, uint64_t>* badAt = nullptr;  // (diagnóstico) sondeos malos por dirección del acceso
+        struct Visit
+        {
+            Cpu::PlainState core; P33::Snap p33; Periph::AdcState adc; uint32_t at; size_t log;
+            uint64_t tReads, cyc, due, wdt, lastCnt, side; uint32_t streak;  // lo necesario para repetir la vuelta en sombra
+        };
+        // Vueltas que leen el contador del TIMER4 (0x10804; p. ej. la espera de trama de Felucca, que lee fm1_ticks() en cada
+        // pasada de ui_input). El valor leído deja restos distintos en cada vuelta (registros, banderas, palabras de RAM: los
+        // "muertos"), así que valen si:
+        //   - son un periodo: dos vueltas seguidas con el mismo recorrido de pc (un pc visitado varias veces por periodo no
+        //     cuenta; medido: el tramo de 2016 instrucciones entre dos llamadas de Felucca seguido de uno de 75);
+        //   - A, en sombra: con los muertos alterados al empezar, la vuelta acaba bit a bit como la real (están muertos);
+        //   - B, en sombra: con el contador desplazado 2^31, mismo recorrido, mismas direcciones escritas y mismo estado salvo
+        //     los muertos y la pila muerta (el contador solo llega a ellos).
+        // Veredicto en caché por firma de la vuelta. Se salta una vuelta menos de las que caben: la última, ejecutada de
+        // verdad antes del siguiente evento, reescribe los muertos con lo que les toca, y el estado queda como sin salto
+        // (comprobado: hash del estado final igual al de --reference 1)
+        bool timerOk = true;
+        bool timerSkip = true;  // (diagnóstico) false: se comprueba en sombra pero no se salta
+        uint64_t tReads = 0;  // lecturas del contador en el sondeo en curso
+        uint64_t timerHits = 0, timerVerified = 0, timerRejected = 0;  // saltos con contador, vueltas comprobadas y rechazadas
+        std::unordered_map<uint64_t, int8_t> verdict;
+        std::vector<std::pair<uint32_t, uint32_t>> altLog, realEnd;
+        std::vector<uint32_t> deadWords, realWords;  // (sombra) palabras que la vuelta deja distintas; las que escribe
         std::vector<std::pair<uint32_t, uint32_t>> log, scratch;
         std::vector<Visit> seen;
         std::vector<uint32_t> pcs;  // el pc de cada instrucción del sondeo en curso
@@ -275,6 +313,37 @@ public:
         bool expIe = false;
     } ccPoll;
 
+    // Vueltas con el contador del TIMER4 ya comprobadas en sombra (LoopSkip::timerOk): en lugar de sondearlas (ruta lenta,
+    // instrucción a instrucción), se ejecutan de verdad por la ruta rápida apuntando sus escrituras a RAM (Ram::log), sus
+    // lecturas del contador y cualquier acceso con efectos. De vuelta en su pc: misma longitud, mismas lecturas, mismas
+    // escrituras (número y firma de direcciones), ningún evento ni acceso con efectos en medio y el mismo estado salvo los
+    // registros muertos y la pila muerta. Entonces se saltan las vueltas que caben menos una: la siguiente, también
+    // observada, es la vuelta real que deja esos registros y esa pila como sin salto
+    struct Observe
+    {
+        struct Known
+        {
+            uint32_t pc0, len, reads, writes; uint64_t addrHash; uint32_t deadRegs; bool deadFlags;
+            std::vector<uint32_t> deadWords;  // palabras de RAM (desplazamiento, ordenadas) que la vuelta deja distintas
+        };
+        std::vector<Known> known;
+        bool enabled = true;
+        bool active = false;
+        size_t idx = 0;
+        Cpu::PlainState start {};
+        P33::Snap p33 {};
+        Periph::AdcState adc {};
+        uint64_t insn0 = 0, t40 = 0, impure0 = 0, adv0 = 0;
+        std::vector<std::pair<uint32_t, uint32_t>> log;
+        uint64_t rounds = 0, hits = 0, skipped = 0, misses = 0;
+        uint32_t pcAt (uint32_t pc) const noexcept
+        {
+            for (size_t i = 0; i < known.size(); ++i)
+                if (known[i].pc0 == pc) return (uint32_t) i;
+            return 0xffffffffu;
+        }
+    } observe;
+
     // reparto de las instrucciones de cpu0 (medida del intérprete): por la ruta de arriba de runBlocks, de ellas con una
     // interrupción pendiente (anyPending), y en ráfaga
     uint64_t statTop = 0, statTopPending = 0, statBurst = 0;
@@ -288,6 +357,10 @@ private:
     uint32_t hleKernelEnter (Cpu& c1);  // V16, en el gancho de un kernel: instrucciones que ahorra (0 = se emula)
     void hleKernelCompare (Cpu& c1);    // en su epílogo tras el emulado en Check
     uint32_t probeLoop (uint32_t budget);
+    void observeStop();
+    uint64_t observeEnd (uint32_t budget);  // en su pc con la vuelta observada acabada: instrucciones saltadas (0 = ninguna)
+    bool probeTimerAlt (const LoopSkip::Visit& v, uint32_t roundLen, uint64_t roundReads);  // ver LoopSkip::timerOk
+    bool probeShadow (const LoopSkip::Visit& v, uint32_t roundLen, uint64_t roundReads, bool perturbDead);
     bool burstStop (uint32_t room) const noexcept;
     void cpu0Between();
     bool runBlocks (uint32_t n, uint32_t& done, std::string& error);  // el bucle de bloques de cpu0

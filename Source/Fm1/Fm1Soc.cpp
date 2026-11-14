@@ -337,6 +337,7 @@ void Soc::logUnknown (uint32_t addr, uint8_t width, bool isWrite, uint32_t value
 // 24 bits en los bits bajos: Felucca escribe Q15 << 7, así que >> 8 da 16 bits)
 void Soc::advance (uint64_t n)
 {
+    ++advances;
     const auto due = periph.advance (n);
     if (due.wdt && ! resetReq)
         resetReq = P33::kRstWdt;
@@ -357,6 +358,7 @@ void Soc::advance (uint64_t n)
 void Soc::idle (uint32_t core)
 {
     ++sideEffects;
+    obsImpure += observing ? 1 : 0;
     if (core == 0) periph.idle();
     else cpu1Idle = true;
 }
@@ -364,6 +366,7 @@ void Soc::idle (uint32_t core)
 void Soc::spin (uint32_t core, uint32_t addr)
 {
     ++sideEffects;
+    obsImpure += observing ? 1 : 0;
     if (cpu1Running)
         waits[core & 1] = Wait { Wait::Byte, addr };
 }
@@ -371,6 +374,7 @@ void Soc::spin (uint32_t core, uint32_t addr)
 bool Soc::hwLock (uint32_t core, bool set)
 {
     ++sideEffects;
+    obsImpure += observing ? 1 : 0;
     if (set)
     {
         if (lockOwner && *lockOwner != core)
@@ -461,6 +465,11 @@ uint32_t Soc::timerRead (uint32_t addr)
 uint32_t Soc::read32Slow (uint32_t addr)
 {
     ++sideEffects;
+    if (observing) [[unlikely]]
+    {
+        if (addr == 0x10804) ++obsT4;
+        else if (! pureRead (addr)) ++obsImpure;
+    }
     switch (region (addr))
     {
         case Region::Xip:
@@ -617,6 +626,8 @@ void Soc::spi2Write (uint32_t addr, uint32_t v)
 void Soc::write32Slow (uint32_t addr, uint32_t v)
 {
     ++sideEffects;
+    if (observing && region (addr) != Region::Ram) [[unlikely]]
+        ++obsImpure;
     switch (region (addr))
     {
         case Region::Xip: case Region::XipFlash: logUnknown (addr, 4, true, v); break;  // la flash se escribe por SPI0
@@ -837,11 +848,14 @@ void Machine::cpu0Between()
 // ---- salto de bucles de sondeo (probe_loop de fm1-emu) ---------------------------------------------------------------------
 namespace
 {
-constexpr uint32_t kProbeMax = 2048;  // lo más que un sondeo sigue a cpu0 buscando una vuelta
 constexpr uint32_t kProbeMin = 1024;  // solo con al menos estas instrucciones y ciclos por delante
 constexpr uint32_t kProbeKnown = 64;  // lo mismo en un pc con bucle conocido (un sondeo de un bucle corto cuesta ~10-20)
 constexpr int64_t kCreditMax = 1 << 16;
 constexpr size_t kVisits = 8;         // visitas al pc inicial que se guardan para comparar
+constexpr uint32_t kT4Cnt = 0x10804;  // el contador del TIMER4 (24 MHz, libre)
+constexpr uint32_t kDeadStack = 0x4000;  // pila muerta: palabras hasta 16 KiB por debajo de sp
+constexpr uint32_t kMinTimedRound = 64;
+constexpr uint32_t kMinObserved = 256;  // vueltas que se observan en lugar de sondearse: las largas  // vueltas con contador: al menos esto (Periph: dos lecturas a < 64 ciclos son racha)
 
 // cpu0 tal como la ve un sondeo: un acceso que una vuelta saltada no podría repetir no se hace (una carga lee 0) y marca el
 // sondeo como malo; las escrituras a RAM se apuntan con lo que había
@@ -849,15 +863,24 @@ struct ProbeBus : Bus
 {
     Soc& soc;
     bool bad = false;
+    uint32_t badAddr = 0;  // el acceso que lo hizo malo (diagnóstico)
+    uint64_t* tReads = nullptr;  // != nullptr: se admite leer el contador del TIMER4 (palabra entera) y se cuentan las lecturas
+    uint32_t altDelta = 0;       // lo que se suma a esas lecturas (la vuelta en sombra)
     std::vector<std::pair<uint32_t, uint32_t>>& log;
     std::optional<P33>& p33Was;
     ProbeBus (Soc& s, std::vector<std::pair<uint32_t, uint32_t>>& l, std::optional<P33>& p) : soc (s), log (l), p33Was (p) {}
 
-    bool load (uint32_t a)
+    bool load (uint32_t a, bool word = true)
     {
         if (bad) return false;
         if ((size_t) (a - kRamBase) < soc.ram.size() || soc.pureRead (a)) return true;
+        if (tReads != nullptr && word && a == kT4Cnt)
+        {
+            ++*tReads;
+            return true;
+        }
         bad = true;
+        badAddr = a;
         return false;
     }
     bool store (uint32_t a, uint32_t width, uint32_t word)
@@ -870,6 +893,7 @@ struct ProbeBus : Bus
             if ((size_t) o + width > soc.ram.size() || soc.ram.isCode (o))
             {
                 bad = true;
+                badAddr = a;
                 return false;
             }
             const auto w = o & ~3u;
@@ -881,22 +905,23 @@ struct ProbeBus : Bus
         if (! soc.loopWriteOk (word))
         {
             bad = true;
+            badAddr = a;
             return false;
         }
         if (! p33Was && word - P33::kCon < 8)
             p33Was = soc.p33;
         return true;
     }
-    uint8_t read8 (uint32_t a) override { return load (a & ~3u) ? soc.read8 (a) : 0; }
-    uint16_t read16 (uint32_t a) override { return load (a & ~3u) ? soc.read16 (a) : 0; }
-    uint32_t read32 (uint32_t a) override { return load (a) ? soc.read32 (a) : 0; }
+    uint8_t read8 (uint32_t a) override { return load (a & ~3u, false) ? soc.read8 (a) : 0; }
+    uint16_t read16 (uint32_t a) override { return load (a & ~3u, false) ? soc.read16 (a) : 0; }
+    uint32_t read32 (uint32_t a) override { return load (a) ? soc.read32 (a) + (a == kT4Cnt ? altDelta : 0u) : 0; }
     uint32_t fetch32 (uint32_t a) override { return load (a) ? soc.fetch32 (a) : 0; }
     void write8 (uint32_t a, uint8_t v) override { if (store (a, 1, a & ~3u)) soc.write8 (a, v); }
     void write16 (uint32_t a, uint16_t v) override { if (store (a, 2, a & ~3u)) soc.write16 (a, v); }
     void write32 (uint32_t a, uint32_t v) override { if (store (a, 4, a)) soc.write32 (a, v); }
-    bool hwLock (uint32_t, bool) override { bad = true; return true; }
-    void spin (uint32_t, uint32_t) override { bad = true; }  // la vuelta de un cerrojo de byte no es un bucle de sondeo
-    void idle (uint32_t) override { bad = true; }
+    bool hwLock (uint32_t, bool) override { bad = true; badAddr = 1; return true; }
+    void spin (uint32_t, uint32_t) override { bad = true; badAddr = 2; }  // la vuelta de un cerrojo de byte no es un bucle de sondeo
+    void idle (uint32_t) override { bad = true; badAddr = 3; }
 };
 } // namespace
 
@@ -909,6 +934,10 @@ bool Machine::LoopSkip::mayProbe (uint64_t now, uint32_t pc, uint32_t room)
     const auto earned = (int64_t) std::min<uint64_t> ((now > creditAt ? now - creditAt : 0) / 2048, (uint64_t) kCreditMax);
     credit = std::min (credit + earned, kCreditMax);
     creditAt = now;
+    // sin crédito, ni sondeo ni paradas de la ráfaga para buscarlo hasta que vuelva (1 por cada 2048 ciclos): si no, la
+    // ráfaga se para en cada instrucción (burstStop) para nada y todo va por la ruta de arriba
+    if (credit <= 0)
+        nextTry = now + (uint64_t) (1 - credit) * 2048;
     return credit > 0;
 }
 
@@ -930,7 +959,15 @@ uint32_t Machine::probeLoop (uint32_t budget)
     const auto cycles0 = soc.periph.cycles, due0 = soc.periph.nextDue, wdt0 = soc.periph.wdtAt;
     const auto adc0 = soc.periph.adcState();
     const auto insns0 = cpu0.insnCount;
+    const auto lastCnt0 = soc.periph.lastCntRead, idleSkipped0 = soc.periph.skipped;
+    const auto streak0 = soc.periph.cntStreak;
     auto& ls = loopSkip;
+    ls.tReads = 0;
+    {
+        const auto room = due0 > cycles0 ? due0 - cycles0 : 0;
+        ++ls.roomHist[room < 2048 ? 0 : room < 8192 ? 1 : room < 32768 ? 2 : room < 131072 ? 3 : 4];
+    }
+    const bool timerOk = ls.timerOk && ! soc.cpu1Running && ! cpu1;
     ++ls.probes;
     ls.log.clear();
     ls.seen.clear();
@@ -941,6 +978,7 @@ uint32_t Machine::probeLoop (uint32_t budget)
     int result = 0;  // 1 = vuelta encontrada (len en roundLen); -1 = no; -2 = un evento vence (mirar después de él);
                      // -3 = interrupción o reset pendiente (sin espera)
     uint32_t roundLen = 0;
+    size_t found = 0;  // la visita con la que cerró la vuelta
     while (true)
     {
         Cpu::PlainState core;
@@ -948,9 +986,23 @@ uint32_t Machine::probeLoop (uint32_t budget)
         {
             const auto snap = soc.p33.snap();
             const auto adc = soc.periph.adcState();
-            const LoopSkip::Visit visit { core, snap, adc, i, ls.log.size() };
+            const LoopSkip::Visit visit { core, snap, adc, i, ls.log.size(), ls.tReads, soc.periph.cycles, soc.periph.nextDue, soc.periph.wdtAt,
+                                          soc.periph.lastCntRead, soc.sideEffects, soc.periph.cntStreak };
+            // (con lecturas del contador en medio, los registros de datos y las banderas pueden diferir: restos de la vuelta
+            // anterior que la siguiente reescribe antes de leerlos; lo comprueba probeTimerAlt)
+            auto sameCore = [this, &core] (const LoopSkip::Visit& s)
+            {
+                if (s.core == core)
+                    return true;
+                if (loopSkip.tReads <= s.tReads)
+                    return false;
+                auto c = s.core;
+                std::copy (std::begin (core.regs), std::end (core.regs), std::begin (c.regs));
+                c.flags = core.flags;
+                return c == core;
+            };
             size_t j = 0;
-            while (j < ls.seen.size() && ! (ls.seen[j].core == core && ls.seen[j].p33 == snap && ls.seen[j].adc == adc))
+            while (j < ls.seen.size() && ! (sameCore (ls.seen[j]) && ls.seen[j].p33 == snap && ls.seen[j].adc == adc))
                 ++j;
             if (j < ls.seen.size())
             {
@@ -959,13 +1011,34 @@ uint32_t Machine::probeLoop (uint32_t budget)
                 std::stable_sort (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
                 ls.scratch.erase (std::unique (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first == b.first; }),
                                   ls.scratch.end());
-                if (std::all_of (ls.scratch.begin(), ls.scratch.end(), [this] (const auto& e) { return soc.ram.read32 (e.first) == e.second; }))
+                // (con lecturas del contador, la pila muerta puede guardar su valor: ver LoopSkip::timerOk)
+                const bool timed = ls.tReads > ls.seen[j].tReads;
+                const auto sp = core.sp;
+                // (con lecturas del contador, cualquier palabra puede guardar su valor o algo hecho con él: lo juzgan las
+                // vueltas en sombra de probeTimerAlt, que exigen que esté muerta al empezar)
+                // (y entonces la vuelta debe ser un periodo: la visita j cerraba otra vuelta igual, mismo recorrido de pc. Si
+                // no, el pc se visita varias veces por periodo y el tramo siguiente puede ser otro: no es una vuelta)
+                const auto len = i - ls.seen[j].at;
+                const bool period = ! timed || std::any_of (ls.seen.begin(), ls.seen.end(), [&] (const LoopSkip::Visit& p)
+                {
+                    return p.at + len == ls.seen[j].at
+                        && std::equal (ls.pcs.begin() + p.at, ls.pcs.begin() + ls.seen[j].at, ls.pcs.begin() + ls.seen[j].at);
+                });
+                if (period && (timed || std::all_of (ls.scratch.begin(), ls.scratch.end(), [this, timed, sp] (const auto& e)
+                    {
+                        const auto a = kRamBase + e.first;
+                        return soc.ram.read32 (e.first) == e.second || (timed && a < sp && a + kDeadStack >= sp);
+                    })))
                 {
                     roundLen = i - ls.seen[j].at;
+                    found = j;
                     result = 1;
                     break;
                 }
-                ls.seen[j] = visit;  // (una primera vuelta que preparó algo: comparar con esta en adelante)
+                if (ls.tReads > ls.seen[j].tReads && ls.seen.size() < kVisits)
+                    ls.seen.push_back (visit);  // (con contador se guarda la historia: el periodo se mira en dos vueltas)
+                else
+                    ls.seen[j] = visit;  // (una primera vuelta que preparó algo: comparar con esta en adelante)
             }
             else if (ls.seen.size() < kVisits)
                 ls.seen.push_back (visit);
@@ -973,28 +1046,36 @@ uint32_t Machine::probeLoop (uint32_t budget)
                 ls.seen[visits % kVisits] = visit;
             ++visits;
         }
-        if (i >= budget || i >= kProbeMax)
+        if (i >= budget || i >= ls.probeMax)
         {
+            ++ls.failNoRound;
             result = -1;
             break;
         }
         // (el tick de la primera instrucción está pagado; con algo pendiente sigue el bucle normal)
         if (i > 0 && soc.periph.tick())
         {
+            ++ls.failEvent;
             result = -2;
             break;
         }
         ls.pcs.push_back (cpu0.pc);
         ProbeBus bus (soc, ls.log, p33Was);
+        if (timerOk)
+            bus.tReads = &ls.tReads;
         const bool ok = cpu0.step (bus);
         // (un reset pedido: llega tras esta vuelta, no tras las saltadas)
         if (! ok || bus.bad)
         {
+            ++ls.failBad;
+            if (ls.badAt != nullptr && bus.bad)
+                ++(*ls.badAt)[bus.badAddr];
             result = -1;
             break;
         }
         if (soc.periph.anyPending() || soc.resetDue())
         {
+            ++ls.failIrq;
             result = -3;  // la cortó una interrupción o un reset: no dice nada de si hay bucle
             break;
         }
@@ -1008,16 +1089,60 @@ uint32_t Machine::probeLoop (uint32_t budget)
         const auto due = soc.periph.nextDue;
         const auto byEvent = (due > c + 1 ? due - (c + 1) : 0) / l;
         const auto byBudget = (uint64_t) (budget - i) / l;
-        const auto k = std::min (byEvent, byBudget);
+        auto k = std::min (byEvent, byBudget);
+        if (const auto roundReads = ls.tReads - ls.seen[found].tReads; roundReads > 0)
+        {
+            // con contador: la vuelta debe poder repetirse con otro valor, y la última se ejecuta de verdad (ver timerOk)
+            const bool fine = l >= kMinTimedRound && ! p33Was && soc.periph.cntStreak == 0 && soc.periph.skipped == idleSkipped0
+                              && probeTimerAlt (ls.seen[found], roundLen, roundReads);
+            k = fine && k > 0 && ls.timerSkip ? k - 1 : 0;
+            if (fine && k > 0)
+                ++ls.timerHits;
+            // comprobada: desde ahora se observa (Observe) en lugar de sondearla
+            if (fine && observe.enabled && l >= kMinObserved && observe.pcAt (pc0) == 0xffffffffu && observe.known.size() < 8)
+            {
+                Observe::Known kn { pc0, roundLen, (uint32_t) roundReads, 0, 0, 0, false };
+                for (size_t e = ls.seen[found].log; e < ls.log.size(); ++e)
+                {
+                    ++kn.writes;
+                    kn.addrHash += (uint64_t) (ls.log[e].first + 0x9e3779b9u) * 0x9e3779b97f4a7c15ull;
+                }
+                Cpu::PlainState endCore;
+                cpu0.plainState (endCore);
+                for (int r = 0; r < 16; ++r)
+                    if (endCore.regs[r] != ls.seen[found].core.regs[r])
+                        kn.deadRegs |= 1u << r;
+                kn.deadFlags = endCore.flags != ls.seen[found].core.flags;
+                ls.scratch.assign (ls.log.begin() + (std::ptrdiff_t) ls.seen[found].log, ls.log.end());
+                std::stable_sort (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+                ls.scratch.erase (std::unique (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first == b.first; }),
+                                  ls.scratch.end());
+                for (const auto& [w, startVal] : ls.scratch)
+                    if (soc.ram.read32 (w) != startVal)
+                        kn.deadWords.push_back (w);
+                observe.known.push_back (std::move (kn));
+            }
+        }
+        if (ls.hitsAt != nullptr)
+        {
+            auto& e = (*ls.hitsAt)[{ pc0, roundLen, (uint32_t) (ls.tReads - ls.seen[found].tReads) }];
+            ++e.first;
+            e.second += k;
+        }
         soc.periph.cycles += k * l;
         cpu0.insnCount += k * l;
         ls.credit = std::min<int64_t> (ls.credit + (int64_t) (k * l / 4) - (int64_t) i, kCreditMax);
         ++ls.hits;
         ls.skipped += k * l;
-        for (size_t q = i - roundLen; q < i; ++q)  // todos los pc de la vuelta: un tramo puede empezar en cualquiera
-            ls.loopAt (ls.pcs[q]) = ls.pcs[q];
-        ls.hasLoops = true;
-        if (k * l >= 8ull * i)
+        if (k > 0 || ls.tReads == ls.seen[found].tReads)
+        {
+            for (size_t q = i - roundLen; q < i; ++q)  // todos los pc de la vuelta: un tramo puede empezar en cualquiera
+                ls.loopAt (ls.pcs[q]) = ls.pcs[q];
+            ls.hasLoops = true;
+        }
+        if (k == 0 && ls.tReads > ls.seen[found].tReads)
+            ls.backOff (soc.periph.cycles);  // con contador y sin salto (corta, o sin sitio): como un fallo
+        else if (k * l >= 8ull * i)
         {
             ls.backoff = 0;
             ls.backoffUntil = 0;
@@ -1037,6 +1162,9 @@ uint32_t Machine::probeLoop (uint32_t budget)
     soc.periph.setAdcState (adc0);
     soc.periph.nextDue = due0;
     soc.periph.wdtAt = wdt0;
+    soc.periph.lastCntRead = lastCnt0;
+    soc.periph.cntStreak = streak0;
+    soc.periph.skipped = idleSkipped0;
     soc.clearResetReq();
     soc.periph.cycles = cycles0;
     cpu0.setPlainState (start);
@@ -1048,6 +1176,232 @@ uint32_t Machine::probeLoop (uint32_t budget)
         ls.backOff (cycles0);
     // (en un pc con bucle conocido un fallo es casi siempre cpu0 saliendo del bucle, despertada: solo cuesta crédito)
     return 0;
+}
+
+// La vuelta que acaba de cerrar el sondeo (de la visita v al pc actual, roundLen instrucciones, roundReads lecturas del
+// contador del TIMER4), repetida en sombra con el contador desplazado 2^31: true si recorre los mismos pc, lee el contador
+// las mismas veces y vuelve al mismo estado (registros y RAM salvo la pila muerta). Lo deja todo como al final de la vuelta
+// real. Veredicto en caché por la firma de la vuelta (sus pc): un recorrido distinto (un botón pulsado...) se comprueba aparte
+bool Machine::probeTimerAlt (const LoopSkip::Visit& v, uint32_t roundLen, uint64_t roundReads)
+{
+    // A: los registros (y banderas) que la vuelta deja distintos, alterados al empezar y el contador como estaba: el final
+    // debe ser el de la vuelta real, bit a bit (están muertos al empezar). B: el contador desplazado 2^31: mismo recorrido y
+    // mismo estado salvo esos registros y la pila muerta (el contador solo llega a ellos)
+    return probeShadow (v, roundLen, roundReads, true) && probeShadow (v, roundLen, roundReads, false);
+}
+
+bool Machine::probeShadow (const LoopSkip::Visit& v, uint32_t roundLen, uint64_t roundReads, bool perturbDead)
+{
+    auto& ls = loopSkip;
+    const auto from = ls.pcs.size() - roundLen;
+    uint64_t h = (1469598103934665603ull ^ roundLen) + (perturbDead ? 1u : 0u);
+    for (size_t q = from; q < ls.pcs.size(); ++q)
+        h = (h ^ ls.pcs[q]) * 1099511628211ull;
+    if (const auto it = ls.verdict.find (h); it != ls.verdict.end())
+        return it->second > 0;
+    ++ls.timerVerified;
+
+    // el final de la vuelta real, para volver a él
+    Cpu::PlainState endCore;
+    if (! cpu0.plainState (endCore))
+        return false;
+    const auto insns = cpu0.insnCount;
+    const auto cyc = soc.periph.cycles, due = soc.periph.nextDue, wdt = soc.periph.wdtAt;
+    const auto adc = soc.periph.adcState();
+    const auto lastCnt = soc.periph.lastCntRead, idleSkipped = soc.periph.skipped, side = soc.sideEffects;
+    const auto streak = soc.periph.cntStreak;
+    ls.realEnd.clear();
+    for (size_t e = v.log; e < ls.log.size(); ++e)
+        ls.realEnd.push_back ({ ls.log[e].first, soc.ram.read32 (ls.log[e].first) });
+    // las palabras que escribe la vuelta real y las que deja distintas (el primer valor apuntado es el del principio)
+    ls.scratch.assign (ls.log.begin() + (std::ptrdiff_t) v.log, ls.log.end());
+    std::stable_sort (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+    ls.scratch.erase (std::unique (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first == b.first; }),
+                      ls.scratch.end());
+    ls.realWords.clear();
+    ls.deadWords.clear();
+    for (const auto& [w, startVal] : ls.scratch)
+    {
+        ls.realWords.push_back (w);
+        if (soc.ram.read32 (w) != startVal)
+            ls.deadWords.push_back (w);
+    }
+    ls.credit -= (int64_t) roundLen;  // (la sombra también cuesta)
+    // al principio de la vuelta
+    for (size_t e = ls.log.size(); e-- > v.log;)
+        soc.ram.restore32 (ls.log[e].first, ls.log[e].second);
+    // los registros que difieren al final de la vuelta real (A: alterados al empezar)
+    uint32_t deadRegs = 0;
+    for (int r = 0; r < 16; ++r)
+        if (endCore.regs[r] != v.core.regs[r])
+            deadRegs |= 1u << r;
+    const bool deadFlags = endCore.flags != v.core.flags;
+    auto startCore = v.core;
+    if (perturbDead)
+    {
+        for (int r = 0; r < 16; ++r)
+            if ((deadRegs >> r) & 1u)
+                startCore.regs[r] ^= 0xa5a5a5a5u;
+        if (deadFlags)
+            startCore.flags ^= 0xfu;
+    }
+    if (perturbDead)
+        for (const auto w : ls.deadWords)
+            soc.ram.restore32 (w, soc.ram.read32 (w) ^ 0xa5a5a5a5u);
+    cpu0.setPlainState (startCore);
+    soc.periph.cycles = v.cyc;
+    soc.periph.nextDue = v.due;
+    soc.periph.wdtAt = v.wdt;
+    soc.periph.setAdcState (v.adc);
+    soc.periph.lastCntRead = v.lastCnt;
+    soc.periph.cntStreak = v.streak;
+    auto* const hist = cpu0.pcHist;
+    cpu0.pcHist = nullptr;
+
+    ls.altLog.clear();
+    std::optional<P33> p33x;
+    uint64_t reads = 0;
+    bool ok = true;
+    for (uint32_t q = 0; q < roundLen && ok; ++q)
+    {
+        if ((v.at + q > 0 && soc.periph.tick()) || cpu0.pc != ls.pcs[from + q])
+        {
+            ok = false;
+            break;
+        }
+        ProbeBus bus (soc, ls.altLog, p33x);
+        bus.tReads = &reads;
+        bus.altDelta = perturbDead ? 0u : 0x80000000u;
+        if (! cpu0.step (bus) || bus.bad || p33x || soc.periph.anyPending() || soc.resetDue())
+            ok = false;
+    }
+    Cpu::PlainState back {};
+    ok = ok && reads == roundReads && cpu0.plainState (back);
+    if (ok && perturbDead)
+    {
+        // A: todo como en la vuelta real (registros y cada palabra escrita, pila muerta incluida)
+        ok = back == endCore;
+        for (const auto& [w, val] : ls.realEnd)
+            ok = ok && soc.ram.read32 (w) == val;
+        for (const auto& [w, old] : ls.altLog)
+            ok = ok && std::any_of (ls.realEnd.begin(), ls.realEnd.end(), [w = w] (const auto& e) { return e.first == w; });
+    }
+    else if (ok)
+    {
+        // B: el estado del principio salvo los registros muertos
+        auto b = back;
+        for (int r = 0; r < 16; ++r)
+            if ((deadRegs >> r) & 1u)
+                b.regs[r] = v.core.regs[r];
+        if (deadFlags)
+            b.flags = v.core.flags;
+        ok = b == v.core;
+    }
+    if (ok && ! perturbDead)
+    {
+        ls.scratch = ls.altLog;
+        std::stable_sort (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+        ls.scratch.erase (std::unique (ls.scratch.begin(), ls.scratch.end(), [] (const auto& a, const auto& b) { return a.first == b.first; }),
+                          ls.scratch.end());
+        const auto sp = v.core.sp;
+        ok = ls.scratch.size() == ls.realWords.size()
+             && std::all_of (ls.scratch.begin(), ls.scratch.end(), [this, sp, q = size_t (0)] (const auto& e) mutable
+        {
+            const auto a = kRamBase + e.first;
+            return e.first == loopSkip.realWords[q++]  // las mismas direcciones (el contador no las mueve)
+                && (soc.ram.read32 (e.first) == e.second || (a < sp && a + kDeadStack >= sp)
+                    || std::binary_search (loopSkip.deadWords.begin(), loopSkip.deadWords.end(), e.first));
+        });
+    }
+
+    // de vuelta al final de la vuelta real
+    for (auto it = ls.altLog.rbegin(); it != ls.altLog.rend(); ++it)
+        soc.ram.restore32 (it->first, it->second);
+    for (const auto& [w, val] : ls.realEnd)
+        soc.ram.restore32 (w, val);
+    cpu0.setPlainState (endCore);
+    cpu0.insnCount = insns;
+    cpu0.pcHist = hist;
+    soc.periph.cycles = cyc;
+    soc.periph.nextDue = due;
+    soc.periph.wdtAt = wdt;
+    soc.periph.setAdcState (adc);
+    soc.periph.lastCntRead = lastCnt;
+    soc.periph.cntStreak = streak;
+    soc.periph.skipped = idleSkipped;
+    soc.sideEffects = side;
+    soc.clearResetReq();
+
+    if (ls.verdict.size() > 4096)
+        ls.verdict.clear();
+    ls.verdict[h] = ok ? 1 : -1;
+    if (! ok)
+        ++ls.timerRejected;
+    return ok;
+}
+
+void Machine::observeStop()
+{
+    observe.active = false;
+    soc.observing = false;
+    soc.ram.log = nullptr;
+}
+
+// cpu0 en el pc de la vuelta observada, con su tick pagado: ¿la vuelta se repite igual? Devuelve las instrucciones que se
+// saltan (vueltas enteras, dejando sitio para una más antes del siguiente evento y dentro del tramo), 0 si ninguna
+uint64_t Machine::observeEnd (uint32_t budget)
+{
+    auto& o = observe;
+    const auto& kn = o.known[o.idx];
+    observeStop();
+    ++o.rounds;
+    Cpu::PlainState core {};
+    bool ok = cpu0.insnCount - o.insn0 == kn.len && soc.obsT4 - o.t40 == kn.reads && soc.obsImpure == o.impure0
+              && soc.advances == o.adv0 && o.log.size() == kn.writes && soc.periph.cntStreak == 0 && ! soc.periph.anyPending()
+              && cpu0.plainState (core) && soc.p33.snap() == o.p33 && soc.periph.adcState() == o.adc;
+    if (ok)
+    {
+        uint64_t hsh = 0;
+        for (const auto& e : o.log)
+            hsh += (uint64_t) (e.first + 0x9e3779b9u) * 0x9e3779b97f4a7c15ull;
+        auto c = core;
+        for (int r = 0; r < 16; ++r)
+            if ((kn.deadRegs >> r) & 1u)
+                c.regs[r] = o.start.regs[r];
+        if (kn.deadFlags)
+            c.flags = o.start.flags;
+        ok = hsh == kn.addrHash && c == o.start;
+        // cada palabra escrita vuelve a lo que tenía, salvo la pila muerta (el primer valor apuntado de cada una)
+        if (ok)
+        {
+            std::stable_sort (o.log.begin(), o.log.end(), [] (const auto& a, const auto& b) { return a.first < b.first; });
+            o.log.erase (std::unique (o.log.begin(), o.log.end(), [] (const auto& a, const auto& b) { return a.first == b.first; }), o.log.end());
+            const auto sp = core.sp;
+            ok = std::all_of (o.log.begin(), o.log.end(), [this, sp, &kn] (const auto& e)
+            {
+                const auto a = kRamBase + e.first;
+                return soc.ram.read32 (e.first) == e.second || (a < sp && a + kDeadStack >= sp)
+                    || std::binary_search (kn.deadWords.begin(), kn.deadWords.end(), e.first);
+            });
+        }
+    }
+    if (! ok)
+    {
+        ++o.misses;
+        return 0;
+    }
+    const uint64_t l = kn.len;
+    const auto cyc = soc.periph.cycles;  // (el tick de la instrucción en el pc está pagado)
+    const auto due = soc.periph.nextDue;
+    const auto byEvent = (due > cyc ? due - cyc : 0) / l;
+    const auto byBudget = (uint64_t) budget / l;
+    const auto rounds = std::min (byEvent, byBudget);
+    if (rounds < 2)
+        return 0;
+    ++o.hits;
+    const auto k = (rounds - 1) * l;
+    o.skipped += k;
+    return k;
 }
 
 // El bucle de cpu0 (de referencia: una instrucción cada vez, el SoC atendido cuando vence un tick). Devuelve en done las
@@ -1095,9 +1449,44 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
                 }
             }
         }
+        // vueltas observadas (ver Observe): al acabar una en su pc, el salto; luego, la siguiente se observa
+        if (observe.active && cpu0.insnCount - observe.insn0 > observe.known[observe.idx].len)
+            observeStop();  // más larga que la conocida: salió del bucle
+        bool observed = false;
+        if (! observe.known.empty() && loopSkip.enabled)
+        {
+            // (al cumplir su longitud: el pc puede visitarse varias veces por periodo)
+            if (observe.active && cpu0.pc == observe.known[observe.idx].pc0
+                && cpu0.insnCount - observe.insn0 == observe.known[observe.idx].len)
+            {
+                if (const auto k = observeEnd (n - done); k > 0)
+                {
+                    soc.periph.cycles += k - 1;  // (como CcPoll: el tick de la primera está pagado)
+                    cpu0.insnCount += k;
+                    done += (uint32_t) k;
+                    continue;
+                }
+            }
+            if (const auto idx = observe.pcAt (cpu0.pc); idx != 0xffffffffu && ! observe.active && ! soc.cpu1Release && ! cpu1
+                && ! soc.cpu1Running && ! soc.periph.anyPending() && cpu0.plainState (observe.start))
+            {
+                observe.active = true;
+                observe.idx = idx;
+                observe.p33 = soc.p33.snap();
+                observe.adc = soc.periph.adcState();
+                observe.insn0 = cpu0.insnCount;
+                observe.t40 = soc.obsT4;
+                observe.impure0 = soc.obsImpure;
+                observe.adv0 = soc.advances;
+                observe.log.clear();
+                soc.observing = true;
+                soc.ram.log = &observe.log;
+            }
+            observed = observe.active;
+        }
         // (no con una liberación de cpu1 retenida: el tramo debe cortarse donde lo haría sin el salto)
-        if (loopSkip.enabled && ! soc.cpu1Release && n - done >= kProbeKnown && ! soc.periph.anyPending()
-            && loopSkip.mayProbe (soc.periph.cycles, cpu0.pc, n - done))
+        if (! observed && loopSkip.enabled && ! soc.cpu1Release && n - done >= kProbeKnown && ! soc.periph.anyPending()
+            && ((cpu0.pc == loopSkip.forcePc && n - done >= kProbeMin) || loopSkip.mayProbe (soc.periph.cycles, cpu0.pc, n - done)))
         {
             if (soc.periph.nextDue < soc.periph.cycles + kProbeKnown)
                 loopSkip.nextTry = soc.periph.nextDue;  // demasiado cerca del siguiente evento
@@ -1174,6 +1563,15 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
                 bs.stopA = ccPoll.entry;
                 if (ccPoll.pending)
                     bs.stopB = ccPoll.exit;
+            }
+            if (! observe.known.empty() && ! observe.active && bs.stopB == 0xffffffffu)
+                bs.stopB = observe.known[0].pc0;  // (para empezar a observar; con varias conocidas, la primera)
+            if (observe.active && bs.stopB == 0xffffffffu)
+            {
+                bs.stopB = observe.known[observe.idx].pc0;
+                // (y no más allá de su longitud: si sale del bucle, arriba lo deja)
+                bs.room = (uint32_t) std::min<uint64_t> (bs.room, observe.known[observe.idx].len + 1 - std::min<uint64_t> (
+                                                                      cpu0.insnCount - observe.insn0, observe.known[observe.idx].len));
             }
             bs.loopEnabled = loopSkip.enabled;
             bs.nextTry = loopSkip.nextTry;
