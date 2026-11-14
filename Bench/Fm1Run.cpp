@@ -396,6 +396,11 @@ int main (int argc, char** argv)
                      m.ccPoll.insns, (unsigned long long) m.ccPoll.skipped, (unsigned long long) m.ccPoll.checked,
                      (unsigned long long) m.ccPoll.mismatches, m.ccPoll.firstMismatch.empty() ? "" : "; primera: ",
                      m.ccPoll.firstMismatch.c_str());
+    if (hleMode != Machine::Hle::Off && m.hle.nKern > 0)
+        std::printf ("HLE kernels V16: %d encontrados; %llu llamadas, %llu nativas, %llu comprobadas, %llu distintas, nativo %s%s%s\n",
+                     m.hle.nKern, (unsigned long long) m.hle.kCalls, (unsigned long long) m.hle.kNative, (unsigned long long) m.hle.kChecked,
+                     (unsigned long long) m.hle.kMismatches, m.hle.kOff ? "apagado" : m.hle.kOn ? "encendido" : "sin decidir",
+                     m.hle.kFirstMismatch.empty() ? "" : "; primera: ", m.hle.kFirstMismatch.c_str());
     std::printf ("UART MIDI: con0 0x%08x, búfer de recepción %u B, bytes descartados %llu\n", soc.periph.uartCon0(),
                  soc.periph.uartRxLen(), (unsigned long long) soc.periph.midiDropped());
     // accesos desconocidos por dirección (la hoja de ruta de lo que falta)

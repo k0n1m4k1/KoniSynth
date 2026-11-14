@@ -230,6 +230,25 @@ public:
         HleRenderArgs args;
         std::vector<uint8_t> expOut, expParams, expFb, expAlg;
         double avgCost() const noexcept { return checked > 0 ? (double) emulatedInsns / (double) checked : 0.0; }
+        // V16: los kernels de operador (findV16Kernels), cada uno con su coste medido en Check (instrucciones emuladas del
+        // gancho al epílogo; sin medir, se comprueba antes de usarlo). Auto: nativo tras kAutoChecks llamadas comprobadas
+        // sin diferencias (salida, fb_buf, los 16 registros); con una, apagado
+        static constexpr int kMaxKernels = 8;
+        std::array<HleKernel, kMaxKernels> kern {};
+        int nKern = 0;
+        uint32_t kMin = 0xffffffffu, kMax = 0;
+        std::array<uint32_t, kMaxKernels> kCost {};
+        uint32_t kAutoChecks = 300;
+        bool kOn = false, kOff = false;
+        uint64_t kCalls = 0, kNative = 0, kChecked = 0, kMismatches = 0;
+        std::string kFirstMismatch;
+        bool kPending = false;
+        int kIdx = 0;
+        uint32_t kExit = 0, kSp = 0, kOutA = 0, kFbA = 0;
+        uint64_t kInsnAt = 0;
+        uint32_t kExpRegs[16] {};
+        std::array<uint8_t, 256> kExpOut {};
+        std::array<uint8_t, 8> kExpFb {};
     } hle;
 
     // HLE de cpu0 para GHOULBOX (firmware de la comunidad): la pasada vacía de midi_cc_apply (su ui_input.c), el sondeo
@@ -266,6 +285,8 @@ private:
     void ccPollCompare();              // en exit tras la pasada emulada en Check
     bool hleEnter (Cpu& c1);     // en la entrada de la rutina: true = la ejecutó el nativo (On) y cpu1 ya ha vuelto
     void hleCompare (Cpu& c1);   // de vuelta de la rutina emulada en Check
+    uint32_t hleKernelEnter (Cpu& c1);  // V16, en el gancho de un kernel: instrucciones que ahorra (0 = se emula)
+    void hleKernelCompare (Cpu& c1);    // en su epílogo tras el emulado en Check
     uint32_t probeLoop (uint32_t budget);
     bool burstStop (uint32_t room) const noexcept;
     void cpu0Between();

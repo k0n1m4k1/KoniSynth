@@ -1261,6 +1261,15 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
     if (hle.mode != Hle::Off && ! hle.site && hle.searchIn-- == 0)
     {
         hle.site = findFmCoreRender (soc.ram.ptr(), kRamBase, soc.ram.size());
+        if (! hle.site && hle.nKern == 0)
+        {
+            hle.nKern = findV16Kernels (soc.ram.ptr(), kRamBase, soc.ram.size(), hle.kern.data(), Hle::kMaxKernels);
+            for (int i = 0; i < hle.nKern; ++i)
+            {
+                hle.kMin = std::min (hle.kMin, hle.kern[(size_t) i].hook);
+                hle.kMax = std::max (hle.kMax, hle.kern[(size_t) i].hook);
+            }
+        }
         hle.searchIn = 4096;  // sin el código aún copiado: otra vez dentro de un rato
     }
     const auto probePc = c1.pc;
@@ -1279,6 +1288,12 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
             left -= std::min<uint64_t> (left, hle.costPerCall);
             continue;  // el nativo ya volvió a rets
         }
+        if (hle.nKern > 0 && c1.pc >= hle.kMin && c1.pc <= hle.kMax && hle.mode != Hle::Off && ! hle.kOff && ! hle.kPending)
+            if (const auto saved = hleKernelEnter (c1); saved > 0)
+            {
+                left -= std::min<uint64_t> (left, saved);
+                continue;  // el nativo ya está en el epílogo
+            }
         Core1Bus bus (soc, until);
         if (! c1.step (bus))
         {
@@ -1288,6 +1303,8 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
         --left;
         if (hle.pending && c1.pc == hle.retPc && c1.sp == hle.retSp)
             hleCompare (c1);
+        if (hle.kPending && c1.pc == hle.kExit && c1.sp == hle.kSp)
+            hleKernelCompare (c1);
         if (soc.waits[1])
         {
             soc.waits[1].reset();
@@ -1477,6 +1494,100 @@ void Machine::ccPollCompare()
         else if (p.checked >= p.autoChecks)
             p.mode = CcPoll::On;
     }
+}
+
+uint32_t Machine::hleKernelEnter (Cpu& c1)
+{
+    int i = 0;
+    while (i < hle.nKern && hle.kern[(size_t) i].hook != c1.pc)
+        ++i;
+    if (i == hle.nKern)
+        return 0;
+    const auto& k = hle.kern[(size_t) i];
+    ++hle.kCalls;
+    auto* ram = soc.ram.ptr();
+    const auto size = soc.ram.size();
+    uint32_t regs[16];
+    std::memcpy (regs, c1.regs, sizeof regs);
+    const auto cost = hle.kCost[(size_t) i];
+    if (cost != 0 && (hle.mode == Hle::On || (hle.mode == Hle::Auto && hle.kOn)))
+    {
+        if (! hleV16Kernel (ram, kRamBase, size, k, regs))
+            return 0;
+        std::memcpy (c1.regs, regs, sizeof regs);
+        c1.pc = k.exit;
+        c1.insnCount += cost;
+        ++hle.kNative;
+        return cost;
+    }
+    // Check: el nativo calcula aparte (la RAM se restaura) y el firmware sigue con su código hasta el epílogo
+    const uint32_t outA = regs[4], fbA = regs[6];
+    const bool fb = k.kind == HleKernel::Fb;
+    const auto inRam = [&] (uint32_t a, uint32_t len) { return a >= kRamBase && (size_t) (a - kRamBase) + len <= size; };
+    if (! inRam (outA, 256) || (fb && ! inRam (fbA, 8)))
+        return 0;
+    std::array<uint8_t, 256> saveOut;
+    std::array<uint8_t, 8> saveFb {};
+    std::memcpy (saveOut.data(), ram + (outA - kRamBase), 256);
+    if (fb)
+        std::memcpy (saveFb.data(), ram + (fbA - kRamBase), 8);
+    if (! hleV16Kernel (ram, kRamBase, size, k, regs))
+        return 0;
+    std::memcpy (hle.kExpOut.data(), ram + (outA - kRamBase), 256);
+    if (fb)
+        std::memcpy (hle.kExpFb.data(), ram + (fbA - kRamBase), 8);
+    std::memcpy (hle.kExpRegs, regs, sizeof regs);
+    std::memcpy (ram + (outA - kRamBase), saveOut.data(), 256);
+    if (fb)
+        std::memcpy (ram + (fbA - kRamBase), saveFb.data(), 8);
+    hle.kPending = true;
+    hle.kIdx = i;
+    hle.kExit = k.exit;
+    hle.kSp = c1.sp;
+    hle.kOutA = outA;
+    hle.kFbA = fb ? fbA : 0;
+    hle.kInsnAt = c1.insnCount;
+    return 0;
+}
+
+void Machine::hleKernelCompare (Cpu& c1)
+{
+    hle.kPending = false;
+    ++hle.kChecked;
+    const auto* ram = soc.ram.ptr();
+    char buf[200] {};
+    if (std::memcmp (ram + (hle.kOutA - kRamBase), hle.kExpOut.data(), 256) != 0)
+    {
+        int s = 0;
+        while (s < 64 && std::memcmp (ram + (hle.kOutA - kRamBase) + 4 * s, hle.kExpOut.data() + 4 * s, 4) == 0)
+            ++s;
+        uint32_t g, e;
+        std::memcpy (&g, ram + (hle.kOutA - kRamBase) + 4 * s, 4);
+        std::memcpy (&e, hle.kExpOut.data() + 4 * s, 4);
+        std::snprintf (buf, sizeof buf, "kernel %d (0x%08x): salida[%d] emulada 0x%08x, nativa 0x%08x", hle.kIdx,
+                       hle.kern[(size_t) hle.kIdx].hook, s, g, e);
+    }
+    else if (hle.kFbA != 0 && std::memcmp (ram + (hle.kFbA - kRamBase), hle.kExpFb.data(), 8) != 0)
+        std::snprintf (buf, sizeof buf, "kernel %d (0x%08x): fb_buf", hle.kIdx, hle.kern[(size_t) hle.kIdx].hook);
+    else
+        for (int r = 0; r < 16 && buf[0] == 0; ++r)
+            if (c1.regs[r] != hle.kExpRegs[r])
+                std::snprintf (buf, sizeof buf, "kernel %d (0x%08x): r%d emulado 0x%08x, nativo 0x%08x", hle.kIdx,
+                               hle.kern[(size_t) hle.kIdx].hook, r, c1.regs[r], hle.kExpRegs[r]);
+    if (buf[0] != 0)
+    {
+        if (hle.kMismatches++ == 0)
+            hle.kFirstMismatch = buf;
+        if (hle.mode == Hle::Auto)
+            hle.kOff = true;
+        return;
+    }
+    // coste: lo emulado del gancho al epílogo (con una ISR de cpu1 por medio sería mayor: se queda el menor)
+    const auto ran = (uint32_t) (c1.insnCount - hle.kInsnAt);
+    auto& cost = hle.kCost[(size_t) hle.kIdx];
+    cost = cost == 0 ? ran : std::min (cost, ran);
+    if (hle.mode == Hle::Auto && hle.kChecked >= hle.kAutoChecks)
+        hle.kOn = true;
 }
 
 bool Machine::hleEnter (Cpu& c1)

@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <initializer_list>
+#include <iterator>
 
 namespace fm1
 {
@@ -275,6 +277,146 @@ bool hleFmCoreRender (uint8_t* ram, uint32_t ramBase, size_t ramSize, const HleR
     }
     wr32 (ram + (a.fb - ramBase), (uint32_t) fb[0]);
     wr32 (ram + (a.fb - ramBase) + 4, (uint32_t) fb[1]);
+    return true;
+}
+
+// ---- V16 ------------------------------------------------------------------------------------------------------------------
+namespace
+{
+// El seno de los kernels de la V16 (0x01C0BFA4..0x01C0BFD8 en la V16 de fábrica), del sextra al << 13; mismos registros
+// en todos: r0 fase, r1 ganancia, r6 / r7 las tablas
+const uint8_t kV16Sin[] = { 0xb2, 0xe1, 0x2d, 0x06, 0xab, 0xbf, 0x3a, 0x19, 0xd8, 0xed, 0x68, 0x22, 0x80, 0xa8, 0x60, 0xe1,
+                            0x00, 0x0c, 0x20, 0x19, 0x08, 0x1c, 0x43, 0xe0, 0xff, 0x03, 0x90, 0xe1, 0x33, 0x10, 0xd8, 0xed,
+                            0x78, 0x11, 0xb2, 0xe1, 0x14, 0x05, 0x11, 0xe1, 0x00, 0x10, 0xa1, 0x1a, 0xb0, 0xe1, 0x85, 0x07,
+                            0x18, 0x19, 0x00, 0xad };
+
+bool at (const uint8_t* ram, size_t size, size_t o, std::initializer_list<uint8_t> b) noexcept
+{
+    if (o + b.size() > size)
+        return false;
+    size_t i = 0;
+    for (auto x : b)
+        if (ram[o + i++] != x)
+            return false;
+    return true;
+}
+} // namespace
+
+int findV16Kernels (const uint8_t* ram, uint32_t ramBase, size_t ramSize, HleKernel* out, int max) noexcept
+{
+    int n = 0;
+    const auto* end = ram + ramSize;
+    for (const auto* p = std::search (ram, end, std::begin (kV16Sin), std::end (kV16Sin)); p != end && n < max;
+         p = std::search (p + 1, end, std::begin (kV16Sin), std::end (kV16Sin)))
+    {
+        const auto c = (size_t) (p - ram);
+        // la carga de la primera tabla (r6 = #imm32, c6 ff) entre el prólogo y el seno: el gancho
+        size_t hook = 0;
+        for (size_t o = c >= 0x40 ? c - 0x40 : 0; o + 12 <= c; o += 2)
+            if (at (ram, ramSize, o, { 0xc6, 0xff }) && at (ram, ramSize, o + 6, { 0xc7, 0xff }))
+                hook = o;  // (la última antes del seno)
+        if (hook == 0)
+            continue;
+        HleKernel k;
+        k.hook = ramBase + (uint32_t) hook;
+        k.tLog = rd32 (ram + hook + 2);
+        k.tExp = rd32 (ram + hook + 8);
+        static const uint8_t asrR14[] = { 0xc8, 0xe1, 0x03, 0x0e };  // r0 = r0 >>> r14
+        const bool fb = std::search (ram + hook, ram + c, std::begin (asrR14), std::end (asrR14)) != ram + c;
+        if (fb)
+            k.kind = HleKernel::Fb;
+        else
+        {
+            if (! at (ram, ramSize, hook + 12, { 0x4c, 0xe0, 0x40, 0x00 }))  // r12 = 64
+                continue;
+            k.kind = at (ram, ramSize, hook + 18, { 0x50, 0x05 }) ? HleKernel::Input : HleKernel::Pure;  // r0 = [r5++=4]
+        }
+        // tras el seno: con la suma, r1 = [r4+0] (41 60); el epílogo {pc, R*n} = [sp++] (5n 04)
+        for (size_t o = c + sizeof kV16Sin; o < c + sizeof kV16Sin + 8; o += 2)
+            if (at (ram, ramSize, o, { 0x41, 0x60 }))
+                k.add = true;
+        for (size_t o = c + sizeof kV16Sin; o + 2 <= ramSize && o < c + sizeof kV16Sin + 0x20; o += 2)
+            if ((ram[o] & 0xf0) == 0x50 && ram[o + 1] == 0x04)
+            {
+                k.exit = ramBase + (uint32_t) o;
+                break;
+            }
+        const auto inRam = [&] (uint32_t a, uint32_t len) { return a >= ramBase && (size_t) (a - ramBase) + len <= ramSize; };
+        if (k.exit == 0 || ! inRam (k.tLog, 2048) || ! inRam (k.tExp, 2048))
+            continue;
+        out[n++] = k;
+    }
+    return n;
+}
+
+bool hleV16Kernel (uint8_t* ram, uint32_t ramBase, size_t ramSize, const HleKernel& k, uint32_t regs[16]) noexcept
+{
+    const auto inRam = [&] (uint32_t a, uint32_t len) { return a >= ramBase && (size_t) (a - ramBase) + len <= ramSize; };
+    const uint32_t outA = regs[4], inA = regs[5], fbA = regs[6];
+    if (! inRam (outA, 256) || (k.kind == HleKernel::Input && ! inRam (inA, 256)) || (k.kind == HleKernel::Fb && ! inRam (fbA, 8))
+        || ! inRam (k.tLog, 2048) || ! inRam (k.tExp, 2048))
+        return false;
+    const auto* tLog = ram + (k.tLog - ramBase);
+    const auto* tExp = ram + (k.tExp - ramBase);
+    const auto h = [] (const uint8_t* t, uint32_t i) { return (uint32_t) (t[2 * i] | (t[2 * i + 1] << 8)); };
+    uint8_t* o = ram + (outA - ramBase);
+    const uint8_t* in = k.kind == HleKernel::Input ? ram + (inA - ramBase) : nullptr;
+    uint32_t gain = regs[8], phase = regs[10], y0 = regs[12], y = regs[13];
+    const uint32_t dgain = regs[9], freq = regs[11], sh1 = regs[14];
+    uint32_t r0 = 0, r1 = 0, r2 = 0;
+    for (int i = 0; i < kN; ++i)
+    {
+        gain += dgain;
+        uint32_t x = phase;
+        if (in != nullptr)
+            x += rd32 (in + 4 * i);
+        else if (k.kind == HleKernel::Fb)
+        {
+            // r0 = r12 + r13; r0 >>>= r14; r12 = r13
+            x += (uint32_t) ((int32_t) (y0 + y) >> std::min<uint32_t> (sh1 & 31, 31));
+            y0 = y;
+        }
+        // el seno (kV16Sin), instrucción a instrucción
+        auto a = (uint32_t) ((int32_t) ((x >> 12) << 21) >> 21);       // sextra (p 12, l 11)
+        a ^= (uint32_t) ((int32_t) a >> 31);
+        const auto e = (((x >> 8) & 0x8000u) | h (tLog, a & 0xffffu)) + gain;  // (a: 0..1023)
+        r2 = (e >> 10) & 31;                                             // uextra (p 10, l 5)
+        r1 = (h (tExp, 1023u & ~e) + 4096u) >> r2;
+        r0 = ((uint32_t) -(int32_t) ((e >> 15) & 1) ^ r1) << 13;        // sextra (p 15, l 1), ^, << 13
+        if (k.kind == HleKernel::Fb)
+            y = r0;
+        if (k.add)
+        {
+            r1 = rd32 (o + 4 * i);
+            r0 += r1;
+        }
+        wr32 (o + 4 * i, r0);
+        phase += freq;
+    }
+    regs[0] = r0;
+    regs[1] = r1;
+    regs[2] = r2;
+    regs[3] = 1023;
+    regs[4] = outA + 256;
+    regs[7] = k.tExp;
+    regs[8] = gain;
+    regs[10] = phase;
+    if (k.kind == HleKernel::Fb)
+    {
+        // r6 = fb_buf; [r6++=4] = r12; [r6] = r13
+        wr32 (ram + (fbA - ramBase), y0);
+        wr32 (ram + (fbA - ramBase) + 4, y);
+        regs[6] = fbA + 4;
+        regs[12] = y0;
+        regs[13] = y;
+    }
+    else
+    {
+        if (k.kind == HleKernel::Input)
+            regs[5] = inA + 256;
+        regs[6] = k.tLog;
+        regs[12] = 0;
+    }
     return true;
 }
 } // namespace fm1
