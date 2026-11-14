@@ -326,10 +326,11 @@ public:
     // (array estático: un std::initializer_list devuelto por valor apuntaría a un array temporal ya destruido)
     // y el orden de la cadena de efectos ("fxOrder"; vacío = el de siempre) y la receta de Math Models > Modal ("modalRecipe";
     // vacía = Soft Key, Engines/SynthData.h)
-    static const std::array<const char*, 10>& textProperties()
+    // y la memoria del FM-1 ("fm1Memory", Base64: lo que su firmware guardó con SAVE; Engines/Fm1.h)
+    static const std::array<const char*, 11>& textProperties()
     {
-        static const std::array<const char*, 10> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder",
-                                                        "modalRecipe", "dx7Bank", "fm1Firmware" };
+        static const std::array<const char*, 11> list { "chipMacros", "mdMacros", "snesMacros", "perfMacros", "perfMacroNames", "dx7Voice", "fxOrder",
+                                                        "modalRecipe", "dx7Bank", "fm1Firmware", "fm1Memory" };
         return list;
     }
 
@@ -629,7 +630,8 @@ private:
             snapshot[p->getParameterID()] = p->getValue();
         textSnapshot.clear();
         for (const auto* prop : textProperties())
-            textSnapshot[prop] = apvts.state.getProperty (prop).toString();
+            if (juce::String (prop) != "fm1Memory") // (la memoria del FM-1 la cambia el propio aparato al arrancar: no marca el "*")
+                textSnapshot[prop] = apvts.state.getProperty (prop).toString();
         for (const auto& prop : { playHintProp, playLowProp, playHighProp }) // editar cómo tocarlo también marca el "*"
             textSnapshot[prop.toString()] = apvts.state.getProperty (prop).toString();
         snapshotFiles(); // Save / Save As: los ficheros guardados. En una carga, loadInternal la repite tras restaurarlos
@@ -852,8 +854,10 @@ private:
         xml.setAttribute (cabIrAttribute, apvts.state.getProperty (cabIrAttribute).toString());
         if (const auto ans = apvts.state.getProperty ("ansUser").toString(); ans.isNotEmpty())
             xml.setAttribute ("ansUser", ans); // partitura del ANS dibujada por el usuario
+        const bool fm1 = apvts.getRawParameterValue ("engine") != nullptr && (int) apvts.getRawParameterValue ("engine")->load() == 16;
         for (const auto* prop : textProperties())
-            if (const auto text = apvts.state.getProperty (prop).toString(); text.isNotEmpty())
+            if (const auto text = apvts.state.getProperty (prop).toString(); text.isNotEmpty()
+                && (fm1 || juce::String (prop) != "fm1Memory")) // (la memoria del FM-1, solo en sus presets)
                 xml.setAttribute (prop, text);
         for (auto* p : rangedParameters())
             xml.setAttribute (p->getParameterID(), p->convertFrom0to1 (p->getValue()));

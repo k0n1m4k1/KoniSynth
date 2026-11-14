@@ -29,8 +29,10 @@ public:
     ~Fm1Engine() { stop(); }
 
     // ---- hilo de mensajes ---------------------------------------------------------------------------------------------
-    // Carga el paquete y arranca la máquina en su hilo. false y el motivo en status si no se puede
-    bool start (const juce::File& fwsc, juce::String& error)
+    // Carga el paquete y arranca la máquina en su hilo. false y el motivo en status si no se puede. La memoria del aparato
+    // (lo que el firmware guardó en su flash: SAVE, ajustes): la de memoryB64 (preset o proyecto) si es de este paquete; si
+    // no, la del fichero <firmware>.fm1save junto al .fwsc; si no, la flash del paquete tal cual
+    bool start (const juce::File& fwsc, juce::String& error, const juce::String& memoryB64 = {})
     {
         stop();
         juce::MemoryBlock data;
@@ -43,6 +45,19 @@ public:
         auto e = boot (std::vector<uint8_t> (bytes, bytes + data.getSize()), error);
         if (e == nullptr)
             return false;
+        e->packageHash = fnv64 (bytes, data.getSize());
+        e->savePath = fwsc.withFileExtension ("fm1save");
+        {
+            juce::MemoryBlock fromPreset, fromFile;
+            juce::String note;
+            if (memoryB64.isNotEmpty() && fromPreset.fromBase64Encoding (memoryB64) && applyMemory (*e, fromPreset, note))
+                note = "memory from the preset";
+            else if (e->savePath.loadFileAsData (fromFile) && applyMemory (*e, fromFile, note))
+                note = "memory from " + e->savePath.getFileName();
+            memoryNote = note;
+        }
+        e->savedRev = e->seenRev = e->soc->flash.revision;
+        publishMemory (*e);
         audioFifo.reset();
         midiFifo.reset();
         panelFifo.reset();
@@ -76,10 +91,19 @@ public:
             worker.reset();
         }
         const std::lock_guard<std::mutex> g (emuLock);
+        if (emu != nullptr)
+            saveMemory (*emu, true); // lo que el firmware escribió desde el último guardado
         emu.reset();
     }
 
     bool isLive() const noexcept { return live.load (std::memory_order_acquire); }
+
+    // La memoria del aparato en Base64 (el formato de <firmware>.fm1save), para el preset y el proyecto; vacía sin máquina
+    juce::String memoryBase64() const
+    {
+        const std::lock_guard<std::mutex> g (memoryLock);
+        return memoryB64Now;
+    }
     juce::File loadedFile() const { return loaded; }
 
     // Latencia añadida (ms) y su valor en muestras del host (la cola por delante del audio + el remuestreador)
@@ -203,7 +227,125 @@ private:
         int64_t dacOffset = -1;   // trama del reloj del DAC de la primera trama dada (-1: aún sin audio)
         uint64_t shownAt = 0;     // ciclo de la última copia de la pantalla
         uint32_t shownRev = ~0u;  // y su revisión
+        uint64_t packageHash = 0; // FNV-1a del .fwsc: la memoria guardada solo vale para el mismo paquete
+        juce::File savePath;      // <firmware>.fm1save
+        uint64_t savedRev = 0;    // SpiFlash::revision de lo último guardado
+        uint64_t seenRev = 0;     // la última revisión vista y cuándo (ms) se vio cambiar
+        double changedAt = 0.0;
     };
+
+    //==========================================================================
+    // Memoria del aparato: los sectores de 4 KiB de la flash que difieren de la del paquete (Stock::flash). Formato, comprimido
+    // con gzip: "KFM1", versión 1 (u32), FNV-1a del .fwsc (u64), n (u32) y n veces (desplazamiento u32, 4096 bytes); enteros
+    // en little endian. Fichero <firmware>.fm1save junto al .fwsc y, en Base64, la propiedad fm1Memory del preset y del proyecto
+    static constexpr size_t kSector = 4096;
+    static constexpr double kSaveDelayMs = 1000.0; // tras la última escritura del firmware (un SAVE son varias órdenes)
+
+    static uint64_t fnv64 (const uint8_t* p, size_t n)
+    {
+        uint64_t h = 0xcbf29ce484222325ull;
+        for (size_t i = 0; i < n; ++i) { h ^= p[i]; h *= 0x100000001b3ull; }
+        return h;
+    }
+
+    static juce::MemoryBlock encodeMemory (const Emu& e)
+    {
+        const auto& now = e.soc->flash.mem;
+        const auto& base = e.stock.flash;
+        juce::MemoryOutputStream raw;
+        raw.write ("KFM1", 4);
+        raw.writeInt (1);
+        raw.writeInt64 ((juce::int64) e.packageHash);
+        std::vector<uint32_t> sectors;
+        for (size_t at = 0; at < now.size(); at += kSector)
+        {
+            const auto n = std::min (kSector, now.size() - at);
+            const bool same = at + n <= base.size() ? std::memcmp (&now[at], &base[at], n) == 0 : false;
+            if (! same)
+                sectors.push_back ((uint32_t) at);
+        }
+        raw.writeInt ((int) sectors.size());
+        for (const auto at : sectors)
+        {
+            raw.writeInt ((int) at);
+            raw.write (&now[at], std::min (kSector, now.size() - at));
+        }
+        juce::MemoryOutputStream packed;
+        {
+            juce::GZIPCompressorOutputStream gz (packed, 9);
+            gz.write (raw.getData(), raw.getDataSize());
+        }
+        return packed.getMemoryBlock();
+    }
+
+    // La memoria guardada sobre la flash recién arrancada (antes de la primera instrucción). false (y por qué en note) si no
+    // es de este paquete o no se lee
+    static bool applyMemory (Emu& e, const juce::MemoryBlock& packed, juce::String& note)
+    {
+        juce::MemoryInputStream in (packed, false);
+        juce::GZIPDecompressorInputStream gz (in);
+        juce::MemoryBlock raw;
+        gz.readIntoMemoryBlock (raw);
+        juce::MemoryInputStream r (raw, false);
+        char magic[4] = {};
+        if (r.read (magic, 4) != 4 || std::memcmp (magic, "KFM1", 4) != 0 || r.readInt() != 1)
+        {
+            note = "saved memory not readable";
+            return false;
+        }
+        if ((uint64_t) r.readInt64() != e.packageHash)
+        {
+            note = "saved memory is for another build of this firmware: not loaded";
+            return false;
+        }
+        const auto n = r.readInt();
+        auto image = e.stock.flash;
+        image.resize (e.soc->flash.mem.size(), 0xff);
+        for (int k = 0; k < n; ++k)
+        {
+            const auto at = (size_t) (uint32_t) r.readInt();
+            const auto len = std::min (kSector, image.size() - std::min (at, image.size()));
+            if (at >= image.size() || r.read (&image[at], (int) len) != (int) len)
+            {
+                note = "saved memory truncated";
+                return false;
+            }
+        }
+        e.soc->restoreFlash (image); // (y la ventana XIP, por si el firmware guarda en ella)
+        return true;
+    }
+
+    void publishMemory (const Emu& e)
+    {
+        const auto b64 = encodeMemory (e).toBase64Encoding();
+        const std::lock_guard<std::mutex> g (memoryLock);
+        memoryB64Now = b64;
+    }
+
+    // (con emuLock) la flash cambió: cuando lleva kSaveDelayMs sin cambiar (o con force), al fichero y al preset. El
+    // fichero se escribe aparte y se renombra: un corte a medias deja el anterior entero
+    void saveMemory (Emu& e, bool force)
+    {
+        const auto rev = e.soc->flash.revision;
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        if (rev != e.seenRev)
+        {
+            e.seenRev = rev;
+            e.changedAt = now;
+        }
+        if (rev == e.savedRev || (! force && now - e.changedAt < kSaveDelayMs))
+            return;
+        const auto packed = encodeMemory (e);
+        juce::TemporaryFile tmp (e.savePath);
+        if (tmp.getFile().replaceWithData (packed.getData(), packed.getSize()))
+            tmp.overwriteTargetFileWithTemporary();
+        {
+            const auto b64 = packed.toBase64Encoding();
+            const std::lock_guard<std::mutex> g (memoryLock);
+            memoryB64Now = b64;
+        }
+        e.savedRev = rev;
+    }
 
     struct Worker : juce::Thread
     {
@@ -360,8 +502,9 @@ private:
                 if (emu->produced > 0 && statusBooting)
                 {
                     statusBooting = false;
-                    setStatus ("Running " + loaded.getFileName());
+                    setStatus ("Running " + loaded.getFileName() + (memoryNote.isNotEmpty() ? " (" + memoryNote + ")" : juce::String()));
                 }
+                saveMemory (*emu, false); // lo que el firmware guardó en su flash (SAVE), al fichero y al preset
                 // velocidad: tiempo de máquina / tiempo real, cada ~0,5 s
                 const auto wall = juce::Time::getMillisecondCounterHiRes();
                 const auto cycles = emu->soc->periph.cycles;
@@ -452,4 +595,8 @@ private:
 
     juce::CriticalSection statusLock;
     juce::String status;
+
+    mutable std::mutex memoryLock;
+    juce::String memoryB64Now; // (memoryLock) la memoria del aparato en Base64, la última guardada
+    juce::String memoryNote;   // de dónde vino la memoria al arrancar (o por qué no se cargó la guardada)
 };

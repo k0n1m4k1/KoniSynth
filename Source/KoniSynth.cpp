@@ -288,6 +288,7 @@ public:
         fm1Tried = true;
         const auto folder = fm1FirmwareFolder();
         fm1StartedChoice = apvts.state.getProperty (fm1FirmwareProp).toString();
+        fm1StartedMemory = apvts.state.getProperty (fm1MemoryProp).toString();
         juce::File file;
         if (fm1StartedChoice.isNotEmpty())
         {
@@ -309,7 +310,7 @@ public:
         juce::String status;
         if (! file.existsAsFile())
             status = "No firmware: put your FM-1 .fwsc files in " + folder.getFullPathName();
-        else if (! fm1Engine.start (file, status))
+        else if (! fm1Engine.start (file, status, fm1StartedMemory))
             status = file.getFileName() + ": " + status;
         const juce::ScopedLock sl (sampleInfoLock);
         fm1StartError = status;
@@ -327,6 +328,7 @@ public:
     // elegir un firmware (menú o Locate): su ruta entra en el estado (preset y proyecto) y arranca
     void chooseFm1 (const juce::File& file)
     {
+        apvts.state.setProperty (fm1MemoryProp, juce::String(), nullptr); // (la memoria era del otro: este trae la suya)
         apvts.state.setProperty (fm1FirmwareProp, file.getFullPathName(), nullptr);
         rescanFm1();
     }
@@ -2152,8 +2154,11 @@ private:
     juce::String mt32Status; // protegido por sampleInfoLock
     juce::String gusStatus;  // protegido por sampleInfoLock
     juce::String fm1StartError; // protegido por sampleInfoLock
+    // memoria del aparato (Fm1Engine: lo que el firmware guardó en su flash) en Base64, preset y proyecto; vacía: la del fichero
+    static constexpr const char* fm1MemoryProp = "fm1Memory";
     static constexpr const char* fm1FirmwareProp = "fm1Firmware"; // ruta del .fwsc (preset y proyecto); vacía: el primero
     juce::String fm1StartedChoice; // la ruta con la que arrancó (para rearrancar si el estado trae otra)
+    juce::String fm1StartedMemory; // y la memoria (fm1MemoryProp), o la última que publicó la máquina
     juce::StringArray gusPatchNames; // nombres por índice del banco; protegido por sampleInfoLock
     AnsSlot ansSlot;
     MacroSlot chipMacroSlot, mdMacroSlot, snesMacroSlot;
@@ -2354,6 +2359,21 @@ private:
                 startFm1();
             else if (apvts.state.getProperty (fm1FirmwareProp).toString() != fm1StartedChoice)
                 rescanFm1(); // un proyecto cargado con otro firmware
+            else
+            {
+                // la memoria del aparato (SAVE): un preset o proyecto que trae otra la carga (reinicia el aparato con ella);
+                // si no, la propiedad sigue a la máquina, para que el preset y el proyecto guarden la que tiene. Vacía (presets
+                // de fábrica): no se toca la memoria
+                const auto wanted = apvts.state.getProperty (fm1MemoryProp).toString();
+                const auto now = fm1Engine.memoryBase64();
+                if (wanted.isNotEmpty() && wanted != fm1StartedMemory && wanted != now)
+                    rescanFm1();
+                else if (now.isNotEmpty() && now != wanted)
+                {
+                    fm1StartedMemory = now;
+                    apvts.state.setProperty (fm1MemoryProp, now, nullptr);
+                }
+            }
         }
         else if (fm1Tried)
         {
