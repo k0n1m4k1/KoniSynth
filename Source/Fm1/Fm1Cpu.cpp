@@ -970,6 +970,156 @@ static uint16_t routeOf (const Fm1IsaEntry& e, uint64_t raw, bool alu4, bool bit
 
 static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept;
 
+// Micro-op para las rutas crudas más ejecutadas (medido 2026-11-14 con --profile: 1, 11, 17, 4, 10 y 20 son el 34,7 % de
+// las instrucciones de cpu0 en Felucca y el 25,1 % en la V15): los mismos campos que execRoute saca de raw en cada
+// ejecución, resueltos una vez, y la misma semántica (las variantes que no encajan siguen por execRoute). La ruta de
+// referencia (fastPath = false) sigue por execRoute: la prueba diferencial las compara
+static void computeFastRaw (uint64_t raw, Fm1Pre& pre) noexcept
+{
+    switch (pre.route)
+    {
+        case 1:  // ALU de 4 bytes: registro (las aritméticas con banderas, como aluF) o lectura-modificación-escritura
+            if (pre.aluRhs.kind == Fm1Pre::RhsBit)
+                return;
+            if (! pre.aluDstMem)
+            {
+                pre.fast = pre.aluRhs.kind == Fm1Pre::RhsReg ? Fm1Pre::FastAluR : Fm1Pre::FastAluI;
+                pre.fd = pre.aluDst;
+                pre.fa = pre.aluSrc;
+                pre.fb = (uint8_t) (pre.aluRhs.v & 15);
+                pre.fimm = pre.aluRhs.v;
+                pre.fcond = (uint8_t) pre.aluOp;
+                return;
+            }
+            {
+                uint8_t op;
+                switch (pre.aluOp)
+                {
+                    case Fm1Pre::Or:  op = Fm1Pre::OpOr; break;
+                    case Fm1Pre::And: op = Fm1Pre::OpAnd; break;
+                    case Fm1Pre::Xor: op = Fm1Pre::OpXor; break;
+                    case Fm1Pre::Add: op = Fm1Pre::OpAdd; break;
+                    case Fm1Pre::Sub: op = Fm1Pre::OpSub; break;
+                    default: return;
+                }
+                pre.fast = Fm1Pre::FastStX;
+                pre.fmode = Fm1Pre::MemRImm;
+                pre.fa = pre.aluSrc;
+                pre.fimm = (uint32_t) pre.aluMemOff;
+                pre.fw = 4;
+                pre.fcond = op;
+                if (pre.aluRhs.kind == Fm1Pre::RhsReg)
+                {
+                    pre.fsrc = Fm1Pre::SrcReg;
+                    pre.fd = (uint8_t) (pre.aluRhs.v & 15);
+                }
+                else
+                {
+                    pre.fsrc = Fm1Pre::SrcImm;
+                    pre.foff = (int64_t) pre.aluRhs.v;
+                }
+            }
+            return;
+        case 4:  // R = #i de 2 bytes
+            pre.fast = Fm1Pre::FastMovI;
+            pre.fd = (uint8_t) ((raw & 7) | (((raw >> 7) & 1) << 3));
+            pre.fimm = ((raw & 0xc0) == 0xc0 && ((raw >> 8) & 0xff) == 0x14)
+                           ? 0u : (uint32_t) ((raw >> 8) & 0x1f) | ((uint32_t) ((raw >> 3) & 7) << 5);
+            return;
+        case 10:  // R = R << >> >>> #i de 2 bytes; cuenta 0 = 32
+        {
+            auto shc = (uint32_t) ((raw >> 8) & 0x1f);
+            if (shc == 0) shc = 32;
+            pre.fast = Fm1Pre::FastShift;
+            pre.fd = (uint8_t) (raw & 7);
+            pre.fa = (uint8_t) ((raw >> 4) & 7);
+            pre.fimm = shc;
+            pre.fidx = false;
+            pre.fcond = pre.nameKind == 1 ? 1 : pre.nameKind == 2 ? 2 : 0;
+            return;
+        }
+        case 11:  // if (R op #i) goto de 4 bytes
+        {
+            const auto fam = (raw >> 8) & 0xff;
+            const bool alt = (raw & 0x80) != 0;
+            const auto imm10 = (uint32_t) (((raw >> 25) & 0x7f) | (((raw >> 4) & 7) << 7));
+            const auto immS = (imm10 & 0x200) != 0 ? (imm10 | ~0x3ffu) : imm10;
+            const auto f = (int64_t) (((raw >> 16) & 0xff) | (((raw >> 24) & 1) << 8));
+            Cond c;
+            uint32_t imm = immS;
+            if (fam == 0xf8) c = alt ? Cond::Ne : Cond::Eq;
+            else if (fam == 0xf9) { c = alt ? Cond::LtU : Cond::GeU; imm = imm10; }
+            else if (fam == 0xfc) { c = alt ? Cond::LeU : Cond::GtU; imm = imm10; }
+            else if (fam == 0xfd) c = alt ? Cond::LtS : Cond::GeS;
+            else if (fam == 0xfe && ! alt) c = Cond::GtS;
+            else c = Cond::LeS;
+            pre.fast = Fm1Pre::FastBrI;
+            pre.fa = (uint8_t) (raw & 0xf);
+            pre.fimm = imm;
+            pre.fcond = (uint8_t) c;
+            pre.foff = 2 * ((f & 0x100) != 0 ? f - 0x200 : f);  // desde pc + 4 (la instrucción mide 4)
+            return;
+        }
+        case 17:  // R = [rB+#i] / [rB+#i] = R, palabra, media o byte
+        {
+            const uint8_t w = ((raw >> 8) & 0xff) == 0xec ? 4 : ((raw >> 8) & 0xff) == 0xed ? 2 : 1;
+            const auto fv = (uint32_t) (((raw >> 16) & 0xf) | (((raw >> 24) & 0xf) << 4));
+            bool store, sign;
+            int32_t off;
+            if (w == 1)
+            {
+                off = (raw & 1) != 0 ? (int32_t) fv - 256 : (int32_t) fv;
+                store = ((raw >> 1) & 1) != 0;
+                sign = ((raw >> 2) & 1) != 0;
+            }
+            else
+            {
+                const auto x = (fv & ~1u) | ((uint32_t) (raw & 1) << 8) | ((uint32_t) ((raw >> 1) & 1) << 9);
+                off = (x & 0x200) != 0 ? (int32_t) x - 0x400 : (int32_t) x;
+                store = ((raw >> 16) & 1) != 0;
+                sign = w == 2 && ((raw >> 2) & 1) != 0;
+            }
+            pre.fast = store ? Fm1Pre::FastSt : Fm1Pre::FastLd;
+            pre.fd = (uint8_t) ((raw >> 28) & 0xf);
+            pre.fa = (uint8_t) ((raw >> 20) & 0xf);
+            pre.fimm = (uint32_t) off;
+            pre.fw = w;
+            pre.fsign = sign;
+            pre.fsp = false;
+            pre.fidx = false;
+            return;
+        }
+        case 20:  // [rB + rI << s], indexado
+        {
+            const auto kind = (raw >> 8) & 0xff;
+            const auto sub = (raw >> 16) & 0xf;
+            const auto op = sub & 3;
+            uint8_t w;
+            bool store = false, sign = false;
+            if (kind == 0xec && op == 2) w = 4;
+            else if (kind == 0xec && op == 3) { w = 4; store = true; }
+            else if (kind == 0xed && op == 0) w = 2;
+            else if (kind == 0xed && op == 1) { w = 2; store = true; }
+            else if (kind == 0xed && op == 2) { w = 2; sign = true; }
+            else if (kind == 0xee && op == 0) w = 1;
+            else if (kind == 0xee && op == 1) { w = 1; store = true; }
+            else if (kind == 0xee && op == 2) { w = 1; sign = true; }
+            else return;  // (sin semántica: execRoute falla como antes)
+            pre.fast = store ? Fm1Pre::FastSt : Fm1Pre::FastLd;
+            pre.fd = (uint8_t) ((raw >> 28) & 0xf);
+            pre.fa = (uint8_t) ((raw >> 20) & 0xf);
+            pre.fb = (uint8_t) ((raw >> 24) & 0xf);
+            pre.fsh = (uint8_t) ((sub & 8) != 0 ? (kind == 0xec ? 2 : 1) : 0);
+            pre.fw = w;
+            pre.fsign = sign;
+            pre.fsp = false;
+            pre.fidx = true;
+            return;
+        }
+        default: return;
+    }
+}
+
 void computePre (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& pre) noexcept
 {
     pre = {};
@@ -1035,6 +1185,8 @@ void computePre (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& pre) noexcept
     pre.pairHead = s.ends_with ('#');
     if (pre.route == kRouteSyntax)
         computeFast (e, raw, pre);
+    else
+        computeFastRaw (raw, pre);
 }
 
 // ---- Cpu ----------------------------------------------------------------------------------------------------------------
@@ -1421,7 +1573,11 @@ FM1_INLINE bool Cpu::stepImpl (Bus& bus)
     // (sin copia: solo fetch reemplaza líneas de la caché, y execute no llama a fetch; blockEnd decodifica aparte)
     const auto& line = *l;
     if (hist != nullptr)
+    {
         ++(*hist)[line.entry];
+        ++routeCount[fastPath && line.pre.fast != Fm1Pre::FastNone ? 255 : line.pre.route & 0xff];
+        pairHeads += line.pre.pairHead ? 1 : 0;
+    }
     if (pcHist != nullptr)
         ++(*pcHist)[pc];
     const auto nextPc = pc + line.len;

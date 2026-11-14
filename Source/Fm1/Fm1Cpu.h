@@ -240,6 +240,8 @@ public:
     bool fastPath = true;  // micro-ops para las formas comunes (false = solo exec_syntax: la referencia)
     // Perfil opcional (nullptr = apagado): instrucciones ejecutadas por clase
     std::unordered_map<const Fm1IsaEntry*, uint64_t>* hist = nullptr;
+    // con hist: instrucciones por ruta (ruta rápida: el índice 255) y cabezas de par de emisión doble
+    uint64_t routeCount[256] {}, pairHeads = 0;
     std::unordered_map<const Fm1IsaEntry*, uint64_t>* synHist = nullptr;  // las que van de verdad por exec_syntax
     std::unordered_map<uint32_t, uint64_t>* pcHist = nullptr;  // instrucciones ejecutadas por pc (también las de los sondeos)
     bool hasPcWin = false;

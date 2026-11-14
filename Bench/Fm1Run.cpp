@@ -391,6 +391,16 @@ int main (int argc, char** argv)
                  (unsigned long long) soc.periph.ms(), wall, (double) soc.periph.ms() / 1000.0 / wall, (unsigned long long) cpu.insnCount,
                  m.cpu1 ? "en marcha," : "sin arrancar,", (unsigned long long) (m.cpu1 ? m.cpu1->insnCount : 0),
                  100.0 * (double) soc.periph.skipped / (double) std::max<uint64_t> (soc.periph.cycles, 1));
+    if (profile > 0)
+    {
+        uint64_t tot = 0;
+        for (const auto c : cpu.routeCount) tot += c;
+        std::printf ("cpu0 por ruta (de %llu; 255 = micro-op): ", (unsigned long long) tot);
+        for (int r = 0; r < 256; ++r)
+            if (cpu.routeCount[r] * 200 >= tot && tot > 0)
+                std::printf ("%d %.1f %%  ", r, 100.0 * (double) cpu.routeCount[r] / (double) tot);
+        std::printf ("; cabezas de par %.1f %%\n", tot > 0 ? 100.0 * (double) cpu.pairHeads / (double) tot : 0.0);
+    }
     std::printf ("salto de bucles: %llu sondeos, %llu con bucle, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.probes,
                  (unsigned long long) m.loopSkip.hits, (unsigned long long) m.loopSkip.skipped);
     std::printf ("  con el contador del TIMER4: %llu saltos; %llu vueltas comprobadas en sombra, %llu rechazadas\n",
