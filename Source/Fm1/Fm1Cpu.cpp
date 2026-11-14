@@ -975,7 +975,7 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
 // las instrucciones de cpu0 en Felucca y el 25,1 % en la V15): los mismos campos que execRoute saca de raw en cada
 // ejecución, resueltos una vez, y la misma semántica (las variantes que no encajan siguen por execRoute). La ruta de
 // referencia (fastPath = false) sigue por execRoute: la prueba diferencial las compara
-static void computeFastRaw (uint64_t raw, Fm1Pre& pre) noexcept
+static void computeFastRaw (uint64_t raw, Fm1Pre& pre, uint8_t len) noexcept
 {
     switch (pre.route)
     {
@@ -1021,6 +1021,57 @@ static void computeFastRaw (uint64_t raw, Fm1Pre& pre) noexcept
                 }
             }
             return;
+        case 0:  // salto por prueba de bit (decode_bittest)
+            pre.fast = Fm1Pre::FastBitBr;
+            pre.fa = pre.btReg;
+            pre.fmode = (uint8_t) pre.btMask.kind;
+            pre.fb = (uint8_t) (pre.btMask.v & 15);
+            pre.fimm = pre.btMask.v;
+            pre.fcond = pre.btNe ? 1 : 0;
+            pre.foff = pre.btOff;
+            return;
+        case 12:  // if (R op #i) goto de 6 bytes
+        {
+            const auto b0 = raw & 0xff;
+            const auto fam = (b0 >> 1) & 7;
+            uint32_t imm;
+            if ((b0 & 0x20) != 0)
+                imm = composedImm ((uint32_t) ((raw >> 24) & 0xf), (uint32_t) ((raw >> 16) & 0xff));
+            else
+            {
+                imm = (uint32_t) ((raw >> 16) & 0xfff);
+                if ((imm & 0x800) != 0 && ! (fam == 1 || fam == 4)) imm |= ~0xfffu;
+            }
+            pre.fast = Fm1Pre::FastBrI;
+            pre.fa = (uint8_t) ((raw >> 28) & 0xf);
+            pre.fimm = imm;
+            pre.fcond = (uint8_t) condOfFam (fam, (b0 & 1) != 0);
+            pre.foff = 2 * (int64_t) (int16_t) (uint16_t) (raw >> 32);
+            return;
+        }
+        case 13:  // if (R op R) goto (decodificada en computePre)
+            pre.fast = Fm1Pre::FastBrR;
+            pre.fa = pre.cbA;
+            pre.fb = pre.cbB;
+            pre.fcond = (uint8_t) condOfFam (pre.cbFam, pre.cbAlt);
+            pre.foff = pre.cbOff;
+            return;
+        case 26:  // [--sp] = {rets, ...}
+        case 28:  // {pc, ...} = [sp++]
+        {
+            uint32_t mask = 0;
+            if (len == 4)  // (d9 / d5 e8 <máscara>; la de 2 bytes, un rango)
+                mask = (uint32_t) ((raw >> 16) & 0xffff);
+            else
+            {
+                const auto n = (int) (raw & 0xf);
+                for (int i = std::min (n, 4); i <= std::max (n, 3); ++i)
+                    mask |= 1u << i;
+            }
+            pre.fast = pre.route == 26 ? Fm1Pre::FastPushRets : Fm1Pre::FastPopRetPc;
+            pre.fimm = mask;
+            return;
+        }
         case 4:  // R = #i de 2 bytes
             pre.fast = Fm1Pre::FastMovI;
             pre.fd = (uint8_t) ((raw & 7) | (((raw >> 7) & 1) << 3));
@@ -1187,7 +1238,7 @@ void computePre (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& pre) noexcept
     if (pre.route == kRouteSyntax)
         computeFast (e, raw, pre);
     else
-        computeFastRaw (raw, pre);
+        computeFastRaw (raw, pre, e.len);
 }
 
 // ---- Cpu ----------------------------------------------------------------------------------------------------------------
@@ -2114,7 +2165,7 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
         // cambian el flujo, o lo que miran irqReady / inIsr: la última del bloque
         if (f == Fm1Pre::FastBrI || f == Fm1Pre::FastBrR || f == Fm1Pre::FastGoto || f == Fm1Pre::FastCall || f == Fm1Pre::FastRts
             || f == Fm1Pre::FastTb || f == Fm1Pre::FastCallR || f == Fm1Pre::FastRti || f == Fm1Pre::FastPopPc || f == Fm1Pre::FastDecBr
-            || f == Fm1Pre::FastIe || f == Fm1Pre::FastIcfgWr)
+            || f == Fm1Pre::FastIe || f == Fm1Pre::FastIcfgWr || f == Fm1Pre::FastPopRetPc || f == Fm1Pre::FastBitBr)
             break;
     }
     if (lines.size() < 2)
@@ -2489,6 +2540,37 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                         sp += 4;
                     }
                 break;
+            case Fm1Pre::FastPushRets:  // (ruta 26)
+                sp -= 4;
+                bus.write32 (sp, rets);
+                for (int i = 15; i >= 0; --i)
+                    if (((pre.fimm >> i) & 1) != 0)
+                    {
+                        sp -= 4;
+                        bus.write32 (sp, regs[i]);
+                    }
+                break;
+            case Fm1Pre::FastPopRetPc:  // (ruta 28)
+            {
+                for (int i = 0; i < 16; ++i)
+                    if (((pre.fimm >> i) & 1) != 0)
+                    {
+                        regs[i] = bus.read32 (sp);
+                        sp += 4;
+                    }
+                const auto t = bus.read32 (sp);
+                sp += 4;
+                jumpTo (t);
+                break;
+            }
+            case Fm1Pre::FastBitBr:  // (ruta 0)
+            {
+                const auto m = pre.fmode == Fm1Pre::RhsReg ? regs[pre.fb] : pre.fmode == Fm1Pre::RhsImm ? pre.fimm
+                                                                                                       : 1u << (regs[pre.fb] & 31);
+                if (((regs[pre.fa] & m) != 0) == (pre.fcond != 0))
+                    jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff));
+                break;
+            }
             case Fm1Pre::FastNone: break;
         }
         finish (jumped, target, nextPc);

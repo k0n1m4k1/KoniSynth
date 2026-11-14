@@ -99,7 +99,12 @@ struct Fm1Pre
                             FastCallR,  // call R
                             FastRti,    // rti (Cpu::doRti)
                             FastPushList, // [--sp] = {R*N}: fimm = máscara de registros, del mayor al menor
-                            FastPopList   // {R*N} = [sp++]: fimm = máscara, del menor al mayor
+                            FastPopList,  // {R*N} = [sp++]: fimm = máscara, del menor al mayor
+                            // cuarta tanda (cobertura del JIT): rutas crudas 26, 28 y 0
+                            FastPushRets, // [--sp] = {rets, R*N}: rets primero, luego la máscara fimm del mayor al menor
+                            FastPopRetPc, // {pc, R*N} = [sp++]: la máscara fimm del menor al mayor, luego pc
+                            FastBitBr     // if ((R & rhs) != 0) == fcond goto: fmode = clase de rhs (Fm1Pre::RhsKind),
+                                          // fb = su registro, fimm = su inmediato
     };
     // Direccionamientos de FastLdX / FastStX (los de exec_syntax)
     enum MemMode : uint8_t { MemRImm, MemSpImm, MemSp, MemRR, MemRRShl, MemPostImm, MemPostR, MemPreImm, MemPreR, MemPushSp };
