@@ -107,8 +107,10 @@ struct Fm1Pre
                             // cuarta tanda (cobertura del JIT): rutas crudas 26, 28 y 0
                             FastPushRets, // [--sp] = {rets, R*N}: rets primero, luego la máscara fimm del mayor al menor
                             FastPopRetPc, // {pc, R*N} = [sp++]: la máscara fimm del menor al mayor, luego pc
-                            FastBitBr     // if ((R & rhs) != 0) == fcond goto: fmode = clase de rhs (Fm1Pre::RhsKind),
+                            FastBitBr,    // if ((R & rhs) != 0) == fcond goto: fmode = clase de rhs (Fm1Pre::RhsKind),
                                           // fb = su registro, fimm = su inmediato
+                            // quinta tanda (cobertura del JIT, medida con el osciloscopio de la V15): ruta cruda 2
+                            FastNop       // nop / csync / sti R / cli R: sin efecto (como su caso en execRoute)
     };
     // Direccionamientos de FastLdX / FastStX (los de exec_syntax)
     enum MemMode : uint8_t { MemRImm, MemSpImm, MemSp, MemRR, MemRRShl, MemPostImm, MemPostR, MemPreImm, MemPreR, MemPushSp };

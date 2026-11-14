@@ -1072,6 +1072,23 @@ static void computeFastRaw (uint64_t raw, Fm1Pre& pre, uint8_t len) noexcept
             pre.fimm = mask;
             return;
         }
+        case 2:  // nop / csync / sti R / cli R
+            pre.fast = Fm1Pre::FastNop;
+            return;
+        case 8:  // R = #h (composedImm, como su caso en execRoute)
+            pre.fast = Fm1Pre::FastMovI;
+            pre.fd = (uint8_t) ((raw >> 28) & 0xf);
+            pre.fimm = composedImm ((uint32_t) ((raw >> 24) & 0xf), (uint32_t) ((raw >> 16) & 0xff));
+            return;
+        case 15:  // R = R.b0|.l (u|s) (xx 17): d = bits(0,2), s = bits(4,6), bit3 = con signo, bit7 = media palabra
+        {
+            const bool sign = (raw & 8) != 0, half = (raw & 0x80) != 0;
+            pre.fast = Fm1Pre::FastPart;
+            pre.fd = (uint8_t) (raw & 7);
+            pre.fa = (uint8_t) ((raw >> 4) & 7);
+            pre.fsh = (uint8_t) ((half ? 2 : 0) + (sign ? 1 : 0));  // FastPart: 0 b0 (u), 1 b0 (s), 2 l (u), 3 l (s)
+            return;
+        }
         case 4:  // R = #i de 2 bytes
             pre.fast = Fm1Pre::FastMovI;
             pre.fd = (uint8_t) ((raw & 7) | (((raw >> 7) & 1) << 3));
@@ -1446,7 +1463,7 @@ int64_t Cpu::skipCountedLoop (Bus& bus, uint32_t room)
             holdIrq = 0;
             return (int64_t) (rounds * len);
         }
-        else if (! (p.route == 2 && p.fast == Fm1Pre::FastNone))
+        else if (p.route != 2)
             return -1;  // solo nop / csync en el cuerpo
         at = next;
     }
@@ -1727,6 +1744,8 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
     const auto stEax = [&] (uint32_t off) { memOp (e, { 0x89 }, 0, off); };
     switch (p.fast)
     {
+        case Fm1Pre::FastNop:
+            return true;
         case Fm1Pre::FastMovI:
             memOp (e, { 0xc7 }, 0, R (p.fd));  // mov dword [rd], imm32
             e.u32 (p.fimm);
@@ -2289,7 +2308,8 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             || f == Fm1Pre::FastIe || f == Fm1Pre::FastIcfgWr || f == Fm1Pre::FastPopRetPc || f == Fm1Pre::FastBitBr)
             break;
     }
-    if (lines.size() < 2)
+    // (también de una instrucción: el salto que sigue a otro o a una sin micro-op; medido, GHOULBOX 2.4 -7 % de tiempo)
+    if (lines.empty())
         return nullptr;
     uint64_t slotMask = 0;
     for (const auto* q : lines)
@@ -2778,6 +2798,7 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                     jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff));
                 break;
             }
+            case Fm1Pre::FastNop: break;
             case Fm1Pre::FastNone: break;
         }
         finish (jumped, target, nextPc);
