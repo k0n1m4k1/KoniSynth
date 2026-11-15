@@ -347,6 +347,13 @@ private:
     std::deque<JitLink> jitLinks;
     JitLink* jitPending = nullptr;  // salida sin enlazar del último bloque: se enlaza con el siguiente si es su pc
     void jitUnlinkAll() noexcept;
+    // Saltos a destino calculado (rts, pop a pc, call R, tablas): pc -> entrada encadenada de su bloque, directa por
+    // (pc >> 1) mod 2^14, como Jit::itab de fm1-emu. El código nativo la lee al final de esos bloques; la entrada
+    // encadenada repite las comprobaciones de la ráfaga. 256 KiB. Se vacía con los enlaces (jitUnlinkAll) y con el búfer
+    struct JitItab { uint32_t pc, pad; const void* body; };
+    static constexpr uint32_t kItabBits = 14;
+    std::vector<JitItab> jitItab;
+    void jitItabClear() noexcept;
     // índice por media palabra de los primeros 2 MiB de la XIP (la aplicación de Felucca ocupa 586 KB): 0 sin mirar,
     // 1 sin bloque, k + 2 = jitBlocks[k]. 4 MiB; la consulta "sin bloque" no toca los bloques
     static constexpr uint32_t kJitSpan = 1u << 21, kJitMax = 64;

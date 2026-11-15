@@ -2719,6 +2719,24 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
         e.bytes ({ 0xff, 0x20 });                                    // jmp [rax] (JitLink::to)
         e.patch32 (skip, (uint32_t) (e.pos() - (skip + 4)));
     }
+    if ((f == Fm1Pre::FastRts || f == Fm1Pre::FastPopPc || f == Fm1Pre::FastPopRetPc || f == Fm1Pre::FastCallR
+         || f == Fm1Pre::FastTb) && ! jitItab.empty())
+    {
+        // destino calculado: su bloque por la itab, a la entrada encadenada (que lo comprueba todo); si no está, al epílogo.
+        // rti, sti/cli e icfg = R no: cambian lo que miran las interrupciones, y la ráfaga tiene que verlo
+        memOp (e, { 0x8b }, 0, pcOff);                                        // mov eax, [pc]
+        e.bytes ({ 0x89, 0xc1, 0xd1, 0xe9 });                                 // mov ecx, eax; shr ecx, 1
+        e.bytes ({ 0x81, 0xe1 }); e.u32 ((1u << kItabBits) - 1);              // and ecx, 2^14 - 1
+        e.bytes ({ 0x48, 0xc1, 0xe1, 0x04 });                                 // shl rcx, 4
+        e.bytes ({ 0x48, 0xba }); e.u64 ((uint64_t) (uintptr_t) jitItab.data());  // mov rdx, itab
+        e.bytes ({ 0x3b, 0x04, 0x0a });                                       // cmp eax, [rdx + rcx] (JitItab::pc)
+        toEpilogue ({ 0x0f, 0x85 });                                          // jne epílogo
+        e.bytes ({ 0x48, 0x8b, 0x44, 0x0a, 0x08 });                           // mov rax, [rdx + rcx + 8] (body)
+        e.bytes ({ 0x48, 0xc7, 0x43, C (offsetof (JitCtx, lastLink)) }); e.u32 (0);  // mov qword [lastLink], 0
+        e.bytes ({ 0x81, 0x43, C (offsetof (JitCtx, base)) }); e.u32 (n);     // add dword [base], n
+        e.bytes ({ 0x48, 0x81, 0x43, C (offsetof (JitCtx, now)) }); e.u32 (n);  // add qword [now], n
+        e.bytes ({ 0xff, 0xe0 });                                             // jmp rax
+    }
     const auto epilogue = e.pos();
     for (const auto x : exits)
         e.patch32 (x, (uint32_t) (epilogue - (x + 4)));
@@ -2736,6 +2754,14 @@ void Cpu::jitUnlinkAll() noexcept
     for (auto& k : jitLinks)
         k.to = k.unlinked;
     jitPending = nullptr;
+    jitItabClear();
+}
+
+void Cpu::jitItabClear() noexcept
+{
+    static_assert (sizeof (JitItab) == 16, "JitItab: el código nativo la lee de 16 en 16 bytes");
+    for (auto& t : jitItab)
+        t = { 0xffffffffu, 0, nullptr };  // (ningún pc de instrucción es impar)
 }
 
 // El bloque que empieza en at (XIP), compilado la primera vez; nullptr si tiene menos de 2 instrucciones o no hay JIT.
@@ -2750,6 +2776,8 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
         jitIndexRam.assign (jitRamOk ? jitRam.size / 2 : 0, 0);
         jitRamCw = bus.codeWrites();
         jitCode = std::make_unique<CodeBuffer>();
+        jitItab.resize ((size_t) 1 << kItabBits);  // (no cambia de tamaño después: el código nativo guarda su dirección)
+        jitItabClear();
         if (! jitCode->init ((size_t) 16 << 20))
             jitFailed = true;
     }
@@ -2936,6 +2964,7 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
         jitLines.clear();
         jitLinks.clear();
         jitPending = nullptr;
+        jitItabClear();
         jitCode->reset();
         ++jitResets;
         return nullptr;
@@ -2962,6 +2991,7 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     b.last = lines.back()->pc;
     jitBlocks.push_back (b);
     slot = (uint32_t) jitBlocks.size() + 1;
+    jitItab[(at >> 1) & ((1u << kItabBits) - 1)] = { at, 0, b.entryB };
     return &jitBlocks.back();
 }
 
@@ -3097,6 +3127,8 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                         jitPending->to = b->entryB;
                         ++jitLinked;
                     }
+                    // (otra que compartía su hueco de la itab pudo quitarle el sitio: se lo devuelve la próxima vez)
+                    jitItab[(pc >> 1) & ((1u << kItabBits) - 1)] = { pc, 0, b->entryB };
                     b->fn (&c);
                     jitPending = c.status == 0 ? (JitLink*) c.lastLink : nullptr;
                     ++jitRuns;
