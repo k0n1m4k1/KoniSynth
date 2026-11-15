@@ -479,7 +479,8 @@ int main (int argc, char** argv)
             if (cpu.jitExits[w] * 100 < tot || cpu.jitExits[w] == 0)
                 continue;
             const char* name = w == 0 ? "sin motivo" : w == 1 ? "presupuesto" : w == 2 ? "enlace" : w == 3 ? "itab"
-                             : w == 6 ? "if sin cumplirse" : w == 7 ? "RAM reescrita" : w == 9 ? "acceso con efectos"
+                             : w == 6 ? "if sin cumplirse" : w == 7 ? "RAM reescrita" : w == 8 ? "rep sin presupuesto"
+                             : w == 9 ? "acceso con efectos"
                              : w == 10 ? "fallo" : w == 11 ? "ventanas" : w == 12 ? "stop" : w == 13 ? "avoid"
                              : w == 14 ? "loopHint" : w == 15 ? "tabla de bucles" : nullptr;
             char buf[32];

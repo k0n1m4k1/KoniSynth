@@ -1759,6 +1759,18 @@ bool Cpu::pairWide (const Line& head, const Line& second) noexcept
     return head.pre.fast == Fm1Pre::FastExecRaw || calls (head) || calls (second);
 }
 
+void Cpu::jitRepExit (Cpu* c, uint32_t start, uint32_t end)
+{
+    c->repEnd = end;
+    if (c->pc == end)  // (hecha: el cuerpo no tiene saltos)
+    {
+        if (--c->repCount != 0)
+            c->pc = start;
+        else
+            c->repEnd = 0;
+    }
+}
+
 void Cpu::jitThenExit (Cpu* c, uint32_t thenEnd, uint32_t elseEnd, uint32_t thenStart)
 {
     if (c->pc == thenEnd)
@@ -1981,6 +1993,61 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
                 e.bytes ({ 0xff, 0xd0 });                                 // call rax
                 return true;
             }
+            if (p.route == 21)
+            {
+                // pares de 64 bits (execRaw, ruta 21): el par p son regs[2p] (bajo) y regs[2p + 1] (alto), contiguos: un
+                // qword en little endian. d0 / d8: desplazamiento (op <= 1 izquierda, 2 lógico, 3 aritmético; cuenta de 6
+                // bits, como el & 63 de x86 con 64 bits); f8 / fc / fe: producto 32 x 32 -> 64 (=, +=, -=). El resto
+                // (rotaciones, saturados, división), jitOp. Medido con 12 notas: 50 M por jitOp en 4 s entre 10 firmwares
+                const auto b0 = raw & 0xff;
+                const auto pairOff = R (2 * (int) ((raw >> 29) & 7));
+                if (b0 == 0xd0 || b0 == 0xd8)
+                {
+                    const bool byReg = b0 == 0xd8;
+                    const auto op = byReg ? ((raw >> 16) & 3) : ((raw >> 26) & 3);
+                    const uint8_t ext = op <= 1 ? 0xe0 : op == 2 ? 0xe8 : 0xf8;  // shl / shr / sar
+                    memOp (e, { 0x8b }, 0, pairOff, true);                     // mov rax, [par]
+                    if (byReg)
+                    {
+                        memOp (e, { 0x8b }, 1, R ((int) ((raw >> 24) & 0xf)));  // mov ecx, [rn]
+                        e.bytes ({ 0x48, 0xd3, ext });                           // shl / shr / sar rax, cl
+                    }
+                    else
+                    {
+                        const auto n = (uint8_t) (((raw >> 16) & 0xf) | (((raw >> 24) & 3) << 4));
+                        e.bytes ({ 0x48, 0xc1, ext, n });                        // shl / shr / sar rax, n
+                    }
+                    memOp (e, { 0x89 }, 0, pairOff, true);                     // mov [par], rax
+                    return true;
+                }
+                if (b0 == 0xf8 || b0 == 0xfc || b0 == 0xfe)
+                {
+                    const bool sgn = ((raw >> 28) & 1) != 0;
+                    const auto ra = R ((int) ((raw >> 20) & 0xf)), rb = R ((int) ((raw >> 24) & 0xf));
+                    if (sgn)
+                    {
+                        memOp (e, { 0x63 }, 0, ra, true);                      // movsxd rax, [ra]
+                        memOp (e, { 0x63 }, 1, rb, true);                      // movsxd rcx, [rb]
+                    }
+                    else
+                    {
+                        memOp (e, { 0x8b }, 0, ra);                            // mov eax, [ra] (sin signo: a cero arriba)
+                        memOp (e, { 0x8b }, 1, rb);                            // mov ecx, [rb]
+                    }
+                    e.bytes ({ 0x48, 0x0f, 0xaf, 0xc1 });                      // imul rax, rcx (los 64 bits bajos: exacto)
+                    if (b0 == 0xfc)
+                        memOp (e, { 0x03 }, 0, pairOff, true);                 // add rax, [par]
+                    else if (b0 == 0xfe)
+                    {
+                        memOp (e, { 0x8b }, 1, pairOff, true);                 // mov rcx, [par]
+                        e.bytes ({ 0x48, 0x29, 0xc1 });                        // sub rcx, rax
+                        e.bytes ({ 0x48, 0x89, 0xc8 });                        // mov rax, rcx
+                    }
+                    memOp (e, { 0x89 }, 0, pairOff, true);                     // mov [par], rax
+                    return true;
+                }
+                return false;
+            }
             // ruta 41, min / max (execRaw con el raw de 32 bits): cmp y cmov, que con iguales deja x como std::max / min
             if (p.route != 41 || dspRaw (raw) != Dsp::MinMax)
                 return false;
@@ -2182,6 +2249,8 @@ bool Cpu::jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t
 {
     if (l.pre.fast == Fm1Pre::FastPushList || l.pre.fast == Fm1Pre::FastPushRets || l.pre.fast == Fm1Pre::FastPopList)
         return jitList (e, l, j, pend, pendPc, exits);
+    if (l.pre.fast == Fm1Pre::FastBlock)
+        return jitBlock (e, l, j, pend, pendPc, exits);
     // Rutas crudas 18 y 19 (un registro con actualización de la base, execRaw): la forma equivalente de FastLd / FastSt
     // (sin actualización), FastLdX / FastStX con MemPreImm (previa) o MemPostImm (posterior). La posterior de execRaw
     // deja en la base base + inc calculado antes del acceso; la de FastLdX suma inc después: en una carga sobre la propia
@@ -2207,13 +2276,36 @@ bool Cpu::jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t
         conv.fast = ! m.pre && ! m.post ? (m.store ? Fm1Pre::FastSt : Fm1Pre::FastLd)
                   : m.store ? Fm1Pre::FastStX : Fm1Pre::FastLdX;
     }
-    const auto& p = raw1819 ? conv : l.pre;
+    // Ruta cruda 32 ([++rB=rI] / [rB++=rI], execRaw): FastLdX / FastStX con MemPreR o MemPostR (el incremento rI se lee
+    // antes del acceso en las dos). Salvo d == b (la ruta 32 escribe la base después del acceso; MemPreR antes) y el
+    // almacén de la mitad alta (rD >> 16): jitOp. Medido con 12 notas: 37 M por jitOp en 4 s entre 14 firmwares
+    const bool raw32 = l.pre.fast == Fm1Pre::FastExecRaw && l.pre.route == 32;
+    if (raw32)
+    {
+        IdxInc m;
+        if (! idxInc ((uint64_t) (uint32_t) l.raw, m) || m.high || m.d == m.b)
+            return false;
+        conv = l.pre;
+        conv.fa = (uint8_t) m.b;
+        conv.fb = (uint8_t) m.i;
+        conv.fd = (uint8_t) m.d;
+        conv.fw = m.w;
+        conv.fsign = m.sign;
+        conv.fsh = 0;
+        conv.fsp = false;
+        conv.fidx = false;
+        conv.fsrc = Fm1Pre::SrcReg;
+        conv.fcond = Fm1Pre::OpSet;
+        conv.fmode = m.pre ? Fm1Pre::MemPreR : Fm1Pre::MemPostR;
+        conv.fast = m.store ? Fm1Pre::FastStX : Fm1Pre::FastLdX;
+    }
+    const auto& p = raw1819 || raw32 ? conv : l.pre;
     const bool ldx = p.fast == Fm1Pre::FastLdX, stx = p.fast == Fm1Pre::FastStX;
     if (! jitRamOk || (p.fast != Fm1Pre::FastLd && p.fast != Fm1Pre::FastSt && ! ldx && ! stx) || (p.fw != 1 && p.fw != 2 && p.fw != 4))
         return false;
-    if (stx && p.fcond > Fm1Pre::OpSar)
+    if (stx && p.fcond > Fm1Pre::OpAndNot)
         return false;
-    if (stx && p.fcond > Fm1Pre::OpSub && p.fsrc != Fm1Pre::SrcImm)
+    if (stx && (p.fcond == Fm1Pre::OpShl || p.fcond == Fm1Pre::OpShr || p.fcond == Fm1Pre::OpSar) && p.fsrc != Fm1Pre::SrcImm)
         return false;  // (los desplazamientos, solo con cuenta inmediata)
     const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
     const auto R = [&] (int r) { return off (&regs[r & 15]); };
@@ -2326,6 +2418,7 @@ bool Cpu::jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t
                 case Fm1Pre::OpShl: e.bytes ({ 0xc1, 0xe0, (uint8_t) (p.foff & 31) }); break;  // shl eax, n
                 case Fm1Pre::OpShr: e.bytes ({ 0xc1, 0xe8, (uint8_t) (p.foff & 31) }); break;  // shr eax, n
                 case Fm1Pre::OpSar: e.bytes ({ 0xc1, 0xf8, (uint8_t) (p.foff & 31) }); break;  // sar eax, n
+                case Fm1Pre::OpAndNot: e.bytes ({ 0xf7, 0xd2, 0x21, 0xd0 }); break;            // not edx; and eax, edx
                 default:            e.bytes ({ 0x29, 0xd0 }); break;  // sub eax, edx
             }
             e.bytes ({ 0x89, 0xc2 });                               // mov edx, eax
@@ -2480,6 +2573,76 @@ bool Cpu::jitList (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_
     return true;
 }
 
+// FastBlock con la RAM en línea, como su caso en execFast: la dirección de partida desde la base (menos 4n hacia abajo),
+// alineada y dentro de la RAM; en un store, sin palabras de código ni registro de escrituras (como jitList); los registros
+// de la máscara de menor a mayor y, con wb, la base nueva al final. Si no, jitOp (jitSlow)
+bool Cpu::jitBlock (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits)
+{
+    const auto& p = l.pre;
+    const bool store = (p.fcond & 1) != 0, wb = (p.fcond & 2) != 0, down = (p.fcond & 4) != 0;
+    const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
+    std::vector<uint32_t> slots;
+    for (int i = 0; i < 16; ++i)
+        if (((p.fimm >> i) & 1) != 0)
+            slots.push_back (off (&regs[i]));
+    const auto bytes = (uint32_t) (4 * slots.size());
+    if (! jitRamOk || slots.empty() || bytes > jitRam.size)
+        return false;
+    const auto baseOff = off (&regs[p.fa & 15]);
+    std::vector<size_t> slow;
+    const auto jcc = [&] (uint8_t cc) { e.bytes ({ 0x0f, cc }); slow.push_back (e.pos()); e.u32 (0); };
+    memOp (e, { 0x8b }, 0, baseOff);                                // mov eax, [base]
+    if (down)
+    {
+        e.u8 (0x2d); e.u32 (bytes);                                 // sub eax, bytes (la dirección de partida)
+    }
+    e.bytes ({ 0xa8, 0x03 });                                       // test al, 3
+    jcc (0x85);                                                     // jnz lenta
+    e.bytes ({ 0x89, 0xc1 });                                       // mov ecx, eax
+    e.bytes ({ 0x81, 0xe9 }); e.u32 (jitRam.base);                  // sub ecx, base
+    e.bytes ({ 0x81, 0xf9 }); e.u32 (jitRam.size - bytes);          // cmp ecx, size - bytes
+    jcc (0x87);                                                     // ja lenta
+    e.bytes ({ 0x49, 0xbb }); e.u64 ((uint64_t) (uintptr_t) jitRam.data);  // mov r11, RAM
+    if (store)
+    {
+        e.bytes ({ 0x49, 0xba }); e.u64 ((uint64_t) (uintptr_t) jitRam.code);  // mov r10, marcas de código
+        e.bytes ({ 0x89, 0xca, 0xc1, 0xea, 0x02 });                 // mov edx, ecx; shr edx, 2
+        for (size_t k = 0; k < slots.size(); ++k)
+        {
+            e.bytes ({ 0x41, 0x80, 0x7c, 0x12, (uint8_t) k, 0x00 });  // cmp byte [r10 + rdx + k], 0
+            jcc (0x85);                                                // jne lenta
+        }
+        e.bytes ({ 0x49, 0xba }); e.u64 ((uint64_t) (uintptr_t) jitRam.log);   // mov r10, &Ram::log
+        e.bytes ({ 0x49, 0x83, 0x3a, 0x00 });                       // cmp qword [r10], 0
+        jcc (0x85);                                                 // jne lenta
+        for (size_t k = 0; k < slots.size(); ++k)
+        {
+            memOp (e, { 0x8b }, 2, slots[k]);                                       // mov edx, [registro]
+            e.bytes ({ 0x41, 0x89, 0x54, 0x0b, (uint8_t) (4 * k) });                // mov [r11 + rcx + 4k], edx
+        }
+    }
+    else
+        for (size_t k = 0; k < slots.size(); ++k)
+        {
+            e.bytes ({ 0x41, 0x8b, 0x54, 0x0b, (uint8_t) (4 * k) });                // mov edx, [r11 + rcx + 4k]
+            memOp (e, { 0x89 }, 2, slots[k]);                                       // mov [registro], edx
+        }
+    if (wb)
+    {
+        if (! down)
+        {
+            e.u8 (0x05); e.u32 (bytes);                             // add eax, bytes (la dirección tras la última)
+        }
+        memOp (e, { 0x89 }, 0, baseOff);                            // mov [base], eax
+    }
+    e.u8 (0xe9);                                                    // jmp sigue
+    const auto cont = e.pos();
+    e.u32 (0);
+    jitSlow (e, l, j, pend, pendPc, exits, slow, { cont });
+    return true;
+}
+
+// pc = [sp++] (FastPopPc; medido con 12 notas: 20 M por jitOp en 4 s entre 17 firmwares) y
 // {pc, R*N} = [sp++] (FastPopRetPc, ruta 28) al final del bloque, como su caso en execFast y finish: los registros de la
 // máscara de menor a mayor, luego pc, desde la RAM interna con sp alineado; si no, jitOp (jitSlow). Medido, Melodee con 12
 // notas: 13,4 M por jitOp en 4 s (el 27 % de lo que hacía por jitOp)
@@ -2488,7 +2651,7 @@ bool Cpu::jitPopRet (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint3
     const auto& p = l.pre;
     const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
     std::vector<uint32_t> slots;  // desplazamientos en el objeto, de la dirección menor a la mayor (pc la última)
-    for (int i = 0; i < 16; ++i)
+    for (int i = 0; i < 16 && p.fast == Fm1Pre::FastPopRetPc; ++i)  // (pc = [sp++], FastPopPc: solo pc)
         if (((p.fimm >> i) & 1) != 0)
             slots.push_back (off (&regs[i]));
     slots.push_back (off (&pc));
@@ -2533,9 +2696,29 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
     const auto target = (uint32_t) ((int64_t) nextPc + p.foff);
     const bool cond = p.fast == Fm1Pre::FastBrI || p.fast == Fm1Pre::FastBrR || p.fast == Fm1Pre::FastDecBr;
     const bool bit = p.fast == Fm1Pre::FastBitBr;
-    uint8_t jcc = 0;  // jcc de x86 tras cmp a, b (o test, en BitBr)
+    uint8_t jcc = 0;  // jcc de x86 tras cmp a, b (o test, en BitBr; o ucomiss, en coma flotante)
+    bool fl = false, swap = false;
     if (cond && (jcc = jccOf ((Cond) p.fcond)) == 0)
-        return false;  // (comparaciones de coma flotante: jitOp)
+    {
+        // coma flotante (fcond): ucomiss a, b deja CF = ZF = 1 si no están ordenados, así que ja / jae (CF = 0) son las
+        // ordenadas > y >= (falso con NaN) y jbe / jb sus negaciones (cierto con NaN); < y <= con los operandos
+        // cambiados. == y != (ZF y PF), jitOp. Medido con 12 notas: ~30 M por jitOp en 4 s entre 7 firmwares
+        if (p.fast == Fm1Pre::FastDecBr)
+            return false;
+        switch ((Cond) p.fcond)
+        {
+            case Cond::FGt:  jcc = 0x87; break;
+            case Cond::FUle: jcc = 0x86; break;
+            case Cond::FGe:  jcc = 0x83; break;
+            case Cond::FUlt: jcc = 0x82; break;
+            case Cond::FLt:  jcc = 0x87; swap = true; break;
+            case Cond::FUge: jcc = 0x86; swap = true; break;
+            case Cond::FLe:  jcc = 0x83; swap = true; break;
+            case Cond::FUgt: jcc = 0x82; swap = true; break;
+            default:         return false;
+        }
+        fl = true;
+    }
     else if (bit)
         jcc = p.fcond != 0 ? 0x85 : 0x84;  // salta si ((a & m) != 0) == (fcond != 0)
     else if (! cond && p.fast != Fm1Pre::FastGoto && p.fast != Fm1Pre::FastCall && p.fast != Fm1Pre::FastRts
@@ -2585,6 +2768,20 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
             }
             memOp (e, { 0x85 }, 0, R (p.fa));                      // test [ra], eax
         }
+    }
+    else if (fl)
+    {
+        e.bytes ({ 0x66, 0x41, 0x0f, 0x6e, 0x84, 0x24 }); e.u32 (R (p.fa));        // movd xmm0, [ra]
+        if (p.fast == Fm1Pre::FastBrR)
+        {
+            e.bytes ({ 0x66, 0x41, 0x0f, 0x6e, 0x8c, 0x24 }); e.u32 (R (p.fb));    // movd xmm1, [rb]
+        }
+        else
+        {
+            e.u8 (0xb8); e.u32 (p.fimm);                                            // mov eax, imm32
+            e.bytes ({ 0x66, 0x0f, 0x6e, 0xc8 });                                   // movd xmm1, eax
+        }
+        e.bytes ({ 0x0f, 0x2e, (uint8_t) (swap ? 0xc8 : 0xc1) });                   // ucomiss xmm0, xmm1 (o xmm1, xmm0)
     }
     else if (p.fast == Fm1Pre::FastBrR)
     {
@@ -2741,6 +2938,9 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     std::vector<ThenExits> thenExits;
     // las salidas desde la segunda de un par ancho (índices en exits): antes, la fusión de los registros del par
     std::vector<std::pair<size_t, size_t>> pairExits;
+    // las salidas desde la última instrucción del cuerpo de un rep: antes, jitRepExit (Cpu*, repStart, repEnd)
+    struct RepExits { size_t from, to; uint32_t start, end; };
+    std::vector<RepExits> repExits;
     // tras la instrucción j (que acaba en endPc): si cierra la parte then, el pc sigue en elseEnd
     const auto thenDone = [&] (uint32_t j, uint32_t endPc) -> bool
     {
@@ -2774,9 +2974,131 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
             xmm (0x7f, 1, rOff + k);
         }
     };
+    // la instrucción j por jitOp (lo pendiente apuntado antes); si devuelve != 0, al epílogo
+    const auto callJitOp = [&] (uint32_t j)
+    {
+        sync();
+#if defined(_WIN32)
+        e.bytes ({ 0x48, 0x89, 0xd9 });    // mov rcx, rbx
+        e.u8 (0xba); e.u32 (j);            // mov edx, j
+        e.bytes ({ 0x49, 0xb8 });          // mov r8, línea
+#else
+        e.bytes ({ 0x48, 0x89, 0xdf });    // mov rdi, rbx
+        e.u8 (0xbe); e.u32 (j);            // mov esi, j
+        e.bytes ({ 0x48, 0xba });          // mov rdx, línea
+#endif
+        e.u64 ((uint64_t) (uintptr_t) lines[j]);
+        e.bytes ({ 0x48, 0xb8 });          // mov rax, jitOp
+        e.u64 ((uint64_t) (uintptr_t) &Cpu::jitOp);
+        e.bytes ({ 0xff, 0xd0 });          // call rax
+        e.bytes ({ 0x85, 0xc0 });          // test eax, eax
+        toEpilogue ({ 0x0f, 0x85 });       // jnz (jitOp ya dejó done, status y el ciclo)
+    };
     for (uint32_t j = 0; j < n; ++j)
     {
         const auto& l = *lines[j];
+        if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 29)
+        {
+            // rep N {..} (ruta 29 de execRoute) con su cuerpo de B instrucciones detrás (jitAt: ifThenEnd = B, ifElseEnd =
+            // repEnd). repStart, repEnd y repCount se llevan en la Cpu como el intérprete: si el bloque sale a mitad del
+            // cuerpo (ruta lenta, acceso con efectos), la ráfaga sigue con el rep a medias. El descuento de cada vuelta es
+            // este: la última del cuerpo corre con repEnd = 0 (por la ruta lenta, su finish no descuenta) y sus salidas
+            // pasan por jitRepExit. Cada vuelta más suma B a base y now (los índices estáticos j siguen valiendo) y mira
+            // antes el presupuesto de la cadena; sin él, a la ráfaga en repStart (why 8)
+            const auto raw = (uint64_t) (uint32_t) l.raw;
+            const auto start = l.pc + l.len, end = l.ifElseEnd, body = l.ifThenEnd;
+            const auto rsOff = off (&repStart), reOff = off (&repEnd), rcOff = off (&repCount);
+            const bool byReg = l.pre.nameKind == 1;  // rep N rR {: la cuenta del registro, que queda a 0
+            if (byReg)
+            {
+                const auto rr = off (&regs[raw & 0xf]);
+                memOp (e, { 0x8b }, 0, rr);                    // mov eax, [rR]
+                memOp (e, { 0xc7 }, 0, rr); e.u32 (0);         // mov dword [rR], 0
+                memOp (e, { 0x89 }, 0, rcOff);                 // mov [repCount], eax
+            }
+            else
+            {
+                memOp (e, { 0xc7 }, 0, rcOff); e.u32 ((uint32_t) ((raw >> 8) & 0x1f) + 1);  // mov dword [repCount], k + 1
+            }
+            memOp (e, { 0xc7 }, 0, rsOff); e.u32 (start);      // mov dword [repStart], start
+            memOp (e, { 0xc7 }, 0, reOff); e.u32 (end);        // mov dword [repEnd], end
+            ++pend;
+            pendPc = start;
+            sync();
+            size_t toZero = 0;
+            if (byReg)
+            {
+                memOp (e, { 0x83 }, 7, rcOff); e.u8 (0);       // cmp dword [repCount], 0
+                e.bytes ({ 0x0f, 0x84 });                      // je cero vueltas
+                toZero = e.pos();
+                e.u32 (0);
+            }
+            const auto loopTop = e.pos();
+            for (uint32_t k = 1; k <= body; ++k)
+            {
+                const auto& t = *lines[j + k];
+                const auto x0 = exits.size();
+                if (k == body)
+                {
+                    memOp (e, { 0xc7 }, 0, reOff); e.u32 (0);  // mov dword [repEnd], 0 (la última)
+                }
+                if (jitMem (e, t, j + k, pend, pendPc, exits) || jitNative (e, t))
+                {
+                    ++pend;
+                    pendPc = t.pc + t.len;
+                }
+                else
+                    callJitOp (j + k);
+                if (k == body)
+                {
+                    repExits.push_back ({ x0, exits.size(), start, end });
+                    memOp (e, { 0xc7 }, 0, reOff); e.u32 (end);  // mov dword [repEnd], end
+                }
+            }
+            sync();                                             // (pc = repEnd)
+            memOp (e, { 0x83 }, 5, rcOff); e.u8 (1);           // sub dword [repCount], 1
+            e.bytes ({ 0x0f, 0x84 });                          // jz fin
+            const auto toDone = e.pos();
+            e.u32 (0);
+            e.bytes ({ 0x81, 0x43, C (offsetof (JitCtx, base)) }); e.u32 (body);        // add dword [base], B
+            e.bytes ({ 0x48, 0x81, 0x43, C (offsetof (JitCtx, now)) }); e.u32 (body);  // add qword [now], B
+            e.bytes ({ 0x8b, 0x43, C (offsetof (JitCtx, base)) });                      // mov eax, [base]
+            e.u8 (0x05); e.u32 (n);                                                      // add eax, n
+            e.bytes ({ 0x3b, 0x43, C (offsetof (JitCtx, budget)) });                   // cmp eax, [budget]
+            e.bytes ({ 0x0f, 0x86 });                                                    // jbe otra vuelta
+            e.u32 ((uint32_t) (loopTop - (e.pos() + 4)));
+            // sin presupuesto: hechas base + j + 1, la última en now + j; el rep sigue en la ráfaga desde repStart
+            memOp (e, { 0xc7 }, 0, pcOff); e.u32 (start);                                // mov dword [pc], repStart
+            e.bytes ({ 0x48, 0x8b, 0x43, C (offsetof (JitCtx, now)) });                  // mov rax, [now]
+            e.bytes ({ 0x48, 0x05 }); e.u32 (j);                                          // add rax, j
+            e.bytes ({ 0x48, 0x8b, 0x4b, C (offsetof (JitCtx, cycles)) });               // mov rcx, [cycles]
+            e.bytes ({ 0x48, 0x89, 0x01 });                                               // mov [rcx], rax
+            e.bytes ({ 0x8b, 0x43, C (offsetof (JitCtx, base)) });                       // mov eax, [base]
+            e.u8 (0x05); e.u32 (j + 1);                                                   // add eax, j + 1
+            e.bytes ({ 0x89, 0x43, C (offsetof (JitCtx, done)) });                       // mov [done], eax
+            e.bytes ({ 0x48, 0xc7, 0x43, C (offsetof (JitCtx, lastLink)) }); e.u32 (0);  // mov qword [lastLink], 0
+            e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), 8 });                     // mov byte [why], 8
+            toEpilogue ({ 0xe9 });
+            size_t toAfter = 0;
+            if (byReg)
+            {
+                // cero vueltas: el cuerpo no corre (como la ruta 29: a repEnd y repEnd = 0); sus B no cuentan
+                e.patch32 (toZero, (uint32_t) (e.pos() - (toZero + 4)));
+                memOp (e, { 0xc7 }, 0, reOff); e.u32 (0);                                // mov dword [repEnd], 0
+                e.bytes ({ 0x81, 0x6b, C (offsetof (JitCtx, base)) }); e.u32 (body);     // sub dword [base], B
+                e.bytes ({ 0x48, 0x81, 0x6b, C (offsetof (JitCtx, now)) }); e.u32 (body);  // sub qword [now], B
+                memOp (e, { 0xc7 }, 0, pcOff); e.u32 (end);                               // mov dword [pc], repEnd
+                e.u8 (0xe9);                                                               // jmp después
+                toAfter = e.pos();
+                e.u32 (0);
+            }
+            e.patch32 (toDone, (uint32_t) (e.pos() - (toDone + 4)));
+            memOp (e, { 0xc7 }, 0, reOff); e.u32 (0);                                    // fin: mov dword [repEnd], 0
+            if (toAfter != 0)
+                e.patch32 (toAfter, (uint32_t) (e.pos() - (toAfter + 4)));
+            j += body;
+            continue;
+        }
         if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 14)
         {
             // if (a <op> rhs) { then } else { ... } (ruta 14 de execRoute): si no se cumple, sale del bloque a thenEnd con
@@ -2909,9 +3231,12 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
             pend += 2;
             pendPc = s.pc + s.len;
             ++j;
+            if (const auto elseEnd = ifElseEnd; thenDone (j, pendPc))
+                pendPc = elseEnd;  // (un par que cierra la parte then)
             continue;
         }
-        if (j + 1 == n && (l.pre.fast == Fm1Pre::FastPopRetPc ? jitPopRet (e, l, j, pend, pendPc, exits) : jitBranch (e, l, pend)))
+        if (j + 1 == n && (l.pre.fast == Fm1Pre::FastPopRetPc || l.pre.fast == Fm1Pre::FastPopPc ? jitPopRet (e, l, j, pend, pendPc, exits)
+                                                                                                  : jitBranch (e, l, pend)))
         {
             pend = 0;  // (apuntado con el salto)
             continue;
@@ -2924,22 +3249,7 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
                 pendPc = elseEnd;  // (fin de la parte then)
             continue;
         }
-        sync();
-#if defined(_WIN32)
-        e.bytes ({ 0x48, 0x89, 0xd9 });    // mov rcx, rbx
-        e.u8 (0xba); e.u32 (j);            // mov edx, j
-        e.bytes ({ 0x49, 0xb8 });          // mov r8, línea
-#else
-        e.bytes ({ 0x48, 0x89, 0xdf });    // mov rdi, rbx
-        e.u8 (0xbe); e.u32 (j);            // mov esi, j
-        e.bytes ({ 0x48, 0xba });          // mov rdx, línea
-#endif
-        e.u64 ((uint64_t) (uintptr_t) lines[j]);
-        e.bytes ({ 0x48, 0xb8 });          // mov rax, jitOp
-        e.u64 ((uint64_t) (uintptr_t) &Cpu::jitOp);
-        e.bytes ({ 0xff, 0xd0 });          // call rax
-        e.bytes ({ 0x85, 0xc0 });          // test eax, eax
-        toEpilogue ({ 0x0f, 0x85 });       // jnz (jitOp ya dejó done, status y el ciclo)
+        callJitOp (j);
         if (const auto elseEnd = ifElseEnd; thenDone (j, l.pc + l.len))
         {
             memOp (e, { 0xc7 }, 0, pcOff); e.u32 (elseEnd);  // mov dword [pc], elseEnd (jitOp lo dejó en thenEnd)
@@ -3018,6 +3328,29 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     // las salidas desde las partes then: jitThenExit (Cpu*, thenEnd, elseEnd, thenStart) y al epílogo (en el mismo marco que
     // las llamadas a jitOp: pila alineada y sombra reservada)
     std::vector<bool> redirected (exits.size(), false);
+    for (const auto& t : repExits)
+    {
+        if (t.from == t.to)
+            continue;
+        const auto stub = e.pos();
+        for (auto x = t.from; x < t.to; ++x)
+        {
+            e.patch32 (exits[x], (uint32_t) (stub - (exits[x] + 4)));
+            redirected[x] = true;
+        }
+#if defined(_WIN32)
+        e.bytes ({ 0x4c, 0x89, 0xe1 });                    // mov rcx, r12
+        e.u8 (0xba); e.u32 (t.start);                      // mov edx, repStart
+        e.bytes ({ 0x41, 0xb8 }); e.u32 (t.end);           // mov r8d, repEnd
+#else
+        e.bytes ({ 0x4c, 0x89, 0xe7 });                    // mov rdi, r12
+        e.u8 (0xbe); e.u32 (t.start);                      // mov esi, repStart
+        e.u8 (0xba); e.u32 (t.end);                        // mov edx, repEnd
+#endif
+        e.bytes ({ 0x48, 0xb8 }); e.u64 ((uint64_t) (uintptr_t) &Cpu::jitRepExit);  // mov rax, jitRepExit
+        e.bytes ({ 0xff, 0xd0 });                          // call rax
+        toEpilogue ({ 0xe9 });                             // jmp epílogo
+    }
     for (const auto& [from, to] : pairExits)
     {
         if (from == to)
@@ -3206,6 +3539,42 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             a += l.len + s.len;
             continue;
         }
+        if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 29)
+        {
+            // rep N {..} con su cuerpo en línea (jitEmit): el cuerpo son los N bytes tras ella, instrucciones con micro-op
+            // sin saltos, pares, if ni nada que cierre un bloque, acabando justo en repEnd. Medido
+            // con 12 notas: V15, V16 y FM1 Open interpretaban ~11 M instrucciones en 4 s dentro de bloques rep
+            const auto raw = (uint64_t) (uint32_t) l.raw;
+            const auto start = a + l.len, end = start + 2 * ((uint32_t) ((raw >> 4) & 0xf) + 1);
+            std::vector<Line> body;
+            bool fit = inSpan (end);
+            for (uint32_t x = start; fit && x < end;)
+            {
+                Line t;
+                fit = lines.size() + 2 + body.size() < kJitMax && decodeAt (x, t) && t.pre.fast != Fm1Pre::FastNone
+                      && ! t.pre.pairHead && ! endsBlock (t.pre);
+                if (fit)
+                {
+                    x += t.len;
+                    body.push_back (t);
+                    fit = x <= end;
+                }
+            }
+            if (! fit || body.empty())
+                break;
+            l.ifThenEnd = (uint32_t) body.size();
+            l.ifElseEnd = end;
+            codeHi = std::max (codeHi, end);
+            jitLines.push_back (l);
+            lines.push_back (&jitLines.back());
+            for (const auto& t : body)
+            {
+                jitLines.push_back (t);
+                lines.push_back (&jitLines.back());
+            }
+            a = end;
+            continue;
+        }
         if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 14 && l.pre.ibElse > 0)
         {
             // if con else: la parte then en línea y el bloque sigue en elseEnd (jitEmit). La parte then, sin saltos, pares,
@@ -3225,8 +3594,25 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             for (uint32_t x = nextPc; fit && x < thenEnd;)
             {
                 Line t;
-                fit = lines.size() + 1 + part.size() < kJitMax && decodeAt (x, t) && ! t.pre.pairHead
-                      && t.pre.fast != Fm1Pre::FastNone && ! endsBlock (t.pre);
+                fit = lines.size() + 1 + part.size() < kJitMax && decodeAt (x, t) && t.pre.fast != Fm1Pre::FastNone
+                      && ! endsBlock (t.pre);
+                if (fit && t.pre.pairHead)
+                {
+                    // un par estrecho (las dos en nativo, sin llamadas: no sale a mitad), como en el cuerpo del bloque
+                    Emitter probe;
+                    Line s;
+                    fit = lines.size() + 2 + part.size() < kJitMax && decodeAt (x + t.len, s) && ! s.pre.pairHead
+                          && s.pre.fast != Fm1Pre::FastNone && ! endsBlock (s.pre) && ! pairWide (t, s)
+                          && jitNative (probe, t) && jitNative (probe, s);
+                    if (fit)
+                    {
+                        x += t.len + s.len;
+                        part.push_back (t);
+                        part.push_back (s);
+                        fit = x <= thenEnd;
+                    }
+                    continue;
+                }
                 if (fit)
                 {
                     x += t.len;
@@ -3706,6 +4092,7 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                     case Fm1Pre::OpShl: nv = ldW (bus, pre.fw, false, addr) << (val & 31); break;
                     case Fm1Pre::OpShr: nv = ldW (bus, pre.fw, false, addr) >> (val & 31); break;
                     case Fm1Pre::OpSar: nv = (uint32_t) ((int32_t) ldW (bus, pre.fw, false, addr) >> (val & 31)); break;
+                    case Fm1Pre::OpAndNot: nv = ldW (bus, pre.fw, false, addr) & ~val; break;
                     default:            nv = ldW (bus, pre.fw, false, addr) - val; break;
                 }
                 stW (bus, pre.fw, addr, nv);
@@ -3831,6 +4218,23 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
             }
             case Fm1Pre::FastNop: break;
             case Fm1Pre::FastMovPair: regs[pre.fd] = pre.fimm; regs[pre.fb] = (uint32_t) pre.foff; break;
+            case Fm1Pre::FastBlock:
+            {
+                const bool store = (pre.fcond & 1) != 0, wb = (pre.fcond & 2) != 0, down = (pre.fcond & 4) != 0;
+                const auto n = (uint32_t) std::popcount (pre.fimm);
+                const auto start = down ? regs[pre.fa] - 4u * n : regs[pre.fa];
+                auto addr = start;
+                for (int i = 0; i < 16; ++i)
+                    if (((pre.fimm >> i) & 1) != 0)
+                    {
+                        if (store) bus.write32 (addr, regs[i]);
+                        else regs[i] = bus.read32 (addr);
+                        addr += 4;
+                    }
+                if (wb)
+                    regs[pre.fa] = down ? start : addr;
+                break;
+            }
             case Fm1Pre::FastExecRaw: execRaw (bus, (uint8_t) pre.route, (uint32_t) raw); break;
             case Fm1Pre::FastNone: break;
         }
@@ -5279,6 +5683,34 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
     const int n = e.slotCount;
     const auto sl = [&] (int i) { return slotValue (e.slots[i], raw); };
     const auto rg = [&] (int i) { return (uint8_t) (sl (i) & 0xf); };
+
+    // [R+#i] &= ~R (como exec_syntax: palabra; medido con 12 notas: 2 M interpretadas en 4 s entre 7 firmwares)
+    if (s == "[R+#i] &= ~R" && n >= 3)
+    {
+        p.fast = Fm1Pre::FastStX;
+        p.fmode = Fm1Pre::MemRImm;
+        p.fa = rg (0);
+        p.fimm = (uint32_t) sl (1);
+        p.fd = rg (2);
+        p.fsrc = Fm1Pre::SrcReg;
+        p.fcond = Fm1Pre::OpAndNot;
+        p.fw = 4;
+        return;
+    }
+
+    // movimientos de bloque con base registro (como exec_syntax; medido con 12 notas: ~3,8 M interpretadas en 4 s entre
+    // 18 firmwares, y cada una cortaba un bloque)
+    {
+        bool store, wb, down;
+        if (e.len == 4 && ((raw >> 8) & 0xff) == 0xeb && blockForm (s, store, wb, down))
+        {
+            p.fast = Fm1Pre::FastBlock;
+            p.fa = (uint8_t) (raw & 0xf);
+            p.fimm = (uint32_t) ((raw >> 16) & 0xffff);
+            p.fcond = (uint8_t) ((store ? 1 : 0) | (wb ? 2 : 0) | (down ? 4 : 0));
+            return;
+        }
+    }
 
     // rH_rL = #i (como exec_syntax: el inmediato de 64 bits es la ranura 2; primero el bajo, luego el alto)
     {

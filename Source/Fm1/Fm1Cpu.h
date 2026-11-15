@@ -119,13 +119,16 @@ struct Fm1Pre
                             // interrupciones: el mismo Cpu::execRaw que execRoute
                             FastExecRaw,
                             // séptima tanda (Mutable Dreams: 3 M bloques cortados en 4 s con 12 notas)
-                            FastMovPair   // rH_rL = #i: regs[fd] = fimm (bajo), regs[fb] = foff (alto)
+                            FastMovPair,  // rH_rL = #i: regs[fd] = fimm (bajo), regs[fb] = foff (alto)
+                            FastBlock     // [R+] = {..} / {..} = [R+] y R++, -R, --R (eb): fa = base, fimm = máscara,
+                                          // fcond = store | wb << 1 | down << 2
     };
     // Direccionamientos de FastLdX / FastStX (los de exec_syntax)
     enum MemMode : uint8_t { MemRImm, MemSpImm, MemSp, MemRR, MemRRShl, MemPostImm, MemPostR, MemPreImm, MemPreR, MemPushSp };
     enum MemSrc : uint8_t { SrcReg, SrcImm, SrcRets };
     // (OpShl / OpShr / OpSar: la ALU de la ruta 1 con destino en memoria y cuenta inmediata, & 31 como alu())
-    enum MemOp : uint8_t { OpSet, OpOr, OpAnd, OpXor, OpAdd, OpSub, OpShl, OpShr, OpSar };
+    // (OpAndNot: [R+#i] &= ~R, de exec_syntax)
+    enum MemOp : uint8_t { OpSet, OpOr, OpAnd, OpXor, OpAdd, OpSub, OpShl, OpShr, OpSar, OpAndNot };
     uint8_t fmode = 0, fsrc = 0;
     FastOp fast = FastNone;
     uint8_t fd = 0, fa = 0, fb = 0;  // destino, fuente / base, segundo registro (índice o rhs)
@@ -394,6 +397,9 @@ private:
     // Salida del bloque a mitad de la parte then de un if con else en línea: el estado que el intérprete tendría (el salto
     // pendiente en predSkips; o, acabada la parte then, el pc en elseEnd)
     static void jitThenExit (Cpu* c, uint32_t thenEnd, uint32_t elseEnd, uint32_t thenStart);
+    // Salida del bloque en la última instrucción del cuerpo de un rep (que corre con repEnd = 0): repEnd de vuelta y, si
+    // se hizo, el descuento de finishSlow
+    static void jitRepExit (Cpu* c, uint32_t start, uint32_t end);
     bool jitNative (Emitter& e, const Line& l);  // una instrucción en código nativo (false: la hace jitOp)
     // (jitEmit) eax ya tiene el registro de off si la instrucción anterior acabó en mov [off], eax justo en la posición at
     // del emisor em (el del bloque; las sondas de jitAt usan otro y no lo tocan): la siguiente se ahorra la carga
@@ -407,6 +413,7 @@ private:
     bool jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
     // push y pop de listas de registros con la RAM en línea (desde jitMem)
     bool jitList (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
+    bool jitBlock (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
     bool jitPopRet (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
     // la ruta lenta común: jitOp con lo pendiente apuntado; slow, los saltos que llegan a ella; conts, los de "sigue"
     void jitSlow (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits,
