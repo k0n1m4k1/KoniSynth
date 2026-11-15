@@ -16,6 +16,7 @@
 
 #include <deque>
 #include <memory>
+#include <string_view>
 
 #include <cstdint>
 #include <unordered_map>
@@ -120,8 +121,11 @@ struct Fm1Pre
                             FastExecRaw,
                             // séptima tanda (Mutable Dreams: 3 M bloques cortados en 4 s con 12 notas)
                             FastMovPair,  // rH_rL = #i: regs[fd] = fimm (bajo), regs[fb] = foff (alto)
-                            FastBlock     // [R+] = {..} / {..} = [R+] y R++, -R, --R (eb): fa = base, fimm = máscara,
+                            FastBlock,    // [R+] = {..} / {..} = [R+] y R++, -R, --R (eb): fa = base, fimm = máscara,
                                           // fcond = store | wb << 1 | down << 2
+                            // octava tanda (los bloques que no podían empezar, medido con la V15)
+                            FastSregList, // [--sp] = {psr, reti...} / {..} = [sp++] (Cpu::sregList); fcond = 1: cierra el bloque
+                            FastMovPairR  // rH_rL = rH_rL: regs[fb] = regs[fimm], regs[fd] = regs[fa] (las dos leídas antes)
     };
     // Direccionamientos de FastLdX / FastStX (los de exec_syntax)
     enum MemMode : uint8_t { MemRImm, MemSpImm, MemSp, MemRR, MemRRShl, MemPostImm, MemPostR, MemPreImm, MemPreR, MemPushSp };
@@ -445,6 +449,8 @@ private:
     bool execRoute (Bus& bus, const Line& l, uint32_t nextPc);
     // Devuelve false si la forma no tiene semántica; jump/hasJump = salto tomado
     bool execSyntax (Bus& bus, const Line& l, uint32_t nextPc, bool& hasJump, uint32_t& jump);
+    // registros especiales a / desde la pila ([--sp] = {..} / {..} = [sp++]): false si s no es una de esas
+    bool sregList (Bus& bus, std::string_view s);
     void execRaw (Bus& bus, uint8_t route, uint32_t raw);
     void finish (bool hasJump, uint32_t jump, uint32_t nextPc);
     void finishSlow (bool hasJump, uint32_t at, uint32_t nextPc);  // bloques if {} y rep en curso

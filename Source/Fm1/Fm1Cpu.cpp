@@ -1756,7 +1756,9 @@ bool Cpu::pairWide (const Line& head, const Line& second) noexcept
     {
         return (x.pre.fast == Fm1Pre::FastExecRaw && x.pre.route == kRouteFpu) || x.pre.fast == Fm1Pre::FastIcfgRd;
     };
-    return head.pre.fast == Fm1Pre::FastExecRaw || calls (head) || calls (second);
+    // (y una cabeza que escribe dos registros: el par estrecho solo guarda fd)
+    return head.pre.fast == Fm1Pre::FastExecRaw || head.pre.fast == Fm1Pre::FastMovPair || head.pre.fast == Fm1Pre::FastMovPairR
+        || calls (head) || calls (second);
 }
 
 void Cpu::jitRepExit (Cpu* c, uint32_t start, uint32_t end)
@@ -1899,6 +1901,12 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
             e.bytes ({ 0x48, 0xb8 }); e.u64 ((uint64_t) (uintptr_t) &Cpu::jitIcfgRd);  // mov rax, jitIcfgRd
             e.bytes ({ 0xff, 0xd0 });                                                  // call rax
             stEax (R (p.fd));
+            return true;
+        case Fm1Pre::FastMovPairR:
+            memOp (e, { 0x8b }, 0, R ((int) p.fimm));     // mov eax, [sh]
+            memOp (e, { 0x8b }, 1, R (p.fa));             // mov ecx, [sl]
+            memOp (e, { 0x89 }, 0, R (p.fb));             // mov [dh], eax
+            memOp (e, { 0x89 }, 1, R (p.fd));             // mov [dl], ecx
             return true;
         case Fm1Pre::FastMovPair:
             memOp (e, { 0xc7 }, 0, R (p.fd)); e.u32 (p.fimm);             // mov dword [rl], bajo
@@ -3339,7 +3347,8 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     else if (f == Fm1Pre::FastGoto || f == Fm1Pre::FastCall)
         outs = { target };
     else if (! (f == Fm1Pre::FastRts || f == Fm1Pre::FastTb || f == Fm1Pre::FastCallR || f == Fm1Pre::FastRti || f == Fm1Pre::FastPopPc
-                || f == Fm1Pre::FastPopRetPc || (f == Fm1Pre::FastIe && l.pre.fimm != 0) || f == Fm1Pre::FastIcfgWr))
+                || f == Fm1Pre::FastPopRetPc || (f == Fm1Pre::FastIe && l.pre.fimm != 0) || f == Fm1Pre::FastIcfgWr
+                || (f == Fm1Pre::FastSregList && l.pre.fcond != 0)))
         outs = { nextPc };
     if (irqEnd)
     {
@@ -3571,7 +3580,8 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
         const auto f = p.fast;
         return f == Fm1Pre::FastBrI || f == Fm1Pre::FastBrR || f == Fm1Pre::FastGoto || f == Fm1Pre::FastCall || f == Fm1Pre::FastRts
             || f == Fm1Pre::FastTb || f == Fm1Pre::FastCallR || f == Fm1Pre::FastRti || f == Fm1Pre::FastPopPc || f == Fm1Pre::FastDecBr
-            || (f == Fm1Pre::FastIe && p.fimm != 0) || f == Fm1Pre::FastIcfgWr || f == Fm1Pre::FastPopRetPc || f == Fm1Pre::FastBitBr;
+            || (f == Fm1Pre::FastIe && p.fimm != 0) || f == Fm1Pre::FastIcfgWr || f == Fm1Pre::FastPopRetPc || f == Fm1Pre::FastBitBr
+            || (f == Fm1Pre::FastSregList && p.fcond != 0);
     };
     const auto inSpan = [&] (uint32_t x) { return inRam ? x - jitRam.base + 8 <= jitRam.size : x - 0x02000000u < kJitSpan; };
     const auto decodeAt = [&] (uint32_t x, Line& l)
@@ -4354,6 +4364,14 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
             }
             case Fm1Pre::FastNop: break;
             case Fm1Pre::FastMovPair: regs[pre.fd] = pre.fimm; regs[pre.fb] = (uint32_t) pre.foff; break;
+            case Fm1Pre::FastMovPairR:
+            {
+                const auto a = regs[pre.fimm & 15], b = regs[pre.fa];
+                regs[pre.fb] = a;
+                regs[pre.fd] = b;
+                break;
+            }
+            case Fm1Pre::FastSregList: sregList (bus, l.entry->canon); break;
             case Fm1Pre::FastBlock:
             {
                 const bool store = (pre.fcond & 1) != 0, wb = (pre.fcond & 2) != 0, down = (pre.fcond & 4) != 0;
@@ -5149,6 +5167,47 @@ bool isSregGet (sv n) noexcept
 }
 } // namespace
 
+// Registros especiales a / desde la pila (envoltorios de ISR, prólogos, cambios de contexto): se apilan en el orden impreso
+// (el primero en la dirección más alta) y se desapilan en ascendente asignando la lista al revés
+bool Cpu::sregList (Bus& bus, sv s)
+{
+    sv list = s, names[10];
+    if (stripPrefix (list, "[--sp] = "))
+    {
+        const int n = namedList (list, names);
+        if (n > 0)
+        {
+            for (int i = 0; i < n; ++i)
+                if (names[i] == "reti") nestOk = true;
+            for (int i = 0; i < n; ++i)
+            {
+                const auto val = sregNamed (names[i].data(), names[i].size());
+                sp -= 4;
+                bus.write32 (sp, val);
+            }
+            return true;
+        }
+    }
+    list = s;
+    if (stripSuffix (list, " = [sp++]"))
+    {
+        const int n = namedList (list, names);
+        if (n > 0)
+        {
+            for (int i = 0; i < n; ++i)
+                if (names[i] == "reti") nestOk = false;
+            for (int i = n - 1; i >= 0; --i)
+            {
+                const auto val = bus.read32 (sp);
+                sp += 4;
+                setSregNamed (names[i].data(), names[i].size(), val);
+            }
+            return true;
+        }
+    }
+    return false;
+}
+
 bool Cpu::execSyntax (Bus& bus, const Line& l, uint32_t nextPc, bool& hasJump, uint32_t& jump)
 {
     const sv s (l.entry->canon);
@@ -5156,44 +5215,9 @@ bool Cpu::execSyntax (Bus& bus, const Line& l, uint32_t nextPc, bool& hasJump, u
     const auto len = l.len;
     const auto J = [&] (uint32_t t) { hasJump = true; jump = t; return true; };
 
-    // ---- registros especiales a / desde la pila (envoltorios de ISR, prólogos, cambios de contexto): se apilan en el
-    // orden impreso (el primero en la dirección más alta) y se desapilan en ascendente asignando la lista al revés
-    {
-        sv list = s, names[10];
-        if (stripPrefix (list, "[--sp] = "))
-        {
-            const int n = namedList (list, names);
-            if (n > 0)
-            {
-                for (int i = 0; i < n; ++i)
-                    if (names[i] == "reti") nestOk = true;
-                for (int i = 0; i < n; ++i)
-                {
-                    const auto val = sregNamed (names[i].data(), names[i].size());
-                    sp -= 4;
-                    bus.write32 (sp, val);
-                }
-                return true;
-            }
-        }
-        list = s;
-        if (stripSuffix (list, " = [sp++]"))
-        {
-            const int n = namedList (list, names);
-            if (n > 0)
-            {
-                for (int i = 0; i < n; ++i)
-                    if (names[i] == "reti") nestOk = false;
-                for (int i = n - 1; i >= 0; --i)
-                {
-                    const auto val = bus.read32 (sp);
-                    sp += 4;
-                    setSregNamed (names[i].data(), names[i].size(), val);
-                }
-                return true;
-            }
-        }
-    }
+    // ---- registros especiales a / desde la pila (sregList)
+    if (sregList (bus, s))
+        return true;
 
     // ---- saltos: if[s] (<cond>) goto #i
     if ((s.starts_with ("if (") || s.starts_with ("ifs (")) && s.ends_with (") goto #i"))
@@ -5848,6 +5872,40 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
         }
     }
 
+    // registros especiales a / desde la pila (como exec_syntax, Cpu::sregList). Cierran el bloque los que pueden dejar lista
+    // una interrupción: con icfg (ie) o un push con reti (nestOk = true); un pop con reti solo la quita
+    {
+        sv list = s, names[10];
+        const bool push = stripPrefix (list, "[--sp] = ");
+        if (! push)
+            list = s;
+        if ((push || stripSuffix (list, " = [sp++]")))
+            if (const int count = namedList (list, names); count > 0)
+            {
+                bool ends = false;
+                for (int i = 0; i < count; ++i)
+                    ends = ends || names[i] == "icfg" || (push && names[i] == "reti");
+                p.fast = Fm1Pre::FastSregList;
+                p.fcond = ends ? 1 : 0;
+                return;
+            }
+    }
+
+    // rH_rL = rH_rL (como exec_syntax: las dos leídas antes de escribir)
+    {
+        sv lhs, rhs;
+        int dh, dl, srcH, srcL;
+        if (split2 (s, " = ", lhs, rhs) && pairOf (lhs, dh, dl) && pairOf (rhs, srcH, srcL))
+        {
+            p.fast = Fm1Pre::FastMovPairR;
+            p.fd = (uint8_t) dl;
+            p.fb = (uint8_t) dh;
+            p.fa = (uint8_t) srcL;
+            p.fimm = (uint32_t) srcH;
+            return;
+        }
+    }
+
     // rH_rL = #i (como exec_syntax: el inmediato de 64 bits es la ranura 2; primero el bajo, luego el alto)
     {
         sv lhs, rhs;
@@ -5926,7 +5984,9 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
     {
         uint8_t w;
         sv inner, addrTxt, rest;
-        if (widthOf (s, w, inner) && split2 (inner, "] ", addrTxt, rest))
+        // (sin "[--sp] = {..}": esas son listas, más abajo; antes este caso las dejaba sin micro-op. Medido con 12 notas:
+        // 0,76 M bloques que no podían empezar en 4 s entre 16 firmwares)
+        if (! s.starts_with ("[--sp] = {") && widthOf (s, w, inner) && split2 (inner, "] ", addrTxt, rest))
         {
             const auto spc = rest.find (' ');
             if (spc == sv::npos)
