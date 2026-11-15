@@ -113,6 +113,15 @@ public:
     // Accesos que pueden cambiar lo que el bucle de cpu0 mira entre instrucciones (MMIO por la ruta lenta, cerrojos,
     // espera de byte, idle): sin ellos ni un tick vencido, nada de eso cambia (las ráfagas de Machine::runBlocks)
     uint64_t sideEffects = 0;
+    // Los accesos con efectos que paran la ráfaga de cpu0 (y su JIT): todos los de sideEffects salvo los que no pueden
+    // cambiar nada de lo que la ráfaga deja de mirar (Machine::runBlocks: reset, interrupciones, cpu1, cerrojos, guardas,
+    // el siguiente evento): las lecturas del P33, de CON/RES del ADC y de los GPIO, y las escrituras al ADC y a los GPIO
+    // (salvo PD0, el chip select de la flash) que no piden reevaluar (Periph::nextDue intacto). Medido: DUB-1 y HYP-1
+    // alimentan el perro guardián 117 000 y 181 000 veces por segundo, ~24 accesos al P33 cada vez, y sondean el ADC
+    uint64_t stopEffects = 0;
+    // (KoniFm1Run --ioprofile) accesos con efectos por dirección & ~3 | 1 si escribe; idle, spin y hwLock como 0xfffffff0,
+    // 0xfffffff4 y 0xfffffff8. nullptr: sin contar
+    std::unordered_map<uint32_t, uint64_t>* ioHist = nullptr;
     uint64_t ticks = 0;
     // (Machine, vuelta observada) con observing: lecturas del contador del TIMER4 y accesos que una vuelta saltada no
     // repetiría (MMIO con efectos, escrituras fuera de la RAM, cerrojos, idle); advances: veces que se atendió el SoC

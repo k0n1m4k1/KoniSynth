@@ -3190,6 +3190,8 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                     ++jitExits[c.status != 0 ? 8 + (c.status & 7) : c.why & 63];
                     if (stepHist != nullptr && c.status == 0 && c.why == 2)
                         ++(*stepHist)[9u << 28 | (pc & 0x0fffffffu)];  // (--stepprofile) el destino de un enlace sin bloque
+                    if (stepHist != nullptr && c.status == 1)
+                        ++(*stepHist)[10u << 28 | (pc & 0x0fffffffu)];  // (--stepprofile) tras un acceso con efectos
                     ++jitRuns;
                     jitInsns += c.done;
                     if (c.status == 2)

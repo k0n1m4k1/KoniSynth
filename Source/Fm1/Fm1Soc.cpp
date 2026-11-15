@@ -358,6 +358,8 @@ void Soc::advance (uint64_t n)
 void Soc::idle (uint32_t core)
 {
     ++sideEffects;
+    ++stopEffects;
+    if (ioHist != nullptr) ++(*ioHist)[0xfffffff0u];
     obsImpure += observing ? 1 : 0;
     if (core == 0) periph.idle();
     else cpu1Idle = true;
@@ -366,6 +368,8 @@ void Soc::idle (uint32_t core)
 void Soc::spin (uint32_t core, uint32_t addr)
 {
     ++sideEffects;
+    ++stopEffects;
+    if (ioHist != nullptr) ++(*ioHist)[0xfffffff4u];
     obsImpure += observing ? 1 : 0;
     if (cpu1Running)
         waits[core & 1] = Wait { Wait::Byte, addr };
@@ -374,6 +378,8 @@ void Soc::spin (uint32_t core, uint32_t addr)
 bool Soc::hwLock (uint32_t core, bool set)
 {
     ++sideEffects;
+    ++stopEffects;
+    if (ioHist != nullptr) ++(*ioHist)[0xfffffff8u];
     obsImpure += observing ? 1 : 0;
     if (set)
     {
@@ -465,6 +471,10 @@ uint32_t Soc::timerRead (uint32_t addr)
 uint32_t Soc::read32Slow (uint32_t addr)
 {
     ++sideEffects;
+    // (sin efectos para la ráfaga: el P33 lee su estado, el ADC su CON / RES y los GPIO sus pines; nada cambia)
+    if (const auto r = region (addr); ! (r == Region::P33 || r == Region::Gpio || addr == 0x13100 || addr == 0x13104))
+        ++stopEffects;
+    if (ioHist != nullptr) ++(*ioHist)[addr & ~3u];
     if (observing) [[unlikely]]
     {
         if (addr == 0x10804) ++obsT4;
@@ -626,6 +636,17 @@ void Soc::spi2Write (uint32_t addr, uint32_t v)
 void Soc::write32Slow (uint32_t addr, uint32_t v)
 {
     ++sideEffects;
+    // ADC y GPIO (salvo PD0): sin efectos para la ráfaga si el periférico no pidió reevaluar (nextDue intacto; una IRQ del
+    // ADC que cambia lo pide). El resto, siempre. Se decide al salir (las ramas de abajo vuelven por varios sitios)
+    struct StopAfter
+    {
+        Soc& soc;
+        bool quiet;
+        uint64_t due0;
+        ~StopAfter() { if (! quiet || soc.periph.nextDue != due0) ++soc.stopEffects; }
+    } stopAfter { *this, (region (addr) == Region::Gpio && addr != 0x500c0) || addr == 0x13100 || addr == 0x13104,
+                  periph.nextDue };
+    if (ioHist != nullptr) ++(*ioHist)[(addr & ~3u) | 1u];
     if (observing && region (addr) != Region::Ram) [[unlikely]]
         ++obsImpure;
     switch (region (addr))
@@ -1542,7 +1563,7 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
                     blockedPrio = p->second;
             }
         }
-        const auto side0 = soc.sideEffects;
+        const auto stop0 = soc.stopEffects;
         const bool trip = cpu0.pcEnter (cpu0.pc);
         if (! cpu0.step (soc))
         {
@@ -1560,8 +1581,8 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
         {
             // (en Cpu::burst; las paradas son las de burstStop)
             Cpu::BurstStop bs;
-            bs.sideEffects = &soc.sideEffects;
-            bs.side0 = side0;
+            bs.sideEffects = &soc.stopEffects;  // (los que paran la ráfaga: ver Soc::stopEffects)
+            bs.side0 = stop0;
             bs.cycles = &soc.periph.cycles;
             bs.due = soc.periph.nextDue;
             bs.inIsr = &soc.periph.inIsr;
