@@ -399,6 +399,9 @@ private:
     bool jitFailed = false;     // sin memoria ejecutable o búfer lleno: el intérprete
     const JitBlock* jitAt (Bus& bus, uint32_t at);
     static int jitOp (JitCtx* c, uint32_t j, const Line* l);
+    // la ruta lenta de un acceso de jitMem sin actualización de la base, con la dirección ya calculada: lo mismo que jitOp
+    // sin execFast (ni volver a calcular la dirección)
+    static int jitMemSlow (JitCtx* c, uint32_t j, const Line* l, uint32_t addr);
     static void jitFpu (Cpu* c, uint32_t raw);  // una instrucción de la FPU (ruta 31) desde el código nativo
     static uint32_t jitIcfgRd (Cpu* c) noexcept { return c->icfg(); }  // R = icfg desde el código nativo
     // un par que jitEmit hace con los 16 registros: cabeza cruda (su registro destino va en el raw), o una llamada (FPU,
@@ -427,7 +430,7 @@ private:
     bool jitPopRet (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
     // la ruta lenta común: jitOp con lo pendiente apuntado; slow, los saltos que llegan a ella; conts, los de "sigue"
     void jitSlow (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits,
-                  const std::vector<size_t>& slow, std::initializer_list<size_t> conts);
+                  const std::vector<size_t>& slow, std::initializer_list<size_t> conts, bool memSlow = false);
     Bus::RamView jitRam {};
     bool jitRamOk = false;
     Bus::XipView jitXip {};

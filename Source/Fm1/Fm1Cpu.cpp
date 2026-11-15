@@ -2458,19 +2458,29 @@ bool Cpu::jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t
         cont2 = e.pos();
         e.u32 (0);
     }
-    jitSlow (e, l, j, pend, pendPc, exits, slow, { cont, cont2 });
+    // (sin actualización de la base ni línea convertida: la ruta lenta ligera, con la dirección de eax)
+    jitSlow (e, l, j, pend, pendPc, exits, slow, { cont, cont2 }, ! pre && ! post && ! raw1819 && ! raw32);
     return true;
 }
 
 // La ruta lenta de jitMem / jitList: los saltos de slow llegan aquí; lo pendiente se apunta, jitOp hace la instrucción
 // entera y, si sigue el bloque, se vuelve a la cuenta de la ruta rápida; conts: los jmp de la ruta rápida (0: ninguno)
 void Cpu::jitSlow (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits,
-                   const std::vector<size_t>& slow, std::initializer_list<size_t> conts)
+                   const std::vector<size_t>& slow, std::initializer_list<size_t> conts, bool memSlow)
 {
     const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
     const auto slowAt = e.pos();
     for (const auto x : slow)
         e.patch32 (x, (uint32_t) (slowAt - (x + 4)));
+    if (memSlow)
+    {
+        // (la dirección, en eax en todos los saltos a la lenta: cuarto / cuarto argumento de jitMemSlow)
+#if defined(_WIN32)
+        e.bytes ({ 0x41, 0x89, 0xc1 });  // mov r9d, eax
+#else
+        e.bytes ({ 0x89, 0xc1 });        // mov ecx, eax
+#endif
+    }
     if (pend > 0)
     {
         memOp (e, { 0x81 }, 0, off (&insnCount), true); e.u32 (pend);  // add qword [insnCount], pend
@@ -2491,8 +2501,8 @@ void Cpu::jitSlow (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_
     e.bytes ({ 0x48, 0xba });        // mov rdx, línea
 #endif
     e.u64 ((uint64_t) (uintptr_t) &l);
-    e.bytes ({ 0x48, 0xb8 });        // mov rax, jitOp
-    e.u64 ((uint64_t) (uintptr_t) &Cpu::jitOp);
+    e.bytes ({ 0x48, 0xb8 });        // mov rax, jitOp (o jitMemSlow)
+    e.u64 (memSlow ? (uint64_t) (uintptr_t) &Cpu::jitMemSlow : (uint64_t) (uintptr_t) &Cpu::jitOp);
     e.bytes ({ 0xff, 0xd0 });        // call rax
     e.bytes ({ 0x85, 0xc0 });        // test eax, eax
     e.bytes ({ 0x0f, 0x85 });        // jnz salida
@@ -4026,6 +4036,54 @@ static void stW (Bus& bus, uint8_t w, uint32_t a, uint32_t val)
     else bus.write32 (a, val);
 }
 
+// FastStX: lo que se escribe en addr (OpSet: val; el resto lee antes la memoria, sin signo)
+static uint32_t stxValue (Bus& bus, const Fm1Pre& pre, uint32_t addr, uint32_t val)
+{
+    switch (pre.fcond)
+    {
+        case Fm1Pre::OpSet:    return val;
+        case Fm1Pre::OpOr:     return ldW (bus, pre.fw, false, addr) | val;
+        case Fm1Pre::OpAnd:    return ldW (bus, pre.fw, false, addr) & val;
+        case Fm1Pre::OpXor:    return ldW (bus, pre.fw, false, addr) ^ val;
+        case Fm1Pre::OpAdd:    return ldW (bus, pre.fw, false, addr) + val;
+        case Fm1Pre::OpShl:    return ldW (bus, pre.fw, false, addr) << (val & 31);
+        case Fm1Pre::OpShr:    return ldW (bus, pre.fw, false, addr) >> (val & 31);
+        case Fm1Pre::OpSar:    return (uint32_t) ((int32_t) ldW (bus, pre.fw, false, addr) >> (val & 31));
+        case Fm1Pre::OpAndNot: return ldW (bus, pre.fw, false, addr) & ~val;
+        default:               return ldW (bus, pre.fw, false, addr) - val;
+    }
+}
+
+int Cpu::jitMemSlow (JitCtx* c, uint32_t j, const Line* l, uint32_t addr)
+{
+    auto& cpu = *c->cpu;
+    auto& bus = *c->bus;
+    const auto& pre = l->pre;
+    *c->cycles = c->now + j;
+    cpu.fault = Fault::None;
+    c->done = c->base + j;
+    if (cpu.jitOpHist != nullptr)
+        ++(*cpu.jitOpHist)[(uint32_t) pre.fast << 24 | (uint32_t) (pre.route & 0xff) << 16 | (uint32_t) (pre.fmode & 0xff) << 8
+                           | (pre.fidx ? 0x80u : 0u) | (pre.fcond & 0x7fu)];
+    if (pre.fast == Fm1Pre::FastLd || pre.fast == Fm1Pre::FastLdX)
+        cpu.regs[pre.fd] = ldW (bus, pre.fw, pre.fsign, addr);
+    else if (pre.fast == Fm1Pre::FastSt)
+        stW (bus, pre.fw, addr, cpu.regs[pre.fd]);
+    else
+    {
+        const uint32_t val = pre.fsrc == Fm1Pre::SrcReg ? cpu.regs[pre.fd] : pre.fsrc == Fm1Pre::SrcRets ? cpu.rets : (uint32_t) pre.foff;
+        stW (bus, pre.fw, addr, stxValue (bus, pre, addr, val));
+    }
+    cpu.finish (false, 0, l->pc + l->len);
+    c->done = c->base + j + 1;
+    if (*c->sideEffects != c->side0)
+    {
+        c->status = 1;
+        return 1;
+    }
+    return 0;
+}
+
 // Ruta rápida: las formas comunes de exec_syntax con sus operandos ya resueltos (misma semántica, ver computeFast). En
 // línea en step y en la ráfaga; el resto (rutas crudas, exec_syntax) en execRoute, fuera de línea: su marco de pila es
 // mucho mayor y no lo paga cada instrucción
@@ -4144,21 +4202,7 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                     default:                 sp -= 4; addr = sp; break;
                 }
                 const uint32_t val = pre.fsrc == Fm1Pre::SrcReg ? regs[pre.fd] : pre.fsrc == Fm1Pre::SrcRets ? rets : (uint32_t) pre.foff;
-                uint32_t nv;
-                switch (pre.fcond)
-                {
-                    case Fm1Pre::OpSet: nv = val; break;
-                    case Fm1Pre::OpOr:  nv = ldW (bus, pre.fw, false, addr) | val; break;
-                    case Fm1Pre::OpAnd: nv = ldW (bus, pre.fw, false, addr) & val; break;
-                    case Fm1Pre::OpXor: nv = ldW (bus, pre.fw, false, addr) ^ val; break;
-                    case Fm1Pre::OpAdd: nv = ldW (bus, pre.fw, false, addr) + val; break;
-                    case Fm1Pre::OpShl: nv = ldW (bus, pre.fw, false, addr) << (val & 31); break;
-                    case Fm1Pre::OpShr: nv = ldW (bus, pre.fw, false, addr) >> (val & 31); break;
-                    case Fm1Pre::OpSar: nv = (uint32_t) ((int32_t) ldW (bus, pre.fw, false, addr) >> (val & 31)); break;
-                    case Fm1Pre::OpAndNot: nv = ldW (bus, pre.fw, false, addr) & ~val; break;
-                    default:            nv = ldW (bus, pre.fw, false, addr) - val; break;
-                }
-                stW (bus, pre.fw, addr, nv);
+                stW (bus, pre.fw, addr, stxValue (bus, pre, addr, val));
                 if (post)
                     regs[pre.fa] += inc;
                 break;

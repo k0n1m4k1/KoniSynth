@@ -489,7 +489,7 @@ uint32_t Soc::read32Slow (uint32_t addr)
         if (addr == 0x10804) ++obsT4;
         else if (! pureRead (addr)) ++obsImpure;
     }
-    switch (region (addr))
+    switch (r0)
     {
         case Region::Xip:
         {
@@ -645,6 +645,7 @@ void Soc::spi2Write (uint32_t addr, uint32_t v)
 void Soc::write32Slow (uint32_t addr, uint32_t v)
 {
     ++sideEffects;
+    const auto rg = region (addr);  // (una vez: no se queda en línea, y eran tres llamadas)
     // ADC, GPIO (salvo PD0) y P33: sin efectos para la ráfaga si el periférico no pidió reevaluar (nextDue intacto; una
     // IRQ del ADC lo pide, y en el P33 un reset o un perro guardián que vence antes: p33Event). El resto, siempre. Se decide
     // al salir (las ramas de abajo vuelven por varios sitios). Medido con 12 notas: HYP-1 y DUB-1 alimentan el perro
@@ -655,13 +656,13 @@ void Soc::write32Slow (uint32_t addr, uint32_t v)
         bool quiet;
         uint64_t due0;
         ~StopAfter() { if (! quiet || soc.periph.nextDue != due0) ++soc.stopEffects; }
-    } stopAfter { *this, (region (addr) == Region::Gpio && addr != 0x500c0) || region (addr) == Region::P33 || addr == 0x13100
+    } stopAfter { *this, (rg == Region::Gpio && addr != 0x500c0) || rg == Region::P33 || addr == 0x13100
                              || addr == 0x13104,
                   periph.nextDue };
     if (ioHist != nullptr) ++(*ioHist)[(addr & ~3u) | 1u];
-    if (observing && region (addr) != Region::Ram) [[unlikely]]
+    if (observing && rg != Region::Ram) [[unlikely]]
         ++obsImpure;
-    switch (region (addr))
+    switch (rg)
     {
         case Region::Xip: case Region::XipFlash: logUnknown (addr, 4, true, v); break;  // la flash se escribe por SPI0
         case Region::Ram: ram.write32 (addr - kRamBase, v); break;
