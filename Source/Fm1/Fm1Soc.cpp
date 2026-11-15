@@ -645,15 +645,18 @@ void Soc::spi2Write (uint32_t addr, uint32_t v)
 void Soc::write32Slow (uint32_t addr, uint32_t v)
 {
     ++sideEffects;
-    // ADC y GPIO (salvo PD0): sin efectos para la ráfaga si el periférico no pidió reevaluar (nextDue intacto; una IRQ del
-    // ADC que cambia lo pide). El resto, siempre. Se decide al salir (las ramas de abajo vuelven por varios sitios)
+    // ADC, GPIO (salvo PD0) y P33: sin efectos para la ráfaga si el periférico no pidió reevaluar (nextDue intacto; una
+    // IRQ del ADC lo pide, y en el P33 un reset o un perro guardián que vence antes: p33Event). El resto, siempre. Se decide
+    // al salir (las ramas de abajo vuelven por varios sitios). Medido con 12 notas: HYP-1 y DUB-1 alimentan el perro
+    // guardián 117 000-181 000 veces por segundo, ~24 accesos al P33 cada vez
     struct StopAfter
     {
         Soc& soc;
         bool quiet;
         uint64_t due0;
         ~StopAfter() { if (! quiet || soc.periph.nextDue != due0) ++soc.stopEffects; }
-    } stopAfter { *this, (region (addr) == Region::Gpio && addr != 0x500c0) || addr == 0x13100 || addr == 0x13104,
+    } stopAfter { *this, (region (addr) == Region::Gpio && addr != 0x500c0) || region (addr) == Region::P33 || addr == 0x13100
+                             || addr == 0x13104,
                   periph.nextDue };
     if (ioHist != nullptr) ++(*ioHist)[(addr & ~3u) | 1u];
     if (observing && region (addr) != Region::Ram) [[unlikely]]
