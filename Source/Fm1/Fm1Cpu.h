@@ -378,6 +378,7 @@ private:
     bool jitFailed = false;     // sin memoria ejecutable o búfer lleno: el intérprete
     const JitBlock* jitAt (Bus& bus, uint32_t at);
     static int jitOp (JitCtx* c, uint32_t j, const Line* l);
+    static void jitFpu (Cpu* c, uint32_t raw);  // una instrucción de la FPU (ruta 31) desde el código nativo
     bool jitNative (Emitter& e, const Line& l);  // una instrucción en código nativo (false: la hace jitOp)
     // el salto que cierra el bloque, en nativo, con lo pendiente apuntado (pend nativas antes): false si no
     bool jitBranch (Emitter& e, const Line& l, uint32_t pend);

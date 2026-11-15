@@ -1107,6 +1107,7 @@ static void computeFastRaw (uint64_t raw, Fm1Pre& pre, uint8_t len) noexcept
         }
         case 16: case 18: case 19: case 21: case 22: case 32: case 33: case 34: case 35: case 36: case 38: case 39:
         case 40: case 41:  // (las de execRoute que van a execRaw: datos, sin salto)
+        case kRouteFpu:    // (la FPU: sin ella, cada operación de coma flotante cortaba los bloques del JIT; DUB-1, HYP-1)
             pre.fast = Fm1Pre::FastExecRaw;
             return;
         case 8:  // R = #h (composedImm, como su caso en execRoute)
@@ -1737,6 +1738,14 @@ int Cpu::jitOp (JitCtx* c, uint32_t j, const Line* l)
     return 0;
 }
 
+// Una instrucción de la FPU llamada desde el código nativo: la misma fpuD que el intérprete (exacta por construcción)
+void Cpu::jitFpu (Cpu* c, uint32_t raw)
+{
+    uint8_t op, d, a, b;
+    decodeFpu (raw, op, d, a, b);
+    c->regs[d] = fpuD (op, c->regs[d], c->regs[a], c->regs[b]);
+}
+
 // ---- código nativo (x86-64; codificaciones del Intel SDM vol. 2) ----
 // Registros del host: rbx = JitCtx*, r12 = Cpu* (los dos se conservan en las dos ABI); eax, ecx y r10/r11 de trabajo.
 // Los registros del pi32v2 viven en el objeto Cpu ([r12 + desplazamiento]). Las instrucciones que se hacen en nativo
@@ -1881,8 +1890,23 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
         }
         case Fm1Pre::FastExecRaw:
         {
-            // ruta 41, min / max (execRaw con el raw de 32 bits): cmp y cmov, que con iguales deja x como std::max / min
             const auto raw = (uint64_t) (uint32_t) l.raw;
+            if (p.route == kRouteFpu)
+            {
+                // FPU: llamada a jitFpu (Cpu*, raw). Pisa los registros volátiles (eax, ecx, edx, r8-r11): nada vive en
+                // ellos entre instrucciones salvo en un par de emisión doble, y jitAt no deja una así en un par
+#if defined(_WIN32)
+                e.bytes ({ 0x4c, 0x89, 0xe1 });                           // mov rcx, r12
+                e.u8 (0xba); e.u32 ((uint32_t) raw);                      // mov edx, raw
+#else
+                e.bytes ({ 0x4c, 0x89, 0xe7 });                           // mov rdi, r12
+                e.u8 (0xbe); e.u32 ((uint32_t) raw);                      // mov esi, raw
+#endif
+                e.bytes ({ 0x48, 0xb8 }); e.u64 ((uint64_t) (uintptr_t) &Cpu::jitFpu);  // mov rax, jitFpu
+                e.bytes ({ 0xff, 0xd0 });                                 // call rax
+                return true;
+            }
+            // ruta 41, min / max (execRaw con el raw de 32 bits): cmp y cmov, que con iguales deja x como std::max / min
             if (p.route != 41 || dspRaw (raw) != Dsp::MinMax)
                 return false;
             const bool isMin = (raw & 1) != 0, sgn = ((raw >> 16) & 1) != 0;
@@ -2857,6 +2881,8 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
                 || l.pre.fast == Fm1Pre::FastExecRaw)
                 break;
             const bool nl = jitNative (probe, l), ns = jitNative (probe, s);
+            if (s.pre.fast == Fm1Pre::FastExecRaw && s.pre.route == kRouteFpu)
+                break;  // (la FPU en nativo es una llamada: pisaría edx y r8d, que el par usa)
             if (! nl || ! ns)
             {
                 // Con un acceso a memoria (FastLd, FastSt, FastLdX, FastStX) en el par: si la segunda no lee ni escribe
@@ -3162,6 +3188,8 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                     b->fn (&c);
                     jitPending = c.status == 0 ? (JitLink*) c.lastLink : nullptr;
                     ++jitExits[c.status != 0 ? 8 + (c.status & 7) : c.why & 63];
+                    if (stepHist != nullptr && c.status == 0 && c.why == 2)
+                        ++(*stepHist)[9u << 28 | (pc & 0x0fffffffu)];  // (--stepprofile) el destino de un enlace sin bloque
                     ++jitRuns;
                     jitInsns += c.done;
                     if (c.status == 2)
@@ -3892,6 +3920,14 @@ void Cpu::execRaw (Bus& bus, uint8_t route, uint32_t raw32)
     const auto raw = (uint64_t) raw32;
     switch (route)
     {
+        case kRouteFpu:
+        {
+            // la FPU (como su caso en execRoute)
+            uint8_t op, d, a, b;
+            decodeFpu (raw, op, d, a, b);
+            regs[d] = fpuD (op, regs[d], regs[a], regs[b]);
+            break;
+        }
         case 16:
         {
             // pares de 64 bits rH_rL = d[...] / d[...] = rH_rL (decode_pair_mem); el bajo en la dirección menor

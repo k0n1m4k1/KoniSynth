@@ -627,7 +627,7 @@ int main (int argc, char** argv)
                      (unsigned long long) tot, (unsigned long long) byWhy[1], (unsigned long long) byWhy[2],
                      (unsigned long long) (byWhy[3] + byWhy[4] + byWhy[5] + byWhy[6] + byWhy[7] + byWhy[8]));
         static const char* const kWhy[] = { "?", "estado", "sin bloque", "room/evento", "stop", "loopHint", "sondeo", "tabla",
-                                            "ventanas", "?", "?", "?", "?", "?", "?", "?" };
+                                            "ventanas", "tras enlace", "?", "?", "?", "?", "?", "?" };
         std::printf ("  no cabe por: room/evento %llu, stop %llu, loopHint %llu, sondeo %llu, tabla %llu, ventanas %llu\n",
                      (unsigned long long) byWhy[3], (unsigned long long) byWhy[4], (unsigned long long) byWhy[5],
                      (unsigned long long) byWhy[6], (unsigned long long) byWhy[7], (unsigned long long) byWhy[8]);
