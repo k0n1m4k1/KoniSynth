@@ -80,7 +80,8 @@ public:
     }
 
     // Para la máquina y la libera (al cambiar de motor: sin el FM-1 elegido no gasta CPU)
-    void stop()
+    // save = false (RESET): sin guardar lo que el firmware escribió en su flash desde el último guardado
+    void stop (bool save = true)
     {
         live.store (false, std::memory_order_release);
         while (inRender.load (std::memory_order_acquire) > 0) // un bloque de audio que empezó antes: que termine
@@ -91,7 +92,7 @@ public:
             worker.reset();
         }
         const std::lock_guard<std::mutex> g (emuLock);
-        if (emu != nullptr)
+        if (emu != nullptr && save)
             saveMemory (*emu, true); // lo que el firmware escribió desde el último guardado
         emu.reset();
     }

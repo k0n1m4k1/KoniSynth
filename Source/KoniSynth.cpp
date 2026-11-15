@@ -301,6 +301,8 @@ public:
                 return;
             }
         }
+        else if (const auto last = fm1LastFirmware(); last.existsAsFile())
+            file = last; // (el preset no trae firmware: el último que arrancó, ajuste global)
         else
         {
             auto all = folder.findChildFiles (juce::File::findFiles, true, "*.fwsc");
@@ -312,10 +314,49 @@ public:
             status = "No firmware: put your FM-1 .fwsc files in " + folder.getFullPathName();
         else if (! fm1Engine.start (file, status, fm1StartedMemory))
             status = file.getFileName() + ": " + status;
+        else if (file != fm1LastFirmware())
+            setFm1LastFirmware (file);
         const juce::ScopedLock sl (sampleInfoLock);
         fm1StartError = status;
     }
     void rescanFm1() { fm1Engine.stop(); startFm1(); }
+    // PANIC del FM-1: la máquina se reinicia con su memoria guardada, como apagar y encender el aparato. El PANIC general
+    // solo manda All Notes Off, que los loops, secuencias y notas retenidas de un firmware pueden ignorar; esto los para
+    // siempre. Lo que no se guardó con SAVE se pierde, como en el aparato (hilo de mensajes)
+    void fm1Panic()
+    {
+        if ((int) params.engine->load() != 16 || ! fm1Tried)
+            return;
+        fm1Engine.stop(); // (guarda en <firmware>.fm1save lo que el firmware escribió en su flash)
+        if (const auto mem = fm1Engine.memoryBase64(); mem.isNotEmpty())
+            apvts.state.setProperty (fm1MemoryProp, mem, nullptr);
+        startFm1();
+    }
+    // RESET del FM-1: el firmware con la memoria de fábrica de su paquete. <firmware>.fm1save va a la papelera (recuperable;
+    // si no se puede, no se toca nada) y la memoria del preset se vacía. false con el motivo en error (hilo de mensajes)
+    bool fm1FactoryReset (juce::String& error)
+    {
+        if ((int) params.engine->load() != 16 || ! fm1Tried)
+            return false;
+        const auto fw = fm1Engine.loadedFile();
+        if (fw == juce::File())
+        {
+            error = "No firmware is loaded.";
+            return false;
+        }
+        const auto save = fw.withFileExtension ("fm1save");
+        fm1Engine.stop (false); // (sin guardar: lo que hubiera escrito el firmware se descarta)
+        if (save.existsAsFile() && ! save.moveToTrash())
+        {
+            error = "Cannot move " + save.getFullPathName() + " to the recycle bin; nothing was reset.";
+            startFm1();
+            return false;
+        }
+        apvts.state.setProperty (fm1MemoryProp, juce::String(), nullptr);
+        fm1StartedMemory = {};
+        startFm1();
+        return true;
+    }
     void setFm1Folder (const juce::File& folder) { setFm1FirmwareFolder (folder); rescanFm1(); }
     // los .fwsc de la carpeta de firmwares (el menú Firmware...) y el que está cargado
     juce::Array<juce::File> fm1Firmwares() const
@@ -1920,6 +1961,8 @@ public:
         }
         if (midiLearn.takeAction (MidiLearn::actionRevoke))
             agentSession.revoke ("Control taken back (MIDI), agent session closed.");
+        if (midiLearn.takeAction (MidiLearn::actionFm1Panic))
+            fm1Panic();
         // mandos del panel del FM-1 asignados a un CC (MidiLearn::handleFm1): al aparato
         for (int k = 0; k < 14; ++k)
             if (const auto down = midiLearn.fm1KeyState[(size_t) k].exchange (-1); down >= 0)

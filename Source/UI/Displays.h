@@ -1233,6 +1233,35 @@ public:
         masterLabel.setJustificationType (juce::Justification::centred);
         masterLabel.setFont (juce::FontOptions (11.0f));
         addAndMakeVisible (masterLabel);
+        // dos botones del emulador (no del aparato): PANIC lo reinicia con la memoria guardada; RESET, con la de fábrica
+        panicButton.setTooltip ("FM-1 panic: restarts the emulated FM-1 with its saved memory, like switching it off and on. Stops "
+                          "anything the firmware keeps playing (loops, sequences, held notes) that the main PANIC can't. Edits "
+                          "not stored with SAVE are lost, as on the device. Right-click: MIDI Learn.");
+        panicButton.learn = &processor.midiLearn;
+        panicButton.action = MidiLearn::actionFm1Panic;
+        panicButton.onClick = [this] { processor.fm1Panic(); };
+        addAndMakeVisible (panicButton);
+        resetButton.setTooltip ("FM-1 reset: restarts the firmware with its factory memory. Its saved memory (<firmware>.fm1save, "
+                          "next to the .fwsc) goes to the recycle bin and the preset's copy is cleared. Asks first.");
+        resetButton.onClick = [this]
+        {
+            const auto fw = processor.fm1Loaded();
+            overlay = Overlay::create (*this, "FM-1 reset",
+                "Restart " + (fw == juce::File() ? juce::String ("the firmware") : fw.getFileName()) + " with its factory memory? "
+                "Everything saved on the device with SAVE (presets, songs, settings) is discarded: its "
+                + fw.withFileExtension ("fm1save").getFileName() + " goes to the recycle bin.",
+                std::nullopt, "Reset", "Cancel", [this] (bool ok, const juce::String&, int)
+                {
+                    overlay.reset();
+                    if (! ok)
+                        return;
+                    juce::String error;
+                    if (! processor.fm1FactoryReset (error) && error.isNotEmpty())
+                        overlay = Overlay::create (*this, "FM-1 reset", error, std::nullopt, "OK", {},
+                                                   [this] (bool, const juce::String&, int) { overlay.reset(); });
+                });
+        };
+        addAndMakeVisible (resetButton);
         startTimerHz (10);
     }
 
@@ -1286,6 +1315,10 @@ public:
         encoders[0]->setBounds (row1.reduced (kSpace / 2, 0));
         encoders[1]->setBounds (row2.removeFromLeft (colW).reduced (kSpace / 2, 0));
         encoders[2]->setBounds (row2.reduced (kSpace / 2, 0));
+        // abajo a la izquierda: PANIC y RESET del emulador
+        auto tools = left.removeFromBottom (26);
+        panicButton.setBounds (tools.removeFromLeft (colW).reduced (kSpace / 2, 0));
+        resetButton.setBounds (tools.reduced (kSpace / 2, 0));
         // derecha: K1-K4 y dos filas de seis botones, con hueco para su rótulo entero
         auto kRow = right.removeFromTop (std::min (right.getWidth() / 4 - kSpace, 84) + 14);
         const auto kw = kRow.getWidth() / 4;
@@ -1309,6 +1342,10 @@ private:
     static constexpr double kMasterDefault = 900.0; // Fm1Periph.cpp: adcValue[4] al encender
 
     void sendMaster() { processor.fm1Panel ({ fm1::PanelAction::Adc, 4, (int32_t) master.getValue() }); }
+
+    MidiActionButton<juce::TextButton> panicButton { "PANIC" };
+    juce::TextButton resetButton { "RESET" };
+    std::unique_ptr<Overlay> overlay;
 
     // al arrancar (o cambiar) el firmware la máquina vuelve a 900: se le manda la posición del mando. MASTER movido por un
     // CC asignado: la perilla lo sigue (sin volver a mandarlo). El marco de MIDI Learn, al cambiar

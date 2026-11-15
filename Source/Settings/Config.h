@@ -106,6 +106,16 @@ static juce::File dx7BankFolder() { return romsFolder ("DX7"); }
 
 static void setFm1FirmwareFolder (const juce::File& folder) { setConfigText ("fm1Firmware", folder.getFullPathName()); }
 
+// El último firmware del FM-1 que arrancó (clave fm1LastFirmware): sin firmware en el preset o el proyecto (los de otros
+// motores no lo traen), arranca este y no el primero de la carpeta
+static juce::File fm1LastFirmware()
+{
+    auto config = openConfig();
+    const auto path = config != nullptr ? config->getValue ("fm1LastFirmware") : juce::String();
+    return juce::File::isAbsolutePath (path) ? juce::File (path) : juce::File();
+}
+static void setFm1LastFirmware (const juce::File& file) { setConfigText ("fm1LastFirmware", file.getFullPathName()); }
+
 // Latencia del FM-1 (ms): la cola de audio por delante de la que tira el host (Engines/Fm1.h). Más larga aguanta los picos
 // del emulador (cambios rápidos de tono, muchas voces) a costa de retraso. Clave fm1LatencyMs; 30 ms por defecto
 static constexpr int kFm1Latencies[] = { 30, 60, 120, 250, 500 };
