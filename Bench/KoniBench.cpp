@@ -42,27 +42,51 @@ juce::AudioProcessorParameter* find (juce::AudioPluginInstance& p, const juce::S
     return nullptr;
 }
 
-void set (juce::AudioPluginInstance& p, const juce::String& name, float normalised)
+// Un valor del escenario: normalizado 0..1 o, con text, como texto del parámetro (las opciones de un desplegable por su
+// nombre: un índice normalizado cambia de significado al añadir opciones; con "/9" los escenarios de motores medían otro
+// motor desde que hay 17)
+struct Value
 {
-    if (auto* param = find (p, name))
-        param->setValue (normalised);
-}
+    const char* name;
+    float normalised = 0.0f;
+    const char* text = nullptr;
+};
 
 struct Scenario
 {
     const char* name;
-    std::vector<std::pair<const char*, float>> values; // nombre del parámetro, valor normalizado 0..1
+    std::vector<Value> values;
     int notes;
     int eventEvery = 0; // > 0: un pitch bend cada N muestras (eventos densos: cada uno parte el render de las voces)
 };
 
 void run (juce::AudioPluginInstance& plugin, const Scenario& s)
 {
-    // Restablece a valores por defecto y aplica el escenario
+    // Restablece a valores por defecto y aplica el escenario. Un parámetro que no existe o un texto que no es una de sus
+    // opciones invalidan la medida: se dice y no se mide. Los valores que quedan se escriben como texto (el motor efectivo)
     for (auto* param : plugin.getParameters())
         param->setValue (param->getDefaultValue());
-    for (const auto& [name, value] : s.values)
-        set (plugin, name, value);
+    juce::String applied;
+    for (const auto& v : s.values)
+    {
+        auto* param = find (plugin, v.name);
+        if (param == nullptr)
+        {
+            std::printf ("%-34s  NO MEDIDO: no existe el parámetro %s\n", s.name, v.name);
+            return;
+        }
+        param->setValue (v.text != nullptr ? param->getValueForText (v.text) : v.normalised);
+        const auto now = param->getText (param->getValue(), 64);
+        if (v.text != nullptr && now != juce::String (juce::CharPointer_UTF8 (v.text)))
+        {
+            std::printf ("%-34s  NO MEDIDO: %s = \"%s\" no es una opción (queda \"%s\")\n", s.name, v.name, v.text, now.toRawUTF8());
+            return;
+        }
+        if (param->isDiscrete() || v.text != nullptr)
+            applied << (applied.isEmpty() ? "" : ", ") << v.name << " = " << now;
+    }
+    if (applied.isNotEmpty())
+        std::printf ("%-34s  [%s]\n", s.name, applied.toRawUTF8());
 
     plugin.prepareToPlay (kSampleRate, kBlockSize);
     juce::AudioBuffer<float> buffer (2, kBlockSize);
@@ -1750,41 +1774,41 @@ int main (int argc, char** argv)
                                        { "Media On", 1.0f }, { "LFO On", 1.0f } }, 8 },
         { "5. Solo efectos (sin notas)", { { "Tube On", 1.0f }, { "Chorus On", 1.0f }, { "Echo On", 1.0f },
                                            { "Reverb On", 1.0f }, { "Media On", 1.0f } }, 0 },
-        { "6. Theremin fisico + efectos", { { "Theremin On", 1.0f }, { "Theremin Volume", 0.8f }, { "Reverb On", 1.0f },
+        { "6. Theremin fisico + efectos", { { "Engine", 0.0f, "Theremin" }, { "Theremin Volume", 0.8f }, { "Reverb On", 1.0f },
                                             { "Echo On", 1.0f }, { "Media On", 1.0f } }, 0 },
-        // Motores retro (Engine: 10 opciones -> índice / 9)
-        { "7. Stylophone", { { "Engine", 3.0f / 9.0f } }, 8 },
-        { "8. Omnichord Rock 1, acorde", { { "Engine", 4.0f / 9.0f }, { "Omnichord Rhythm", 1.0f / 12.0f } }, 1 },
-        { "9. Drum Machine 808 Electro", { { "Engine", 5.0f / 9.0f }, { "Drum Pattern", 5.0f / 28.0f } }, 0 },
-        { "9b. Mini Pops Slow Rock + Rock 1", { { "Engine", 5.0f / 9.0f }, { "Drum Kit", 0.0f }, { "Drum Pattern", 19.0f / 28.0f },
-                                                { "Drum Pattern 2", 1.0f / 28.0f } }, 0 },
-        { "10. FM 6-Op alg 32, 6 op, 8 notas", { { "Engine", 6.0f / 9.0f }, { "FM Algorithm", 1.0f }, { "FM OP2 Level", 0.9f },
+        // Motores retro (Engine por nombre)
+        { "7. Stylophone", { { "Engine", 0.0f, "Stylophone" } }, 8 },
+        { "8. Omnichord Rock 1, acorde", { { "Engine", 0.0f, "Omnichord" }, { "Omnichord Rhythm", 0.0f, "Rock 1" } }, 1 },
+        { "9. Drum Machine 808 Electro", { { "Engine", 0.0f, "Drum Machine" }, { "Drum Pattern", 0.0f, "Electro" } }, 0 },
+        { "9b. Mini Pops Slow Rock + Rock 1", { { "Engine", 0.0f, "Drum Machine" }, { "Drum Kit", 0.0f, "Mini Pops 7 (1966)" }, { "Drum Pattern", 0.0f, "Slow Rock" },
+                                                { "Drum Pattern 2", 0.0f, "Rock 1" } }, 0 },
+        { "10. FM 6-Op alg 32, 6 op, 8 notas", { { "Engine", 0.0f, "FM 6-Op (DX7)" }, { "FM Algorithm", 1.0f }, { "FM OP2 Level", 0.9f },
                                                  { "FM OP3 Level", 0.9f }, { "FM OP4 Level", 0.9f }, { "FM OP5 Level", 0.9f },
                                                  { "FM OP6 Level", 0.9f } }, 8 },
-        { "11. 8-Bit/DPCM NES Poly, arpegio y vibrato", { { "Engine", 7.0f / 9.0f }, { "8-Bit/DPCM Voice", 0.75f }, { "8-Bit/DPCM Arpeggio", 0.5f },
+        { "11. 8-Bit/DPCM NES Poly, arpegio y vibrato", { { "Engine", 0.0f, "8-Bit/DPCM" }, { "8-Bit/DPCM Voice", 0.0f, "Poly" }, { "8-Bit/DPCM Arpeggio", 0.5f },
                                                    { "8-Bit/DPCM Vibrato Depth", 0.3f } }, 3 },
-        { "12. 8-Bit/DPCM NES ruido corto", { { "Engine", 7.0f / 9.0f }, { "8-Bit/DPCM Voice", 0.5f }, { "8-Bit/DPCM Noise Mode", 1.0f } }, 1 },
-        { "13. Polivoks, 2 notas", { { "Engine", 8.0f / 9.0f }, { "Polivoks Resonance", 0.6f } }, 2 },
-        { "14. ANS bandas de ruido", { { "Engine", 1.0f }, { "ANS Score", 4.0f / 6.0f }, { "ANS Hold", 1.0f } }, 0 },
+        { "12. 8-Bit/DPCM NES ruido corto", { { "Engine", 0.0f, "8-Bit/DPCM" }, { "8-Bit/DPCM Voice", 0.0f, "Noise" }, { "8-Bit/DPCM Noise Mode", 1.0f } }, 1 },
+        { "13. Polivoks, 2 notas", { { "Engine", 0.0f, "Polivoks" }, { "Polivoks Resonance", 0.6f } }, 2 },
+        { "14. ANS bandas de ruido", { { "Engine", 0.0f, "ANS" }, { "ANS Score", 0.0f, "Noise Bands" }, { "ANS Hold", 1.0f } }, 0 },
         { "15. Flanger + shifter + Leslie + muelles, 8 notas", { { "Flanger On", 1.0f }, { "Freq Shift On", 1.0f }, { "Leslie On", 1.0f },
                                                                  { "Spring On", 1.0f } }, 8 },
         { "16. Ampli JCM800 + 4x12 + compresor + limitador 5 ms, 8 notas", { { "Amp On", 1.0f }, { "Amp Gain", 0.8f },
                                                                              { "Comp On", 1.0f }, { "Limiter On", 1.0f },
-                                                                             { "Limiter Lookahead", 1.0f } }, 8 },
-        // Osc 2: sierra frente a Wavetable (Osc2 Wave normalizado, 12 opciones: Saw = 2/11, Wavetable = 10/11), con sync
-        { "17. Osc 2 sierra + sync, 8 notas", { { "Osc2 Wave", 2.0f / 11.0f }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f } }, 8 },
-        { "18. Osc 2 Wavetable + sync, 8 notas", { { "Osc2 Wave", 10.0f / 11.0f }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f },
-                                                    { "Osc2 WT Position", 0.5f }, { "Wavetable", 0.4f } }, 8 },
+                                                                             { "Limiter Lookahead", 0.0f, "5 ms" } }, 8 },
+        // Osc 2: sierra frente a su wavetable (fuente propia desde el formato 8: Osc2 WT Level), con sync
+        { "17. Osc 2 sierra + sync, 8 notas", { { "Osc2 Wave", 0.0f, "Saw" }, { "Osc2 Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f } }, 8 },
+        { "18. Osc 2 Wavetable + sync, 8 notas", { { "Osc2 Level", 0.0f }, { "Osc2 WT Level", 1.0f }, { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f },
+                                                    { "Osc2 WT Position", 0.5f }, { "Osc2 Wavetable", 0.4f } }, 8 },
         // El 2 con Osc 3 en sierra a +1 octava (Osc3 Octave +1: normalizado 0,75 de -2..+2; Semi 0: 0,5): coste de Osc 3 frente al 2
         { "19. Unisono 7 + filtro + Osc 3 sierra, 8 notas", { { "Unison Voices", 1.0f }, { "Resonance", 0.5f }, { "Filter Drive", 0.5f },
-                                                              { "Osc3 Level", 1.0f }, { "Osc3 Wave", 2.0f / 11.0f }, { "Osc3 Octave", 0.75f }, { "Osc3 Semi", 0.5f } }, 8 },
+                                                              { "Osc3 Level", 1.0f }, { "Osc3 Wave", 0.0f, "Saw" }, { "Osc3 Octave", 0.75f }, { "Osc3 Semi", 0.5f } }, 8 },
         // El 3 con Osc 2 / Osc 3 como modulador del Complex (Complex Mod Source: Osc 2 = 1/2, Osc 3 = 2/2), a nivel 0: coste del
         // modulador externo frente al interno
         { "20. Complex 2x + unisono 7, modulador Osc 2 sierra + sync", { { "Complex On", 1.0f }, { "Unison Voices", 1.0f }, { "FM Index", 0.5f },
-                                                                        { "Timbre", 0.6f }, { "AM Depth", 0.3f }, { "Complex Mod Source", 0.5f },
+                                                                        { "Timbre", 0.6f }, { "AM Depth", 0.3f }, { "Complex Mod Source", 0.0f, "Osc 2" },
                                                                         { "Osc2 Sync", 1.0f }, { "Osc2 Semi", 0.8f } }, 8 },
         { "21. Complex 2x + unisono 7, modulador Osc 3", { { "Complex On", 1.0f }, { "Unison Voices", 1.0f }, { "FM Index", 0.5f },
-                                                          { "Timbre", 0.6f }, { "AM Depth", 0.3f }, { "Complex Mod Source", 1.0f },
+                                                          { "Timbre", 0.6f }, { "AM Depth", 0.3f }, { "Complex Mod Source", 0.0f, "Osc 3" },
                                                           { "Osc3 Octave", 0.75f }, { "Osc3 Semi", 0.5f } }, 8 },
         // Eventos densos: con la subdivisión de 1 muestra del Synth (KoniSynth.cpp) cada evento parte el render de las voces
         { "22. Init, 8 notas + pitch bend cada 32 muestras", {}, 8, 32 },
