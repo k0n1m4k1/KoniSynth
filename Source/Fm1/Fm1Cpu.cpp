@@ -1980,6 +1980,35 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
             const auto raw = (uint64_t) (uint32_t) l.raw;
             if (p.route == kRouteFpu)
             {
+                // + - * / y d +- a * b (el producto redondeado aparte, como fpuD: no es FMA) en SSE escalar, en el mismo
+                // orden de operandos que fpuD (x op y; d op p). Medido con 12 notas: jitFpu + fpuD eran ~5 % del tiempo en
+                // HYP-1 y FoMni. El resto (min / max, conversiones), por la llamada
+                uint8_t op, fd, fa, fb;
+                decodeFpu (raw, op, fd, fa, fb);
+                if (op <= 3 || op == 7 || op == 8)
+                {
+                    const auto movd = [&] (uint8_t opc, int x, int r)  // movd xmm, [r] (6e) / [r], xmm (7e)
+                    {
+                        e.bytes ({ 0x66, 0x41, 0x0f, opc, (uint8_t) (0x84 | (x << 3)), 0x24 });
+                        e.u32 (R (r));
+                    };
+                    static const uint8_t kOp[] = { 0x58, 0x5c, 0x59, 0x5e };  // addss, subss, mulss, divss
+                    movd (0x6e, 0, fa);                                         // xmm0 = x
+                    movd (0x6e, 1, fb);                                         // xmm1 = y
+                    if (op <= 3)
+                    {
+                        e.bytes ({ 0xf3, 0x0f, kOp[op], 0xc1 });                // xmm0 = x op y
+                        movd (0x7e, 0, fd);
+                    }
+                    else
+                    {
+                        e.bytes ({ 0xf3, 0x0f, 0x59, 0xc1 });                   // mulss xmm0, xmm1 (p)
+                        movd (0x6e, 2, fd);                                     // xmm2 = d
+                        e.bytes ({ 0xf3, 0x0f, (uint8_t) (op == 7 ? 0x58 : 0x5c), 0xd0 });  // xmm2 = d +- p
+                        movd (0x7e, 2, fd);
+                    }
+                    return true;
+                }
                 // FPU: llamada a jitFpu (Cpu*, raw). Pisa los registros volátiles (eax, ecx, edx, r8-r11): nada vive en
                 // ellos entre instrucciones salvo en un par de emisión doble, y jitAt no deja una así en un par
 #if defined(_WIN32)
