@@ -981,7 +981,20 @@ static void computeFastRaw (uint64_t raw, Fm1Pre& pre, uint8_t len) noexcept
     {
         case 1:  // ALU de 4 bytes: registro (las aritméticas con banderas, como aluF) o lectura-modificación-escritura
             if (pre.aluRhs.kind == Fm1Pre::RhsBit)
+            {
+                // R = R op (1 << R) (94 e1; op |, ^, & o &~, sin banderas): FastAluR con fidx = el operando es 1 << (rB & 31)
+                // (medido: 19,5 M de 828 M instrucciones de HYP-1 en 4 s fuera del JIT por no tener micro-op)
+                if (pre.aluDstMem || (pre.aluOp != Fm1Pre::Or && pre.aluOp != Fm1Pre::Xor && pre.aluOp != Fm1Pre::And
+                                      && pre.aluOp != Fm1Pre::AndNot))
+                    return;
+                pre.fast = Fm1Pre::FastAluR;
+                pre.fidx = true;
+                pre.fd = pre.aluDst;
+                pre.fa = pre.aluSrc;
+                pre.fb = (uint8_t) (pre.aluRhs.v & 15);
+                pre.fcond = (uint8_t) pre.aluOp;
                 return;
+            }
             if (! pre.aluDstMem)
             {
                 pre.fast = pre.aluRhs.kind == Fm1Pre::RhsReg ? Fm1Pre::FastAluR : Fm1Pre::FastAluI;
@@ -1963,6 +1976,24 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
         case Fm1Pre::FastAluR:
         {
             const bool reg = p.fast == Fm1Pre::FastAluR;
+            if (reg && p.fidx)
+            {
+                // R = R op (1 << (rB & 31)), op |, ^, &, &~ (sin banderas, como alu)
+                memOp (e, { 0x8b }, 1, R (p.fb));                     // mov ecx, [rb]
+                e.bytes ({ 0x41, 0xba, 1, 0, 0, 0 });                 // mov r10d, 1
+                e.bytes ({ 0x41, 0xd3, 0xe2 });                       // shl r10d, cl
+                ldEax (R (p.fa));
+                switch ((Fm1Pre::AluOp) p.fcond)
+                {
+                    case Fm1Pre::Or:     e.bytes ({ 0x44, 0x09, 0xd0 }); break;                     // or eax, r10d
+                    case Fm1Pre::Xor:    e.bytes ({ 0x44, 0x31, 0xd0 }); break;                     // xor eax, r10d
+                    case Fm1Pre::And:    e.bytes ({ 0x44, 0x21, 0xd0 }); break;                     // and eax, r10d
+                    case Fm1Pre::AndNot: e.bytes ({ 0x41, 0xf7, 0xd2, 0x44, 0x21, 0xd0 }); break;   // not r10d; and
+                    default: return false;
+                }
+                stEax (R (p.fd));
+                return true;
+            }
             const auto op = (Fm1Pre::AluOp) p.fcond;
             // la segunda fuente: un registro ([rb]) o el inmediato
             const auto rhsOp = [&] (uint8_t memOpc, uint8_t immOpc)
@@ -2770,8 +2801,28 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             Emitter probe;
             // (una cruda de cabeza no: jitEmit toma fd como el registro que escribe, y en las crudas va en el raw)
             if (lines.size() + 2 > kJitMax || ! inSpan (a + l.len) || ! decodeAt (a + l.len, s) || s.pre.pairHead
-                || l.pre.fast == Fm1Pre::FastExecRaw || ! jitNative (probe, l) || ! jitNative (probe, s))
+                || l.pre.fast == Fm1Pre::FastExecRaw)
                 break;
+            const bool nl = jitNative (probe, l), ns = jitNative (probe, s);
+            if (! nl || ! ns)
+            {
+                // Con un acceso a memoria (FastLd, FastSt, FastLdX, FastStX) en el par: si la segunda no lee ni escribe
+                // ningún registro que escriba la cabeza, el par es lo mismo que las dos seguidas (stepImpl solo cambia qué
+                // registros lee la segunda y confirma los de la cabeza que ella no cambió), y van como dos instrucciones
+                // normales: sin pairHead en la copia del bloque. Registros por exceso: fa, fb y fd de cada una (las de
+                // memoria escriben fd o la base fa). Medido: GHOULBOX, HYP-1 y DUB-1 interpretaban 13-20 M de pares así
+                const auto mem = [] (const Line& x)
+                {
+                    const auto f = x.pre.fast;
+                    return f == Fm1Pre::FastLd || f == Fm1Pre::FastSt || f == Fm1Pre::FastLdX || f == Fm1Pre::FastStX;
+                };
+                const auto regsOf = [] (const Line& x) { return 1u << (x.pre.fa & 15) | 1u << (x.pre.fb & 15) | 1u << (x.pre.fd & 15); };
+                const auto headWrites = ! nl ? regsOf (l)
+                                      : l.pre.fast == Fm1Pre::FastNop || l.pre.fast == Fm1Pre::FastSpAdd ? 0u : 1u << (l.pre.fd & 15);
+                if (! (nl || mem (l)) || ! (ns || mem (s)) || s.pre.fast == Fm1Pre::FastExecRaw || (headWrites & regsOf (s)) != 0)
+                    break;
+                l.pre.pairHead = false;
+            }
             jitLines.push_back (l);
             lines.push_back (&jitLines.back());
             jitLines.push_back (s);
@@ -2982,19 +3033,33 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
         if (s.blockedPrio >= 0 && irqReady ((uint8_t) s.blockedPrio))
             break;
         // un bloque del JIT, si ninguna parada de arriba puede saltar dentro de él (ver jitOn)
+        // (--stepprofile) por qué esta va por el intérprete: 1 estado, 2 sin bloque; no cabe: 3 room o evento, 4 stopA/B,
+        // 5 loopHint dentro, 6 hueco de sondeo, 7 tabla de bucles, 8 ventanas de pc
+        uint32_t why = 1;
         if (jitOn && jitSupported() && fastPath && hist == nullptr && pcHist == nullptr && ! pairPending && predSkips.empty()
             && repEnd == 0)
         {
+            why = 2;
             if (const auto* b = jitAt (bus, pc); b != nullptr)
             {
+                why = 3;
                 const uint32_t n = b->n, lo = pc + 1, hi = b->last;
                 const auto inside = [lo, hi] (uint32_t x) { return x >= lo && x <= hi; };
                 bool fits = n <= room && now + n - 1 < s.due && ! inside (s.stopA) && ! inside (s.stopB);
+                if (! fits && stepHist != nullptr)
+                    why = n > room || now + n - 1 >= s.due ? 3 : 4;
                 if (fits && s.loopEnabled)
                 {
                     // (sondeo y tabla, solo en estado plano: dentro del bloque no cambia; rti, que lo cambia, lo cierra)
                     fits = ! inside (loopHint) && ! (plain && now + n - 1 >= s.probeAnyAt && room >= s.probeMin);
-                    if (fits && plain && s.anyLoops)
+                    if (! fits)
+                        why = inside (loopHint) ? 5 : 6;
+                    else
+                        why = 7;
+                    // la tabla de bucles solo puede parar donde room >= probeKnown y now >= nextTry (arriba): con el
+                    // bloque entero antes de nextTry, o sin room para eso, no hace falta mirarla (HYP-1 y DUB-1 la tienen
+                    // con un reintento lejano: 71 y 56 M instrucciones interpretadas en 4 s por esto)
+                    if (fits && plain && s.anyLoops && room >= s.probeKnown && now + n - 1 >= s.nextTry)
                         fits = (b->slotMask & s.loopsMask) == 0 || [&]
                         {
                             for (uint32_t a = lo + 1; a <= hi; a += 2)  // (las instrucciones empiezan en media palabra)
@@ -3004,7 +3069,10 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                         }();
                 }
                 if (fits && hasPcWin)
+                {
+                    why = 8;
                     fits = (pcWin[0][0] <= pc && hi <= pcWin[0][1]) || (pcWin[1][0] <= pc && hi <= pcWin[1][1]);
+                }
                 if (fits)
                 {
                     *s.inIsr = ! irqLevels.empty();  // (solo la última, rti, lo cambia)
@@ -3019,7 +3087,8 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                     c.stopA = s.stopA;
                     c.stopB = s.stopB;
                     c.loopEnabled = s.loopEnabled ? 1 : 0;
-                    c.loopsMask = plain && s.anyLoops ? s.loopsMask : 0;
+                    // (los bloques encadenados, igual: toda la cadena antes de nextTry, o sin room para la tabla, no la miran)
+                    c.loopsMask = plain && s.anyLoops && room >= s.probeKnown && now + budget > s.nextTry ? s.loopsMask : 0;
                     if (hasPcWin)
                         std::memcpy (c.win, pcWin, sizeof c.win);
                     c.ramCw = jitRamCw;
@@ -3042,6 +3111,8 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                 }
             }
         }
+        if (stepHist != nullptr)
+            ++(*stepHist)[why << 28 | (pc & 0x0fffffffu)];
         *s.cycles = now;
         *s.inIsr = ! irqLevels.empty();
         bool t = false;
@@ -3171,7 +3242,9 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                 }
                 break;
             case Fm1Pre::FastAluI: regs[pre.fd] = aluF ((Fm1Pre::AluOp) pre.fcond, regs[pre.fa], pre.fimm); break;
-            case Fm1Pre::FastAluR: regs[pre.fd] = aluF ((Fm1Pre::AluOp) pre.fcond, regs[pre.fa], regs[pre.fb]); break;
+            case Fm1Pre::FastAluR:
+                regs[pre.fd] = aluF ((Fm1Pre::AluOp) pre.fcond, regs[pre.fa], pre.fidx ? 1u << (regs[pre.fb] & 31) : regs[pre.fb]);
+                break;
             case Fm1Pre::FastMov: regs[pre.fd] = regs[pre.fa]; break;
             case Fm1Pre::FastMovI: regs[pre.fd] = pre.fimm; break;
             case Fm1Pre::FastGoto: jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff)); break;

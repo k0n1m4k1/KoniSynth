@@ -273,6 +273,9 @@ public:
     // (KoniFm1Run --jitprofile) instrucciones que el JIT hace con jitOp, por clave fast << 24 | ruta << 16 | fmode << 8 |
     // fidx << 7 | fcond (en las crudas, en lugar de fmode, la subclase: ver jitOp); nullptr: sin contar
     std::unordered_map<uint32_t, uint64_t>* jitOpHist = nullptr;
+    // (KoniFm1Run --stepprofile) instrucciones que la ráfaga interpreta, por motivo << 28 | pc (1: estado de la CPU, 2: sin
+    // bloque del JIT, 3: el bloque no cabe en lo que queda); nullptr: sin contar
+    std::unordered_map<uint32_t, uint64_t>* stepHist = nullptr;
     uint64_t jitRuns = 0, jitInsns = 0, jitCompiled = 0;  // bloques ejecutados, sus instrucciones, bloques compilados
     uint64_t jitRamFlushes = 0, jitResets = 0, jitLinked = 0;  // (y enlaces hechos entre bloques)  // vaciados de los bloques de RAM (código reescrito) y del búfer entero
     // Un bloque del JIT en pc fuera de la ráfaga (el bucle de cpu1, Machine::runCpu1): como mucho maxN instrucciones, sin

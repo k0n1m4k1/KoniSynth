@@ -13,6 +13,7 @@
 //   --profile N         las N clases de instrucción más ejecutadas por cpu0
 //   --pcprofile N       los N pc de cpu0 más ejecutados, con su instrucción (incluye las de los sondeos del salto de bucles)
 //   --jitprofile N      las N clases de micro-op que el JIT de cpu0 hace con jitOp (las que no tiene en nativo)
+//   --stepprofile N     los N pc de cpu0 que la ráfaga interpreta en vez de usar el JIT, con el motivo
 //   --pcprofile1 N      lo mismo para cpu1 (los dos con el mismo formato, cpu1 detrás)
 //   --hostprofile N    perfil del propio emulador por muestreo (Windows; necesita el PDB): N funciones y líneas
 //   --reference 1       sin la ruta rápida de la CPU ni el salto de bucles (para la prueba diferencial: el hash del estado final debe coincidir)
@@ -201,6 +202,8 @@ int main (int argc, char** argv)
     uint32_t disIni = 0, disFin = 0;  // --disasm INI:FIN (hex): desensamblado con el valor de cada ranura (registros, inmediatos)
     int pcProfile = 0;  // --pcprofile N: los N pc de cpu0 más ejecutados
     int jitProfile = 0;  // --jitprofile N: las N clases de micro-op por jitOp
+    int stepProfile = 0;  // --stepprofile N: los N pc interpretados por la ráfaga
+    std::unordered_map<uint32_t, uint64_t> stepHist;
     std::unordered_map<uint32_t, uint64_t> jitOpHist;
     int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
@@ -235,6 +238,7 @@ int main (int argc, char** argv)
         else if (opt == "--hostprofile") hostProfile = std::atoi (v);
         else if (opt == "--pcprofile") pcProfile = std::atoi (v);
         else if (opt == "--jitprofile") jitProfile = std::atoi (v);
+        else if (opt == "--stepprofile") stepProfile = std::atoi (v);
         else if (opt == "--pcprofile1") pcProfile1 = std::atoi (v);
         else if (opt == "--disasm" && std::sscanf (v, "%x:%x", &disIni, &disFin) == 2) {}
         else if (opt == "--wav") wav = v;
@@ -303,6 +307,7 @@ int main (int argc, char** argv)
     std::unordered_map<const Fm1IsaEntry*, uint64_t> hist;
     if (profile > 0) cpu.hist = &hist;
     if (jitProfile > 0) cpu.jitOpHist = &jitOpHist;
+    if (stepProfile > 0) cpu.stepHist = &stepHist;
     std::unordered_map<const Fm1IsaEntry*, uint64_t> synHist;  // los dos núcleos
     if (profile > 0) cpu.synHist = &synHist;
     std::unordered_map<uint32_t, uint64_t> pcHist;
@@ -582,6 +587,33 @@ int main (int argc, char** argv)
             std::printf ("  %6.2f %%  %10llu  %-9s ruta %3u  fmode %u  fidx %u  fcond %u\n", 100.0 * (double) h[i].first / (double) tot,
                          (unsigned long long) h[i].first, f < std::size (kFast) ? kFast[f] : "?", (k >> 16) & 0xff, (k >> 8) & 0xff,
                          (k >> 7) & 1, k & 0x7f);
+        }
+    }
+    if (stepProfile > 0)
+    {
+        // instrucciones de cpu0 que la ráfaga interpreta: por motivo y los pc más frecuentes con su micro-op
+        uint64_t byWhy[16] {}, tot = 0;
+        std::vector<std::pair<uint64_t, uint32_t>> h;
+        for (const auto& [k, c] : stepHist) { h.push_back ({ c, k }); byWhy[(k >> 28) & 15] += c; tot += c; }
+        std::sort (h.rbegin(), h.rend());
+        std::printf ("ráfaga interpretada (cpu0): %llu instrucciones; por estado %llu, sin bloque %llu, no cabe %llu\n",
+                     (unsigned long long) tot, (unsigned long long) byWhy[1], (unsigned long long) byWhy[2],
+                     (unsigned long long) (byWhy[3] + byWhy[4] + byWhy[5] + byWhy[6] + byWhy[7] + byWhy[8]));
+        static const char* const kWhy[] = { "?", "estado", "sin bloque", "room/evento", "stop", "loopHint", "sondeo", "tabla",
+                                            "ventanas", "?", "?", "?", "?", "?", "?", "?" };
+        std::printf ("  no cabe por: room/evento %llu, stop %llu, loopHint %llu, sondeo %llu, tabla %llu, ventanas %llu\n",
+                     (unsigned long long) byWhy[3], (unsigned long long) byWhy[4], (unsigned long long) byWhy[5],
+                     (unsigned long long) byWhy[6], (unsigned long long) byWhy[7], (unsigned long long) byWhy[8]);
+        for (size_t i = 0; i < std::min<size_t> (h.size(), (size_t) stepProfile); ++i)
+        {
+            const auto pc = h[i].second & 0x0fffffffu;
+            uint64_t raw = 0;
+            const auto* e = decodeAny (((uint64_t) soc.fetch32 (pc + 4) << 32) | soc.fetch32 (pc), raw);
+            Fm1Pre pre;
+            if (e != nullptr) computePre (*e, raw, pre);
+            std::printf ("  %6.2f %%  %10llu  %-10s 0x%08x  %-30s fast %2u ruta %3u\n", 100.0 * (double) h[i].first / (double) tot,
+                         (unsigned long long) h[i].first, kWhy[(h[i].second >> 28) & 15], pc, e != nullptr ? e->syntax : "?",
+                         e != nullptr ? (unsigned) pre.fast : 0u, e != nullptr ? (unsigned) (pre.route & 0xff) : 0u);
         }
     }
     for (uint32_t pc = disIni; pc < disFin;)
