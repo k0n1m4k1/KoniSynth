@@ -350,7 +350,11 @@ private:
     struct Worker : juce::Thread
     {
         explicit Worker (Fm1Engine& e) : juce::Thread ("KoniSynth FM-1"), engine (e) {}
-        void run() override { engine.workerLoop (*this); }
+        void run() override
+        {
+            fm1::preferPerformanceCores(); // (en una CPU híbrida, a los núcleos P: el emulador va un 25 % más lento en uno E)
+            engine.workerLoop (*this);
+        }
         Fm1Engine& engine;
     };
 

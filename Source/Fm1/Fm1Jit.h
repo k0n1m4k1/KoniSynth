@@ -20,6 +20,12 @@ constexpr bool jitSupported() noexcept
 #endif
 }
 
+// Calidad de servicio alta para el hilo que llama (el del emulador): en Windows 10 1709 o posterior quita su limitación
+// de energía (EcoQoS), con lo que el planificador lo lleva a los núcleos de rendimiento de una CPU híbrida (medido en un
+// Core Ultra 9 288V con GHOULBOX y 12 notas: P 1,26-1,42x, E 1,03-1,04x) sin fijarlo a ninguno. En el resto de
+// plataformas no hace nada. false si el sistema no lo admite
+bool preferPerformanceCores() noexcept;
+
 // Memoria para código nativo: se reserva de una vez; cada bloque se copia con sus páginas en lectura-escritura y luego
 // pasan a lectura-ejecución (nunca escribibles y ejecutables a la vez)
 class CodeBuffer

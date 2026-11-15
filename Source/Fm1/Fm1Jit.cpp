@@ -16,6 +16,23 @@
 
 namespace fm1
 {
+bool preferPerformanceCores() noexcept
+{
+#if defined(_WIN32)
+    // SetThreadInformation (ThreadPowerThrottling = 3) con THREAD_POWER_THROTTLING_STATE { versión 1, máscara
+    // EXECUTION_SPEED = 1, estado 0: sin limitar } (processthreadsapi.h, documentación de Microsoft). Por GetProcAddress:
+    // la función existe desde Windows 8 y la clase desde Windows 10 1709; en uno anterior falla y no pasa nada
+    struct State { ULONG version, controlMask, stateMask; } state { 1, 1, 0 };
+    using Fn = BOOL (WINAPI*) (HANDLE, int, LPVOID, DWORD);
+    const auto kernel = GetModuleHandleW (L"kernel32.dll");
+    const auto fn = kernel != nullptr ? reinterpret_cast<Fn> (reinterpret_cast<void*> (GetProcAddress (kernel, "SetThreadInformation")))
+                                      : nullptr;
+    return fn != nullptr && fn (GetCurrentThread(), 3, &state, (DWORD) sizeof state) != 0;
+#else
+    return false;
+#endif
+}
+
 namespace
 {
 constexpr size_t kPage = 4096;  // (las dos plataformas con JIT usan páginas de 4 KiB para esta memoria)
