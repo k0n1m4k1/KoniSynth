@@ -69,6 +69,11 @@ public:
         v = { ram.ptr(), kRamBase, (uint32_t) ram.size(), ram.codeMarks(), (void* const*) &ram.log, &ram.codeWrites };
         return true;
     }
+    bool xipView (XipView& v) override
+    {
+        v = { xip.data(), kXipBase, (uint32_t) xip.size() };
+        return ! xip.empty();
+    }
 
     // ---- SoC ----
     void advance (uint64_t n);  // avanza el reloj de periféricos y saca de la RAM una mitad de audio acabada

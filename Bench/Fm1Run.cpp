@@ -12,6 +12,7 @@
 //   --syx FICHERO       un banco DX7 de 32 voces en el área USR
 //   --profile N         las N clases de instrucción más ejecutadas por cpu0
 //   --pcprofile N       los N pc de cpu0 más ejecutados, con su instrucción (incluye las de los sondeos del salto de bucles)
+//   --jitprofile N      las N clases de micro-op que el JIT de cpu0 hace con jitOp (las que no tiene en nativo)
 //   --pcprofile1 N      lo mismo para cpu1 (los dos con el mismo formato, cpu1 detrás)
 //   --hostprofile N    perfil del propio emulador por muestreo (Windows; necesita el PDB): N funciones y líneas
 //   --reference 1       sin la ruta rápida de la CPU ni el salto de bucles (para la prueba diferencial: el hash del estado final debe coincidir)
@@ -199,6 +200,8 @@ int main (int argc, char** argv)
     int pcProfile1 = 0;  // --pcprofile1 N: lo mismo para cpu1
     uint32_t disIni = 0, disFin = 0;  // --disasm INI:FIN (hex): desensamblado con el valor de cada ranura (registros, inmediatos)
     int pcProfile = 0;  // --pcprofile N: los N pc de cpu0 más ejecutados
+    int jitProfile = 0;  // --jitprofile N: las N clases de micro-op por jitOp
+    std::unordered_map<uint32_t, uint64_t> jitOpHist;
     int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
     bool haveSyx = false;
@@ -231,6 +234,7 @@ int main (int argc, char** argv)
         else if (opt == "--reference") reference = std::atoi (v) != 0;
         else if (opt == "--hostprofile") hostProfile = std::atoi (v);
         else if (opt == "--pcprofile") pcProfile = std::atoi (v);
+        else if (opt == "--jitprofile") jitProfile = std::atoi (v);
         else if (opt == "--pcprofile1") pcProfile1 = std::atoi (v);
         else if (opt == "--disasm" && std::sscanf (v, "%x:%x", &disIni, &disFin) == 2) {}
         else if (opt == "--wav") wav = v;
@@ -298,6 +302,7 @@ int main (int argc, char** argv)
     std::printf ("%s: \"%s\", entrada 0x%08x, XIP %zu B, clave 0x%04x\n", argv[1], st.identity.c_str(), st.entry, st.xip.size(), st.key);
     std::unordered_map<const Fm1IsaEntry*, uint64_t> hist;
     if (profile > 0) cpu.hist = &hist;
+    if (jitProfile > 0) cpu.jitOpHist = &jitOpHist;
     std::unordered_map<const Fm1IsaEntry*, uint64_t> synHist;  // los dos núcleos
     if (profile > 0) cpu.synHist = &synHist;
     std::unordered_map<uint32_t, uint64_t> pcHist;
@@ -558,6 +563,27 @@ int main (int argc, char** argv)
                          (unsigned long long) h[i].first, h[i].second->name, h[i].second->canon);
         }
     }
+    if (jitProfile > 0)
+    {
+        // fast: el orden de Fm1Pre::FastOp
+        static const char* const kFast[] = { "None", "Ld", "St", "BrI", "BrR", "AluI", "AluR", "Mov", "MovI", "Goto", "Call",
+            "Rts", "Part", "LdX", "StX", "SpAdd", "SpPlus", "Cnum", "Field", "Adc", "Ie", "AndNot", "Shift", "DecBr", "PopPc",
+            "IcfgRd", "IcfgWr", "Div", "Abs", "Not", "Tb", "CallR", "Rti", "PushList", "PopList", "PushRets", "PopRetPc",
+            "BitBr", "Nop", "ExecRaw" };
+        std::vector<std::pair<uint64_t, uint32_t>> h;
+        uint64_t tot = 0;
+        for (const auto& [k, c] : jitOpHist) { h.push_back ({ c, k }); tot += c; }
+        std::sort (h.rbegin(), h.rend());
+        std::printf ("jitOp de cpu0: %llu instrucciones (%.1f %% de las %llu del JIT), %zu clases:\n", (unsigned long long) tot,
+                     cpu.jitInsns > 0 ? 100.0 * (double) tot / (double) cpu.jitInsns : 0.0, (unsigned long long) cpu.jitInsns, h.size());
+        for (size_t i = 0; i < std::min<size_t> (h.size(), (size_t) jitProfile); ++i)
+        {
+            const auto k = h[i].second, f = k >> 24;
+            std::printf ("  %6.2f %%  %10llu  %-9s ruta %3u  fmode %u  fidx %u  fcond %u\n", 100.0 * (double) h[i].first / (double) tot,
+                         (unsigned long long) h[i].first, f < std::size (kFast) ? kFast[f] : "?", (k >> 16) & 0xff, (k >> 8) & 0xff,
+                         (k >> 7) & 1, k & 0x7f);
+        }
+    }
     for (uint32_t pc = disIni; pc < disFin;)
     {
         uint64_t raw = 0;
@@ -588,6 +614,13 @@ int main (int argc, char** argv)
             acc += 100.0 * (double) h[i].first / (double) total;
             std::printf ("  %6.2f %%  (acum %6.2f %%)  %10llu  0x%08x  %-28s raw 0x%llx\n", 100.0 * (double) h[i].first / (double) total, acc,
                          (unsigned long long) h[i].first, h[i].second, e != nullptr ? e->syntax : "?", (unsigned long long) raw);
+            if (e != nullptr)
+            {
+                Fm1Pre pre;
+                computePre (*e, raw, pre);
+                if (pre.route == 14)  // bloque predicado: unidades de then y de else
+                    std::printf ("            then %u, else %u\n", (unsigned) pre.ibThen, (unsigned) pre.ibElse);
+            }
         }
     }
     {

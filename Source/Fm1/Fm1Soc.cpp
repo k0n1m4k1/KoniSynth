@@ -813,6 +813,7 @@ struct Core1Bus : Bus
     void spin (uint32_t core, uint32_t addr) override { soc.spin (core, addr); }
     void idle (uint32_t) override { soc.cpu1Idle = true; stop = true; }
     bool ramView (RamView& v) override { return soc.ramView (v); }
+    bool xipView (XipView& v) override { return soc.xipView (v); }
     void markCode (uint32_t lo, uint32_t hi) override { soc.markCode (lo, hi); }
     uint64_t codeWrites() override { return soc.codeWrites(); }
 };
@@ -1581,7 +1582,11 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
                 bs.room = (uint32_t) std::min<uint64_t> (bs.room, observe.known[observe.idx].len + 1 - std::min<uint64_t> (
                                                                       cpu0.insnCount - observe.insn0, observe.known[observe.idx].len));
             }
-            bs.loopEnabled = loopSkip.enabled;
+            // Con una interrupción pendiente (aún sin aceptar), arriba ni se sondea un bucle ni se salta uno contado (los dos
+            // piden ! anyPending): pararse por ellos solo daba una instrucción por ráfaga (GHOULBOX con 12 notas: 37 M de 47 M
+            // pasos por arriba, 4030 sondeos). Lo pendiente solo cambia con un evento o un acceso con efectos, y la ráfaga se
+            // para en los dos
+            bs.loopEnabled = loopSkip.enabled && ! soc.periph.anyPending();
             bs.nextTry = loopSkip.nextTry;
             bs.backoffUntil = loopSkip.backoffUntil;
             bs.loops = loopSkip.loops.data();

@@ -42,6 +42,10 @@ struct Bus
     // puntero de apuntado de escrituras (Ram::log). false: sin acceso en línea (todo por el bus)
     struct RamView { uint8_t* data; uint32_t base, size; const uint8_t* code; void* const* log; const uint64_t* codeWrites; };
     virtual bool ramView (RamView&) { return false; }
+    // la XIP (flash mapeada), para cargas en línea en el JIT: se lee como Soc::read32 (su contenido puede cambiar al
+    // escribir la flash; el búfer no se mueve ni cambia de tamaño)
+    struct XipView { const uint8_t* data; uint32_t base, size; };
+    virtual bool xipView (XipView&) { return false; }
     // (JIT) marca como código las palabras de RAM de [lo, hi) y cuenta las escrituras a palabras marcadas: si cambia,
     // los bloques hechos desde RAM ya no valen
     virtual void markCode (uint32_t /*lo*/, uint32_t /*hi*/) {}
@@ -266,6 +270,9 @@ public:
     // la ráfaga se miran una vez para todo su rango. Fase J2.0: cada instrucción es una llamada a jitOp (execFast), la
     // misma semántica. Solo con la ruta rápida, sin perfiles y en las plataformas con JIT (jitSupported)
     bool jitOn = true;
+    // (KoniFm1Run --jitprofile) instrucciones que el JIT hace con jitOp, por clave fast << 24 | ruta << 16 | fmode << 8 |
+    // fidx << 7 | fcond (en las crudas, en lugar de fmode, la subclase: ver jitOp); nullptr: sin contar
+    std::unordered_map<uint32_t, uint64_t>* jitOpHist = nullptr;
     uint64_t jitRuns = 0, jitInsns = 0, jitCompiled = 0;  // bloques ejecutados, sus instrucciones, bloques compilados
     uint64_t jitRamFlushes = 0, jitResets = 0, jitLinked = 0;  // (y enlaces hechos entre bloques)  // vaciados de los bloques de RAM (código reescrito) y del búfer entero
     // Un bloque del JIT en pc fuera de la ráfaga (el bucle de cpu1, Machine::runCpu1): como mucho maxN instrucciones, sin
@@ -355,8 +362,15 @@ private:
     // carga o almacenamiento con la RAM en línea; el resto de direcciones, por jitOp (j: índice en el bloque; pend y
     // pendPc: las nativas pendientes de apuntar antes de ella). false: esta forma no
     bool jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
+    // push y pop de listas de registros con la RAM en línea (desde jitMem)
+    bool jitList (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits);
+    // la ruta lenta común: jitOp con lo pendiente apuntado; slow, los saltos que llegan a ella; conts, los de "sigue"
+    void jitSlow (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits,
+                  const std::vector<size_t>& slow, std::initializer_list<size_t> conts);
     Bus::RamView jitRam {};
     bool jitRamOk = false;
+    Bus::XipView jitXip {};
+    bool jitXipOk = false;
     // el código de un bloque; devuelve dónde empieza la segunda entrada y añade sus enlaces (con el desplazamiento del
     // epílogo en "to", que jitAt convierte en dirección)
     size_t jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inRam, uint64_t slotMask, std::vector<JitLink*>& links);
