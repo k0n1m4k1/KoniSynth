@@ -11,6 +11,11 @@
 #include <cstring>
 #include <limits>
 #include <string_view>
+#if (defined(_WIN32) && defined(_M_X64))
+ #include <intrin.h>
+#elif (defined(__linux__) && defined(__x86_64__))
+ #include <cpuid.h>
+#endif
 
 namespace fm1
 {
@@ -1827,6 +1832,22 @@ void packFlags (Emitter& e, bool sub, uint32_t flagsOff)
 }
 } // namespace
 
+// ¿Tiene la CPU POPCNT (CPUID.1:ECX bit 23)? Sin ella, popcnt va por jitOp. Las demás instrucciones que emite el JIT son
+// de x86-64 base (SSE2 incluido)
+bool hasPopcnt() noexcept
+{
+#if (defined(_WIN32) && defined(_M_X64))
+    int r[4];
+    __cpuid (r, 1);
+    return ((r[2] >> 23) & 1) != 0;
+#elif (defined(__linux__) && defined(__x86_64__))
+    unsigned a, b, c, d;
+    return __get_cpuid (1, &a, &b, &c, &d) != 0 && ((c >> 23) & 1) != 0;
+#else
+    return false;
+#endif
+}
+
 // jcc de x86 (segundo byte de 0f 8x) tras cmp a, b para una condición entera; 0 si es de coma flotante
 uint8_t jccOf (Cond c) noexcept
 {
@@ -2084,6 +2105,35 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
                     return true;
                 }
                 return false;
+            }
+            if (p.route == 22)
+            {
+                // rev8 / rev16 / revs / popcnt (execRaw, ruta 22). Medido con 12 notas: 2,7 M por jitOp en 4 s entre 17
+                // firmwares
+                const auto op = (raw >> 22) & 3;
+                static const bool popcnt = hasPopcnt();
+                if (op == 3 && ! popcnt)
+                    return false;
+                ldEax (R ((int) ((raw >> 24) & 0xf)));                     // mov eax, [rs]
+                switch (op)
+                {
+                    case 0:  e.bytes ({ 0x0f, 0xc8 }); break;                                  // bswap eax
+                    case 1:  e.bytes ({ 0x0f, 0xc8, 0xc1, 0xc0, 0x10 }); break;               // bswap eax; rol eax, 16
+                    case 2:  e.bytes ({ 0x66, 0xc1, 0xc0, 0x08, 0x0f, 0xbf, 0xc0 }); break;  // rol ax, 8; movsx eax, ax
+                    default: e.bytes ({ 0xf3, 0x0f, 0xb8, 0xc0 }); break;                      // popcnt eax, eax
+                }
+                stEax (R ((int) ((raw >> 28) & 0xf)));
+                return true;
+            }
+            if (p.route == 36)
+            {
+                // clz (ruta 36) con bsr, sin LZCNT: 31 - índice del bit más alto = índice ^ 31; con 0, 63 ^ 31 = 32
+                memOp (e, { 0x0f, 0xbd }, 0, R ((int) ((raw >> 24) & 0xf)));  // bsr eax, [rs] (ZF = 1 si es 0)
+                e.bytes ({ 0xb9, 63, 0, 0, 0 });                                // mov ecx, 63
+                e.bytes ({ 0x0f, 0x44, 0xc1 });                                 // cmovz eax, ecx
+                e.bytes ({ 0x83, 0xf0, 31 });                                   // xor eax, 31
+                stEax (R ((int) ((raw >> 28) & 0xf)));
+                return true;
             }
             // ruta 41, min / max (execRaw con el raw de 32 bits): cmp y cmov, que con iguales deja x como std::max / min
             if (p.route != 41 || dspRaw (raw) != Dsp::MinMax)
@@ -2745,11 +2795,13 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
     const bool bit = p.fast == Fm1Pre::FastBitBr;
     uint8_t jcc = 0;  // jcc de x86 tras cmp a, b (o test, en BitBr; o ucomiss, en coma flotante)
     bool fl = false, swap = false;
+    int fEq = 0;      // 1: == (jp antes, al no tomado); 2: != (jp antes, al tomado)
     if (cond && (jcc = jccOf ((Cond) p.fcond)) == 0)
     {
         // coma flotante (fcond): ucomiss a, b deja CF = ZF = 1 si no están ordenados, así que ja / jae (CF = 0) son las
         // ordenadas > y >= (falso con NaN) y jbe / jb sus negaciones (cierto con NaN); < y <= con los operandos
-        // cambiados. == y != (ZF y PF), jitOp. Medido con 12 notas: ~30 M por jitOp en 4 s entre 7 firmwares
+        // cambiados. Medido con 12 notas: ~30 M por jitOp en 4 s entre 7 firmwares. == salta con ZF = 1 y PF = 0 (jp por
+        // encima de je); != (no ordenada), con PF = 1 o ZF = 0 (jp y jne al mismo destino): 0,3 M en 4 s entre 5
         if (p.fast == Fm1Pre::FastDecBr)
             return false;
         switch ((Cond) p.fcond)
@@ -2762,6 +2814,8 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
             case Cond::FUge: jcc = 0x86; swap = true; break;
             case Cond::FLe:  jcc = 0x83; swap = true; break;
             case Cond::FUgt: jcc = 0x82; swap = true; break;
+            case Cond::FEq:  jcc = 0x84; fEq = 1; break;
+            case Cond::FUne: jcc = 0x85; fEq = 2; break;
             default:         return false;
         }
         fl = true;
@@ -2839,6 +2893,15 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
     {
         memOp (e, { 0x81 }, 7, R (p.fa)); e.u32 (p.fimm);         // cmp dword [ra], imm32
     }
+    size_t takenP = SIZE_MAX;
+    if (fEq == 1)
+        e.bytes ({ 0x7a, 0x06 });                                   // jp +6 (sobre el je: no ordenados, no tomado)
+    else if (fEq == 2)
+    {
+        e.bytes ({ 0x0f, 0x8a });                                   // jp tomado (no ordenados)
+        takenP = e.pos();
+        e.u32 (0);
+    }
     e.bytes ({ 0x0f, jcc });                                        // jcc tomado
     const auto taken = e.pos();
     e.u32 (0);
@@ -2847,6 +2910,8 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
     const auto end = e.pos();
     e.u32 (0);
     e.patch32 (taken, (uint32_t) (e.pos() - (taken + 4)));
+    if (takenP != SIZE_MAX)
+        e.patch32 (takenP, (uint32_t) (e.pos() - (takenP + 4)));
     setPc (target);
     // loopHint, como execFast: "!=" hacia atrás (BrI); "<" hacia atrás corto, hasta 16 B (BrR)
     const bool hint = (p.fast == Fm1Pre::FastBrI && p.foff < 0 && (Cond) p.fcond == Cond::Ne)
