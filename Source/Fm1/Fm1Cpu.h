@@ -291,6 +291,7 @@ public:
     uint64_t jitExits[64] {};
     uint64_t jitCompileNs = 0;  // tiempo real gastado en compilar bloques (jitAt)
     uint64_t jitRuns = 0, jitInsns = 0, jitCompiled = 0;  // bloques ejecutados, sus instrucciones, bloques compilados
+    uint64_t jitChained = 0;  // (con jitOpHist, KoniFm1Run --jitprofile) entradas encadenadas que pasan sus comprobaciones
     uint64_t jitRamFlushes = 0, jitResets = 0, jitLinked = 0;  // (y enlaces hechos entre bloques)  // vaciados de los bloques de RAM (código reescrito) y del búfer entero
     // Un bloque del JIT en pc fuera de la ráfaga (el bucle de cpu1, Machine::runCpu1): como mucho maxN instrucciones, sin
     // ninguna de avoidA / avoidB ni del rango [avoidLo, avoidHi] después de la primera (ganchos del HLE, pc de sondeo) y
@@ -368,6 +369,15 @@ private:
         uint64_t slotMask = 0;   // entradas de la tabla de bucles que podrían caer en sus pc
     };
     std::deque<JitLink> jitLinks;
+    // Época de las comprobaciones fijas de la entrada encadenada: ventanas de pc, stopA / stopB y avoid solo cambian de una
+    // cadena a otra; jitEpoch sube cuando cambian (jitEpochFor, antes de cada cadena) y cada bloque guarda en su hueco de
+    // jitEpochSlots la última con la que las pasó. La tabla de bucles no: su máscara cambia casi en cada cadena con el salto
+    // de bucles (V15). Medido con 12 notas: 4-5 instrucciones por bloque recorrido, y la entrada encadenada eran ~45
+    // instrucciones de x86
+    uint64_t jitEpoch = 1;
+    uint32_t jitEpochKey[8] {};
+    std::deque<uint64_t> jitEpochSlots;
+    void jitEpochFor (const JitCtx& c) noexcept;
     JitLink* jitPending = nullptr;  // salida sin enlazar del último bloque: se enlaza con el siguiente si es su pc
     void jitUnlinkAll() noexcept;
     // Saltos a destino calculado (rts, pop a pc, call R, tablas): pc -> entrada encadenada de su bloque, directa por

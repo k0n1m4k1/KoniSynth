@@ -463,6 +463,9 @@ int main (int argc, char** argv)
     std::printf ("JIT: cpu0 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer, %llu enlaces\n",
                  (unsigned long long) cpu.jitRuns, (unsigned long long) cpu.jitInsns, (unsigned long long) cpu.jitCompiled,
                  (unsigned long long) cpu.jitRamFlushes, (unsigned long long) cpu.jitResets, (unsigned long long) cpu.jitLinked);
+    if (cpu.jitChained > 0)
+        std::printf ("JIT: %llu entradas encadenadas; %.1f instrucciones por bloque recorrido\n", (unsigned long long) cpu.jitChained,
+                     (double) cpu.jitInsns / (double) (cpu.jitChained + cpu.jitRuns));
     std::printf ("JIT: compilar, %.1f ms reales (%.1f us por bloque)\n", (double) cpu.jitCompileNs / 1e6,
                  cpu.jitCompiled > 0 ? (double) cpu.jitCompileNs / 1e3 / (double) cpu.jitCompiled : 0.0);
     {

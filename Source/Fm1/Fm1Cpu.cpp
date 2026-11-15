@@ -2854,6 +2854,15 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     e.u8 (0x05); e.u32 (n);                                         // add eax, n
     e.bytes ({ 0x3b, 0x43, C (offsetof (JitCtx, budget)) });       // cmp eax, [budget]
     toEpilogue ({ 0x0f, 0x87 });                                    // ja
+    // las comprobaciones fijas de la cadena, solo si este bloque no las pasó ya en esta época (Cpu::jitEpoch)
+    jitEpochSlots.push_back (0);
+    const auto epochSlot = (uint64_t) (uintptr_t) &jitEpochSlots.back();
+    e.bytes ({ 0x49, 0x8b, 0x84, 0x24 }); e.u32 (off (&jitEpoch));  // mov rax, [jitEpoch]
+    e.bytes ({ 0x48, 0xb9 }); e.u64 (epochSlot);                    // mov rcx, hueco del bloque
+    e.bytes ({ 0x48, 0x3b, 0x01 });                                 // cmp rax, [rcx]
+    e.bytes ({ 0x0f, 0x84 });                                       // je pasadas
+    const auto toPassed = e.pos();
+    e.u32 (0);
     // el bloque dentro de una de las ventanas de pc (las guardas: como pcEnter en la ráfaga)
     // (why: cada grupo de comprobaciones apunta el suyo al empezar; los saltos cortos de un grupo caen al principio del
     // siguiente, que es donde va su apunte)
@@ -2886,7 +2895,12 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     e.bytes ({ 0x8b, 0x43, C (offsetof (JitCtx, avoidHi)) });      // mov eax, [avoidHi]   (3)
     e.u8 (0x3d); e.u32 (first);                                     // cmp eax, primero     (5)
     toEpilogue ({ 0x0f, 0x83 });                                    // jae                  (6)
-    // con el salto de bucles: loopHint dentro del bloque, o una entrada de la tabla en alguno de sus pc
+    // pasadas: la época, en el hueco del bloque
+    e.bytes ({ 0x49, 0x8b, 0x84, 0x24 }); e.u32 (off (&jitEpoch));  // mov rax, [jitEpoch]
+    e.bytes ({ 0x48, 0xb9 }); e.u64 (epochSlot);                    // mov rcx, hueco del bloque
+    e.bytes ({ 0x48, 0x89, 0x01 });                                 // mov [rcx], rax
+    e.patch32 (toPassed, (uint32_t) (e.pos() - (toPassed + 4)));
+    // con el salto de bucles: loopHint (lo cambian los saltos de la cadena) dentro del bloque
     e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), 14 });     // mov byte [why], 14 (loopHint)
     e.bytes ({ 0x80, 0x7b, C (offsetof (JitCtx, loopEnabled)), 0 });  // cmp byte [loopEnabled], 0
     e.bytes ({ 0x74, 0x00 });                                       // je fin de bucles
@@ -2900,6 +2914,7 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     e.bytes ({ 0x89, 0xc8, 0xd1, 0xe8, 0x83, 0xe0, 0x07 });         // mov eax, ecx; shr eax, 1; and eax, 7     (7)
     e.bytes ({ 0x41, 0x3b, 0x8c, 0x84 }); e.u32 (off (notCounted)); // cmp ecx, [r12 + rax*4 + notCounted]  (8)
     toEpilogue ({ 0x0f, 0x85 });                                    // jne (contado: la ráfaga pararía)    (6)
+    // y una entrada de la tabla en alguno de sus pc
     e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), 15 });     // mov byte [why], 15 (tabla de bucles)
     e.bytes ({ 0x48, 0x8b, 0x43, C (offsetof (JitCtx, loopsMask)) });  // mov rax, [loopsMask]
     e.bytes ({ 0x48, 0xb9 }); e.u64 (slotMask);                     // mov rcx, máscara del bloque
@@ -2914,6 +2929,11 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
         e.bytes ({ 0x48, 0x3b, 0x43, C (offsetof (JitCtx, ramCw)) });      // cmp rax, [ramCw]
         toEpilogue ({ 0x0f, 0x85 });                                        // jne (código en RAM reescrito)
     }
+    if (jitOpHist != nullptr)
+    {
+        memOp (e, { 0x81 }, 0, off (&jitChained), true); e.u32 (1);  // add qword [jitChained], 1 (--jitprofile)
+    }
+    const auto entryExits = exits.size();  // (las de la entrada encadenada: al epílogo por advanced, abajo)
     e.patch32 (toBody, (uint32_t) (e.pos() - (toBody + 4)));
 
     // cuerpo
@@ -3256,14 +3276,13 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
         }
     }
     sync();
-    // el bloque entero: el ciclo de su última instrucción y done = base + n
-    e.bytes ({ 0x48, 0x8b, 0x43, C (offsetof (JitCtx, now)) });     // mov rax, [now]
-    e.bytes ({ 0x48, 0x05 }); e.u32 (n - 1);                         // add rax, n - 1
-    e.bytes ({ 0x48, 0x8b, 0x4b, C (offsetof (JitCtx, cycles)) });  // mov rcx, [cycles]
-    e.bytes ({ 0x48, 0x89, 0x01 });                                  // mov [rcx], rax
-    e.bytes ({ 0x8b, 0x43, C (offsetof (JitCtx, base)) });          // mov eax, [base]
-    e.u8 (0x05); e.u32 (n);                                          // add eax, n
-    e.bytes ({ 0x89, 0x43, C (offsetof (JitCtx, done)) });          // mov [done], eax
+    // El ciclo de la última instrucción y done no se escriben al enlazar: se sacan de base y now al salir a la ráfaga.
+    // Al final del bloque sin enlace (endExit): done = base + n, ciclo now + n - 1; ya pasado (base y now sumados: un
+    // enlace sin enlazar, linkExit, o un fallo de la entrada encadenada del siguiente, advanced): done = base, ciclo now - 1.
+    // Medido con 12 notas: 4-5 instrucciones por bloque recorrido, y el final escribía 6 campos en cada uno
+    std::vector<size_t> toEndExit;
+    size_t irqJump = 0;
+    const auto jumpEndExit = [&] (std::initializer_list<uint8_t> jcc) { e.bytes (jcc); toEndExit.push_back (e.pos()); e.u32 (0); };
     // salidas estáticas: el pc siguiente conocido (destino y continuación del salto, o la siguiente instrucción) por su
     // enlace. Las dinámicas (rts, retorno de pila, tablas, rti) y las que cambian el estado de interrupciones, al epílogo
     const auto& l = *lines.back();
@@ -3283,11 +3302,12 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     else if (! (f == Fm1Pre::FastRts || f == Fm1Pre::FastTb || f == Fm1Pre::FastCallR || f == Fm1Pre::FastRti || f == Fm1Pre::FastPopPc
                 || f == Fm1Pre::FastPopRetPc || (f == Fm1Pre::FastIe && l.pre.fimm != 0) || f == Fm1Pre::FastIcfgWr))
         outs = { nextPc };
-    e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), (uint8_t) (16 + f) });  // mov byte [why], 16 + fast (--exit: el final)
     if (irqEnd)
     {
         e.bytes ({ 0x80, 0x7b, C (offsetof (JitCtx, irqWatch)), 0 });  // cmp byte [irqWatch], 0
-        toEpilogue ({ 0x0f, 0x85 });                                  // jne epílogo
+        e.bytes ({ 0x0f, 0x85 });                                     // jne fin sin enlace (con su motivo)
+        irqJump = e.pos();
+        e.u32 (0);
     }
     for (const auto o : outs)
     {
@@ -3298,9 +3318,7 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
         e.u32 (0);
         jitLinks.push_back ({ nullptr, nullptr, o });
         links.push_back (&jitLinks.back());
-        e.bytes ({ 0x48, 0xb8 }); e.u64 ((uint64_t) (uintptr_t) &jitLinks.back());  // mov rax, enlace
-        e.bytes ({ 0x48, 0x89, 0x43, C (offsetof (JitCtx, lastLink)) });         // mov [lastLink], rax
-        e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), 2 });                 // mov byte [why], 2 (si no está enlazado)
+        e.bytes ({ 0x48, 0xb8 }); e.u64 ((uint64_t) (uintptr_t) &jitLinks.back());  // mov rax, enlace (linkExit lo apunta)
         e.bytes ({ 0x81, 0x43, C (offsetof (JitCtx, base)) }); e.u32 (n);        // add dword [base], n
         e.bytes ({ 0x48, 0x81, 0x43, C (offsetof (JitCtx, now)) }); e.u32 (n);   // add qword [now], n
         e.bytes ({ 0xff, 0x20 });                                    // jmp [rax] (JitLink::to)
@@ -3311,20 +3329,51 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     {
         // destino calculado: su bloque por la itab, a la entrada encadenada (que lo comprueba todo); si no está, al epílogo.
         // rti, sti/cli e icfg = R no: cambian lo que miran las interrupciones, y la ráfaga tiene que verlo
-        e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), 3 });             // mov byte [why], 3 (si no está)
         memOp (e, { 0x8b }, 0, pcOff);                                        // mov eax, [pc]
         e.bytes ({ 0x89, 0xc1, 0xd1, 0xe9 });                                 // mov ecx, eax; shr ecx, 1
         e.bytes ({ 0x81, 0xe1 }); e.u32 ((1u << kItabBits) - 1);              // and ecx, 2^14 - 1
         e.bytes ({ 0x48, 0xc1, 0xe1, 0x04 });                                 // shl rcx, 4
         e.bytes ({ 0x48, 0xba }); e.u64 ((uint64_t) (uintptr_t) jitItab.data());  // mov rdx, itab
         e.bytes ({ 0x3b, 0x04, 0x0a });                                       // cmp eax, [rdx + rcx] (JitItab::pc)
-        toEpilogue ({ 0x0f, 0x85 });                                          // jne epílogo
+        e.bytes ({ 0x0f, 0x85 });                                             // jne no está
+        const auto toMiss = e.pos();
+        e.u32 (0);
         e.bytes ({ 0x48, 0x8b, 0x44, 0x0a, 0x08 });                           // mov rax, [rdx + rcx + 8] (body)
-        e.bytes ({ 0x48, 0xc7, 0x43, C (offsetof (JitCtx, lastLink)) }); e.u32 (0);  // mov qword [lastLink], 0
         e.bytes ({ 0x81, 0x43, C (offsetof (JitCtx, base)) }); e.u32 (n);     // add dword [base], n
         e.bytes ({ 0x48, 0x81, 0x43, C (offsetof (JitCtx, now)) }); e.u32 (n);  // add qword [now], n
         e.bytes ({ 0xff, 0xe0 });                                             // jmp rax
+        e.patch32 (toMiss, (uint32_t) (e.pos() - (toMiss + 4)));
+        e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), 3 });             // no está: mov byte [why], 3
+        jumpEndExit ({ 0xe9 });
     }
+    // fin sin enlace (lo que cae aquí y los saltos de arriba): el motivo, done = base + n y el ciclo now + n - 1
+    if (irqJump != 0)
+        e.patch32 (irqJump, (uint32_t) (e.pos() - (irqJump + 4)));
+    e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), (uint8_t) (16 + f) });  // mov byte [why], 16 + fast (--exit: el final)
+    const auto endExit = e.pos();
+    e.bytes ({ 0x48, 0x8b, 0x43, C (offsetof (JitCtx, now)) });     // mov rax, [now]
+    e.bytes ({ 0x48, 0x05 }); e.u32 (n - 1);                         // add rax, n - 1
+    e.bytes ({ 0x48, 0x8b, 0x4b, C (offsetof (JitCtx, cycles)) });  // mov rcx, [cycles]
+    e.bytes ({ 0x48, 0x89, 0x01 });                                  // mov [rcx], rax
+    e.bytes ({ 0x8b, 0x43, C (offsetof (JitCtx, base)) });          // mov eax, [base]
+    e.u8 (0x05); e.u32 (n);                                          // add eax, n
+    e.bytes ({ 0x89, 0x43, C (offsetof (JitCtx, done)) });          // mov [done], eax
+    toEpilogue ({ 0xe9 });
+    for (const auto x : toEndExit)
+        e.patch32 (x, (uint32_t) (endExit - (x + 4)));
+    // un enlace sin enlazar (rax = el enlace): lastLink para enlazarlo, why = 2
+    const auto linkExit = e.pos();
+    e.bytes ({ 0x48, 0x89, 0x43, C (offsetof (JitCtx, lastLink)) });  // mov [lastLink], rax
+    e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), 2 });          // mov byte [why], 2
+    // ya pasado (base y now sumados por el enlace): done = base, ciclo now - 1
+    const auto advanced = e.pos();
+    e.bytes ({ 0x48, 0x8b, 0x43, C (offsetof (JitCtx, now)) });     // mov rax, [now]
+    e.bytes ({ 0x48, 0xff, 0xc8 });                                  // dec rax
+    e.bytes ({ 0x48, 0x8b, 0x4b, C (offsetof (JitCtx, cycles)) });  // mov rcx, [cycles]
+    e.bytes ({ 0x48, 0x89, 0x01 });                                  // mov [rcx], rax
+    e.bytes ({ 0x8b, 0x43, C (offsetof (JitCtx, base)) });          // mov eax, [base]
+    e.bytes ({ 0x89, 0x43, C (offsetof (JitCtx, done)) });          // mov [done], eax
+    toEpilogue ({ 0xe9 });
     // las salidas desde las partes then: jitThenExit (Cpu*, thenEnd, elseEnd, thenStart) y al epílogo (en el mismo marco que
     // las llamadas a jitOp: pila alineada y sombra reservada)
     std::vector<bool> redirected (exits.size(), false);
@@ -3391,15 +3440,27 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     }
     const auto epilogue = e.pos();
     for (size_t x = 0; x < exits.size(); ++x)
-        if (x >= redirected.size() || ! redirected[x])
+        if (x < entryExits)
+            e.patch32 (exits[x], (uint32_t) (advanced - (exits[x] + 4)));  // (las de la entrada encadenada)
+        else if (x >= redirected.size() || ! redirected[x])
             e.patch32 (exits[x], (uint32_t) (epilogue - (exits[x] + 4)));
     e.bytes ({ 0x48, 0x83, 0xc4, 0x28 });  // add rsp, 40
     e.bytes ({ 0x41, 0x5c });              // pop r12
     e.bytes ({ 0x5b });                    // pop rbx
     e.bytes ({ 0xc3 });                    // ret
     for (auto* k : links)
-        k->unlinked = (void*) (uintptr_t) epilogue;  // (desplazamiento: jitAt lo hace dirección)
+        k->unlinked = (void*) (uintptr_t) linkExit;  // (desplazamiento: jitAt lo hace dirección)
     return entryB;
+}
+
+void Cpu::jitEpochFor (const JitCtx& c) noexcept
+{
+    const uint32_t key[8] = { c.stopA, c.stopB, c.avoidLo, c.avoidHi, c.win[0], c.win[1], c.win[2], c.win[3] };
+    if (std::memcmp (key, jitEpochKey, sizeof key) != 0)
+    {
+        std::memcpy (jitEpochKey, key, sizeof key);
+        ++jitEpoch;
+    }
 }
 
 void Cpu::jitUnlinkAll() noexcept
@@ -3760,6 +3821,7 @@ uint32_t Cpu::runJit (Bus& bus, uint32_t maxN, uint32_t avoidA, uint32_t avoidB,
         jitPending->to = b->entryB;
         ++jitLinked;
     }
+    jitEpochFor (c);
     b->fn (&c);
     jitPending = c.status == 0 ? (JitLink*) c.lastLink : nullptr;
     ++jitRuns;
@@ -3870,6 +3932,7 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                     }
                     // (otra que compartía su hueco de la itab pudo quitarle el sitio: se lo devuelve la próxima vez)
                     jitItab[(pc >> 1) & ((1u << kItabBits) - 1)] = { pc, 0, b->entryB };
+                    jitEpochFor (c);
                     b->fn (&c);
                     jitPending = c.status == 0 ? (JitLink*) c.lastLink : nullptr;
                     ++jitExits[c.status != 0 ? 8 + (c.status & 7) : c.why & 63];
