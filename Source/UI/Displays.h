@@ -1172,20 +1172,24 @@ struct Fm1Pot : juce::Slider
 //==============================================================================
 // El aparato: la pantalla en el centro y, a los lados, los mandos del panel del FM-1 en su sitio (disposición del dibujo
 // de controles de Felucca, como fm1-emu crates/fm1-live/src/panel.rs, MIT): a la izquierda MASTER (potenciómetro, ADC
-// canal 4), SELECT, PRESETS y ALGORITHM; a la derecha K1-K4 y dos filas de seis botones. Las 27 teclas y OCT- / OCT+ no:
-// las notas y la octava llegan por MIDI. Los botones se mantienen mientras se pulsan; los encoders mandan clics (Fm1Engine::panel)
+// canal 4), SELECT, PRESETS, ALGORITHM y OCT- / OCT+; a la derecha K1-K4 y dos filas de seis botones. Las 27 teclas no: las
+// notas llegan por MIDI. Los botones se mantienen mientras se pulsan; los encoders mandan clics (Fm1Engine::panel)
 class Fm1Device : public juce::Component, private juce::Timer
 {
 public:
     explicit Fm1Device (KoniSynthProcessor& p) : processor (p), screen (p)
     {
         addAndMakeVisible (screen);
-        // botones: (rótulo, tecla de la matriz, ayuda). OCT- y OCT+ (0 y 1) no se muestran: la octava ya la llevan el
-        // teclado y el controlador MIDI
-        static const std::array<std::tuple<const char*, int, const char*>, 12> buttons { {
+        // botones: (rótulo, tecla de la matriz, ayuda). Los doce de la derecha y, al final, OCT- y OCT+ (0 y 1): la octava del
+        // firmware solo mueve sus propias teclas (el MIDI que entra no se transpone); Z / X del teclado del PC también las pulsan
+        static const std::array<std::tuple<const char*, int, const char*>, 14> buttons { {
             { "FX", 2, "Effects page" }, { "SCL", 3, "Scale page" }, { "ENV", 4, "Envelope page" }, { "LFO", 5, "LFO page" },
             { "EDIT", 6, "Edit page" }, { "GLO", 7, "Global settings page" }, { "HOME", 8, "Home screen" }, { "SAVE", 9, "Save" },
-            { "ARP", 10, "Arpeggiator" }, { "SEQ", 11, "Sequencer" }, { "PLAY", 12, "Play / stop" }, { "REC", 13, "Record" } } };
+            { "ARP", 10, "Arpeggiator" }, { "SEQ", 11, "Sequencer" }, { "PLAY", 12, "Play / stop" }, { "REC", 13, "Record" },
+            { "OCT-", 0, "Octave down for the firmware (its own keys and what it shows; incoming MIDI notes are not transposed). "
+                         "Z on the PC keyboard also presses it" },
+            { "OCT+", 1, "Octave up for the firmware (its own keys and what it shows; incoming MIDI notes are not transposed). "
+                         "X on the PC keyboard also presses it" } } };
         for (const auto& [name, id, help] : buttons)
         {
             auto* b = keys.add (new Fm1Button (name));
@@ -1305,7 +1309,8 @@ public:
         right.removeFromTop (kSpace);
         // izquierda: MASTER y SELECT; PRESETS y ALGORITHM
         const auto colW = left.getWidth() / 2;
-        const auto knob = std::min ({ colW - kSpace, (left.getHeight() - 28 - 2 * kSpace) / 2, 100 });
+        constexpr int kTools = 26, kOct = 30; // alto de PANIC / RESET y de OCT- / OCT+, abajo
+        const auto knob = std::min ({ colW - kSpace, (left.getHeight() - 28 - 4 * kSpace - kTools - kOct) / 2, 100 });
         auto row1 = left.removeFromTop (knob + 14);
         left.removeFromTop (2 * kSpace);
         auto row2 = left.removeFromTop (knob + 14);
@@ -1316,9 +1321,14 @@ public:
         encoders[1]->setBounds (row2.removeFromLeft (colW).reduced (kSpace / 2, 0));
         encoders[2]->setBounds (row2.reduced (kSpace / 2, 0));
         // abajo a la izquierda: PANIC y RESET del emulador
-        auto tools = left.removeFromBottom (26);
+        auto tools = left.removeFromBottom (kTools);
         panicButton.setBounds (tools.removeFromLeft (colW).reduced (kSpace / 2, 0));
         resetButton.setBounds (tools.reduced (kSpace / 2, 0));
+        // encima: OCT- y OCT+
+        left.removeFromBottom (kSpace);
+        auto oct = left.removeFromBottom (kOct);
+        keys[12]->setBounds (oct.removeFromLeft (colW).reduced (kSpace / 2, 0));
+        keys[13]->setBounds (oct.reduced (kSpace / 2, 0));
         // derecha: K1-K4 y dos filas de seis botones, con hueco para su rótulo entero
         auto kRow = right.removeFromTop (std::min (right.getWidth() / 4 - kSpace, 84) + 14);
         const auto kw = kRow.getWidth() / 4;

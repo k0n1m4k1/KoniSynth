@@ -164,6 +164,7 @@ public:
             if (floatingKeyboard != nullptr) floatingKeyboard->keys.repaint();
         };
         keyboard.onPcKeysChanged = [this] (const juce::String& line) { scope.showCaption ("PC keyboard", line); };
+        keyboard.onOctave = [this] (int octaves) { koni.fm1Octave (octaves); };
         // Al cambiar de preset, el display muestra cómo tocarlo si el preset lo indica (y quita el rótulo anterior si no)
         presetBar.onPresetChanged = [this] (int index)
         {
@@ -1463,6 +1464,7 @@ private:
             floatingKeyboard->keys.attachPlayRange (koni.apvts.state, [this] { editPlayHint(); });
             floatingKeyboard->keys.onFavorite = [this] (int n) { loadFavorite (n); };
             floatingKeyboard->keys.onPcKeysChanged = [this] (const juce::String& line) { scope.showCaption ("PC keyboard", line); };
+            floatingKeyboard->keys.onOctave = [this] (int octaves) { koni.fm1Octave (octaves); };
         }
         else if (mode != 2)
             floatingKeyboard.reset();
@@ -3363,6 +3365,7 @@ private:
         // velocidad -/+ 10 (pcKeyVelocity, 1-127); 1-9: favoritos (onFavorite). Clic derecho: "PC keyboard starts at"
         std::function<void (int index)> onFavorite;
         std::function<void (const juce::String& line)> onPcKeysChanged; // rótulo en el display tras Z / X / C / V
+        std::function<void (int octaves)> onOctave;                     // Z / X movió la octava (-1 / +1; no en los topes)
         static inline const juce::Identifier pcBaseProp { "pcKeyBase" }, pcVelocityProp { "pcKeyVelocity" };
 
         int pcBase() const { return juce::jlimit (0, 120, (int) state.getProperty (pcBaseProp, 60)); }
@@ -3390,8 +3393,11 @@ private:
                 const auto c = juce::CharacterFunctions::toLowerCase (k.getTextCharacter());
                 if (c == 'z' || c == 'x')
                 {
-                    state.setProperty (pcBaseProp, juce::jlimit (0, 108, firstWhite (pcBase()) + (c == 'z' ? -12 : 12)), nullptr);
+                    const auto before = firstWhite (pcBase());
+                    const auto after = juce::jlimit (0, 108, before + (c == 'z' ? -12 : 12));
+                    state.setProperty (pcBaseProp, after, nullptr);
                     if (onPcKeysChanged) onPcKeysChanged (pcSummary());
+                    if (onOctave && after != before) onOctave (after > before ? 1 : -1);
                     return true;
                 }
                 if (c == 'c' || c == 'v')

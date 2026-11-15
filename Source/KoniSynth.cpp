@@ -428,6 +428,16 @@ public:
     }
     bool takeFm1Screen (std::vector<uint16_t>& to, uint64_t& rev, bool& on) { return fm1Engine.takeScreen (to, rev, on); }
     void fm1Panel (const fm1::PanelAction& a) { fm1Engine.panel (a); }
+    // La octava del teclado de KoniSynth (Z / X) cambió: con el motor FM-1, también OCT- / OCT+ del firmware (teclas 0 y 1 de
+    // la matriz), una pulsación por octava. Su octava solo mueve sus 27 teclas: el MIDI que entra no se transpone (medido en
+    // V15, GHOULBOX, GR!MM, Felucca y JIANT), así que el tono no cambia dos veces
+    void fm1Octave (int steps)
+    {
+        if ((int) params.engine->load() != 16)
+            return;
+        for (int i = 0; i < std::abs (steps); ++i)
+            fm1Engine.tap (steps < 0 ? 0 : 1);
+    }
     // Latencia del FM-1 (ajuste global, config.settings): la cola del emulador. El host recibe la nueva en el siguiente bloque
     int fm1Latency() const { return (int) std::lround (fm1Engine.latencyMs()); }
     void setFm1Latency (int ms)

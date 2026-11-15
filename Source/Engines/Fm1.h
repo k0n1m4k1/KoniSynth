@@ -125,6 +125,11 @@ public:
         scope.forEach ([&] (int i) { panelBuf[(size_t) i] = a; });
     }
 
+    // Una pulsación breve de una tecla del panel (OCT- / OCT+ desde Z / X del teclado del PC): kTapMs pulsada y kTapMs de
+    // hueco antes de la siguiente, en tiempo emulado. Medido con dos OCT+ seguidos: V15 no ve 40 ms pulsada; Felucca no
+    // cuenta la segunda con un periodo de 120 ms; con 100 + 100 ms, V15, GR!MM y Felucca suben las dos octavas
+    void tap (uint8_t key) { panel ({ fm1::PanelAction::Key, key, kTapValue }); }
+
     // La pantalla si cambió desde rev (hilo de mensajes): RGB565 de 240 × 240. false = sin cambios
     bool takeScreen (std::vector<uint16_t>& to, uint64_t& rev, bool& on)
     {
@@ -233,6 +238,7 @@ private:
         uint64_t savedRev = 0;    // SpiFlash::revision de lo último guardado
         uint64_t seenRev = 0;     // la última revisión vista y cuándo (ms) se vio cambiar
         double changedAt = 0.0;
+        uint64_t tapFree = 0;     // primer ciclo en que puede empezar otra pulsación breve (tap)
     };
 
     //==========================================================================
@@ -369,6 +375,8 @@ private:
     static constexpr int kAudioCap = 1 << 16;       // tramas (1,49 s)
     static constexpr int kMidiCap = 1 << 14;        // bytes MIDI en vuelo
     static constexpr int kPanelCap = 1024;
+    static constexpr int32_t kTapValue = 2;  // (PanelAction::Key con este valor: una pulsación breve, tap())
+    static constexpr uint64_t kTapMs = 100, kTapCycles = fm1::kCpuHz / 1000 * kTapMs;
     // Instrucciones de cpu0 por paso de la máquina. Cada llamada a Machine::run corta los saltos de bucle en su borde: con
     // 16384, Felucca 1.8.2 iba un 13 % más lenta que con 65536 (KoniFm1Run --chunk, régimen de 4 a 8 s: 0,903x frente a
     // 1,036x; la V15, la V16 y GHOULBOX, ±3 %). El mayor avance de un paso medido es 35,9 ms de máquina (GHOULBOX y
@@ -410,7 +418,19 @@ private:
         if (panelFifo.getNumReady() > 0)
         {
             const auto scope = panelFifo.read (panelFifo.getNumReady());
-            scope.forEach ([&] (int i) { periph.schedule (periph.cycles, panelBuf[(size_t) i]); });
+            scope.forEach ([&] (int i)
+            {
+                const auto& a = panelBuf[(size_t) i];
+                if (a.kind == fm1::PanelAction::Key && a.value == kTapValue)
+                {
+                    const auto at = std::max (periph.cycles, e.tapFree);
+                    periph.schedule (at, fm1::PanelAction { fm1::PanelAction::Key, a.id, 1 });
+                    periph.schedule (at + kTapCycles, fm1::PanelAction { fm1::PanelAction::Key, a.id, 0 });
+                    e.tapFree = at + 2 * kTapCycles;
+                }
+                else
+                    periph.schedule (periph.cycles, a);
+            });
         }
         if (e.dacOffset >= 0 && midiFifo.getNumReady() > 0)
         {
