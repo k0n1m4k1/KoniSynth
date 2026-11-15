@@ -1015,6 +1015,16 @@ static void computeFastRaw (uint64_t raw, Fm1Pre& pre, uint8_t len) noexcept
                     case Fm1Pre::Xor: op = Fm1Pre::OpXor; break;
                     case Fm1Pre::Add: op = Fm1Pre::OpAdd; break;
                     case Fm1Pre::Sub: op = Fm1Pre::OpSub; break;
+                    // (medido con 12 notas: GHOULBOX, Melodee, AMB-1 y Mutable Dreams cortaban un bloque ~0,6 M veces en 4 s
+                    // por un "[R+#i] &= #h" o "<<= #i" sin micro-op). a & ~b con b inmediato = a & (~b)
+                    case Fm1Pre::AndNot:
+                        if (pre.aluRhs.kind != Fm1Pre::RhsImm) return;
+                        op = Fm1Pre::OpAnd;
+                        break;
+                    case Fm1Pre::Shl: case Fm1Pre::Shr: case Fm1Pre::Sar:
+                        if (pre.aluRhs.kind != Fm1Pre::RhsImm) return;
+                        op = pre.aluOp == Fm1Pre::Shl ? Fm1Pre::OpShl : pre.aluOp == Fm1Pre::Shr ? Fm1Pre::OpShr : Fm1Pre::OpSar;
+                        break;
                     default: return;
                 }
                 pre.fast = Fm1Pre::FastStX;
@@ -1031,7 +1041,7 @@ static void computeFastRaw (uint64_t raw, Fm1Pre& pre, uint8_t len) noexcept
                 else
                 {
                     pre.fsrc = Fm1Pre::SrcImm;
-                    pre.foff = (int64_t) pre.aluRhs.v;
+                    pre.foff = (int64_t) (pre.aluOp == Fm1Pre::AndNot ? ~pre.aluRhs.v : pre.aluRhs.v);
                 }
             }
             return;
@@ -1740,6 +1750,23 @@ int Cpu::jitOp (JitCtx* c, uint32_t j, const Line* l)
 }
 
 // Una instrucción de la FPU llamada desde el código nativo: la misma fpuD que el intérprete (exacta por construcción)
+bool Cpu::pairWide (const Line& head, const Line& second) noexcept
+{
+    const auto calls = [] (const Line& x)
+    {
+        return (x.pre.fast == Fm1Pre::FastExecRaw && x.pre.route == kRouteFpu) || x.pre.fast == Fm1Pre::FastIcfgRd;
+    };
+    return head.pre.fast == Fm1Pre::FastExecRaw || calls (head) || calls (second);
+}
+
+void Cpu::jitThenExit (Cpu* c, uint32_t thenEnd, uint32_t elseEnd, uint32_t thenStart)
+{
+    if (c->pc == thenEnd)
+        c->pc = elseEnd;  // (como finishSlow tras la última de la parte then)
+    else if (c->pc >= thenStart && c->pc < thenEnd)
+        c->predSkips.push_back ({ thenEnd, elseEnd, thenStart });  // (como la ruta 14; el JIT exige predSkips vacío)
+}
+
 void Cpu::jitFpu (Cpu* c, uint32_t raw)
 {
     uint8_t op, d, a, b;
@@ -1812,11 +1839,58 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
     const auto R = [this] (int r) { return (uint32_t) ((const uint8_t*) &regs[r & 15] - (const uint8_t*) this); };
     const auto spOff = (uint32_t) ((const uint8_t*) &sp - (const uint8_t*) this);
     const auto flagsOff = (uint32_t) ((const uint8_t*) &flags - (const uint8_t*) this);
-    const auto ldEax = [&] (uint32_t off) { memOp (e, { 0x8b }, 0, off); };
-    const auto stEax = [&] (uint32_t off) { memOp (e, { 0x89 }, 0, off); };
+    // eax con el registro que la anterior acaba de escribir (jitEaxAt): si lo primero que emite esta es su carga, va como
+    // mov eax, eax (deja a cero la mitad alta de rax, como la carga; sin la latencia de reenvío de un almacén a una carga).
+    // Vale si nada salta a esa posición: los saltos internos de cada caso caen antes de su mov [rd], eax final
+    struct EaxCache
+    {
+        Cpu& c;
+        Emitter& em;
+        size_t start, stAt = SIZE_MAX;
+        bool reuse;
+        uint32_t reuseOff, stOff = 0;
+        EaxCache (Cpu& cc, Emitter& ee) : c (cc), em (ee), start (ee.pos()), reuse (cc.jitEaxEm == &ee && cc.jitEaxAt == ee.pos()),
+                                          reuseOff (cc.jitEaxOff) {}
+        ~EaxCache()
+        {
+            if (c.jitEaxEm != &em)
+                return;
+            c.jitEaxAt = stAt == em.pos() ? stAt : SIZE_MAX;
+            c.jitEaxOff = stOff;
+        }
+    } cache { *this, e };
+    const auto ldEax = [&] (uint32_t off)
+    {
+        if (cache.reuse && off == cache.reuseOff && e.pos() == cache.start)
+            e.bytes ({ 0x89, 0xc0 });  // mov eax, eax
+        else
+            memOp (e, { 0x8b }, 0, off);
+    };
+    const auto stEax = [&] (uint32_t off)
+    {
+        memOp (e, { 0x89 }, 0, off);
+        cache.stAt = e.pos();
+        cache.stOff = off;
+    };
     switch (p.fast)
     {
         case Fm1Pre::FastNop:
+            return true;
+        case Fm1Pre::FastIcfgRd:
+            // R = icfg: llamada a jitIcfgRd (Cpu*); pisa los registros volátiles, como la FPU (pairWide). Medido con 12
+            // notas: Melodee 3,9 M y GHOULBOX 1,2 M en 4 s por jitOp
+#if defined(_WIN32)
+            e.bytes ({ 0x4c, 0x89, 0xe1 });                                            // mov rcx, r12
+#else
+            e.bytes ({ 0x4c, 0x89, 0xe7 });                                            // mov rdi, r12
+#endif
+            e.bytes ({ 0x48, 0xb8 }); e.u64 ((uint64_t) (uintptr_t) &Cpu::jitIcfgRd);  // mov rax, jitIcfgRd
+            e.bytes ({ 0xff, 0xd0 });                                                  // call rax
+            stEax (R (p.fd));
+            return true;
+        case Fm1Pre::FastMovPair:
+            memOp (e, { 0xc7 }, 0, R (p.fd)); e.u32 (p.fimm);             // mov dword [rl], bajo
+            memOp (e, { 0xc7 }, 0, R (p.fb)); e.u32 ((uint32_t) p.foff);  // mov dword [rh], alto
             return true;
         case Fm1Pre::FastMovI:
             memOp (e, { 0xc7 }, 0, R (p.fd));  // mov dword [rd], imm32
@@ -1920,12 +1994,21 @@ bool Cpu::jitNative (Emitter& e, const Line& l)
             return true;
         }
         case Fm1Pre::FastIe:
-            // cli (sti no: puede dejar lista una interrupción y la ráfaga tiene que verlo; cierra el bloque por jitOp)
-            if (p.fimm != 0)
-                return false;
-            memOp (e, { 0xc6 }, 0, (uint32_t) ((const uint8_t*) &ie - (const uint8_t*) this));  // mov byte [ie], 0
-            e.u8 (0);
+            // sti / cli (sti cierra el bloque: puede dejar lista una interrupción, y la salida mira JitCtx::irqWatch)
+            memOp (e, { 0xc6 }, 0, (uint32_t) ((const uint8_t*) &ie - (const uint8_t*) this));  // mov byte [ie], fimm
+            e.u8 (p.fimm != 0 ? 1 : 0);
             return true;
+        case Fm1Pre::FastIcfgWr:
+        {
+            // icfg = R (Cpu::setIcfg): sregStore[0] = R; ie = bit 9. Cierra el bloque, como sti
+            const auto sOff = (uint32_t) ((const uint8_t*) &sregStore[0] - (const uint8_t*) this);
+            memOp (e, { 0x8b }, 0, R (p.fd));                         // mov eax, [rd]
+            memOp (e, { 0x89 }, 0, sOff);                             // mov [sregStore], eax
+            e.u8 (0xa9); e.u32 (0x200);                               // test eax, 0x200
+            e.bytes ({ 0x0f, 0x95, 0xc0 });                           // setne al
+            memOp (e, { 0x88 }, 0, (uint32_t) ((const uint8_t*) &ie - (const uint8_t*) this));  // mov [ie], al
+            return true;
+        }
         case Fm1Pre::FastCnum:
             memOp (e, { 0x8b }, 0, (uint32_t) ((const uint8_t*) &coreId - (const uint8_t*) this));  // mov eax, [coreId]
             stEax (R (p.fd));
@@ -2128,8 +2211,10 @@ bool Cpu::jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t
     const bool ldx = p.fast == Fm1Pre::FastLdX, stx = p.fast == Fm1Pre::FastStX;
     if (! jitRamOk || (p.fast != Fm1Pre::FastLd && p.fast != Fm1Pre::FastSt && ! ldx && ! stx) || (p.fw != 1 && p.fw != 2 && p.fw != 4))
         return false;
-    if (stx && p.fcond > Fm1Pre::OpSub)
+    if (stx && p.fcond > Fm1Pre::OpSar)
         return false;
+    if (stx && p.fcond > Fm1Pre::OpSub && p.fsrc != Fm1Pre::SrcImm)
+        return false;  // (los desplazamientos, solo con cuenta inmediata)
     const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
     const auto R = [&] (int r) { return off (&regs[r & 15]); };
     const bool store = p.fast == Fm1Pre::FastSt || stx;
@@ -2238,6 +2323,9 @@ bool Cpu::jitMem (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t
                 case Fm1Pre::OpAnd: e.bytes ({ 0x21, 0xd0 }); break;  // and eax, edx
                 case Fm1Pre::OpXor: e.bytes ({ 0x31, 0xd0 }); break;  // xor eax, edx
                 case Fm1Pre::OpAdd: e.bytes ({ 0x01, 0xd0 }); break;  // add eax, edx
+                case Fm1Pre::OpShl: e.bytes ({ 0xc1, 0xe0, (uint8_t) (p.foff & 31) }); break;  // shl eax, n
+                case Fm1Pre::OpShr: e.bytes ({ 0xc1, 0xe8, (uint8_t) (p.foff & 31) }); break;  // shr eax, n
+                case Fm1Pre::OpSar: e.bytes ({ 0xc1, 0xf8, (uint8_t) (p.foff & 31) }); break;  // sar eax, n
                 default:            e.bytes ({ 0x29, 0xd0 }); break;  // sub eax, edx
             }
             e.bytes ({ 0x89, 0xc2 });                               // mov edx, eax
@@ -2392,7 +2480,49 @@ bool Cpu::jitList (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_
     return true;
 }
 
-// El salto que cierra un bloque (FastBrI, FastBrR, FastDecBr, FastGoto, FastCall, FastRts), como su caso en execFast y
+// {pc, R*N} = [sp++] (FastPopRetPc, ruta 28) al final del bloque, como su caso en execFast y finish: los registros de la
+// máscara de menor a mayor, luego pc, desde la RAM interna con sp alineado; si no, jitOp (jitSlow). Medido, Melodee con 12
+// notas: 13,4 M por jitOp en 4 s (el 27 % de lo que hacía por jitOp)
+bool Cpu::jitPopRet (Emitter& e, const Line& l, uint32_t j, uint32_t pend, uint32_t pendPc, std::vector<size_t>& exits)
+{
+    const auto& p = l.pre;
+    const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
+    std::vector<uint32_t> slots;  // desplazamientos en el objeto, de la dirección menor a la mayor (pc la última)
+    for (int i = 0; i < 16; ++i)
+        if (((p.fimm >> i) & 1) != 0)
+            slots.push_back (off (&regs[i]));
+    slots.push_back (off (&pc));
+    const auto bytes = (uint32_t) (4 * slots.size());
+    if (! jitRamOk || bytes > jitRam.size || 4 * slots.size() > 124)
+        return false;
+    std::vector<size_t> slow;
+    const auto jcc = [&] (uint8_t cc) { e.bytes ({ 0x0f, cc }); slow.push_back (e.pos()); e.u32 (0); };
+    memOp (e, { 0x8b }, 0, off (&sp));                              // mov eax, [sp]
+    e.bytes ({ 0xa8, 0x03 });                                       // test al, 3
+    jcc (0x85);                                                     // jnz lenta
+    e.bytes ({ 0x89, 0xc1 });                                       // mov ecx, eax
+    e.bytes ({ 0x81, 0xe9 }); e.u32 (jitRam.base);                  // sub ecx, base
+    e.bytes ({ 0x81, 0xf9 }); e.u32 (jitRam.size - bytes);          // cmp ecx, size - bytes
+    jcc (0x87);                                                     // ja lenta
+    e.bytes ({ 0x49, 0xbb }); e.u64 ((uint64_t) (uintptr_t) jitRam.data);  // mov r11, RAM
+    for (size_t k = 0; k < slots.size(); ++k)
+    {
+        e.bytes ({ 0x41, 0x8b, 0x54, 0x0b, (uint8_t) (4 * k) });                // mov edx, [r11 + rcx + 4k]
+        memOp (e, { 0x89 }, 2, slots[k]);                                       // mov [registro / pc], edx
+    }
+    e.u8 (0x05); e.u32 (bytes);                                     // add eax, bytes
+    memOp (e, { 0x89 }, 0, off (&sp));                              // mov [sp], eax
+    e.u8 (0xe9);                                                    // jmp sigue
+    const auto cont = e.pos();
+    e.u32 (0);
+    // la lenta: jitOp la hace entera (pc incluido) y deja insnCount como antes de las pendientes; las dos siguen aquí
+    jitSlow (e, l, j, pend, pendPc, exits, slow, { cont });
+    memOp (e, { 0x81 }, 0, off (&insnCount), true); e.u32 (pend + 1);  // add qword [insnCount], pend + 1
+    memOp (e, { 0xc7 }, 0, off (&holdIrq)); e.u32 (0);                // mov dword [holdIrq], 0
+    return true;
+}
+
+// El salto que cierra un bloque (FastBrI, FastBrR, FastDecBr, FastGoto, FastCall, FastRts, FastCallR), como su caso en execFast y
 // finish: lo pendiente más esta instrucción apuntados, el pc de destino o el siguiente, y loopHint donde execFast lo pone
 bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
 {
@@ -2408,7 +2538,8 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
         return false;  // (comparaciones de coma flotante: jitOp)
     else if (bit)
         jcc = p.fcond != 0 ? 0x85 : 0x84;  // salta si ((a & m) != 0) == (fcond != 0)
-    else if (! cond && p.fast != Fm1Pre::FastGoto && p.fast != Fm1Pre::FastCall && p.fast != Fm1Pre::FastRts)
+    else if (! cond && p.fast != Fm1Pre::FastGoto && p.fast != Fm1Pre::FastCall && p.fast != Fm1Pre::FastRts
+             && p.fast != Fm1Pre::FastCallR)
         return false;
     memOp (e, { 0x81 }, 0, off (&insnCount), true); e.u32 (pend + 1);  // add qword [insnCount], pend + 1
     memOp (e, { 0xc7 }, 0, off (&holdIrq)); e.u32 (0);                // mov dword [holdIrq], 0
@@ -2422,6 +2553,12 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
             return true;
         case Fm1Pre::FastRts:
             memOp (e, { 0x8b }, 0, off (&rets));                   // mov eax, [rets]
+            memOp (e, { 0x89 }, 0, off (&pc));                     // mov [pc], eax
+            return true;
+        case Fm1Pre::FastCallR:
+            // call R: el destino antes de escribir rets (R puede ser cualquiera; rets no es un registro de regs)
+            memOp (e, { 0x8b }, 0, R (p.fa));                      // mov eax, [ra]
+            memOp (e, { 0xc7 }, 0, off (&rets)); e.u32 (nextPc);  // rets = siguiente
             memOp (e, { 0x89 }, 0, off (&pc));                     // mov [pc], eax
             return true;
         default: break;
@@ -2482,7 +2619,7 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
 // El código de un bloque: prólogo, cada instrucción en nativo (jitNative) o como llamada a jitOp, epílogo
 size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inRam, uint64_t slotMask, std::vector<JitLink*>& links)
 {
-    static_assert (offsetof (JitCtx, why) < 128, "JitCtx: desplazamientos de 8 bits");
+    static_assert (offsetof (JitCtx, why) < 128 && offsetof (JitCtx, irqWatch) < 128, "JitCtx: desplazamientos de 8 bits");
     const auto off = [this] (const void* f) { return (uint32_t) ((const uint8_t*) f - (const uint8_t*) this); };
     const auto insnOff = off (&insnCount), holdOff = off (&holdIrq), pcOff = off (&pc);
     const auto C = [] (size_t o) { return (uint8_t) o; };  // desplazamiento en JitCtx (disp8 sobre rbx)
@@ -2490,6 +2627,13 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     const uint32_t first = lines.front()->pc, last = lines.back()->pc, span = last - first;
     std::vector<size_t> exits;   // saltos al epílogo (rel32)
     const auto toEpilogue = [&] (std::initializer_list<uint8_t> jcc) { e.bytes (jcc); exits.push_back (e.pos()); e.u32 (0); };
+    // la caché de eax de jitNative, solo con este emisor y mientras dura
+    struct EaxScope
+    {
+        Cpu& c;
+        EaxScope (Cpu& cc, const Emitter& em) : c (cc) { c.jitEaxEm = &em; c.jitEaxAt = SIZE_MAX; }
+        ~EaxScope() { c.jitEaxEm = nullptr; }
+    } eaxScope { *this, e };
 
     // entrada desde C++
     e.bytes ({ 0x53 });                    // push rbx
@@ -2591,7 +2735,45 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
         pend = 0;
     };
     // if con else en curso (jitAt): al llegar la parte then a thenEnd, el pc sigue en elseEnd (finishSlow)
-    uint32_t ifThenEnd = 0, ifElseEnd = 0, endsInThen = 0;
+    uint32_t ifThenEnd = 0, ifElseEnd = 0, ifThenStart = 0, endsInThen = 0;
+    // las salidas al epílogo desde dentro de una parte then (índices en exits): pasan antes por jitThenExit
+    struct ThenExits { size_t from, to; uint32_t thenEnd, elseEnd, thenStart; };
+    std::vector<ThenExits> thenExits;
+    // las salidas desde la segunda de un par ancho (índices en exits): antes, la fusión de los registros del par
+    std::vector<std::pair<size_t, size_t>> pairExits;
+    // tras la instrucción j (que acaba en endPc): si cierra la parte then, el pc sigue en elseEnd
+    const auto thenDone = [&] (uint32_t j, uint32_t endPc) -> bool
+    {
+        if (ifThenEnd == 0 || endPc != ifThenEnd)
+            return false;
+        thenExits.back() = { thenExits.back().from, exits.size(), ifThenEnd, ifElseEnd, ifThenStart };  // (la abierta)
+        ifThenEnd = 0;
+        if (j + 1 == n)
+            endsInThen = ifElseEnd;
+        return true;
+    };
+    // la fusión de un par ancho: donde la segunda no cambió el registro (regs == pairBefore), el de la cabeza (pairNew); si
+    // la cabeza tampoco lo cambió, pairNew == pairBefore == regs: lo mismo. SSE2, de 4 en 4
+    const auto mergePair = [&] (Emitter& em)
+    {
+        const auto xmm = [&] (uint8_t opc, int x, uint32_t disp)  // movdqu xmm, [r12 + disp] (6f) / [r12 + disp], xmm (7f)
+        {
+            em.bytes ({ 0xf3, 0x41, 0x0f, opc, (uint8_t) (0x80 | (x << 3) | 4), 0x24 });
+            em.u32 (disp);
+        };
+        const auto rOff = off (&regs[0]), bOff = off (&pairBefore[0]), nOff = off (&pairNew[0]);
+        for (uint32_t k = 0; k < 64; k += 16)
+        {
+            xmm (0x6f, 0, rOff + k);                  // xmm0 = regs
+            xmm (0x6f, 1, bOff + k);                  // xmm1 = antes
+            em.bytes ({ 0x66, 0x0f, 0x76, 0xc8 });    // pcmpeqd xmm1, xmm0 (la segunda no lo cambió)
+            xmm (0x6f, 2, nOff + k);                  // xmm2 = el de la cabeza
+            em.bytes ({ 0x66, 0x0f, 0xdb, 0xd1 });    // pand xmm2, xmm1
+            em.bytes ({ 0x66, 0x0f, 0xdf, 0xc8 });    // pandn xmm1, xmm0
+            em.bytes ({ 0x66, 0x0f, 0xeb, 0xca });    // por xmm1, xmm2
+            xmm (0x7f, 1, rOff + k);
+        }
+    };
     for (uint32_t j = 0; j < n; ++j)
     {
         const auto& l = *lines[j];
@@ -2654,8 +2836,51 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
             e.patch32 (taken, (uint32_t) (e.pos() - (taken + 4)));
             ifThenEnd = l.ifThenEnd;
             ifElseEnd = l.ifElseEnd;
+            ifThenStart = l.pc + l.len;
+            thenExits.push_back ({ exits.size(), exits.size(), 0, 0, 0 });  // (abierta: se cierra en thenDone)
             ++pend;
             pendPc = l.pc + l.len;
+            continue;
+        }
+        Emitter probe;
+        if (l.pre.pairHead && (pairWide (l, *lines[j + 1]) || ! jitNative (probe, *lines[j + 1])))
+        {
+            // par con una cruda de cabeza (el registro que escribe va en el raw) o la FPU de segunda (una llamada, que pisa
+            // los registros volátiles): como stepImpl con los 16 registros. pairBefore = regs; la cabeza; pairNew = regs y
+            // regs = pairBefore; la segunda; y donde la segunda no cambió el registro (regs == pairBefore), el de la cabeza
+            // (si la cabeza tampoco lo cambió, pairNew == pairBefore == regs: lo mismo). Con SSE2, de 4 en 4. Medido, AMB-1
+            // con 12 notas: 6 M pares de la FPU interpretados en 4 s
+            const auto& s = *lines[j + 1];
+            const auto xmm = [&] (uint8_t opc, int x, uint32_t disp)  // movdqu xmm, [r12 + disp] (6f) / [r12 + disp], xmm (7f)
+            {
+                e.bytes ({ 0xf3, 0x41, 0x0f, opc, (uint8_t) (0x80 | (x << 3) | 4), 0x24 });
+                e.u32 (disp);
+            };
+            const auto rOff = off (&regs[0]), bOff = off (&pairBefore[0]), nOff = off (&pairNew[0]);
+            for (uint32_t k = 0; k < 64; k += 16)
+            {
+                xmm (0x6f, 0, rOff + k);
+                xmm (0x7f, 0, bOff + k);
+            }
+            jitNative (e, l);
+            for (uint32_t k = 0; k < 64; k += 16)
+            {
+                xmm (0x6f, 0, rOff + k);
+                xmm (0x7f, 0, nOff + k);
+                xmm (0x6f, 1, bOff + k);
+                xmm (0x7f, 1, rOff + k);
+            }
+            // la segunda: en nativo o por jitMem (con la cabeza pendiente de apuntar; si sale, tras hacerla: a la fusión)
+            if (! jitNative (e, s))
+            {
+                const auto x0 = exits.size();
+                jitMem (e, s, j + 1, pend + 1, s.pc, exits);
+                pairExits.push_back ({ x0, exits.size() });
+            }
+            mergePair (e);
+            pend += 2;
+            pendPc = s.pc + s.len;
+            ++j;
             continue;
         }
         if (l.pre.pairHead)
@@ -2686,28 +2911,17 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
             ++j;
             continue;
         }
-        if (j + 1 == n && jitBranch (e, l, pend))
+        if (j + 1 == n && (l.pre.fast == Fm1Pre::FastPopRetPc ? jitPopRet (e, l, j, pend, pendPc, exits) : jitBranch (e, l, pend)))
         {
             pend = 0;  // (apuntado con el salto)
             continue;
         }
-        if (jitMem (e, l, j, pend, pendPc, exits))
+        if (jitMem (e, l, j, pend, pendPc, exits) || jitNative (e, l))
         {
             ++pend;
             pendPc = l.pc + l.len;
-            continue;
-        }
-        if (jitNative (e, l))
-        {
-            ++pend;
-            pendPc = l.pc + l.len;
-            if (ifThenEnd != 0 && pendPc == ifThenEnd)
-            {
-                pendPc = ifElseEnd;  // (fin de la parte then)
-                ifThenEnd = 0;
-                if (j + 1 == n)
-                    endsInThen = ifElseEnd;
-            }
+            if (const auto elseEnd = ifElseEnd; thenDone (j, pendPc))
+                pendPc = elseEnd;  // (fin de la parte then)
             continue;
         }
         sync();
@@ -2726,6 +2940,10 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
         e.bytes ({ 0xff, 0xd0 });          // call rax
         e.bytes ({ 0x85, 0xc0 });          // test eax, eax
         toEpilogue ({ 0x0f, 0x85 });       // jnz (jitOp ya dejó done, status y el ciclo)
+        if (const auto elseEnd = ifElseEnd; thenDone (j, l.pc + l.len))
+        {
+            memOp (e, { 0xc7 }, 0, pcOff); e.u32 (elseEnd);  // mov dword [pc], elseEnd (jitOp lo dejó en thenEnd)
+        }
     }
     sync();
     // el bloque entero: el ciclo de su última instrucción y done = base + n
@@ -2743,7 +2961,12 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     const auto nextPc = endsInThen != 0 ? endsInThen : l.pc + l.len;  // (la parte then de un if con else: sigue en elseEnd)
     const auto target = (uint32_t) ((int64_t) nextPc + l.pre.foff);
     std::vector<uint32_t> outs;
-    if (f == Fm1Pre::FastBrI || f == Fm1Pre::FastBrR || f == Fm1Pre::FastDecBr || f == Fm1Pre::FastBitBr)
+    // sti / icfg = R: la siguiente instrucción por su enlace si la cadena no vigila ninguna interrupción (JitCtx::irqWatch);
+    // medido, Melodee con 12 notas: el 43 % de las salidas a la ráfaga (secciones críticas cli ... sti y icfg guardado / repuesto)
+    const bool irqEnd = (f == Fm1Pre::FastIe && l.pre.fimm != 0) || f == Fm1Pre::FastIcfgWr;
+    if (irqEnd)
+        outs = { nextPc };
+    else if (f == Fm1Pre::FastBrI || f == Fm1Pre::FastBrR || f == Fm1Pre::FastDecBr || f == Fm1Pre::FastBitBr)
         outs = { target, nextPc };
     else if (f == Fm1Pre::FastGoto || f == Fm1Pre::FastCall)
         outs = { target };
@@ -2751,6 +2974,11 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
                 || f == Fm1Pre::FastPopRetPc || (f == Fm1Pre::FastIe && l.pre.fimm != 0) || f == Fm1Pre::FastIcfgWr))
         outs = { nextPc };
     e.bytes ({ 0xc6, 0x43, C (offsetof (JitCtx, why)), (uint8_t) (16 + f) });  // mov byte [why], 16 + fast (--exit: el final)
+    if (irqEnd)
+    {
+        e.bytes ({ 0x80, 0x7b, C (offsetof (JitCtx, irqWatch)), 0 });  // cmp byte [irqWatch], 0
+        toEpilogue ({ 0x0f, 0x85 });                                  // jne epílogo
+    }
     for (const auto o : outs)
     {
         memOp (e, { 0x8b }, 0, pcOff);                               // mov eax, [pc]
@@ -2787,9 +3015,51 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
         e.bytes ({ 0x48, 0x81, 0x43, C (offsetof (JitCtx, now)) }); e.u32 (n);  // add qword [now], n
         e.bytes ({ 0xff, 0xe0 });                                             // jmp rax
     }
+    // las salidas desde las partes then: jitThenExit (Cpu*, thenEnd, elseEnd, thenStart) y al epílogo (en el mismo marco que
+    // las llamadas a jitOp: pila alineada y sombra reservada)
+    std::vector<bool> redirected (exits.size(), false);
+    for (const auto& [from, to] : pairExits)
+    {
+        if (from == to)
+            continue;
+        const auto stub = e.pos();
+        for (auto x = from; x < to; ++x)
+        {
+            e.patch32 (exits[x], (uint32_t) (stub - (exits[x] + 4)));
+            redirected[x] = true;
+        }
+        mergePair (e);
+        toEpilogue ({ 0xe9 });                             // jmp epílogo
+    }
+    for (const auto& t : thenExits)
+    {
+        if (t.from == t.to)
+            continue;
+        const auto stub = e.pos();
+        for (auto x = t.from; x < t.to; ++x)
+        {
+            e.patch32 (exits[x], (uint32_t) (stub - (exits[x] + 4)));
+            redirected[x] = true;
+        }
+#if defined(_WIN32)
+        e.bytes ({ 0x4c, 0x89, 0xe1 });                    // mov rcx, r12
+        e.u8 (0xba); e.u32 (t.thenEnd);                    // mov edx, thenEnd
+        e.bytes ({ 0x41, 0xb8 }); e.u32 (t.elseEnd);       // mov r8d, elseEnd
+        e.bytes ({ 0x41, 0xb9 }); e.u32 (t.thenStart);     // mov r9d, thenStart
+#else
+        e.bytes ({ 0x4c, 0x89, 0xe7 });                    // mov rdi, r12
+        e.u8 (0xbe); e.u32 (t.thenEnd);                    // mov esi, thenEnd
+        e.u8 (0xba); e.u32 (t.elseEnd);                    // mov edx, elseEnd
+        e.u8 (0xb9); e.u32 (t.thenStart);                  // mov ecx, thenStart
+#endif
+        e.bytes ({ 0x48, 0xb8 }); e.u64 ((uint64_t) (uintptr_t) &Cpu::jitThenExit);  // mov rax, jitThenExit
+        e.bytes ({ 0xff, 0xd0 });                          // call rax
+        toEpilogue ({ 0xe9 });                             // jmp epílogo
+    }
     const auto epilogue = e.pos();
-    for (const auto x : exits)
-        e.patch32 (x, (uint32_t) (epilogue - (x + 4)));
+    for (size_t x = 0; x < exits.size(); ++x)
+        if (x >= redirected.size() || ! redirected[x])
+            e.patch32 (exits[x], (uint32_t) (epilogue - (exits[x] + 4)));
     e.bytes ({ 0x48, 0x83, 0xc4, 0x28 });  // add rsp, 40
     e.bytes ({ 0x41, 0x5c });              // pop r12
     e.bytes ({ 0x5b });                    // pop rbx
@@ -2861,6 +3131,15 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     } compileClock { jitCompileNs };
     std::vector<const Line*> lines;
     uint32_t a = at;
+    uint32_t codeHi = 0;  // (RAM) hasta dónde depende el bloque del código: los thenEnd / elseEnd de sus if
+    // cambian el flujo, o lo que miran irqReady / inIsr: la última del bloque
+    const auto endsBlock = [] (const Fm1Pre& p)
+    {
+        const auto f = p.fast;
+        return f == Fm1Pre::FastBrI || f == Fm1Pre::FastBrR || f == Fm1Pre::FastGoto || f == Fm1Pre::FastCall || f == Fm1Pre::FastRts
+            || f == Fm1Pre::FastTb || f == Fm1Pre::FastCallR || f == Fm1Pre::FastRti || f == Fm1Pre::FastPopPc || f == Fm1Pre::FastDecBr
+            || (f == Fm1Pre::FastIe && p.fimm != 0) || f == Fm1Pre::FastIcfgWr || f == Fm1Pre::FastPopRetPc || f == Fm1Pre::FastBitBr;
+    };
     const auto inSpan = [&] (uint32_t x) { return inRam ? x - jitRam.base + 8 <= jitRam.size : x - 0x02000000u < kJitSpan; };
     const auto decodeAt = [&] (uint32_t x, Line& l)
     {
@@ -2884,14 +3163,20 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             // en nativo (de registros, sin memoria ni salto) y la segunda sin ser cabeza; jitEmit hace la confirmación
             Line s;
             Emitter probe;
-            // (una cruda de cabeza no: jitEmit toma fd como el registro que escribe, y en las crudas va en el raw)
-            if (lines.size() + 2 > kJitMax || ! inSpan (a + l.len) || ! decodeAt (a + l.len, s) || s.pre.pairHead
-                || l.pre.fast == Fm1Pre::FastExecRaw)
+            if (lines.size() + 2 > kJitMax || ! inSpan (a + l.len) || ! decodeAt (a + l.len, s) || s.pre.pairHead)
                 break;
             const bool nl = jitNative (probe, l), ns = jitNative (probe, s);
-            if (s.pre.fast == Fm1Pre::FastExecRaw && s.pre.route == kRouteFpu)
-                break;  // (la FPU en nativo es una llamada: pisaría edx y r8d, que el par usa)
-            if (! nl || ! ns)
+            // el par ancho de jitEmit (por los 16 registros): la cabeza en nativo y la segunda en nativo o un acceso a memoria
+            // de jitMem, que solo sale tras hacerla. Para una cruda de cabeza o la FPU de segunda, y para los de memoria que
+            // no pueden ir como dos seguidas
+            std::vector<size_t> probeExits;
+            const bool wideOk = nl && (ns || jitMem (probe, s, 0, 1, s.pc, probeExits));
+            if (pairWide (l, s))
+            {
+                if (! wideOk)
+                    break;
+            }
+            else if (! nl || ! ns)
             {
                 // Con un acceso a memoria (FastLd, FastSt, FastLdX, FastStX) en el par: si la segunda no lee ni escribe
                 // ningún registro que escriba la cabeza, el par es lo mismo que las dos seguidas (stepImpl solo cambia qué
@@ -2907,8 +3192,12 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
                 const auto headWrites = ! nl ? regsOf (l)
                                       : l.pre.fast == Fm1Pre::FastNop || l.pre.fast == Fm1Pre::FastSpAdd ? 0u : 1u << (l.pre.fd & 15);
                 if (! (nl || mem (l)) || ! (ns || mem (s)) || s.pre.fast == Fm1Pre::FastExecRaw || (headWrites & regsOf (s)) != 0)
-                    break;
-                l.pre.pairHead = false;
+                {
+                    if (! wideOk)
+                        break;
+                }
+                else
+                    l.pre.pairHead = false;
             }
             jitLines.push_back (l);
             lines.push_back (&jitLines.back());
@@ -2917,13 +3206,15 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             a += l.len + s.len;
             continue;
         }
-        if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 14 && l.pre.ibElse > 0 && ! inRam)
+        if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 14 && l.pre.ibElse > 0)
         {
-            // if con else, en la XIP: la parte then en línea y el bloque sigue en elseEnd (jitEmit). Solo si la parte then
-            // son instrucciones de registros en nativo (jitNative: sin memoria, saltos, pares ni otro if), que acaban justo
-            // en thenEnd: así nada sale del bloque con el salto pendiente (predSkips) a medias. Mientras dura, predSkips no
-            // está vacío (sin interrupciones ni paradas del estado plano en la ráfaga); dentro de un bloque no se mira nada
-            // de eso. Familias enteras; en las comparaciones, rhs de registro o inmediato
+            // if con else: la parte then en línea y el bloque sigue en elseEnd (jitEmit). La parte then, sin saltos, pares,
+            // otro if ni nada que cierre un bloque, y acabando justo en thenEnd; si el bloque sale a mitad (un acceso con
+            // efectos, la ruta lenta), jitThenExit deja el salto pendiente en predSkips como el intérprete. Mientras dura,
+            // predSkips no está vacío (sin interrupciones ni paradas del estado plano en la ráfaga); dentro de un bloque no
+            // se mira nada de eso. Familias enteras; en las comparaciones, rhs de registro o inmediato. En la RAM, el código
+            // marcado llega hasta elseEnd (codeHi). Medido con 12 notas: AMB-1 interpretaba 25 M instrucciones en 4 s por
+            // partes then con memoria
             const auto& p = l.pre;
             const auto nextPc = a + l.len;
             const auto thenEnd = blockEnd (bus, nextPc, p.ibThen);
@@ -2931,11 +3222,11 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             bool fit = (p.cbFam == 2 || (p.cbFam < 8 && p.ibRhs.kind != Fm1Pre::RhsBit && jccOf (condOfFam (p.cbFam, p.cbAlt)) != 0))
                     && thenEnd > nextPc && elseEnd > thenEnd && inSpan (elseEnd);
             std::vector<Line> part;
-            Emitter probe;
             for (uint32_t x = nextPc; fit && x < thenEnd;)
             {
                 Line t;
-                fit = lines.size() + 1 + part.size() < kJitMax && decodeAt (x, t) && ! t.pre.pairHead && jitNative (probe, t);
+                fit = lines.size() + 1 + part.size() < kJitMax && decodeAt (x, t) && ! t.pre.pairHead
+                      && t.pre.fast != Fm1Pre::FastNone && ! endsBlock (t.pre);
                 if (fit)
                 {
                     x += t.len;
@@ -2948,6 +3239,7 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             l.ifThenEnd = thenEnd;
             l.ifElseEnd = elseEnd;
             l.ifKnown = true;
+            codeHi = std::max (codeHi, elseEnd);
             jitLines.push_back (l);
             lines.push_back (&jitLines.back());
             for (const auto& t : part)
@@ -2958,13 +3250,15 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
             a = elseEnd;
             continue;
         }
-        if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 14 && l.pre.ibElse == 0 && ! inRam)
+        if (l.pre.fast == Fm1Pre::FastNone && l.pre.route == 14 && l.pre.ibElse == 0)
         {
-            // bloque predicado sin else, en la XIP: "si no se cumple, a thenEnd" (execRoute, ruta 14; sin predSkips ni rep,
-            // que el JIT exige vacíos, finish no hace nada más). Como salto hacia delante con la condición negada:
-            // condOfFam (fam, !alt) es la negación de condOfFam (fam, alt) en todas las familias (cmpCond)
+            // bloque predicado sin else: "si no se cumple, a thenEnd" (execRoute, ruta 14; sin predSkips ni rep, que el JIT
+            // exige vacíos, finish no hace nada más). Como salto hacia delante con la condición negada: condOfFam (fam,
+            // !alt) es la negación de condOfFam (fam, alt) en todas las familias (cmpCond). En la RAM, el código marcado
+            // llega hasta thenEnd (codeHi)
             const auto nextPc = a + l.len;
             const auto thenEnd = blockEnd (bus, nextPc, l.pre.ibThen);
+            codeHi = std::max (codeHi, thenEnd);
             auto& p = l.pre;
             const auto rk = p.ibRhs.kind;
             p.foff = (int64_t) thenEnd - (int64_t) nextPc;
@@ -2997,11 +3291,7 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
         jitLines.push_back (l);
         lines.push_back (&jitLines.back());
         a += l.len;
-        // cambian el flujo, o lo que miran irqReady / inIsr: la última del bloque
-        if (f == Fm1Pre::FastBrI || f == Fm1Pre::FastBrR || f == Fm1Pre::FastGoto || f == Fm1Pre::FastCall || f == Fm1Pre::FastRts
-            || f == Fm1Pre::FastTb || f == Fm1Pre::FastCallR || f == Fm1Pre::FastRti || f == Fm1Pre::FastPopPc || f == Fm1Pre::FastDecBr
-            || (f == Fm1Pre::FastIe && l.pre.fimm != 0) || f == Fm1Pre::FastIcfgWr || f == Fm1Pre::FastPopRetPc
-            || f == Fm1Pre::FastBitBr)
+        if (endsBlock (l.pre))
             break;
         // (cli no cierra el bloque: con las interrupciones deshabilitadas no se acepta ninguna nueva; medido, sti y cli eran
         // el 28-38 % de lo que HYP-1 y DUB-1 hacían por jitOp, y cada una cortaba el bloque)
@@ -3038,7 +3328,7 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     }
     if (inRam)
     {
-        bus.markCode (at, lines.back()->pc + lines.back()->len);
+        bus.markCode (at, std::max (lines.back()->pc + lines.back()->len, codeHi));
         jitRamCw = bus.codeWrites();
     }
     for (auto* k : links)
@@ -3181,6 +3471,7 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                     c.stopA = s.stopA;
                     c.stopB = s.stopB;
                     c.loopEnabled = s.loopEnabled ? 1 : 0;
+                    c.irqWatch = s.blockedPrio >= 0 ? 1 : 0;
                     // (los bloques encadenados, igual: toda la cadena antes de nextTry, o sin room para la tabla, no la miran)
                     c.loopsMask = plain && s.anyLoops && room >= s.probeKnown && now + budget > s.nextTry ? s.loopsMask : 0;
                     if (hasPcWin)
@@ -3412,6 +3703,9 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                     case Fm1Pre::OpAnd: nv = ldW (bus, pre.fw, false, addr) & val; break;
                     case Fm1Pre::OpXor: nv = ldW (bus, pre.fw, false, addr) ^ val; break;
                     case Fm1Pre::OpAdd: nv = ldW (bus, pre.fw, false, addr) + val; break;
+                    case Fm1Pre::OpShl: nv = ldW (bus, pre.fw, false, addr) << (val & 31); break;
+                    case Fm1Pre::OpShr: nv = ldW (bus, pre.fw, false, addr) >> (val & 31); break;
+                    case Fm1Pre::OpSar: nv = (uint32_t) ((int32_t) ldW (bus, pre.fw, false, addr) >> (val & 31)); break;
                     default:            nv = ldW (bus, pre.fw, false, addr) - val; break;
                 }
                 stW (bus, pre.fw, addr, nv);
@@ -3536,6 +3830,7 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                 break;
             }
             case Fm1Pre::FastNop: break;
+            case Fm1Pre::FastMovPair: regs[pre.fd] = pre.fimm; regs[pre.fb] = (uint32_t) pre.foff; break;
             case Fm1Pre::FastExecRaw: execRaw (bus, (uint8_t) pre.route, (uint32_t) raw); break;
             case Fm1Pre::FastNone: break;
         }
@@ -4984,6 +5279,22 @@ static void computeFast (const Fm1IsaEntry& e, uint64_t raw, Fm1Pre& p) noexcept
     const int n = e.slotCount;
     const auto sl = [&] (int i) { return slotValue (e.slots[i], raw); };
     const auto rg = [&] (int i) { return (uint8_t) (sl (i) & 0xf); };
+
+    // rH_rL = #i (como exec_syntax: el inmediato de 64 bits es la ranura 2; primero el bajo, luego el alto)
+    {
+        sv lhs, rhs;
+        int dh, dl;
+        if (split2 (s, " = ", lhs, rhs) && rhs == "#i" && pairOf (lhs, dh, dl) && n >= 3)
+        {
+            const auto imm = (uint64_t) sl (2);
+            p.fast = Fm1Pre::FastMovPair;
+            p.fd = (uint8_t) dl;
+            p.fb = (uint8_t) dh;
+            p.fimm = (uint32_t) imm;
+            p.foff = (int64_t) (uint32_t) (imm >> 32);
+            return;
+        }
+    }
 
     // cargas: R = <mem> [(u)|(s)]
     {

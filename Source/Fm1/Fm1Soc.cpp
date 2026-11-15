@@ -471,9 +471,18 @@ uint32_t Soc::timerRead (uint32_t addr)
 uint32_t Soc::read32Slow (uint32_t addr)
 {
     ++sideEffects;
-    // (sin efectos para la ráfaga: el P33 lee su estado, el ADC su CON / RES y los GPIO sus pines; nada cambia)
-    if (const auto r = region (addr); ! (r == Region::P33 || r == Region::Gpio || addr == 0x13100 || addr == 0x13104))
-        ++stopEffects;
+    // Sin efectos para la ráfaga: el P33 lee su estado, el ADC su CON / RES y los GPIO sus pines (nada cambia), y el
+    // contador del TIMER4 (0x10804) si no salta tiempo (skipIdle: adelanta cycles y pide reevaluar con nextDue = 0). El
+    // resto, siempre. Melodee con 12 notas lo lee 3 millones de veces por segundo: el 45 % de los accesos con efectos
+    const auto r0 = region (addr);
+    struct StopAfterRead
+    {
+        Soc& soc;
+        bool always;
+        uint64_t due0, cyc0;
+        ~StopAfterRead() { if (always || soc.periph.nextDue != due0 || soc.periph.cycles != cyc0) ++soc.stopEffects; }
+    } stopAfter { *this, ! (r0 == Region::P33 || r0 == Region::Gpio || addr == 0x13100 || addr == 0x13104 || addr == 0x10804),
+                  periph.nextDue, periph.cycles };
     if (ioHist != nullptr) ++(*ioHist)[addr & ~3u];
     if (observing) [[unlikely]]
     {
