@@ -595,17 +595,19 @@ public:
 
         // Canal MIDI de entrada: con un canal elegido se descartan los mensajes de canal de los demás (teclados que mandan el
         // acompañamiento por otros canales); los de sistema pasan siempre. Antes del teclado en pantalla, que no se filtra
-        if (const auto inChannel = (int) params.midiInChannel->load(); inChannel > 0)
+        // (los filtros usan midiFilterScratch, reservado, y devuelven lo que queda a midi, que ya tiene sitio para todo lo
+        // que traía: sin reservar ni liberar memoria en el hilo de audio; antes, un MidiBuffer local en cada bloque)
+        const auto keepOnly = [&] (auto keep)
         {
-            juce::MidiBuffer kept;
+            midiFilterScratch.clear();
             for (const auto metadata : midi)
-            {
-                const auto m = metadata.getMessage();
-                if (m.getChannel() == 0 || m.getChannel() == inChannel)
-                    kept.addEvent (m, metadata.samplePosition);
-            }
-            midi.swapWith (kept);
-        }
+                if (keep (metadata.getMessage()))
+                    midiFilterScratch.addEvent (metadata.getMessage(), metadata.samplePosition);
+            midi.clear();
+            midi.addEvents (midiFilterScratch, 0, -1, 0);
+        };
+        if (const auto inChannel = (int) params.midiInChannel->load(); inChannel > 0)
+            keepOnly ([inChannel] (const juce::MidiMessage& m) { return m.getChannel() == 0 || m.getChannel() == inChannel; });
         // Anunciadores MIDI y HOLD: lo que llega del host (ya filtrado por canal), antes del teclado en pantalla
         if (! midi.isEmpty())
         {
@@ -631,16 +633,8 @@ public:
                 }
             }
             if (modeJunk)
-            {
-                juce::MidiBuffer kept;
-                for (const auto metadata : midi)
-                {
-                    const auto m = metadata.getMessage();
-                    if (! (m.isController() && m.getControllerNumber() >= 120 && m.getControllerValue() != 0))
-                        kept.addEvent (m, metadata.samplePosition);
-                }
-                midi.swapWith (kept);
-            }
+                keepOnly ([] (const juce::MidiMessage& m)
+                          { return ! (m.isController() && m.getControllerNumber() >= 120 && m.getControllerValue() != 0); });
         }
 
         // Origen de las notas con el agente al control (Agent/AgentSession.h): las del usuario son las del controlador (aquí,
@@ -1949,6 +1943,7 @@ public:
     juce::MidiKeyboardState keyboardState;
     SessionTransport sessionTransport; // REC / STOP / PLAY (Transport/SessionTransport.h); inactivo hasta pulsar
     juce::MidiBuffer keyboardScratch = [] { juce::MidiBuffer b; b.ensureSize (4096); return b; }(); // teclado en pantalla al practicar
+    juce::MidiBuffer midiFilterScratch = [] { juce::MidiBuffer b; b.ensureSize (4096); return b; }(); // filtros de canal y de CC 120-127
     // Volumen del MIDI Music Player (ganancia lineal, 0-1): lo fija la UI y se guarda en config.settings (midiPlayerVolume)
     std::atomic<float> playerVolume { [] { auto c = openConfig(); return c != nullptr ? (float) juce::jlimit (0.0, 1.0, c->getDoubleValue ("midiPlayerVolume", 1.0)) : 1.0f; }() };
     float lastPlayerVolume = 1.0f; // hilo de audio
