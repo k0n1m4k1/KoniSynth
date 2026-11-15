@@ -213,7 +213,12 @@ public:
     // instrucciones saltadas; 0 si ahora no hay nada que saltar; -1 si el código en pc no tiene esa forma
     int64_t skipCountedLoop (Bus& bus, uint32_t room);
     uint32_t loopHint = 0xffffffffu;  // destino del último "if (R != #C) goto" hacia atrás tomado (dónde mirar)
-    uint32_t notCounted = 0xffffffffu;  // el último pc que no tenía la forma (no volver a mirarlo)
+    // pc que no tenían la forma de un bucle contado (no volver a mirarlos): 8, directa por (pc >> 1) & 7. Con uno solo,
+    // dos bucles anidados se pisaban y cada vuelta paraba la ráfaga y la cadena del JIT (HYP-1: el 57 % de sus salidas)
+    uint32_t notCounted[8] { 0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu,
+                             0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu };
+    bool counted (uint32_t at) const noexcept { return notCounted[(at >> 1) & 7] != at; }
+    void markNotCounted (uint32_t at) noexcept { notCounted[(at >> 1) & 7] = at; }
     void setPlainState (const PlainState& s) noexcept;
 
     // Límites de PC (las guardas de la CPU): el código corre dentro de alguna de las dos ventanas; una instrucción
@@ -276,6 +281,8 @@ public:
     // (KoniFm1Run --stepprofile) instrucciones que la ráfaga interpreta, por motivo << 28 | pc (1: estado de la CPU, 2: sin
     // bloque del JIT, 3: el bloque no cabe en lo que queda); nullptr: sin contar
     std::unordered_map<uint32_t, uint64_t>* stepHist = nullptr;
+    // salidas de la cadena del JIT a la ráfaga: [JitCtx::why] con status 0; [8 + status] con 1 (acceso con efectos) o 2
+    uint64_t jitExits[64] {};
     uint64_t jitRuns = 0, jitInsns = 0, jitCompiled = 0;  // bloques ejecutados, sus instrucciones, bloques compilados
     uint64_t jitRamFlushes = 0, jitResets = 0, jitLinked = 0;  // (y enlaces hechos entre bloques)  // vaciados de los bloques de RAM (código reescrito) y del búfer entero
     // Un bloque del JIT en pc fuera de la ráfaga (el bucle de cpu1, Machine::runCpu1): como mucho maxN instrucciones, sin
@@ -332,6 +339,11 @@ private:
         uint64_t ramCw = 0;         // Ram::codeWrites cuando se miraron los bloques de RAM
         void* lastLink = nullptr;   // el último enlace por el que salió un bloque
         uint8_t loopEnabled = 0;
+        // por qué volvió la cadena a la ráfaga (Cpu::jitExits): en la entrada encadenada, 1 presupuesto, 11 ventanas de pc,
+        // 12 stopA/B, 13 avoid, 14 loopHint, 15 tabla de bucles, 7 código en RAM reescrito; 2 enlace sin
+        // bloque o sin enlazar, 3 destino calculado fuera de la itab, 6 if con else sin cumplirse, 16 + fast el final de un
+        // bloque sin salida encadenable (rti, sti, icfg = R...)
+        uint8_t why = 0;
     };
     // enlace de una salida de un bloque a otro (en memoria de datos: enlazar no toca el código): to = la segunda entrada
     // del bloque de pc, o el epílogo (unlinked) mientras no se enlaza

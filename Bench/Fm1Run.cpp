@@ -458,6 +458,33 @@ int main (int argc, char** argv)
     std::printf ("JIT: cpu0 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer, %llu enlaces\n",
                  (unsigned long long) cpu.jitRuns, (unsigned long long) cpu.jitInsns, (unsigned long long) cpu.jitCompiled,
                  (unsigned long long) cpu.jitRamFlushes, (unsigned long long) cpu.jitResets, (unsigned long long) cpu.jitLinked);
+    {
+        // por qué volvió la cadena del JIT a la ráfaga (Cpu::jitExits, JitCtx::why): los motivos con más del 1 %
+        static const char* const kFast[] = { "None", "Ld", "St", "BrI", "BrR", "AluI", "AluR", "Mov", "MovI", "Goto", "Call",
+            "Rts", "Part", "LdX", "StX", "SpAdd", "SpPlus", "Cnum", "Field", "Adc", "Ie", "AndNot", "Shift", "DecBr", "PopPc",
+            "IcfgRd", "IcfgWr", "Div", "Abs", "Not", "Tb", "CallR", "Rti", "PushList", "PopList", "PushRets", "PopRetPc",
+            "BitBr", "Nop", "ExecRaw" };
+        uint64_t tot = 0;
+        for (const auto x : cpu.jitExits) tot += x;
+        std::printf ("salidas del JIT a la ráfaga (cpu0, %llu):", (unsigned long long) tot);
+        for (int w = 0; w < 64; ++w)
+        {
+            if (cpu.jitExits[w] * 100 < tot || cpu.jitExits[w] == 0)
+                continue;
+            const char* name = w == 0 ? "sin motivo" : w == 1 ? "presupuesto" : w == 2 ? "enlace" : w == 3 ? "itab"
+                             : w == 6 ? "if sin cumplirse" : w == 7 ? "RAM reescrita" : w == 9 ? "acceso con efectos"
+                             : w == 10 ? "fallo" : w == 11 ? "ventanas" : w == 12 ? "stop" : w == 13 ? "avoid"
+                             : w == 14 ? "loopHint" : w == 15 ? "tabla de bucles" : nullptr;
+            char buf[32];
+            if (name == nullptr)
+            {
+                std::snprintf (buf, sizeof buf, "fin %s", w >= 16 && (size_t) (w - 16) < std::size (kFast) ? kFast[w - 16] : "?");
+                name = buf;
+            }
+            std::printf ("  %s %.1f %%", name, 100.0 * (double) cpu.jitExits[w] / (double) tot);
+        }
+        std::printf ("\n");
+    }
     if (m.cpu1)
         std::printf ("JIT: cpu1 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer\n",
                      (unsigned long long) m.cpu1->jitRuns, (unsigned long long) m.cpu1->jitInsns, (unsigned long long) m.cpu1->jitCompiled,

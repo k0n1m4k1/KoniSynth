@@ -1507,13 +1507,13 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
         }
         // bucle de retardo contado: vueltas enteras hasta antes del siguiente evento, exacto (ver Cpu::skipCountedLoop). El tick
         // de esta instrucción está pagado: k instrucciones dejan el reloj k - 1 más allá, y el tick de la siguiente lo paga el bucle
-        if (cpu0.pc == cpu0.loopHint && cpu0.pc != cpu0.notCounted && loopSkip.enabled && ! soc.cpu1Release && ! soc.periph.anyPending())
+        if (cpu0.pc == cpu0.loopHint && cpu0.counted (cpu0.pc) && loopSkip.enabled && ! soc.cpu1Release && ! soc.periph.anyPending())
         {
             const auto c = soc.periph.cycles, due = soc.periph.nextDue;
             const auto room = (uint32_t) std::min<uint64_t> (n - done, due > c ? due - c : 0);
             const auto k = cpu0.skipCountedLoop (soc, room);
             if (k < 0)
-                cpu0.notCounted = cpu0.pc;
+                cpu0.markNotCounted (cpu0.pc);
             else if (k > 0)
             {
                 soc.periph.cycles += (uint64_t) k - 1;
@@ -1624,7 +1624,7 @@ bool Machine::burstStop (uint32_t room) const noexcept
     if (! loopSkip.enabled)
         return false;
     const auto pc = cpu0.pc;
-    if (pc == cpu0.loopHint && pc != cpu0.notCounted)
+    if (pc == cpu0.loopHint && cpu0.counted (pc))
         return true;
     const auto now = soc.periph.cycles + 1;
     return room >= kProbeKnown && now >= loopSkip.nextTry
