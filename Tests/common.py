@@ -16,7 +16,7 @@ import analysis  # noqa: E402  (read_wav)
 SEED = '--prop=randomSeed=5EED'  # aleatoriedad reproducible (Dsp/RandomClock.h)
 
 
-def render(args, secs, notes, name='t.wav', engine='Synth'):
+def render(args, secs, notes, name='t.wav', engine='KoniSynth'):
     """Render con KoniBench; devuelve (canal izquierdo, fs). Falla si algún parámetro no existe."""
     path = os.path.join(RENDERS, name)
     cmd = [EXE, VST, 'render', path, str(secs)] + (['Engine=' + engine] if engine else []) + [SEED] + list(args) + list(notes)

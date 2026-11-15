@@ -49,7 +49,7 @@ try:
     r = call('load_preset', name='zzKoniTest v3')
     note = r.get('result', {}).get('note', '')
     g = call('get', ids=['cutoff'])
-    check(r['ok'] and r['result']['engine'] == 'Synth' and 'newer KoniSynth (9.9.0' in note and 'futureKnob' in note and g['result']['cutoff'].startswith('2.00 k'),
+    check(r['ok'] and r['result']['engine'] == 'KoniSynth' and 'newer KoniSynth (9.9.0' in note and 'futureKnob' in note and g['result']['cutoff'].startswith('2.00 k'),
           'formato 99 (posterior): carga lo conocido (cutoff %s) y avisa: "%s"' % (g['result']['cutoff'], note))
     r = call('save_preset', name='zzKoniTest Saved', category='Lead')
     head = open(saved, encoding='utf-8').read()[:300] if os.path.exists(saved) else ''

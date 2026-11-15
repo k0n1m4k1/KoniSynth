@@ -6,7 +6,7 @@ from common import EXE, VST, RENDERS, SEED, Checker
 import subprocess
 
 CASES = {
-    'synth': ['Engine=Synth', 'Unison Voices=3', 'Unison Spread=0.8'],
+    'synth': ['Engine=KoniSynth', 'Unison Voices=3', 'Unison Spread=0.8'],
     'theremin': ['Engine=Theremin', 'Theremin Volume=0.8', 'Theremin Pitch=0.5'],
     'vl1': ['Engine=Casio VL-1', 'VL-1 Rhythm=Rock 1'],
     'stylo': ['Engine=Stylophone'], 'omni': ['Engine=Omnichord', 'Omnichord Rhythm=Rock 1'],
