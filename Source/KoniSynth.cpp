@@ -2143,19 +2143,18 @@ private:
                 data[i] = (std::tanh (g * data[i] + B) - offset) * comp;
         };
 
-        juce::dsp::AudioBlock<float> block (buffer);
-
-        if (buffer.getNumSamples() <= maxBlockSize)
+        // Por trozos de como mucho maxBlockSize (el tamaño con el que se preparó el sobremuestreo), como AmpSim: un bloque
+        // mayor que el anunciado sigue sobremuestreado, con el mismo retardo y el estado de los filtros al día (antes iba
+        // sin sobremuestreo, con aliasing y sin el retardo que sí cuenta la latencia)
+        juce::dsp::AudioBlock<float> all (buffer);
+        const auto total = buffer.getNumSamples(), step = juce::jmax (1, maxBlockSize);
+        for (int off = 0; off < total; off += step)
         {
+            auto block = all.getSubBlock ((size_t) off, (size_t) juce::jmin (step, total - off));
             auto up = tubeOversampling->processSamplesUp (block);
             for (size_t ch = 0; ch < up.getNumChannels(); ++ch)
                 shape (up.getChannelPointer (ch), up.getNumSamples());
             tubeOversampling->processSamplesDown (block);
-        }
-        else // bloque mayor que el anunciado en prepareToPlay: sin oversampling antes que fallar
-        {
-            for (size_t ch = 0; ch < block.getNumChannels(); ++ch)
-                shape (block.getChannelPointer (ch), block.getNumSamples());
         }
 
         // DC blocker: y[n] = x[n] - x[n-1] + R·y[n-1]
