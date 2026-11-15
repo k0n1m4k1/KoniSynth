@@ -168,18 +168,26 @@ struct AmpSim
     // Latencia (muestras a la tasa del host) del sobremuestreo; la convolución es de latencia 0
     int latency() const { return oversampling != nullptr ? juce::roundToInt (oversampling->getLatencyInSamples()) : 0; }
 
-    // IR del usuario (hilo de mensajes): la convolución la carga en segundo plano y la cambia sin cortes
-    void setUserIr (juce::AudioBuffer<float>&& ir, double irRate)
+    // IR del usuario (cualquier hilo salvo el de audio). juce::dsp::Convolution exige que loadImpulseResponse no se cruce
+    // con process ("in practice means making the load() call from the audio thread", juce_Convolution.h): aquí solo se
+    // deja la orden en un buzón y el hilo de audio la aplica al empezar process (la carga es sin esperas y la convolución
+    // la prepara en segundo plano y la cambia sin cortes). Una orden aún no recogida se sustituye por la nueva
+    void setUserIr (juce::AudioBuffer<float>&& ir, double irRate) { post (new IrOrder { std::move (ir), irRate, true }); }
+    void clearUserIr() { post (new IrOrder { {}, 0.0, false }); }
+
+    // Hilo de mensajes (temporizador del procesador): libera la orden que el audio ya aplicó
+    void collectIr() { delete irSpent.exchange (nullptr); }
+
+    ~AmpSim()
     {
-        convolution.loadImpulseResponse (std::move (ir), irRate, juce::dsp::Convolution::Stereo::yes,
-                                         juce::dsp::Convolution::Trim::yes, juce::dsp::Convolution::Normalise::yes);
-        hasIr.store (true);
+        delete irPending.exchange (nullptr);
+        collectIr();
     }
-    void clearUserIr() { hasIr.store (false); }
 
     // Bloques mayores que el anunciado en prepare: por trozos (el sobremuestreo y la convolución tienen ese tamaño máximo)
     void process (juce::AudioBuffer<float>& buffer, const Settings& s)
     {
+        takeIrOrder();
         const auto chans = juce::jmin (2, buffer.getNumChannels());
         if (oversampling == nullptr || chans == 0) return;
         juce::dsp::AudioBlock<float> all (buffer.getArrayOfWritePointers(), (size_t) chans, (size_t) buffer.getNumSamples());
@@ -188,6 +196,35 @@ struct AmpSim
     }
 
 private:
+    struct IrOrder
+    {
+        juce::AudioBuffer<float> ir;
+        double rate;
+        bool load;  // false: quitar la IR
+    };
+
+    void post (IrOrder* order)
+    {
+        collectIr();
+        delete irPending.exchange (order);  // la anterior no la tomó el audio (solo la toma con exchange): nadie más la ve
+    }
+
+    // Hilo de audio: aplica la última orden. El envoltorio vacío (el búfer ya movido a la convolución) lo libera collectIr;
+    // si aún no ha liberado el anterior, la orden espera al bloque siguiente, para no liberar memoria aquí
+    void takeIrOrder()
+    {
+        if (irPending.load (std::memory_order_relaxed) == nullptr || irSpent.load() != nullptr)
+            return;
+        auto* order = irPending.exchange (nullptr);
+        if (order == nullptr)
+            return;
+        if (order->load)
+            convolution.loadImpulseResponse (std::move (order->ir), order->rate, juce::dsp::Convolution::Stereo::yes,
+                                             juce::dsp::Convolution::Trim::yes, juce::dsp::Convolution::Normalise::yes);
+        hasIr = order->load;
+        irSpent.store (order);
+    }
+
     void processChunk (juce::dsp::AudioBlock<float> block, const Settings& s)
     {
         const auto chans = (int) block.getNumChannels();
@@ -258,7 +295,7 @@ private:
             for (int ch = 0; ch < chans; ++ch) dry.copyFrom (ch, 0, block.getChannelPointer ((size_t) ch), n);
         if (s.cab == Amp::cabUserIr)
         {
-            if (! hasIr.load()) return;
+            if (! hasIr) return;
             juce::dsp::ProcessContextReplacing<float> ctx (block);
             convolution.process (ctx);
         }
@@ -323,5 +360,6 @@ private:
     Settings cur;
     bool primed = false;
     int lastCab = -1;
-    std::atomic<bool> hasIr { false };
+    bool hasIr = false;  // solo el hilo de audio (takeIrOrder)
+    std::atomic<IrOrder*> irPending { nullptr }, irSpent { nullptr };
 };

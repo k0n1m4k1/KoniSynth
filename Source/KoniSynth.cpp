@@ -2416,6 +2416,7 @@ private:
         for (auto* slot : sampleSlots())
             slot->collect();
         wavetableSlot.collect();
+        ampSim.collectIr();
         osc2WavetableSlot.collect();
         osc3WavetableSlot.collect();
         ansSlot.collect();
