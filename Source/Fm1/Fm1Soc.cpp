@@ -473,17 +473,29 @@ uint32_t Soc::read32Slow (uint32_t addr)
     ++sideEffects;
     // Sin efectos para la ráfaga: el P33 lee su estado, el ADC su CON / RES y los GPIO sus pines (nada cambia), y el
     // contador del TIMER4 (0x10804) si no salta tiempo (skipIdle: adelanta cycles y pide reevaluar con nextDue = 0). El
-    // resto, siempre. Melodee con 12 notas lo lee 3 millones de veces por segundo: el 45 % de los accesos con efectos
+    // resto, siempre. Melodee con 12 notas lo lee 3 millones de veces por segundo: el 45 % de los accesos con efectos.
+    // También, medido con 12 notas en 4 s: ANA (sfrGet; FoMni 969 000, HYP-1 723 000) y USB (almacenamiento simple; ~480 000
+    // en todos), el contador del TIMER5 (0x10904, calculado de cycles; V15 2,4 M) y SPI0, la flash (sin interrupciones;
+    // Melodee 4,1 M), con nextDue y cycles intactos
     const auto r0 = region (addr);
+    // (--ioprofile cuenta los que paran)
     struct StopAfterRead
     {
         Soc& soc;
         bool always;
         uint64_t due0, cyc0;
-        ~StopAfterRead() { if (always || soc.periph.nextDue != due0 || soc.periph.cycles != cyc0) ++soc.stopEffects; }
-    } stopAfter { *this, ! (r0 == Region::P33 || r0 == Region::Gpio || addr == 0x13100 || addr == 0x13104 || addr == 0x10804),
-                  periph.nextDue, periph.cycles };
-    if (ioHist != nullptr) ++(*ioHist)[addr & ~3u];
+        uint32_t key;
+        ~StopAfterRead()
+        {
+            if (always || soc.periph.nextDue != due0 || soc.periph.cycles != cyc0)
+            {
+                ++soc.stopEffects;
+                if (soc.ioHist != nullptr) ++(*soc.ioHist)[key];
+            }
+        }
+    } stopAfter { *this, ! (r0 == Region::P33 || r0 == Region::Gpio || r0 == Region::Ana || r0 == Region::Usb || r0 == Region::Spi0
+                            || addr == 0x13100 || addr == 0x13104 || addr == 0x10804 || addr == 0x10904),
+                  periph.nextDue, periph.cycles, addr & ~3u };
     if (observing) [[unlikely]]
     {
         if (addr == 0x10804) ++obsT4;
@@ -646,7 +658,8 @@ void Soc::write32Slow (uint32_t addr, uint32_t v)
 {
     ++sideEffects;
     const auto rg = region (addr);  // (una vez: no se queda en línea, y eran tres llamadas)
-    // ADC, GPIO (salvo PD0) y P33: sin efectos para la ráfaga si el periférico no pidió reevaluar (nextDue intacto; una
+    // ADC, GPIO (salvo PD0), P33, SPI0 (la flash, sin interrupciones; Melodee con 12 notas: 3,4 M en 4 s) y el contador del
+    // TIMER5 (escribirlo no hace nada; V15: 1,2 M): sin efectos para la ráfaga si el periférico no pidió reevaluar (nextDue intacto; una
     // IRQ del ADC lo pide, y en el P33 un reset o un perro guardián que vence antes: p33Event). El resto, siempre. Se decide
     // al salir (las ramas de abajo vuelven por varios sitios). Medido con 12 notas: HYP-1 y DUB-1 alimentan el perro
     // guardián 117 000-181 000 veces por segundo, ~24 accesos al P33 cada vez
@@ -655,11 +668,18 @@ void Soc::write32Slow (uint32_t addr, uint32_t v)
         Soc& soc;
         bool quiet;
         uint64_t due0;
-        ~StopAfter() { if (! quiet || soc.periph.nextDue != due0) ++soc.stopEffects; }
-    } stopAfter { *this, (rg == Region::Gpio && addr != 0x500c0) || rg == Region::P33 || addr == 0x13100
-                             || addr == 0x13104,
-                  periph.nextDue };
-    if (ioHist != nullptr) ++(*ioHist)[(addr & ~3u) | 1u];
+        uint32_t key;
+        ~StopAfter()
+        {
+            if (! quiet || soc.periph.nextDue != due0)
+            {
+                ++soc.stopEffects;
+                if (soc.ioHist != nullptr) ++(*soc.ioHist)[key];  // (--ioprofile cuenta los que paran)
+            }
+        }
+    } stopAfter { *this, (rg == Region::Gpio && addr != 0x500c0) || rg == Region::P33 || rg == Region::Spi0 || addr == 0x13100
+                             || addr == 0x13104 || addr == 0x10904,
+                  periph.nextDue, (addr & ~3u) | 1u };
     if (observing && rg != Region::Ram) [[unlikely]]
         ++obsImpure;
     switch (rg)
