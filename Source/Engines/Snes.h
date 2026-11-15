@@ -297,11 +297,14 @@ private:
         sources[kNumSources] = encodeBrr (pcm, loop, 0.0);
     }
 
-    int pitchFor (int note) const
+    // Tono de la nota con la raíz de la fuente que suena en la voz (v.source), no la del selector: cambiar SNES Source
+    // con notas sostenidas solo afecta a las nuevas (antes las sostenidas pasaban a la raíz de la nueva: 440 -> 840 Hz
+    // de Sine a Strings)
+    int pitchFor (int note, int source) const
     {
-        const auto& src = sources[(size_t) sourceIndex];
+        const auto& src = sources[(size_t) source];
         // Fuente del usuario: la nota Root suena a su tasa (32/16/8 kHz) -> con tono 0x1000 suena root·32000/tasa
-        const auto rootHz = sourceIndex == kNumSources ? 440.0 * std::exp2 ((userRootNote - 69) / 12.0) * kRate / userRoot : src.rootHz;
+        const auto rootHz = source == kNumSources ? 440.0 * std::exp2 ((userRootNote - 69) / 12.0) * kRate / userRoot : src.rootHz;
         const auto f = 440.0 * std::exp2 ((note - 69) / 12.0 + tuneCents / 1200.0) * KoniTuning::ratio (note);
         return juce::jlimit (0, 0x3fff, (int) std::lround (4096.0 * f / rootHz));
     }
@@ -316,7 +319,7 @@ private:
             const auto& m = macros->macro[MacroSet::arpeggio];
             note = juce::jlimit (0, 127, arp.isAbsolute (m) ? arp.value (m, 0) + 12 : note + arp.value (m, 0));
         }
-        return juce::jlimit (0, 0x3fff, pitchFor (note) - 8 * v.pitchAcc);
+        return juce::jlimit (0, 0x3fff, pitchFor (note, v.source) - 8 * v.pitchAcc);
     }
 
     void applyMacroLevels (Voice& v) const
