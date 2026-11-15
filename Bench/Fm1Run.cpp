@@ -463,6 +463,8 @@ int main (int argc, char** argv)
     std::printf ("JIT: cpu0 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer, %llu enlaces\n",
                  (unsigned long long) cpu.jitRuns, (unsigned long long) cpu.jitInsns, (unsigned long long) cpu.jitCompiled,
                  (unsigned long long) cpu.jitRamFlushes, (unsigned long long) cpu.jitResets, (unsigned long long) cpu.jitLinked);
+    std::printf ("JIT: compilar, %.1f ms reales (%.1f us por bloque)\n", (double) cpu.jitCompileNs / 1e6,
+                 cpu.jitCompiled > 0 ? (double) cpu.jitCompileNs / 1e3 / (double) cpu.jitCompiled : 0.0);
     {
         // por qué volvió la cadena del JIT a la ráfaga (Cpu::jitExits, JitCtx::why): los motivos con más del 1 %
         static const char* const kFast[] = { "None", "Ld", "St", "BrI", "BrR", "AluI", "AluR", "Mov", "MovI", "Goto", "Call",

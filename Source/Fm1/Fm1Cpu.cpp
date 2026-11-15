@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstring>
@@ -2851,6 +2852,13 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     if (slot == 1 || jitFailed)
         return nullptr;
     slot = 1;  // (hasta que se compile)
+    // (KoniFm1Run) el tiempo real que se va en compilar, por todas las salidas de aquí abajo
+    struct CompileClock
+    {
+        uint64_t& ns;
+        std::chrono::steady_clock::time_point t0 = std::chrono::steady_clock::now();
+        ~CompileClock() { ns += (uint64_t) std::chrono::duration_cast<std::chrono::nanoseconds> (std::chrono::steady_clock::now() - t0).count(); }
+    } compileClock { jitCompileNs };
     std::vector<const Line*> lines;
     uint32_t a = at;
     const auto inSpan = [&] (uint32_t x) { return inRam ? x - jitRam.base + 8 <= jitRam.size : x - 0x02000000u < kJitSpan; };

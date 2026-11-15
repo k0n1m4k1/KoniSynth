@@ -26,8 +26,10 @@ constexpr bool jitSupported() noexcept
 // plataformas no hace nada. false si el sistema no lo admite
 bool preferPerformanceCores() noexcept;
 
-// Memoria para código nativo: se reserva de una vez; cada bloque se copia con sus páginas en lectura-escritura y luego
-// pasan a lectura-ejecución (nunca escribibles y ejecutables a la vez)
+// Memoria para código nativo: se reserva de una vez, nunca escribible y ejecutable a la vez (W^X). Preferida: la misma
+// memoria proyectada dos veces, una vista de escritura y otra de ejecución, sin llamadas al sistema por bloque. Si el
+// sistema no la da: una sola vista, y cada bloque pasa sus páginas a escritura, se copia y vuelve a ejecución (dos
+// VirtualProtect / mprotect por bloque: medido, la mitad del tiempo de compilar)
 class CodeBuffer
 {
 public:
@@ -43,7 +45,10 @@ public:
     void reset() noexcept { top = 0; }  // (todo el código anterior deja de usarse: el JIT vacía sus índices antes)
 
 private:
-    uint8_t* base = nullptr;
+    uint8_t* base = nullptr;   // la vista que se ejecuta
+    uint8_t* wbase = nullptr;  // la de escritura (doble vista); nullptr: una sola vista con cambios de protección
+    void* mapping = nullptr;   // (Windows) la sección de las dos vistas
+    int fd = -1;               // (Linux) el memfd de las dos vistas
     size_t size = 0, top = 0;
 };
 

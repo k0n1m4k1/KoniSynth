@@ -1,7 +1,9 @@
 // Port a C++ del decodificador de fm1-emu (crate fm1-isa, lib.rs; Joakim Eriksson, licencia MIT). Ver Fm1Isa.h.
 #include "Fm1Isa.h"
 
+#include <atomic>
 #include <cstring>
+#include <vector>
 
 namespace fm1
 {
@@ -110,14 +112,41 @@ bool hasSyntax (const Fm1IsaEntry& e, const char* form) noexcept
     return false;
 }
 
+namespace
+{
+// Las entradas de kIsa compatibles con los 16 bits bajos de una ventana, en el orden de la tabla (el desempate depende de
+// él), hechas la primera vez que aparece esos 16 bits. Recorrer las 2916 clases en cada decodificación era el 25 % del
+// tiempo del emulador al entrar en código nuevo (DUB-1: 8488 bloques; la memoria de decodeAny es de 4096 ventanas).
+// Entre hilos: una lista hecha dos veces se queda la primera (la otra se libera)
+const std::vector<uint16_t>& isaCandidates (uint16_t lo) noexcept
+{
+    static_assert (countOf (kIsa) < 65536, "índices de 16 bits");
+    static std::atomic<const std::vector<uint16_t>*> lists[65536] {};
+    if (const auto* l = lists[lo].load (std::memory_order_acquire))
+        return *l;
+    auto* made = new std::vector<uint16_t>();
+    for (size_t i = 0; i < countOf (kIsa); ++i)
+        if (((uint64_t) lo & kIsa[i].mask & 0xffff) == (kIsa[i].match & 0xffff))
+            made->push_back ((uint16_t) i);
+    const std::vector<uint16_t>* expected = nullptr;
+    if (! lists[lo].compare_exchange_strong (expected, made, std::memory_order_acq_rel))
+    {
+        delete made;
+        return *expected;
+    }
+    return *made;
+}
+} // namespace
+
 const Fm1IsaEntry* decodeWin (uint64_t win) noexcept
 {
     for (const auto& e : kFpu)
         if ((win & e.mask) == e.match)
             return &e;
     const Fm1IsaEntry* best = nullptr;
-    for (const auto& e : kIsa)
+    for (const auto k : isaCandidates ((uint16_t) win))
     {
+        const auto& e = kIsa[k];
         if ((win & e.mask) != e.match)
             continue;
         // El desempate por muestra compara solo los bytes de la longitud de la entrada (las muestras se guardan como

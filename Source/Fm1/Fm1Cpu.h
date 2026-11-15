@@ -283,6 +283,7 @@ public:
     std::unordered_map<uint32_t, uint64_t>* stepHist = nullptr;
     // salidas de la cadena del JIT a la ráfaga: [JitCtx::why] con status 0; [8 + status] con 1 (acceso con efectos) o 2
     uint64_t jitExits[64] {};
+    uint64_t jitCompileNs = 0;  // tiempo real gastado en compilar bloques (jitAt)
     uint64_t jitRuns = 0, jitInsns = 0, jitCompiled = 0;  // bloques ejecutados, sus instrucciones, bloques compilados
     uint64_t jitRamFlushes = 0, jitResets = 0, jitLinked = 0;  // (y enlaces hechos entre bloques)  // vaciados de los bloques de RAM (código reescrito) y del búfer entero
     // Un bloque del JIT en pc fuera de la ráfaga (el bucle de cpu1, Machine::runCpu1): como mucho maxN instrucciones, sin
