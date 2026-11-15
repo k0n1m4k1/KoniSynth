@@ -502,7 +502,7 @@ public:
         easterEgg.prepare (sampleRate);
         mdEngine.prepare (sampleRate, samplesPerBlock);
         snesEngine.prepare (sampleRate, samplesPerBlock);
-        n64Engine.prepare (sampleRate, samplesPerBlock);
+        n64Engine.prepare (sampleRate, samplesPerBlock, params);
         oplEngine.prepare (sampleRate, samplesPerBlock);
         mt32Engine.prepare (sampleRate, samplesPerBlock);
         gusEngine.prepare (sampleRate, samplesPerBlock);

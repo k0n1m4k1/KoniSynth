@@ -20,12 +20,18 @@ struct N64Engine
 {
     static constexpr int kVoices = 16;
 
-    void prepare (double sr, int maxBlock)
+    // p: las fuentes de fábrica se construyen aquí con la tasa y el ADPCM actuales (6 fuentes con LPC y k-means; en el
+    // hilo de audio, el primer bloque superaba 40 veces el presupuesto de 5,3 ms según una medida externa). Un cambio de
+    // tasa o ADPCM posterior las reconstruye en render
+    void prepare (double sr, int maxBlock, const Params& p)
     {
         hostRate = sr;
         (void) maxBlock;
         outRateIndex = -1; // se configura en el primer render
         reset();
+        readParams (p);
+        if (sourceRateIndex != builtRateIndex || adpcmOn != builtAdpcm)
+            buildSources();
     }
 
     void reset()
