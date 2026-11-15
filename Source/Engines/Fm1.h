@@ -130,6 +130,18 @@ public:
     // cuenta la segunda con un periodo de 120 ms; con 100 + 100 ms, V15, GR!MM y Felucca suben las dos octavas
     void tap (uint8_t key) { panel ({ fm1::PanelAction::Key, key, kTapValue }); }
 
+    // Los LED de las 41 teclas de la matriz si cambiaron desde rev (hilo de mensajes): la fracción del tiempo encendido
+    // desde la copia anterior (Periph::ledTake). false = sin cambios
+    bool takeLeds (std::array<float, 41>& to, uint64_t& rev)
+    {
+        const std::lock_guard<std::mutex> g (screenLock);
+        if (ledsRev == rev)
+            return false;
+        to = leds;
+        rev = ledsRev;
+        return true;
+    }
+
     // La pantalla si cambió desde rev (hilo de mensajes): RGB565 de 240 × 240. false = sin cambios
     bool takeScreen (std::vector<uint16_t>& to, uint64_t& rev, bool& on)
     {
@@ -232,6 +244,7 @@ private:
         int64_t produced = 0;     // tramas de audio que ha dado
         int64_t dacOffset = -1;   // trama del reloj del DAC de la primera trama dada (-1: aún sin audio)
         uint64_t shownAt = 0;     // ciclo de la última copia de la pantalla
+        uint64_t ledsAt = 0;      // y de los LED
         uint32_t shownRev = ~0u;  // y su revisión
         uint64_t packageHash = 0; // FNV-1a del .fwsc: la memoria guardada solo vale para el mismo paquete
         juce::File savePath;      // <firmware>.fm1save
@@ -461,6 +474,7 @@ private:
             moveAudio (e);
         }
         publishScreen (e);
+        publishLeds (e);
         return true;
     }
 
@@ -497,6 +511,19 @@ private:
         screen = lcd.fb;
         screenOn = lcd.displayOn;
         ++screenRev;
+    }
+
+    // Los LED para la interfaz: 30 veces por segundo de máquina, la fracción encendida de cada uno en ese tiempo
+    void publishLeds (Emu& e)
+    {
+        const auto now = e.soc->periph.cycles;
+        if (now - e.ledsAt < fm1::kCpuHz / 30)
+            return;
+        e.ledsAt = now;
+        const auto l = e.soc->periph.ledTake();
+        const std::lock_guard<std::mutex> g (screenLock);
+        leds = l;
+        ++ledsRev;
     }
 
     // El hilo del emulador: mantiene la cola de audio la latencia por delante de lo que el audio ha sacado
@@ -617,6 +644,8 @@ private:
     std::vector<uint16_t> screen = std::vector<uint16_t> ((size_t) kScreen * kScreen, 0);
     bool screenOn = false;
     uint64_t screenRev = 0;
+    std::array<float, 41> leds {};  // (screenLock)
+    uint64_t ledsRev = 0;
 
     juce::CriticalSection statusLock;
     juce::String status;

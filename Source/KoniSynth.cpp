@@ -428,6 +428,7 @@ public:
     }
     bool takeFm1Screen (std::vector<uint16_t>& to, uint64_t& rev, bool& on) { return fm1Engine.takeScreen (to, rev, on); }
     void fm1Panel (const fm1::PanelAction& a) { fm1Engine.panel (a); }
+    bool fm1TakeLeds (std::array<float, 41>& to, uint64_t& rev) { return fm1Engine.takeLeds (to, rev); }
     // La octava del teclado de KoniSynth (Z / X) cambió: con el motor FM-1, también OCT- / OCT+ del firmware (teclas 0 y 1 de
     // la matriz), una pulsación por octava. Su octava solo mueve sus 27 teclas: el MIDI que entra no se transpone (medido en
     // V15, GHOULBOX, GR!MM, Felucca y JIANT), así que el tono no cambia dos veces

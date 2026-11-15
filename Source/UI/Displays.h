@@ -1140,10 +1140,27 @@ private:
 };
 
 // Botón y potenciómetro del panel con su menú contextual (el clic derecho no pulsa ni mueve)
+// Brillo de un LED del FM-1 a partir de la fracción del tiempo encendido (multiplexado): pleno a 0,08, como bright de
+// fm1-live (panel.rs: un LED encendido del todo lo está ~1 tick de cada 11)
+inline float fm1LedBright (float f) { return juce::jlimit (0.0f, 1.0f, f / 0.08f); }
+
 struct Fm1Button : juce::TextButton
 {
     using juce::TextButton::TextButton;
     std::function<void()> onPopup;
+    float led = 0.0f;  // (fm1LedBright) el LED de la tecla, que tiñe el botón como en el aparato
+    void paintButton (juce::Graphics& g, bool over, bool down) override
+    {
+        juce::TextButton::paintButton (g, over, down);
+        if (led > 0.01f)
+        {
+            const auto r = getLocalBounds().toFloat().reduced (2.0f);
+            g.setColour (juce::Colour (0xffffa020).withAlpha (0.45f * led));
+            g.fillRoundedRectangle (r, 4.0f);
+            g.setColour (juce::Colour (0xffffd080).withAlpha (led));
+            g.drawRoundedRectangle (r, 4.0f, 1.5f);
+        }
+    }
     void mouseDown (const juce::MouseEvent& e) override
     {
         if (e.mods.isPopupMenu() && onPopup) { onPopup(); return; }
@@ -1170,10 +1187,100 @@ struct Fm1Pot : juce::Slider
 };
 
 //==============================================================================
+// Las 27 teclas de nota del FM-1 (F3..G5, teclas 14-40 de la matriz) como en fm1-live (panel.rs, keys): 16 blancas en fila
+// y 11 negras encima, en los huecos. Se tocan con el ratón, con la velocidad por la altura del clic (1 arriba, 127 abajo,
+// key_vel), y se iluminan con su LED: lo que el firmware enciende en cada página (pasos, escalas...). Sin rótulos: el
+// firmware no los pone (las teclas no tienen pantalla); lo que significa cada una lo dice la pantalla
+struct Fm1Keys : juce::Component, juce::SettableTooltipClient
+{
+    std::function<void (int id, int vel)> onDown;
+    std::function<void (int id)> onUp;
+    std::array<float, 41> leds {};
+
+    struct Key { int id; juce::Rectangle<float> r; bool black; };
+    // en las unidades de fm1-live (teclas de 62 de ancho, 11 de hueco; blancas de 106 de alto, negras de 94 encima)
+    std::vector<Key> layout() const
+    {
+        constexpr float kw = 62.0f, gap = 11.0f, x0 = 61.0f, y0 = 574.0f, spanW = 15 * (kw + gap) + kw, spanH = 212.0f;
+        const auto area = getLocalBounds().toFloat();
+        const auto sx = area.getWidth() / spanW, sy = area.getHeight() / spanH;
+        const auto rect = [&] (float x, float y, float w, float h)
+        {
+            return juce::Rectangle<float> ((x - x0) * sx, (y - y0) * sy, w * sx, h * sy);
+        };
+        std::vector<Key> v;
+        static const int whites[] = { 0, 2, 4, 6, 7, 9, 11, 12, 14, 16, 18, 19, 21, 23, 24, 26 };
+        for (int i = 0; i < 16; ++i)
+            v.push_back ({ 14 + whites[i], rect (x0 + (float) i * (kw + gap), 680.0f, kw, 106.0f), false });
+        static const std::pair<int, int> blacks[] = { { 1, 0 }, { 3, 1 }, { 5, 2 }, { 8, 4 }, { 10, 5 }, { 13, 7 }, { 15, 8 },
+                                                      { 17, 9 }, { 20, 11 }, { 22, 12 }, { 25, 14 } };
+        for (const auto& [n, after] : blacks)
+        {
+            const auto cx = x0 + (float) (after + 1) * (kw + gap) - gap / 2.0f;
+            v.push_back ({ 14 + n, rect (cx - kw / 2.0f, 574.0f, kw, 94.0f), true });
+        }
+        return v;
+    }
+
+    void paint (juce::Graphics& g) override
+    {
+        for (const auto& k : layout())
+        {
+            const auto lit = fm1LedBright (leds[(size_t) k.id]);
+            const auto heat = k.id == held ? 0.55f : lit * 0.6f;
+            const auto base = juce::Colour (0xff5d4a4c), amber = juce::Colour (0xffffa020);
+            const auto r = k.r.reduced (0.5f);
+            g.setGradientFill (juce::ColourGradient (base.brighter (0.15f).interpolatedWith (amber, heat), r.getX(), r.getY(),
+                                                     base.darker (0.25f).interpolatedWith (amber, heat * 0.8f), r.getX(), r.getBottom(), false));
+            g.fillRoundedRectangle (r, juce::jmin (r.getWidth(), r.getHeight()) / 2.0f);
+            g.setColour (juce::Colour (0xff8f7c7e).interpolatedWith (juce::Colour (0xffffe2b0), k.id == held ? 1.0f : lit));
+            g.drawRoundedRectangle (r, juce::jmin (r.getWidth(), r.getHeight()) / 2.0f, 1.0f);
+        }
+    }
+
+    // (las negras primero: están encima de la fila de blancas)
+    const Key* hit (juce::Point<float> p) const
+    {
+        static thread_local std::vector<Key> ks;
+        ks = layout();
+        for (bool black : { true, false })
+            for (const auto& k : ks)
+                if (k.black == black && k.r.contains (p))
+                    return &k;
+        return nullptr;
+    }
+
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu())
+            return;
+        if (const auto* k = hit (e.position))
+        {
+            held = k->id;
+            const auto vel = juce::roundToInt (1.0f + 126.0f * juce::jlimit (0.0f, 1.0f, (e.position.y - k->r.getY()) / k->r.getHeight()));
+            if (onDown) onDown (held, vel);
+            repaint();
+        }
+    }
+    void mouseUp (const juce::MouseEvent&) override
+    {
+        if (held >= 0)
+        {
+            if (onUp) onUp (held);
+            held = -1;
+            repaint();
+        }
+    }
+
+    int held = -1;
+};
+
+//==============================================================================
 // El aparato: la pantalla en el centro y, a los lados, los mandos del panel del FM-1 en su sitio (disposición del dibujo
 // de controles de Felucca, como fm1-emu crates/fm1-live/src/panel.rs, MIT): a la izquierda MASTER (potenciómetro, ADC
-// canal 4), SELECT, PRESETS, ALGORITHM y OCT- / OCT+; a la derecha K1-K4 y dos filas de seis botones. Las 27 teclas no: las
-// notas llegan por MIDI. Los botones se mantienen mientras se pulsan; los encoders mandan clics (Fm1Engine::panel)
+// canal 4), SELECT, PRESETS, ALGORITHM y OCT- / OCT+; a la derecha K1-K4, dos filas de seis botones y, debajo, las 27
+// teclas (Fm1Keys; las notas también llegan por MIDI). Botones y teclas se iluminan con sus LED. Los botones se mantienen
+// mientras se pulsan; los encoders mandan clics (Fm1Engine::panel)
 class Fm1Device : public juce::Component, private juce::Timer
 {
 public:
@@ -1266,15 +1373,26 @@ public:
                 });
         };
         addAndMakeVisible (resetButton);
-        startTimerHz (10);
+        noteKeys.onDown = [this] (int id, int vel)
+        {
+            processor.fm1Panel ({ fm1::PanelAction::KeyVel, 0, vel });
+            processor.fm1Panel ({ fm1::PanelAction::Key, (uint8_t) id, 1 });
+        };
+        noteKeys.onUp = [this] (int id) { processor.fm1Panel ({ fm1::PanelAction::Key, (uint8_t) id, 0 }); };
+        noteKeys.setTooltip ("The FM-1's 27 keys (F3-G5), lit by the firmware's LEDs. Click to play one: the higher on the key, "
+                             "the softer. What the keys do and light up depends on the firmware and its current page.");
+        addAndMakeVisible (noteKeys);
+        startTimerHz (30);
     }
 
     ~Fm1Device() override
     {
-        // un botón que se quedara pulsado al cerrar el editor se suelta
+        // un botón o una tecla que se quedara pulsada al cerrar el editor se suelta
         for (size_t i = 0; i < held.size(); ++i)
             if (held[i])
                 processor.fm1Panel ({ fm1::PanelAction::Key, (uint8_t) i, 0 });
+        if (noteKeys.held >= 0)
+            processor.fm1Panel ({ fm1::PanelAction::Key, (uint8_t) noteKeys.held, 0 });
     }
 
     void paint (juce::Graphics& g) override { g.fillAll (Skin::c (0xff17191c)); }
@@ -1343,6 +1461,10 @@ public:
                 keys[row * 6 + i]->setBounds (line.removeFromLeft (bw).reduced (kSpace / 2, 0));
             right.removeFromTop (kSpace + 4);
         }
+        // debajo, las 27 teclas: con la proporción de fm1-live (1157 × 212) en lo que quede, hasta ese alto
+        const auto keysW = right.getWidth() - kSpace;
+        const auto keysH = juce::jmin (right.getHeight() - kSpace, juce::roundToInt ((float) keysW * 212.0f / 1157.0f));
+        noteKeys.setBounds (right.getX() + kSpace / 2, right.getY(), keysW, juce::jmax (0, keysH));
     }
 
     // anchos mínimos de los lados (Editor: el del cuerpo = los dos + la pantalla a 240 px)
@@ -1372,6 +1494,22 @@ private:
             shownLearning = waiting;
             repaint();
         }
+        // los LED: los botones (teclas 0-13 de la matriz) y las 27 teclas
+        if (std::array<float, 41> l; processor.fm1TakeLeds (l, ledsRev))
+        {
+            for (const auto& [c, k] : learnTargets)
+                if (k < 14)
+                    if (auto* b = dynamic_cast<Fm1Button*> (c); b != nullptr && std::abs (b->led - fm1LedBright (l[(size_t) k])) > 0.02f)
+                    {
+                        b->led = fm1LedBright (l[(size_t) k]);
+                        b->repaint();
+                    }
+            if (l != noteKeys.leds)
+            {
+                noteKeys.leds = l;
+                noteKeys.repaint();
+            }
+        }
     }
 
     // Menú contextual de un mando del panel (MidiLearn::fm1Base + k): MIDI Learn, Clear MIDI y, si tiene, Reset
@@ -1395,6 +1533,8 @@ private:
     KoniSynthProcessor& processor;
     Fm1Screen screen;
     juce::OwnedArray<Fm1Button> keys;
+    Fm1Keys noteKeys;
+    uint64_t ledsRev = 0;
     juce::OwnedArray<Fm1Encoder> encoders;
     Fm1Pot master;
     std::vector<std::pair<juce::Component*, int>> learnTargets; // mando y su k de MidiLearn (fm1Base + k)
