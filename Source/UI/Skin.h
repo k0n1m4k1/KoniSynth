@@ -207,15 +207,7 @@ inline void glass (juce::Graphics& g, juce::Rectangle<float> r, float radius = 8
                                 a.getX() + a.getWidth() * 0.35f, a.getY() + a.getHeight() * 0.65f, false);
     g.setGradientFill (sheen);
     g.fillRoundedRectangle (a, rr);
-    juce::Path edge;
-    edge.startNewSubPath (a.getX() + 6.0f, a.getCentreY());
-    edge.quadraticTo (a.getX() + a.getWidth() * 0.22f, a.getY() + 4.0f, a.getX() + a.getWidth() * 0.65f, a.getY() + 4.0f);
-    // reflejo difuminado: tres pasadas anchas y tenues (12, 7 y 3 px), en vez de una línea nítida de 1,5 px
-    for (const auto [w, alpha] : { std::pair { 12.0f, 0.018f }, std::pair { 7.0f, 0.025f }, std::pair { 3.0f, 0.03f } })
-    {
-        g.setColour (juce::Colours::white.withAlpha (alpha));
-        g.strokePath (edge, juce::PathStrokeType (w, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    }
+    // (sin la curva de reflejo: se confundía con un trazo del display)
 }
 
 // Placa de circuito (solo Phosphor Green): pistas a 0°/45°/90° sobre una rejilla de 8 px que acaban en pads o vías, y huellas

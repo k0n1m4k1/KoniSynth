@@ -1039,20 +1039,15 @@ private:
 };
 
 //==============================================================================
-// Un encoder del panel del FM-1: arrastrar en vertical o la rueda; + = horario. Se dibuja con las perillas del skin
-// (KoniLookAndFeel::drawRotarySlider). Tres modos:
-//   Endless: sin fin y sin arco (propiedad "endless"), un clic cada 8 px
-//   Stepped: sin fin, con marcas de detención (elegir una opción concreta): un clic cada 24 px y uno por muesca de rueda
-//   Bounded: con tope y arco, de 0 a kRange clics desde el centro; cada movimiento manda la diferencia en clics. El
-//            aparato tiene encoders: la posición dibujada no sabe del valor del firmware (cambia con la página)
+// Un encoder del panel del FM-1 (todos son sin fin en el aparato): arrastrar en vertical (un clic cada 24 px) o la rueda
+// (uno por muesca); + = horario. Con marcas de detención, para acertar una opción concreta. Se dibuja con las perillas del
+// skin (KoniLookAndFeel::drawRotarySlider, propiedad "endless": sin arco)
 class Fm1Encoder : public juce::Component, public juce::SettableTooltipClient
 {
 public:
-    enum class Mode { endless, stepped, bounded };
-    Fm1Encoder (juce::String name, Mode m, std::function<void (int)> turnFn)
-        : label (std::move (name)), mode (m), stepped (m == Mode::stepped), turn (std::move (turnFn))
+    Fm1Encoder (juce::String name, std::function<void (int)> turnFn) : label (std::move (name)), turn (std::move (turnFn))
     {
-        shape.getProperties().set ("endless", mode != Mode::bounded);
+        shape.getProperties().set ("endless", true);
     }
 
     void paint (juce::Graphics& g) override
@@ -1061,31 +1056,18 @@ public:
         const auto text = r.removeFromBottom (14);
         const auto side = std::min (r.getWidth(), r.getHeight());
         const auto k = juce::Rectangle<int> (side, side).withCentre (r.getCentre());
-        if (mode == Mode::bounded)
+        const auto pos = (float) (((clicks % kPerTurn) + kPerTurn) % kPerTurn) / (float) kPerTurn;
+        getLookAndFeel().drawRotarySlider (g, k.getX(), k.getY(), k.getWidth(), k.getHeight(), pos, 0.0f,
+                                           juce::MathConstants<float>::twoPi, shape);
+        // una marca por clic (kPerTurn por vuelta, como gira el dibujo), entre el cuerpo y el borde: la geometría de
+        // drawRotarySlider (radio = lado / 2 - 2, cuerpo 0,62 del radio)
+        const auto c = k.toFloat().getCentre();
+        const auto radius = (float) side * 0.5f - 2.0f, r0 = radius * 0.70f, r1 = radius * 0.92f;
+        g.setColour (Skin::white().withAlpha (0.45f));
+        for (int i = 0; i < kPerTurn; ++i)
         {
-            // el arco de las perillas del plugin (de -135° a +135°)
-            const auto pi = juce::MathConstants<float>::pi;
-            getLookAndFeel().drawRotarySlider (g, k.getX(), k.getY(), k.getWidth(), k.getHeight(), (float) clicks / (float) kRange,
-                                               -0.75f * pi, 0.75f * pi, shape);
-        }
-        else
-        {
-            const auto pos = (float) (((clicks % kPerTurn) + kPerTurn) % kPerTurn) / (float) kPerTurn;
-            getLookAndFeel().drawRotarySlider (g, k.getX(), k.getY(), k.getWidth(), k.getHeight(), pos, 0.0f,
-                                               juce::MathConstants<float>::twoPi, shape);
-        }
-        if (stepped)
-        {
-            // una marca por clic (kPerTurn por vuelta, como gira el dibujo), entre el cuerpo y el borde: la geometría de
-            // drawRotarySlider (radio = lado / 2 - 2, cuerpo 0,62 del radio)
-            const auto c = k.toFloat().getCentre();
-            const auto radius = (float) side * 0.5f - 2.0f, r0 = radius * 0.70f, r1 = radius * 0.92f;
-            g.setColour (Skin::white().withAlpha (0.45f));
-            for (int i = 0; i < kPerTurn; ++i)
-            {
-                const auto a = juce::MathConstants<float>::twoPi * (float) i / (float) kPerTurn - juce::MathConstants<float>::halfPi;
-                g.drawLine (c.x + std::cos (a) * r0, c.y + std::sin (a) * r0, c.x + std::cos (a) * r1, c.y + std::sin (a) * r1, 1.2f);
-            }
+            const auto a = juce::MathConstants<float>::twoPi * (float) i / (float) kPerTurn - juce::MathConstants<float>::halfPi;
+            g.drawLine (c.x + std::cos (a) * r0, c.y + std::sin (a) * r0, c.x + std::cos (a) * r1, c.y + std::sin (a) * r1, 1.2f);
         }
         g.setColour (Skin::white().withAlpha (0.8f));
         g.setFont (juce::FontOptions (11.0f));
@@ -1093,7 +1075,6 @@ public:
     }
 
     std::function<void()> onPopup; // clic derecho: el menú (MIDI Learn...)
-    void recentre() { if (mode == Mode::bounded) { clicks = kRange / 2; repaint(); } } // (solo el dibujo)
 
     void mouseDown (const juce::MouseEvent& e) override
     {
@@ -1106,7 +1087,7 @@ public:
     {
         if (popup)
             return;
-        const auto px = stepped ? 24.0f : mode == Mode::bounded ? 5.0f : 8.0f; // (Bounded: 240 px de tope a tope)
+        constexpr float px = 24.0f;
         const auto d = (int) ((lastY - e.position.y) / px);
         if (d != 0)
         {
@@ -1121,32 +1102,23 @@ public:
         if (d != 0)
         {
             wheel = 0.0f;
-            if (stepped)
-                d = d > 0 ? 1 : -1; // con pasos, uno por muesca
-            step (d);
+            step (d > 0 ? 1 : -1); // uno por muesca
         }
     }
 
 private:
     static constexpr int kPerTurn = 24; // clics por vuelta dibujada (solo el giro del dibujo y sus marcas)
-    static constexpr int kRange = 48;   // Bounded: clics de tope a tope
     void step (int d)
     {
-        if (mode == Mode::bounded)
-            d = juce::jlimit (0, kRange, clicks + d) - clicks; // en el tope no se manda nada
-        if (d == 0)
-            return;
         clicks += d;
         turn (d);
         repaint();
     }
 
     juce::String label;
-    Mode mode = Mode::endless;
-    bool stepped = false;
     std::function<void (int)> turn;
     juce::Slider shape; // (no se muestra: solo lleva las propiedades del dibujo)
-    int clicks = mode == Mode::bounded ? kRange / 2 : 0;
+    int clicks = 0;
     float lastY = 0.0f, wheel = 0.0f;
     bool popup = false;
 };
@@ -1221,24 +1193,14 @@ public:
                                                                           { "K1", 2 }, { "K2", 3 }, { "K3", 4 }, { "K4", 5 } } };
         for (const auto& [name, id] : encs)
         {
-            // SELECT, ALGORITHM y PRESETS eligen opciones: con pasos. K1-K4, con tope
-            const bool knob = id >= 2 && id <= 5;
-            auto* e = encoders.add (new Fm1Encoder (name, knob ? Fm1Encoder::Mode::bounded : Fm1Encoder::Mode::stepped,
-                                                    [this, id = id] (int clicks)
+            auto* e = encoders.add (new Fm1Encoder (name, [this, id = id] (int clicks)
             {
                 processor.fm1Panel ({ fm1::PanelAction::Enc, (uint8_t) id, clicks });
             }));
-            e->onPopup = [this, e, id = id, knob]
-            {
-                learnMenu (MidiLearn::fm1EncFirst + id, e, knob ? std::function<void()> ([e] { e->recentre(); }) : nullptr);
-            };
+            e->onPopup = [this, e, id = id] { learnMenu (MidiLearn::fm1EncFirst + id, e, nullptr); };
             learnTargets.push_back ({ e, MidiLearn::fm1EncFirst + id });
-            e->setTooltip (juce::String ("The FM-1's ") + name
-                           + (knob ? " knob: drag up / down or use the mouse wheel; each move turns the device's encoder by the "
-                                     "same amount. Its position here does not follow the firmware's value (it changes with the "
-                                     "page). "
-                                   : " encoder, in steps: drag up / down (one step every 24 px) or one step per mouse-wheel notch. ")
-                           + "What it does depends on the firmware.");
+            e->setTooltip (juce::String ("The FM-1's ") + name + " encoder (endless, in steps): drag up / down (one step every 24 px) "
+                           "or one step per mouse-wheel notch. What it does depends on the firmware.");
             addAndMakeVisible (e);
         }
         master.setSliderStyle (juce::Slider::RotaryVerticalDrag);
