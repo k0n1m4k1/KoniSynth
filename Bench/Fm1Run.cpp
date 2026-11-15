@@ -340,8 +340,35 @@ int main (int argc, char** argv)
     uint64_t blocks = 0, skippedBlocks = 0;
     bool ok = true;
     uint64_t maxStep = 0;  // el mayor avance del reloj en una llamada a Machine::run (ciclos de CPU)
+    // Tramos de 50 ms de máquina (a partir de 1 s, pasado el arranque): su velocidad (máquina / real). Los cortes del
+    // plugin los dan los picos, no la media: con la cola de 30 ms, un tramo por debajo de 1x más largo que la cola calla
+    constexpr uint64_t kWinMs = 50;
+    auto winWall = std::chrono::steady_clock::now();
+    uint64_t winStart = 0;
+    double worstSpeed = 1e9;
+    uint64_t worstAt = 0, wins = 0, winsSlow = 0;
+    // la cola que haría falta para no callar: el mayor retraso acumulado de la máquina respecto al reloj real desde su
+    // mejor adelanto (lag = real - máquina; caída máxima). Con la máquina más rápida de media, la cola se rellena entre picos
+    double lag = 0.0, lagMin = 0.0, needMs = 0.0;
     while (soc.periph.ms() < ms)
     {
+        if (const auto now = soc.periph.ms(); now >= winStart + kWinMs)
+        {
+            const auto wallNow = std::chrono::steady_clock::now();
+            if (winStart >= 1000)
+            {
+                const auto speed = (double) (now - winStart) / 1000.0 / std::chrono::duration<double> (wallNow - winWall).count();
+                ++wins;
+                if (speed < 1.0) ++winsSlow;
+                if (speed < worstSpeed) { worstSpeed = speed; worstAt = winStart; }
+                // (con la cola acotada a L y llena al empezar, calla si y solo si la caída supera L: recurrencia de Lindley)
+                lag += 1000.0 * std::chrono::duration<double> (wallNow - winWall).count() - (double) (now - winStart);
+                lagMin = std::min (lagMin, lag);
+                needMs = std::max (needMs, lag - lagMin);
+            }
+            winStart = now;
+            winWall = wallNow;
+        }
         // con volcado, tramos de 2048 ciclos: un bloque de cpu1 son ~11 000 instrucciones (estimado), así que entre dos
         // lecturas del índice no caben dos bloques; si el índice no cambia en ±1 se cuenta como bloque perdido
         const auto before = soc.periph.cycles;
@@ -402,6 +429,12 @@ int main (int argc, char** argv)
                  100.0 * (double) soc.periph.skipped / (double) std::max<uint64_t> (soc.periph.cycles, 1));
     std::printf ("paso de %u instrucciones: el mayor avance de una llamada, %.3f ms de máquina\n", chunk,
                  1000.0 * (double) maxStep / (double) kCpuHz);
+    if (wins > 0)
+        std::printf ("tramos de %llu ms (desde 1 s): el más lento %.3fx en el ms %llu; por debajo de 1x %llu de %llu\n",
+                     (unsigned long long) kWinMs, worstSpeed, (unsigned long long) worstAt, (unsigned long long) winsSlow,
+                     (unsigned long long) wins);
+    if (wins > 0)
+        std::printf ("cola necesaria sin cortes (mayor retraso acumulado desde 1 s): %.1f ms (el plugin: 30 ms)\n", needMs);
     if (profile > 0)
     {
         uint64_t tot = 0;

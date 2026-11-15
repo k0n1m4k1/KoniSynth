@@ -105,3 +105,16 @@ static juce::File fm1FirmwareFolder()
 static juce::File dx7BankFolder() { return romsFolder ("DX7"); }
 
 static void setFm1FirmwareFolder (const juce::File& folder) { setConfigText ("fm1Firmware", folder.getFullPathName()); }
+
+// Latencia del FM-1 (ms): la cola de audio por delante de la que tira el host (Engines/Fm1.h). Más larga aguanta los picos
+// del emulador (cambios rápidos de tono, muchas voces) a costa de retraso. Clave fm1LatencyMs; 30 ms por defecto
+static constexpr int kFm1Latencies[] = { 30, 60, 120, 250, 500 };
+static int fm1LatencyMs()
+{
+    auto config = openConfig();
+    const auto v = config != nullptr ? config->getIntValue ("fm1LatencyMs", 30) : 30;
+    for (const auto l : kFm1Latencies)
+        if (l == v) return v;
+    return 30;
+}
+static void setFm1LatencyMs (int ms) { setConfigText ("fm1LatencyMs", juce::String (ms)); }

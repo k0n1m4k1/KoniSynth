@@ -967,7 +967,9 @@ public:
     explicit Fm1Screen (KoniSynthProcessor& p) : processor (p)
     {
         setTooltip ("The FM-1's own screen, drawn by its firmware running in the emulator. Footer: emulator speed (1.00x = real "
-                    "time; below that the sound drops out) and how many dropouts there were.");
+                    "time; below that the sound drops out) and how many dropouts there were. Right-click: Latency (30 ms by "
+                    "default). A longer one rides out the emulator's peaks (fast note changes, many voices) at the cost of delay; "
+                    "measured: the stock V15 needs about 120 ms with fast jumps between low and high notes.");
         startTimerHz (30);
     }
 
@@ -1005,6 +1007,20 @@ public:
     }
 
     static constexpr int kFooter = 18; // el pie (velocidad y cortes)
+
+    // Clic derecho: la latencia del FM-1 (la cola del emulador por delante del audio; ajuste global)
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (! e.mods.isPopupMenu())
+            return;
+        juce::PopupMenu latency;
+        const auto now = processor.fm1Latency();
+        for (const auto ms : kFm1Latencies)
+            latency.addItem (juce::String (ms) + " ms", true, ms == now, [this, ms] { processor.setFm1Latency (ms); });
+        juce::PopupMenu m;
+        m.addSubMenu ("Latency", latency);
+        m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this));
+    }
 
 private:
     void timerCallback() override

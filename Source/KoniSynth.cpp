@@ -387,6 +387,13 @@ public:
     }
     bool takeFm1Screen (std::vector<uint16_t>& to, uint64_t& rev, bool& on) { return fm1Engine.takeScreen (to, rev, on); }
     void fm1Panel (const fm1::PanelAction& a) { fm1Engine.panel (a); }
+    // Latencia del FM-1 (ajuste global, config.settings): la cola del emulador. El host recibe la nueva en el siguiente bloque
+    int fm1Latency() const { return (int) std::lround (fm1Engine.latencyMs()); }
+    void setFm1Latency (int ms)
+    {
+        setFm1LatencyMs (ms);
+        fm1Engine.setLatencyMs (ms);
+    }
     juce::StringArray getGusPatchNames() const { const juce::ScopedLock sl (sampleInfoLock); return gusPatchNames; }
     const GusEngine::View& getGusView() const { return gusEngine.view; }
     bool hasGusBank() const { bool has = false; gusEngine.slot.withCurrent ([&has] (const GusBank* b) { has = b != nullptr; }); return has; }
@@ -448,6 +455,7 @@ public:
         mt32Engine.prepare (sampleRate, samplesPerBlock);
         gusEngine.prepare (sampleRate, samplesPerBlock);
         fm1Engine.prepare (sampleRate, samplesPerBlock);
+        fm1Engine.setLatencyMs (fm1LatencyMs()); // (ajuste global: lo último que guardó cualquier instancia)
         if ((int) params.engine->load() == 14 && sampleRate != mt32Rate) // la conversión de Munt depende de la frecuencia
             rebuildMt32();
         if ((int) params.engine->load() == 15 && ! gusBuilt) // Gravis: los patches, la primera vez (también sin editor: KoniBench)
