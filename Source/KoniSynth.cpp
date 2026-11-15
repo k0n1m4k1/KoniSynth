@@ -1182,10 +1182,9 @@ public:
                 // y = x + mix·t,  línea <- x + feedback·tanh(1,5·t)/1,5 (pendiente 1 en 0: lineal a nivel bajo, acota la autooscilación)
                 const auto sampleRate = (float) getSampleRate();
                 const auto echoOn = params.echoOn->load() > 0.5f;
-                static constexpr float echoBeats[] = { 0.0f, 1.0f, 0.75f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f };
                 const auto echoSync = juce::jlimit (0, 7, (int) params.echoSync->load());
                 const auto echoMs = echoSync == 0 ? params.echoTime->load()
-                                                  : juce::jlimit (10.0f, 1000.0f, (float) (60000.0 / params.tempoBpm.load()) * echoBeats[echoSync]);
+                                                  : juce::jlimit (10.0f, 1000.0f, (float) (60000.0 / params.tempoBpm.load()) * kEchoBeats[echoSync]);
                 const auto echoTarget = echoMs * 0.001f * sampleRate;
 
                 if (echoOn)
@@ -1378,7 +1377,31 @@ public:
                                     ? (params.reverbFreeze->load() > 0.5f ? 30.0 : (double) params.reverbDecay->load())
                                       + 0.001 * params.reverbPredelay->load()
                                     : 0.0;
-        return juce::jmax (5.0, 4.0 + reverbTail + (params.springOn->load() > 0.5f ? (double) params.springDecay->load() : 0.0));
+        // release (hasta 20 s; antes se suponían 4) + eco + reverbs, en serie como la cadena. El eco cae 60 dB en
+        // t·ln(10⁻³)/ln(fb) (1 s al 99 %: 687 s), así que se acota a 30 s como Freeze; con fb >= 1 autooscila (sin final)
+        const auto gap = echoGapSeconds();
+        const auto fb = (double) params.echoFeedback->load();
+        const auto echoTail = gap <= 0.0 || fb <= 0.0 ? gap
+                            : fb >= 1.0           ? 30.0
+                                                  : juce::jmin (30.0, gap * std::log (1.0e-3) / std::log (fb));
+        const auto release = juce::jmax (4.0, (double) params.release->load());
+        return juce::jmax (5.0, release + echoTail + reverbTail
+                                + (params.springOn->load() > 0.5f ? (double) params.springDecay->load() : 0.0));
+    }
+
+    // Tiempo entre repeticiones del eco (s), 0 si está apagado: Render Stems no da la cola por acabada con un silencio más
+    // corto que este (entre dos ecos de una nota corta hay hasta 1 s de silencio)
+    // Pulsos por repetición de cada opción de Echo Sync (0 = Free, Echo Time en ms; D = con puntillo, T = tresillo)
+    static constexpr float kEchoBeats[] = { 0.0f, 1.0f, 0.75f, 0.5f, 1.0f / 3.0f, 0.25f, 1.0f / 6.0f, 0.125f };
+
+    double echoGapSeconds() const
+    {
+        if (params.echoOn->load() < 0.5f)
+            return 0.0;
+        const auto sync = juce::jlimit (0, 7, (int) params.echoSync->load());
+        const auto ms = sync == 0 ? params.echoTime->load()
+                                  : juce::jlimit (10.0f, 1000.0f, (float) (60000.0 / params.tempoBpm.load()) * kEchoBeats[sync]);
+        return 0.001 * ms;
     }
 
     int getNumPrograms() override                              { return 1; }

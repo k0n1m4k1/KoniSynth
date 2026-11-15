@@ -140,7 +140,7 @@ private:
             juce::AudioBuffer<float> buffer (2, kBlock);
             juce::MidiBuffer midi;
             const auto threshold = juce::Decibels::decibelsToGain ((float) kSilenceDb);
-            const auto silenceNeeded = (juce::int64) std::llround (kSilenceSeconds * fs);
+            const auto silenceNeeded = (juce::int64) std::llround (std::max (kSilenceSeconds, p.echoGapSeconds() + 0.1) * fs);
             const auto tailMax = (juce::int64) std::llround (std::max (5.0, p.getTailLengthSeconds()) * fs);
             const auto expected = std::max (1.0, (owner.songSeconds + 5.0) * fs);
             juce::int64 tailFrames = 0, quiet = 0;
