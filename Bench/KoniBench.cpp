@@ -144,6 +144,9 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
     struct Event { double time; juce::MidiMessage message; };
     std::vector<Event> events;
     auto stereo = false; // --stereo: WAV de 2 canales (por defecto, solo el izquierdo, como siempre)
+    // --realtime: render en tiempo real (sin setNonRealtime): lo que el plugin prepara fuera del hilo de audio no se hace en
+    // el render (sin bucle de mensajes, solo lo de prepareToPlay; p. ej. las fuentes de SNES / N64)
+    auto realtime = false;
     auto rate = kSampleRate; // --rate=<Hz>: frecuencia de muestreo del render (por defecto 48 kHz)
     // Propiedades del estado del plugin: --sample=<wav> (samplePath, el sample del panel Sample), --osc2-sample=<wav>
     // (osc2SamplePath, el de Osc 2 en modo Sample) y --prop=<nombre>=<valor>
@@ -154,6 +157,8 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
         const juce::String arg = juce::String::fromUTF8 (argv[a]);
         if (arg == "--stereo")
             stereo = true;
+        else if (arg == "--realtime")
+            realtime = true;
         else if (arg.startsWith ("--rate="))
             rate = arg.fromFirstOccurrenceOf ("=", false, false).getDoubleValue();
         else if (arg.startsWith ("--sample=") || arg.startsWith ("--osc2-sample="))
@@ -255,7 +260,7 @@ int render (juce::AudioPluginInstance& plugin, int argc, char** argv)
             dumpState.replaceWithText (inner.toBase64Encoding());
     }
 
-    plugin.setNonRealtime (true); // un render es una exportación (el FM-1 avanza su emulador aquí en vez de en su hilo)
+    plugin.setNonRealtime (! realtime); // un render es una exportación (el FM-1 avanza su emulador aquí en vez de en su hilo)
     plugin.prepareToPlay (rate, kBlockSize);
     const auto total = (int) (seconds * rate);
     const auto outChannels = stereo ? 2 : 1;
