@@ -172,6 +172,10 @@ public:
             if (! offlineRender && config->getBoolValue ("agentControl", false)) // desactivado por defecto
                 setAgentEnabled (true, false);
         }
+        // Solo para pruebas: KONISYNTH_SIMD=scalar|avx2 fija la ruta SIMD en este proceso sin tocar config.settings
+        // (Tests/test_voice.py compara las dos; antes reescribía el fichero del usuario). avx2 sigue necesitando la CPU
+        if (const auto forced = juce::SystemStats::getEnvironmentVariable ("KONISYNTH_SIMD", {}); forced == "scalar" || forced == "avx2")
+            simdStatus().userEnabled = forced == "avx2";
 
         syncRandomState(); // semilla de la aleatoriedad reproducible (Dsp/RandomClock.h)
         startTimer (100); // libera datos retirados (DataSlot::collect) y genera la wavetable incluida elegida

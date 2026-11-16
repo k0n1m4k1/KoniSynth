@@ -233,9 +233,8 @@ a, b, n0 = int(0.3 * fs), int(1.3 * fs), int(round(0.05 * fs))
 seg, r = x[a:b], z[a - n0:b - n0]
 res = db(np.sqrt(np.mean((seg - np.dot(seg, r) / np.dot(r, r) * r) ** 2)) / np.sqrt(np.mean(seg ** 2)))
 c.check(res < -100, 'ring con Osc 2 en sync (880 Hz, +1 oct +7 st): residuo frente al oráculo con el reinicio exacto %.1f dB (< -100)' % res)
-# AVX2 frente a escalar con modulador externo (useAvx2 en config.settings, con copia y restauración byte a byte)
+# AVX2 frente a escalar con modulador externo: la ruta se fija por proceso con KONISYNTH_SIMD (sin tocar config.settings)
 import os
-CFG = os.path.join(os.environ['APPDATA'], 'KoniSynth', 'config.settings')
 XS = {'Osc 2 sierra con sync, FM, unísono 5': ['Unison Voices=5', 'Wave=Saw', 'FM Index=I 2.00', 'Complex Mod Source=Osc 2', 'Osc2 Wave=Saw',
                                               'Osc2 Sync=On', 'Osc2 Semi=7', 'Osc2 Level=30%', 'Mod Sync=On'],
       'Osc 2 Wavetable, AM, unísono 7': ['Unison Voices=7', 'Wave=Square', 'AM Depth=100%', 'FM Index=I 1.00', 'Complex Mod Source=Osc 2 WT',
@@ -243,20 +242,18 @@ XS = {'Osc 2 sierra con sync, FM, unísono 5': ['Unison Voices=5', 'Wave=Saw', '
       'Osc 3 triángulo, FM, unísono 3': ['Unison Voices=3', 'FM Index=I 3.00', 'Complex Mod Source=Osc 3', 'Osc3 Wave=Triangle', 'Osc3 Octave=1', 'Osc3 Semi=-5',
                                          'Mod Sync=On']}
 XN = ['48:0.05:0.9:110', '55:0.3:0.7:90', '64:0.6:0.6:127']
-orig = open(CFG, 'rb').read() if os.path.exists(CFG) else None
+prev = os.environ.get('KONISYNTH_SIMD')
 out = {}
 try:
     for avx in (1, 0):
-        os.makedirs(os.path.dirname(CFG), exist_ok=True)
-        with open(CFG, 'w', encoding='utf-8', newline='\n') as f:
-            f.write('<?xml version="1.0" encoding="UTF-8"?>\n\n<PROPERTIES>\n  <VALUE name="useAvx2" val="%d"/>\n</PROPERTIES>\n' % avx)
+        os.environ['KONISYNTH_SIMD'] = 'avx2' if avx else 'scalar'
         for name, args in XS.items():
             out[(name, avx)] = render(CX[:4] + ['Drift=30%', 'Complex On=On'] + args, 1.5, XN, 'xmod.wav')[0]
 finally:
-    if orig is None:
-        os.remove(CFG)
+    if prev is None:
+        os.environ.pop('KONISYNTH_SIMD', None)
     else:
-        open(CFG, 'wb').write(orig)
+        os.environ['KONISYNTH_SIMD'] = prev
 for name in XS:
     d = db(np.abs(out[(name, 1)] - out[(name, 0)]).max() / np.abs(out[(name, 0)]).max())
     c.check(d < -100, 'AVX2 = escalar con %s: diferencia máxima %.1f dB del pico (< -100)' % (name, d))
