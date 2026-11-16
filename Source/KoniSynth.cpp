@@ -506,7 +506,8 @@ public:
         easterEgg.prepare (sampleRate);
         mdEngine.prepare (sampleRate, samplesPerBlock);
         snesEngine.prepare (sampleRate, samplesPerBlock);
-        n64Engine.prepare (sampleRate, samplesPerBlock, params);
+        n64Engine.prepare (sampleRate, samplesPerBlock);
+        updateConsoleSources(); // fuentes de fábrica de N64 y samples de SNES / N64, antes del primer bloque
         oplEngine.prepare (sampleRate, samplesPerBlock);
         mt32Engine.prepare (sampleRate, samplesPerBlock);
         gusEngine.prepare (sampleRate, samplesPerBlock);
@@ -903,7 +904,9 @@ public:
                 allVoicesOff();
                 n64Engine.reset();
             }
-            n64Engine.render (buffer, midi, params, n64SampleSlot.current.load (std::memory_order_acquire), (int) params.n64SampleRoot->load());
+            n64Engine.render (buffer, midi, params, n64SampleSlot.current.load (std::memory_order_acquire),
+                              n64FactorySlot.current.load (std::memory_order_acquire), n64UserSlot.current.load (std::memory_order_acquire),
+                              isNonRealtime(), (int) params.n64SampleRoot->load());
         }
         else if (snesOn)
         {
@@ -912,7 +915,8 @@ public:
                 allVoicesOff();
                 snesEngine.reset();
             }
-            snesEngine.render (buffer, midi, params, snesSampleSlot.current.load (std::memory_order_acquire), (int) params.snesSampleRoot->load(),
+            snesEngine.render (buffer, midi, params, snesSampleSlot.current.load (std::memory_order_acquire),
+                               snesUserSlot.current.load (std::memory_order_acquire), isNonRealtime(), (int) params.snesSampleRoot->load(),
                                snesMacroSlot.current.load (std::memory_order_acquire));
         }
         else if (mdOn)
@@ -1342,6 +1346,9 @@ public:
         modalSlot.blocksDone.fetch_add (1, std::memory_order_release);
         for (auto* slot : { &dpcmSampleSlot, &mdSampleSlot, &snesSampleSlot, &n64SampleSlot })
             slot->blocksDone.fetch_add (1, std::memory_order_release);
+        snesUserSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        n64UserSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        n64FactorySlot.blocksDone.fetch_add (1, std::memory_order_release);
         ansSlot.blocksDone.fetch_add (1, std::memory_order_release);
         chipMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
         mdMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
@@ -2322,6 +2329,48 @@ private:
     float lastInputGain = 1.0f;
     SampleSlot sampleSlot, osc2SampleSlot, osc3SampleSlot;
     SampleSlot dpcmSampleSlot, mdSampleSlot, snesSampleSlot, n64SampleSlot; // sample propio de cada motor de consola
+    // Lo que SNES y N64 tocan de esos samples (BRR, VADPCM) y las fuentes de fábrica de N64, preparados fuera del hilo de
+    // audio (updateConsoleSources) con la clave de lo último publicado
+    DataSlot<SnesEngine::UserSource> snesUserSlot;
+    DataSlot<N64Engine::UserSource> n64UserSlot;
+    DataSlot<N64Engine::Factory> n64FactorySlot;
+    SnesEngine::UserKey snesUserKey;
+    N64Engine::UserKey n64UserKey;
+    N64Engine::FactoryKey n64FactoryKey;
+    juce::CriticalSection consoleSourcesLock;
+
+    // Hilo de mensajes (temporizador de 100 ms y prepareToPlay): prepara lo que haya cambiado (sample, Start, Length, Loop,
+    // tasa, ADPCM) y lo publica; render lo toma en el bloque siguiente. El sample se lee bajo el cerrojo de su DataSlot (no
+    // puede liberarse mientras se codifica). Coste en este hilo, solo al cambiar: hasta ~40 ms con un sample de SNES de 5 s
+    // y ~200 ms al reconstruir las fuentes de N64 (medida externa del mismo código cuando iba en el audio)
+    void updateConsoleSources()
+    {
+        const juce::ScopedLock sl (consoleSourcesLock); // (algunos hosts llaman a prepareToPlay desde otro hilo)
+        snesUserSlot.collect();
+        n64UserSlot.collect();
+        n64FactorySlot.collect();
+        if (const auto fk = N64Engine::factoryKey (params); ! (fk == n64FactoryKey))
+        {
+            n64FactoryKey = fk;
+            n64FactorySlot.replace (N64Engine::buildFactory (fk));
+        }
+        snesSampleSlot.withCurrent ([this] (const SampleData* s)
+        {
+            if (const auto k = SnesEngine::userKey (s, params); ! (k == snesUserKey))
+            {
+                snesUserKey = k;
+                snesUserSlot.replace (k.sample != nullptr ? SnesEngine::buildUserSource (k) : nullptr);
+            }
+        });
+        n64SampleSlot.withCurrent ([this] (const SampleData* s)
+        {
+            if (const auto k = N64Engine::userKey (s, params); ! (k == n64UserKey))
+            {
+                n64UserKey = k;
+                n64UserSlot.replace (k.sample != nullptr ? N64Engine::buildUserSource (k) : nullptr);
+            }
+        });
+    }
     WavetableSlot wavetableSlot, osc2WavetableSlot, osc3WavetableSlot;
     juce::CriticalSection missingLock;
     std::vector<MissingFile> missing;
@@ -2438,6 +2487,7 @@ private:
             slot->collect();
         wavetableSlot.collect();
         ampSim.collectIr();
+        updateConsoleSources();
         osc2WavetableSlot.collect();
         osc3WavetableSlot.collect();
         ansSlot.collect();

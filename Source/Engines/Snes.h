@@ -24,6 +24,77 @@ struct SnesEngine
     static constexpr double kRate = 32000.0;
     static constexpr int kNumSources = 6;
 
+    struct Source
+    {
+        std::vector<uint8_t> brr; // bloques de 9 bytes
+        int loopBlock = 0;        // -1 = sin bucle (el último bloque lleva End+Mute)
+        double rootHz = 1000.0;   // frecuencia que suena con tono 0x1000 (1:1 a 32 kHz)
+    };
+
+    // Sample propio del motor (panel Sample) y lo que lo define. Se prepara fuera del hilo de audio y se publica con
+    // DataSlot (KoniSynthProcessor::updateConsoleSources); render lo usa si coincide con los parámetros actuales
+    struct UserKey
+    {
+        const SampleData* sample = nullptr;
+        int length = 0, rateIndex = 0;
+        float start = 0.0f, lengthMs = 0.0f;
+        bool loop = false;
+        bool operator== (const UserKey&) const = default;
+    };
+
+    struct UserSource
+    {
+        UserKey key;
+        Source src;
+        double rate = kRate; // tasa del sample codificado: con tono 0x1000 la nota Root suena a root·32000/tasa
+    };
+
+    static UserKey userKey (const SampleData* sample, const Params& p)
+    {
+        UserKey k;
+        k.sample = sample;
+        k.length = sample != nullptr ? sample->length() : 0;
+        k.rateIndex = juce::jlimit (0, 2, (int) p.snesUserRate->load());
+        k.start = p.snesSampleStart->load();
+        k.lengthMs = p.snesSampleLength->load();
+        k.loop = p.snesSampleLoop->load() > 0.5f;
+        return k;
+    }
+
+    // Región del panel Sample (Start, Length, Loop), remuestreada a 32/16/8 kHz y codificada en BRR con un máximo de 64 KB
+    // (7281 bloques), como la RAM de audio de la consola. Un BRR original (.brr, .spc) se toca tal cual, a 32 kHz, con sus
+    // propios flags de End/Loop (Start/Length/Loop no aplican). Fuera del hilo de audio (o en un render offline), con el
+    // sample vivo mientras dura
+    static std::unique_ptr<UserSource> buildUserSource (const UserKey& k)
+    {
+        auto u = std::make_unique<UserSource>();
+        u->key = k;
+        const auto* sample = k.sample;
+        if (sample == nullptr || k.length < 16)
+            return u;
+        if (! sample->brr.empty())
+        {
+            u->src.brr = sample->brr;
+            u->src.loopBlock = sample->brrLoopBlock;
+            return u;
+        }
+        const auto rate = kRate / (double) (1 << k.rateIndex);
+        const auto ratio = sample->sampleRate / rate;
+        const auto level = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::floor (std::log2 (std::max (1.0, ratio))));
+        const auto scale = ratio / std::exp2 ((double) level);
+        const auto first = (double) k.start * k.length / std::exp2 ((double) level);
+        auto count = (int) ((1.0 - k.start) * k.length / ratio);
+        if (k.lengthMs > 0.0f)
+            count = std::min (count, (int) (k.lengthMs / 1000.0 * rate));
+        count = std::min (count, 7281 * 16);
+        std::vector<int> pcm ((size_t) std::max (0, count));
+        for (int i = 0; i < count; ++i)
+            pcm[(size_t) i] = juce::jlimit (-16000, 16000, (int) std::lround (16000.0 * sample->read (level, first + i * scale)));
+        u->rate = rate;
+        u->src = encodeBrr (pcm, k.loop, 0.0);
+        return u;
+    }
+
     void prepare (double sr, int maxBlock)
     {
         resampler.prepare (kRate, sr);
@@ -57,13 +128,28 @@ struct SnesEngine
     // Macros por frame (Dsp/FrameMacro.h, propiedad "snesMacros"), EXPERIMENTAL: el driver N-SPC avanza por ticks de su timer
     // según el tempo, no por frames; aquí van a 60,10 Hz como en un driver de efectos. Volumen: escala VxVOL (macro/15);
     // arpegio; pitch: registro de tono, 8 unidades por paso (+ = más grave); "duty" = NON, ruido en esa voz (bit 0).
-    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const SampleData* userSample, int rootNote,
-                 const MacroSet* macroSet)
+    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const SampleData* userSample,
+                 const UserSource* prepared, bool offline, int rootNote, const MacroSet* macroSet)
     {
         static const MacroSet none;
         macros = macroSet != nullptr ? macroSet : &none;
         readParams (p);
-        prepareUserSource (userSample, p);
+        // Fuente del usuario: la preparada fuera del audio (KoniSynthProcessor::updateConsoleSources) si es la de los
+        // parámetros actuales; en un render offline se prepara aquí (el bounce suena como lo pedido desde el primer bloque);
+        // en tiempo real, mientras llega la nueva (hasta un tick del temporizador, 100 ms, más la codificación), la anterior.
+        // Antes se codificaba aquí siempre: una medida externa dio 2,5 ms (SNES) y 10,4 ms (N64) por edición de Length
+        if (const auto key = userKey (userSample, p); key.sample == nullptr)
+            user = nullptr;
+        else if (prepared != nullptr && prepared->key == key)
+            user = prepared;
+        else if (offline)
+        {
+            if (offlineUser == nullptr || ! (offlineUser->key == key))
+                offlineUser = buildUserSource (key);
+            user = offlineUser.get();
+        }
+        else
+            user = prepared;
         userRootNote = rootNote;
         bendSmoothed += 0.2f * (p.pitchBend.load() - bendSmoothed);
         tuneCents = (double) p.fineTune->load() + 100.0 * bendSmoothed;
@@ -137,12 +223,12 @@ private:
 
     enum EnvState { attack, decay, sustain, release };
 
-    struct Source
+    // Fuente k: las de fábrica (0..kNumSources - 1) o la del usuario (kNumSources), que puede no estar
+    const Source& sourceAt (int k) const
     {
-        std::vector<uint8_t> brr; // bloques de 9 bytes
-        int loopBlock = 0;        // -1 = sin bucle (el último bloque lleva End+Mute)
-        double rootHz = 1000.0;   // frecuencia que suena con tono 0x1000 (1:1 a 32 kHz)
-    };
+        static const Source none;
+        return k < kNumSources ? sources[(size_t) k] : (user != nullptr ? user->src : none);
+    }
 
     struct Voice
     {
@@ -258,53 +344,15 @@ private:
         }
     }
 
-    // Sample propio del motor: región de su panel Sample (Start, Length, Loop), remuestreada a 32/16/8 kHz y codificada en BRR con un
-    // máximo de 64 KB (7281 bloques). Solo se recodifica si cambia algo. Raíz: la nota Root del panel a esa tasa.
-    void prepareUserSource (const SampleData* sample, const Params& p)
-    {
-        const auto rateIndex = juce::jlimit (0, 2, (int) p.snesUserRate->load());
-        const auto start = p.snesSampleStart->load(), lengthMs = p.snesSampleLength->load();
-        const auto loop = p.snesSampleLoop->load() > 0.5f;
-        const auto length = sample != nullptr ? sample->length() : 0;
-        if (sample == userSource && length == userSourceLength && rateIndex == userRateIndex && start == userStart
-            && lengthMs == userLengthMs && loop == userLoop)
-            return;
-        userSource = sample; userSourceLength = length; userRateIndex = rateIndex; userStart = start; userLengthMs = lengthMs; userLoop = loop;
-        sources[kNumSources] = {};
-        if (sample == nullptr || length < 16)
-            return;
-        // BRR original (.brr, .spc): se toca tal cual, a 32 kHz, con sus propios flags de End/Loop (Start/Length/Loop no aplican)
-        if (! sample->brr.empty())
-        {
-            userRoot = kRate;
-            sources[kNumSources].brr = sample->brr;
-            sources[kNumSources].loopBlock = sample->brrLoopBlock;
-            return;
-        }
-        const auto rate = kRate / (double) (1 << rateIndex);
-        const auto ratio = sample->sampleRate / rate;
-        const auto level = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::floor (std::log2 (std::max (1.0, ratio))));
-        const auto scale = ratio / std::exp2 ((double) level);
-        const auto first = (double) start * length / std::exp2 ((double) level);
-        auto count = (int) ((1.0 - start) * length / ratio);
-        if (lengthMs > 0.0f)
-            count = std::min (count, (int) (lengthMs / 1000.0 * rate));
-        count = std::min (count, 7281 * 16);
-        std::vector<int> pcm ((size_t) std::max (0, count));
-        for (int i = 0; i < count; ++i)
-            pcm[(size_t) i] = juce::jlimit (-16000, 16000, (int) std::lround (16000.0 * sample->read (level, first + i * scale)));
-        userRoot = rate;
-        sources[kNumSources] = encodeBrr (pcm, loop, 0.0);
-    }
-
     // Tono de la nota con la raíz de la fuente que suena en la voz (v.source), no la del selector: cambiar SNES Source
     // con notas sostenidas solo afecta a las nuevas (antes las sostenidas pasaban a la raíz de la nueva: 440 -> 840 Hz
     // de Sine a Strings)
     int pitchFor (int note, int source) const
     {
-        const auto& src = sources[(size_t) source];
+        const auto& src = sourceAt (source);
         // Fuente del usuario: la nota Root suena a su tasa (32/16/8 kHz) -> con tono 0x1000 suena root·32000/tasa
-        const auto rootHz = source == kNumSources ? 440.0 * std::exp2 ((userRootNote - 69) / 12.0) * kRate / userRoot : src.rootHz;
+        const auto rootHz = source == kNumSources ? 440.0 * std::exp2 ((userRootNote - 69) / 12.0) * kRate / (user != nullptr ? user->rate : kRate)
+                                                  : src.rootHz;
         const auto f = 440.0 * std::exp2 ((note - 69) / 12.0 + tuneCents / 1200.0) * KoniTuning::ratio (note);
         return juce::jlimit (0, 0x3fff, (int) std::lround (4096.0 * f / rootHz));
     }
@@ -372,7 +420,7 @@ private:
             v.envState = attack;
             v.konDelay = 5;
             v.nibble = 99;
-            v.decoding = ! sources[(size_t) v.source].brr.empty();
+            v.decoding = ! sourceAt (v.source).brr.empty();
             for (size_t k = 0; k < MacroSet::numKinds; ++k)
                 v.mc[k].start (macros->macro[k]);
             v.pitchAcc = v.mc[MacroSet::pitch].value (macros->macro[MacroSet::pitch], 0);
@@ -417,13 +465,15 @@ private:
     // pasa a release con envolvente 0)
     void decodeNext (Voice& v)
     {
-        const auto& src = sources[(size_t) v.source];
+        const auto& src = sourceAt (v.source);
         int s = 0;
         if (v.decoding)
         {
             if (v.nibble >= 16)
             {
-                if (v.nibble != 99) // 99: aún no se ha leído el primer bloque
+                if (v.nibble != 99 && (size_t) v.block * 9 >= src.brr.size())
+                    v.decoding = false; // la fuente del usuario cambió por una más corta con la voz sonando
+                else if (v.nibble != 99) // 99: aún no se ha leído el primer bloque
                 {
                     const auto flags = src.brr[(size_t) v.block * 9] & 3;
                     if (flags & 1)
@@ -608,7 +658,9 @@ private:
     SincResampler resampler; // DAC "Smooth"
     ZohResampler zoh;        // DAC "Hold" (por defecto)
     bool wasSmooth = false;
-    std::array<Source, kNumSources + 1> sources {};
+    std::array<Source, kNumSources> sources {};  // de fábrica
+    const UserSource* user = nullptr;            // del bloque: la publicada o offlineUser
+    std::unique_ptr<UserSource> offlineUser;     // la preparada en render (solo offline)
     std::array<Voice, 8> voice {};
     std::array<std::vector<int>, 2> echoRam; // izquierda, derecha (en la consola, entradas de 4 bytes L/R)
     std::array<std::array<int, 8>, 2> firBuf {};
@@ -619,7 +671,7 @@ private:
     bool noiseOn = false, velocityOn = true, echoOn = false, filterOn = true;
     std::array<double, 2> lpPrev {}, hpIn {}, hpOut {};
     int settle = 0; // muestras del chip de asentamiento de la salida que quedan (settleOutput)
-    double tuneCents = 0.0, userRoot = kRate;
+    double tuneCents = 0.0;
     float pan = 0.0f, spread = 0.0f;
     bool monoOutput = false; // salida RF: L + R
     float bendSmoothed = 0.0f;
@@ -627,8 +679,4 @@ private:
     double macroClock = 0.0;
     int userRootNote = 60;
     long long age = 0;
-    const SampleData* userSource = nullptr;
-    int userSourceLength = -1, userRateIndex = -1;
-    float userStart = -1.0f, userLengthMs = -1.0f;
-    bool userLoop = false;
 };

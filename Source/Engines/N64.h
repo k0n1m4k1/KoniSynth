@@ -20,18 +20,112 @@ struct N64Engine
 {
     static constexpr int kVoices = 16;
 
-    // p: las fuentes de fábrica se construyen aquí con la tasa y el ADPCM actuales (6 fuentes con LPC y k-means; en el
-    // hilo de audio, el primer bloque superaba 40 veces el presupuesto de 5,3 ms según una medida externa). Un cambio de
-    // tasa o ADPCM posterior las reconstruye en render
-    void prepare (double sr, int maxBlock, const Params& p)
+    //--------------------------------------------------------------------------------------------------------------------------
+    // VADPCM
+    struct Source
+    {
+        std::vector<uint8_t> frames;                  // tramas de 9 bytes (o PCM de 16 bits si ADPCM está apagado)
+        std::vector<int16_t> pcm;                     // fuente sin comprimir (modo ADPCM apagado)
+        std::array<std::array<int16_t, 16>, 4> book {}; // por predictor: book1[8] (muestra -2), book2[8] (muestra -1), Q11
+        bool adpcm = true, loop = true;
+        double rootHz = 1000.0, rate = 22050.0;
+        size_t numSamples() const { return adpcm ? frames.size() / 9 * 16 : pcm.size(); }
+    };
+
+    // Fuentes de fábrica (6, con LPC y k-means del VADPCM) para una tasa de fuente y ADPCM, y el sample del usuario (panel
+    // Sample). Se preparan fuera del hilo de audio y se publican con DataSlot (KoniSynthProcessor: prepareToPlay y
+    // updateConsoleSources); render usa las que coinciden con los parámetros actuales. Antes se construían en render: una
+    // medida externa dio 228 ms en el primer bloque (43 veces su presupuesto de 5,3 ms) y 10,4 ms por edición de Length
+    struct FactoryKey
+    {
+        int rateIndex = -1;
+        bool adpcm = true;
+        bool operator== (const FactoryKey&) const = default;
+    };
+
+    struct Factory
+    {
+        FactoryKey key;
+        std::array<Source, kNumWaveSources> src {};
+    };
+
+    struct UserKey
+    {
+        const SampleData* sample = nullptr;
+        int length = 0, rateIndex = 0;
+        float start = 0.0f, lengthMs = 0.0f;
+        bool loop = false, adpcm = true;
+        bool operator== (const UserKey&) const = default;
+    };
+
+    struct UserSource
+    {
+        UserKey key;
+        Source src;
+    };
+
+    static FactoryKey factoryKey (const Params& p)
+    {
+        return { juce::jlimit (0, 4, (int) p.n64SourceRate->load()), p.n64Adpcm->load() > 0.5f };
+    }
+
+    static std::unique_ptr<Factory> buildFactory (const FactoryKey& k)
+    {
+        auto f = std::make_unique<Factory>();
+        f->key = k;
+        const auto rate = sourceRate (k.rateIndex);
+        for (int i = 0; i < kNumWaveSources; ++i)
+        {
+            const auto w = makeWaveSource (i, rate);
+            f->src[(size_t) i] = encode (w.pcm, true, w.rootHz, rate, k.adpcm);
+        }
+        return f;
+    }
+
+    static UserKey userKey (const SampleData* sample, const Params& p)
+    {
+        UserKey k;
+        k.sample = sample;
+        k.length = sample != nullptr ? sample->length() : 0;
+        k.rateIndex = juce::jlimit (0, 4, (int) p.n64SourceRate->load());
+        k.start = p.n64SampleStart->load();
+        k.lengthMs = p.n64SampleLength->load();
+        k.loop = p.n64SampleLoop->load() > 0.5f;
+        k.adpcm = p.n64Adpcm->load() > 0.5f;
+        return k;
+    }
+
+    // Región del panel Sample a la tasa de fuente elegida; máximo 5 s. Fuera del hilo de audio (o en un render offline),
+    // con el sample vivo mientras dura
+    static std::unique_ptr<UserSource> buildUserSource (const UserKey& k)
+    {
+        auto u = std::make_unique<UserSource>();
+        u->key = k;
+        const auto* sample = k.sample;
+        if (sample == nullptr || k.length < 16)
+            return u;
+        const auto rate = sourceRate (k.rateIndex);
+        const auto ratio = sample->sampleRate / rate;
+        const auto level = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::floor (std::log2 (std::max (1.0, ratio))));
+        const auto scale = ratio / std::exp2 ((double) level);
+        const auto first = (double) k.start * k.length / std::exp2 ((double) level);
+        auto count = (int) ((1.0 - k.start) * k.length / ratio);
+        if (k.lengthMs > 0.0f)
+            count = std::min (count, (int) (k.lengthMs / 1000.0 * rate));
+        count = std::min (count, (int) (5.0 * rate));
+        std::vector<int> pcm ((size_t) std::max (0, count));
+        for (int i = 0; i < count; ++i)
+            pcm[(size_t) i] = clamp16 ((int) std::lround (24000.0 * sample->read (level, first + i * scale)));
+        u->src = encode (pcm, k.loop, 0.0, rate, k.adpcm);
+        return u;
+    }
+
+    void prepare (double sr, int maxBlock)
     {
         hostRate = sr;
         (void) maxBlock;
         outRateIndex = -1; // se configura en el primer render
         reset();
-        readParams (p);
-        if (sourceRateIndex != builtRateIndex || adpcmOn != builtAdpcm)
-            buildSources();
     }
 
     void reset()
@@ -45,13 +139,39 @@ struct N64Engine
         age = 0;
     }
 
-    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const SampleData* userSample, int rootNote)
+    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const SampleData* userSample,
+                 const Factory* preparedFactory, const UserSource* preparedUser, bool offline, int rootNote)
     {
         readParams (p);
         configureRates();
-        if (sourceRateIndex != builtRateIndex || adpcmOn != builtAdpcm)
-            buildSources();
-        prepareUserSource (userSample, p);
+        // Fuentes de fábrica: las publicadas si son de la tasa y el ADPCM actuales; offline, se construyen aquí; en tiempo
+        // real, mientras llegan las nuevas, las anteriores (cada fuente lleva su tasa: suenan afinadas)
+        if (const auto fk = factoryKey (p); preparedFactory != nullptr && preparedFactory->key == fk)
+            factory = preparedFactory;
+        else if (offline)
+        {
+            if (offlineFactory == nullptr || ! (offlineFactory->key == fk))
+                offlineFactory = buildFactory (fk);
+            factory = offlineFactory.get();
+        }
+        else
+            factory = preparedFactory;
+        // Fuente del usuario: la preparada fuera del audio (KoniSynthProcessor::updateConsoleSources) si es la de los
+        // parámetros actuales; en un render offline se prepara aquí (el bounce suena como lo pedido desde el primer bloque);
+        // en tiempo real, mientras llega la nueva (hasta un tick del temporizador, 100 ms, más la codificación), la anterior.
+        // Antes se codificaba aquí siempre: una medida externa dio 2,5 ms (SNES) y 10,4 ms (N64) por edición de Length
+        if (const auto key = userKey (userSample, p); key.sample == nullptr)
+            user = nullptr;
+        else if (preparedUser != nullptr && preparedUser->key == key)
+            user = preparedUser;
+        else if (offline)
+        {
+            if (offlineUser == nullptr || ! (offlineUser->key == key))
+                offlineUser = buildUserSource (key);
+            user = offlineUser.get();
+        }
+        else
+            user = preparedUser;
         userRootNote = rootNote;
         configureFx();
         bendSmoothed += 0.2f * (p.pitchBend.load() - bendSmoothed);
@@ -81,6 +201,15 @@ struct N64Engine
     }
 
 private:
+    // Fuente k: las de fábrica (0..kNumWaveSources - 1) o la del usuario (kNumWaveSources); cualquiera puede no estar
+    const Source& sourceAt (int k) const
+    {
+        static const Source none;
+        if (k < kNumWaveSources)
+            return factory != nullptr ? factory->src[(size_t) k] : none;
+        return user != nullptr ? user->src : none;
+    }
+
     //--------------------------------------------------------------------------------------------------------------------------
     // Tablas del hardware y de libultra
     static const int16_t* resampleLut()
@@ -125,16 +254,6 @@ private:
 
     //--------------------------------------------------------------------------------------------------------------------------
     // VADPCM
-    struct Source
-    {
-        std::vector<uint8_t> frames;                  // tramas de 9 bytes (o PCM de 16 bits si ADPCM está apagado)
-        std::vector<int16_t> pcm;                     // fuente sin comprimir (modo ADPCM apagado)
-        std::array<std::array<int16_t, 16>, 4> book {}; // por predictor: book1[8] (muestra -2), book2[8] (muestra -1), Q11
-        bool adpcm = true, loop = true;
-        double rootHz = 1000.0, rate = 22050.0;
-        size_t numSamples() const { return adpcm ? frames.size() / 9 * 16 : pcm.size(); }
-    };
-
     // Libro de un predictor x[n] = c1·x[n-1] + c2·x[n-2]: respuesta a x[-2] = 1 (book1) y a x[-1] = 1 (book2) en 8 pasos
     static void makeBook (double c1, double c2, std::array<int16_t, 16>& entry)
     {
@@ -317,9 +436,7 @@ private:
     void readParams (const Params& p)
     {
         sourceIndex = juce::jlimit (0, kNumWaveSources, (int) p.n64Source->load());
-        sourceRateIndex = juce::jlimit (0, 4, (int) p.n64SourceRate->load());
         newOutRateIndex = juce::jlimit (0, 2, (int) p.n64OutputRate->load());
-        adpcmOn = p.n64Adpcm->load() > 0.5f;
         attackMs = p.n64Attack->load(); decayMs = p.n64Decay->load(); releaseMs = p.n64Release->load();
         attackVol = (int) p.n64AttackVolume->load(); decayVol = (int) p.n64DecayVolume->load();
         volume = (int) p.n64Volume->load();
@@ -349,52 +466,9 @@ private:
         return rates[juce::jlimit (0, 4, index)];
     }
 
-    void buildSources()
-    {
-        builtRateIndex = sourceRateIndex;
-        builtAdpcm = adpcmOn;
-        const auto rate = sourceRate (sourceRateIndex);
-        for (int k = 0; k < kNumWaveSources; ++k)
-        {
-            const auto w = makeWaveSource (k, rate);
-            sources[(size_t) k] = encode (w.pcm, true, w.rootHz, rate, adpcmOn);
-        }
-        userSource = nullptr; // fuerza recodificar el del usuario a la nueva tasa
-    }
-
-    // Sample del usuario: región del panel Sample a la tasa de fuente elegida; máximo 5 s
-    void prepareUserSource (const SampleData* sample, const Params& p)
-    {
-        const auto start = p.n64SampleStart->load(), lengthMs = p.n64SampleLength->load();
-        const auto loop = p.n64SampleLoop->load() > 0.5f;
-        const auto length = sample != nullptr ? sample->length() : 0;
-        if (sample == userSource && length == userSourceLength && start == userStart && lengthMs == userLengthMs && loop == userLoop
-            && sourceRateIndex == userRateIndex && adpcmOn == userAdpcm)
-            return;
-        userSource = sample; userSourceLength = length; userStart = start; userLengthMs = lengthMs; userLoop = loop;
-        userRateIndex = sourceRateIndex; userAdpcm = adpcmOn;
-        sources[kNumWaveSources] = {};
-        sources[kNumWaveSources].frames.clear();
-        if (sample == nullptr || length < 16)
-            return;
-        const auto rate = sourceRate (sourceRateIndex);
-        const auto ratio = sample->sampleRate / rate;
-        const auto level = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::floor (std::log2 (std::max (1.0, ratio))));
-        const auto scale = ratio / std::exp2 ((double) level);
-        const auto first = (double) start * length / std::exp2 ((double) level);
-        auto count = (int) ((1.0 - start) * length / ratio);
-        if (lengthMs > 0.0f)
-            count = std::min (count, (int) (lengthMs / 1000.0 * rate));
-        count = std::min (count, (int) (5.0 * rate));
-        std::vector<int> pcm ((size_t) std::max (0, count));
-        for (int i = 0; i < count; ++i)
-            pcm[(size_t) i] = clamp16 ((int) std::lround (24000.0 * sample->read (level, first + i * scale)));
-        sources[kNumWaveSources] = encode (pcm, loop, 0.0, rate, adpcmOn);
-    }
-
     uint32_t pitchFor (int note, int source) const
     {
-        const auto& src = sources[(size_t) source];
+        const auto& src = sourceAt (source);
         const auto rootHz = source == kNumWaveSources ? 440.0 * std::exp2 ((userRootNote - 69) / 12.0) : src.rootHz;
         const auto f = 440.0 * std::exp2 ((note - 69) / 12.0 + tuneCents / 1200.0) * KoniTuning::ratio (note);
         const auto ratio = std::min (1.99996, f / rootHz * src.rate / outRate); // MAX_RATIO de libultra
@@ -433,7 +507,7 @@ private:
             v = Voice {};
             v.note = m.getNoteNumber();
             v.source = sourceIndex;
-            v.gate = v.active = ! sources[(size_t) v.source].frames.empty() || ! sources[(size_t) v.source].pcm.empty();
+            v.gate = v.active = ! sourceAt (v.source).frames.empty() || ! sourceAt (v.source).pcm.empty();
             v.age = ++age;
             v.pitch = pitchFor (v.note, v.source);
             // Volumen del canal × velocidad (driver de KoniSynth) × Attack Vol; paneo con eqpower (0 = izquierda, 127 = derecha)
@@ -468,17 +542,17 @@ private:
 
     int nextSourceSample (Voice& v)
     {
-        const auto& src = sources[(size_t) v.source];
+        const auto& src = sourceAt (v.source);
         if (! src.adpcm)
         {
-            if (v.ended || src.pcm.empty()) return 0;
+            if (v.ended || v.frame >= src.pcm.size()) return 0; // (también si la fuente cambió por una más corta)
             const auto s = src.pcm[v.frame++];
             if (v.frame >= src.pcm.size()) { if (src.loop) v.frame = 0; else v.ended = true; }
             return s;
         }
         if (v.pos >= 16)
         {
-            if (v.ended || src.frames.empty()) return 0;
+            if (v.ended || v.frame * 9 + 9 > src.frames.size()) return 0; // (también si la fuente cambió por una más corta)
             const auto* f = &src.frames[v.frame * 9];
             const auto scale = std::min (12, f[0] >> 4);
             const auto& book = src.book[(size_t) (f[0] & 3)];
@@ -663,21 +737,20 @@ private:
     SincResampler resampler; // DAC "Smooth"
     ZohResampler zoh;        // DAC "Hold" (por defecto)
     bool wasSmooth = false;
-    std::array<Source, kNumWaveSources + 1> sources {};
+    const Factory* factory = nullptr;          // del bloque: las publicadas u offlineFactory
+    const UserSource* user = nullptr;          // del bloque: la publicada u offlineUser
+    std::unique_ptr<Factory> offlineFactory;   // preparadas en render (solo offline)
+    std::unique_ptr<UserSource> offlineUser;
     std::array<Voice, kVoices> voice {};
     std::vector<float> fxLine = std::vector<float> (1, 0.0f);
     std::array<FxSection, 4> fxSection {};
     int fxWrite = 0, numSections = 0, builtFx = -1;
-    int sourceIndex = 0, sourceRateIndex = 3, builtRateIndex = -1, outRateIndex = -1, newOutRateIndex = 1;
-    bool adpcmOn = true, builtAdpcm = true, velocityOn = true;
+    int sourceIndex = 0, outRateIndex = -1, newOutRateIndex = 1;
+    bool velocityOn = true;
     float attackMs = 5, decayMs = 0, releaseMs = 200, spread = 0;
     int attackVol = 127, decayVol = 127, volume = 100, pan = 64, fxType = 0, fxMix = 0;
     double tuneCents = 0.0;
     float bendSmoothed = 0.0f;
     int userRootNote = 60;
     long long age = 0;
-    const SampleData* userSource = nullptr;
-    int userSourceLength = -1, userRateIndex = -1;
-    float userStart = -1.0f, userLengthMs = -1.0f;
-    bool userLoop = false, userAdpcm = true;
 };
