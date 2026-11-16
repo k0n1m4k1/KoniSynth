@@ -97,6 +97,21 @@ static float oscillator (int wave, double t, double dt, float pw = 0.5f, bool bl
     }
 }
 
+// Ganancia de un oscilador periódico según su incremento dt = f / fs: 1 hasta 0,45, coseno alzado hasta 0 en 0,5 (Nyquist) y 0
+// por encima. minBLEP y los mipmaps limitan los armónicos, pero no la fundamental: por encima de Nyquist se plegaba a nivel
+// completo (Osc 2 en seno, nota 127 y +2 oct: 50 175 Hz -> 2175 Hz a -25 dBFS con fs = 48 kHz, medido externamente). La
+// fase sigue avanzando. Entre 0,45 y 0,5 de fs la fundamental está a 19,8-22,05 kHz (44,1 kHz) o 21,6-24 kHz (48 kHz). Con
+// dt <= 0,45 da 1 exacto: el sonido de siempre, bit a bit
+static float nyquistGain (double dt)
+{
+    const auto a = std::abs (dt);
+    if (a <= 0.45)
+        return 1.0f;
+    if (a >= 0.5)
+        return 0.0f;
+    return (float) (0.5 + 0.5 * std::cos (juce::MathConstants<double>::pi * (a - 0.45) / 0.05));
+}
+
 // Forma del triángulo analógico (mandos TriSym y TriRound por oscilador; solo la forma Triangle). Medido en dos Minimoog
 // Model D (YouTube CD89Mt1TRnU, 24:27, Do3 = 128,5 Hz): h2 -24/-27 dB y h4 -41/-42 dB (el ideal no tiene pares), h3 -22/-26 dB
 // (ideal -19,1). Modelo, ajustado a h2..h8 con error RMS 1,3 / 1,6 dB:

@@ -721,8 +721,11 @@ struct SynthVoice : juce::SynthesiserVoice
                 osc1Blep.pop (left, right);
 
             // Mezclador: Osc 1 (con unísono/complejo, estéreo) + Osc 2, sub, ruido y sample (mono, al centro)
-            const auto osc1Gain = matrix.targets[ModMatrix::dstOsc1Level] ? juce::jlimit (0.0f, 1.0f, mix.osc1Level + mtx[ModMatrix::dstOsc1Level]) * osc1Gate
-                                                                          : mix.osc1Level;
+            // (nyquistGain: la fundamental de Osc 1 no se pliega por encima de Nyquist; el Complex, con FM / AM / sync y su propio
+            // sobremuestreo, va aparte)
+            const auto osc1Gain = (matrix.targets[ModMatrix::dstOsc1Level] ? juce::jlimit (0.0f, 1.0f, mix.osc1Level + mtx[ModMatrix::dstOsc1Level]) * osc1Gate
+                                                                           : mix.osc1Level)
+                                * (complex.on ? 1.0f : nyquistGain (dt));
             left  *= osc1Gain;
             right *= osc1Gain;
             tapSource (Params::srcOsc1, std::max (std::abs (left), std::abs (right)));
@@ -743,7 +746,8 @@ struct SynthVoice : juce::SynthesiserVoice
             if (stringLevel > 0.0f && stringActive)
                 monoSources += tapSource (Params::srcString, stringLevel * renderString (dt));
             if (blockWavetable != nullptr)
-                monoSources += tapSource (Params::srcWavetable, wtLevel * renderWavetable (*blockWavetable, dt, juce::jlimit (0.0f, 1.0f, wtPositionBase + wtPosMod)));
+                monoSources += tapSource (Params::srcWavetable, wtLevel * nyquistGain (dt)
+                                                                * renderWavetable (*blockWavetable, dt, juce::jlimit (0.0f, 1.0f, wtPositionBase + wtPosMod)));
             left  += monoSources;
             right += monoSources;
 
@@ -1176,15 +1180,19 @@ private:
         const auto dt2 = dt * mix.osc2Ratio * osc2Mul;
         lastDt2 = dt2;
         lastSubRatio = mix.subRatio;
+        // Niveles de Osc 2 y Osc 3 (y sus wavetables) con nyquistGain: la forma y sus saltos minBLEP, con el mismo factor
+        const auto g2 = nyquistGain (dt2), g3 = nyquistGain (dt * mix.subRatio);
+        const auto lvl2 = mix.osc2Level * g2, lvl3 = mix.subLevel * g3;
+        const auto wtLvl2 = mix.osc2WtLevel * g2, wtLvl3 = mix.osc3WtLevel * g3;
 
         if (mix.osc2Level > 0.0f)
         {
             const auto s = oscillator (mix.osc2Wave, osc2Phase, dt2, pw, false);
-            out += tapSource (Params::srcOsc2, mix.osc2Level * (mix.osc2Tri.active && mix.osc2Wave == triangle ? mix.osc2Tri (s) : s));
+            out += tapSource (Params::srcOsc2, lvl2 * (mix.osc2Tri.active && mix.osc2Wave == triangle ? mix.osc2Tri (s) : s));
         }
         // Familia de Osc 2: su Wavetable, con la fase y el incremento del oscilador (mix.osc2Table puede faltar: calla)
         if (mix.osc2WtLevel > 0.0f && mix.osc2Table != nullptr)
-            out += tapSource (Params::srcOsc2Wt, mix.osc2WtLevel * readWavetable (*mix.osc2Table, osc2Phase, dt2, mix.osc2WtPos));
+            out += tapSource (Params::srcOsc2Wt, wtLvl2 * readWavetable (*mix.osc2Table, osc2Phase, dt2, mix.osc2WtPos));
         // Su Sample (y el de Osc 3, abajo): avanza siempre que está activo (también en Mute o como modulador del Complex), como
         // una fase. Con sync, el salto entre el valor en el instante del reinicio (syncAt = (1 - syncPhase)/dt, la misma
         // referencia para Osc 2 y Osc 3) y el de Start se mide antes de avanzar y se corrige con minBLEP más abajo
@@ -1199,10 +1207,10 @@ private:
         if (mix.subLevel > 0.0f)
         {
             const auto s = oscillator (mix.subWave, subPhase, dt3, 0.5f, false);
-            out += tapSource (Params::srcOsc3, mix.subLevel * (mix.osc3Tri.active && mix.subWave == triangle ? mix.osc3Tri (s) : s));
+            out += tapSource (Params::srcOsc3, lvl3 * (mix.osc3Tri.active && mix.subWave == triangle ? mix.osc3Tri (s) : s));
         }
         if (mix.osc3WtLevel > 0.0f && mix.osc3Table != nullptr)
-            out += tapSource (Params::srcOsc3Wt, mix.osc3WtLevel * readWavetable (*mix.osc3Table, subPhase, dt3, mix.osc3WtPos));
+            out += tapSource (Params::srcOsc3Wt, wtLvl3 * readWavetable (*mix.osc3Table, subPhase, dt3, mix.osc3WtPos));
         const auto osc3SampleJump = mix.osc3SampleOn ? sampleSyncJump (osc3Sample, mix.osc3Sample, mix.osc3SmpLevel, mix.osc3Sync, syncNow, dt3, syncAt) : 0.0f;
         if (mix.osc3SampleOn)
             out += tapSource (Params::srcOsc3Sample, mix.osc3SmpLevel * osc3Sample.render (dt3, mix.osc3Sample));
@@ -1223,20 +1231,20 @@ private:
             const auto syncWraps = syncPhase + dt >= 1.0;
             if (mix.osc2Level > 0.0f)
                 MinBlep::syncedStep (monoBlep, mix.osc2Wave, osc2Phase, dt2, mix.osc2Sync && syncWraps,
-                                     syncWraps ? (1.0 - syncPhase) / dt : 1.0, pw, mix.osc2Level, mix.osc2Level);
+                                     syncWraps ? (1.0 - syncPhase) / dt : 1.0, pw, lvl2, lvl2);
             // Wavetable: la tabla ya está limitada en banda (mipmaps); solo el reinicio del sync es un salto: tabla(0) - tabla(fase
             // en el instante del reinicio), con la misma posición y el mismo nivel de mipmap
             if (mix.osc2WtLevel > 0.0f && mix.osc2Table != nullptr && mix.osc2Sync && syncWraps)
-                tableSyncJump (*mix.osc2Table, osc2Phase, dt, dt2, mix.osc2WtPos, mix.osc2WtLevel);
+                tableSyncJump (*mix.osc2Table, osc2Phase, dt, dt2, mix.osc2WtPos, wtLvl2);
             // Sample: el mismo tratamiento (el fichero ya está limitado en banda por su nivel diezmado)
             if (osc2SampleJump != 0.0f)
                 monoBlep.add (syncAt, osc2SampleJump * mix.osc2SmpLevel, osc2SampleJump * mix.osc2SmpLevel);
             // Osc 3: igual. Sin sync, syncedStep es el segment (0, 1) de siempre (bit a bit)
             if (mix.subLevel > 0.0f)
                 MinBlep::syncedStep (monoBlep, mix.subWave, subPhase, dt3, mix.osc3Sync && syncWraps,
-                                     syncWraps ? (1.0 - syncPhase) / dt : 1.0, 0.5, mix.subLevel, mix.subLevel);
+                                     syncWraps ? (1.0 - syncPhase) / dt : 1.0, 0.5, lvl3, lvl3);
             if (mix.osc3WtLevel > 0.0f && mix.osc3Table != nullptr && mix.osc3Sync && syncWraps)
-                tableSyncJump (*mix.osc3Table, subPhase, dt, dt3, mix.osc3WtPos, mix.osc3WtLevel);
+                tableSyncJump (*mix.osc3Table, subPhase, dt, dt3, mix.osc3WtPos, wtLvl3);
             if (osc3SampleJump != 0.0f)
                 monoBlep.add (syncAt, osc3SampleJump * mix.osc3SmpLevel, osc3SampleJump * mix.osc3SmpLevel);
         }

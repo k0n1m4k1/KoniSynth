@@ -567,4 +567,13 @@ c.check(first == 25825 and first2 == 25825 and after == 25841,
         'pitch bend en su muestra: primera diferencia %d (evento 25824); con un segundo bend en 25840 del mismo bloque, %d / %d'
         % (first, first2, after))
 
+# --- Osc 2 por encima de Nyquist (nyquistGain, Dsp/OscillatorCore.h): seno a +2 oct en la nota 127 (50 175 Hz, dt = 1,05) sin
+# pliegue (antes 2175 Hz a -25,09 dBFS RMS); a 0 oct (12 544 Hz, dt = 0,26) igual que antes (-25,09 dBFS, medido externamente)
+OSC2 = TONE + ['Osc1 Level=0%', 'Osc2 Level=100%', 'Osc2 Wave=Sine', '--param=osc2Semi=0']
+fold = render(OSC2 + ['--param=osc2Octave=2'], 1.6, ['127:0.1:1.45:100'], 'osc2-fold.wav')[0][24000:72000]
+plain = render(OSC2 + ['--param=osc2Octave=0'], 1.6, ['127:0.1:1.45:100'], 'osc2-plain.wav')[0][24000:72000]
+rf, rp = (20 * np.log10(max(np.sqrt(np.mean(v ** 2)), 1e-12)) for v in (fold, plain))
+c.check(rf < -100 and abs(rp + 25.09) < 0.05,
+        'Osc 2 seno sobre Nyquist: +2 oct en la nota 127 %.1f dBFS RMS (< -100; antes -25,1 plegado); 0 oct %.2f dBFS (-25,09)' % (rf, rp))
+
 sys.exit(c.summary())
