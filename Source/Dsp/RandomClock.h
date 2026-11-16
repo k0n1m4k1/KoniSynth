@@ -110,6 +110,16 @@ struct TimelineSynth : juce::Synthesiser
     }
     using juce::Synthesiser::renderVoices;
 
+    // Cada evento en su posición (JUCE lo entrega entre dos tramos de render): el procesador aplica aquí el pitch bend
+    // global del Synth, que las voces leen al empezar cada tramo
+    std::function<void (const juce::MidiMessage&)> onMidiEvent;
+    void handleMidiEvent (const juce::MidiMessage& m) override
+    {
+        if (onMidiEvent)
+            onMidiEvent (m);
+        juce::Synthesiser::handleMidiEvent (m);
+    }
+
     // Voice Assign: 0 primera voz libre (JUCE); 1 la misma tecla redispara su voz aunque esté en release (Prophet-5); 2 round
     // robin (Prophet-5 Rev 4): cada nota a la voz libre siguiente. Sin voces libres, el robo de JUCE (la más antigua)
     juce::SynthesiserVoice* findFreeVoice (juce::SynthesiserSound* sound, int channel, int note, bool steal) const override

@@ -160,6 +160,12 @@ public:
         // Con 1 solo se agrupan eventos de la misma muestra; el bloque se parte solo donde hay eventos
         synth.setMinimumRenderingSubdivisionSize (1, true);
         monoSynth.setMinimumRenderingSubdivisionSize (1, true);
+        // Pitch bend global del Synth en su muestra (el resto de motores lo leen por bloque, en el preprocesado del MIDI)
+        synth.onMidiEvent = monoSynth.onMidiEvent = [this] (const juce::MidiMessage& m)
+        {
+            if (isGlobalBend (m))
+                params.pitchBend = bendSemitones (m);
+        };
         perfMacros.attach (apvts);
         undoHistory.attach (*this, apvts, { PerfMacros::mapProp, PerfMacros::namesProp, chipMacrosProp, mdMacrosProp, snesMacrosProp,
                                             "presetName", "presetFactory", "dx7Voice", "dx7Bank", "fm1Firmware", ansUserProp });
@@ -571,7 +577,58 @@ public:
             && (in.isDisabled() || in == juce::AudioChannelSet::mono() || in == juce::AudioChannelSet::stereo());
     }
 
+    // All Sound Off (CC 120 con valor 0, en el canal de entrada) a mitad de bloque: el bloque se parte en su posición; lo de
+    // antes suena como sin el evento y lo de después empieza con el panic (como un CC 120 al principio de un bloque). Antes el
+    // panic se aplicaba al principio del bloque que lo traía: hasta un bloque de adelanto (medido: 224 muestras, 4,7 ms a
+    // 256 / 48 kHz). El segundo tramo ve la misma posición del host que el primero (sin efecto tras el panic, que para todo)
     void processBlock (juce::AudioBuffer<float>& ioBuffer, juce::MidiBuffer& midi) override
+    {
+        const auto n = ioBuffer.getNumSamples();
+        const auto cut = allSoundOffAt (midi);
+        if (cut <= 0 || cut >= n)
+        {
+            processSegment (ioBuffer, midi);
+            return;
+        }
+        splitHead.clear();
+        splitTail.clear();
+        for (const auto m : midi)
+            if (m.samplePosition < cut)
+                splitHead.addEvent (m.data, m.numBytes, m.samplePosition);
+            else
+                splitTail.addEvent (m.data, m.numBytes, m.samplePosition - cut);
+        juce::AudioBuffer<float> head (ioBuffer.getArrayOfWritePointers(), ioBuffer.getNumChannels(), 0, cut);
+        juce::AudioBuffer<float> tail (ioBuffer.getArrayOfWritePointers(), ioBuffer.getNumChannels(), cut, n - cut);
+        processSegment (head, splitHead);
+        processSegment (tail, splitTail);
+        midi.clear();
+        midi.addEvents (splitHead, 0, -1, 0);
+        midi.addEvents (splitTail, 0, -1, cut);
+    }
+
+    // Posición del primer All Sound Off válido del bloque (-1 si no hay): CC 120 con valor 0 (los demás valores los descarta
+    // el filtro de mensajes de modo) en el canal de entrada elegido, o en cualquiera
+    int allSoundOffAt (const juce::MidiBuffer& midi) const
+    {
+        const auto inChannel = (int) params.midiInChannel->load();
+        for (const auto m : midi)
+            if (m.numBytes == 3 && (m.data[0] & 0xf0) == 0xb0 && m.data[1] == 120 && m.data[2] == 0
+                && (inChannel <= 0 || (m.data[0] & 0x0f) + 1 == inChannel))
+                return m.samplePosition;
+        return -1;
+    }
+
+    // Pitch bend global: el de cualquier canal o, en MPE, solo el del maestro (canal 1); en semitonos con el Bend Range
+    bool isGlobalBend (const juce::MidiMessage& m) const
+    {
+        return m.isPitchWheel() && ! (params.mpeOn->load() > 0.5f && m.getChannel() != 1);
+    }
+    float bendSemitones (const juce::MidiMessage& m) const
+    {
+        return (float) (m.getPitchWheelValue() - 8192) / 8192.0f * params.bendRange->load();
+    }
+
+    void processSegment (juce::AudioBuffer<float>& ioBuffer, juce::MidiBuffer& midi)
     {
         juce::ScopedNoDenormals noDenormals;
         const KoniTuning::Scope tuningScope (tuning); // los motores leen la afinación de esta instancia (Dsp/Tuning.h)
@@ -658,7 +715,10 @@ public:
         tuning.beginBlock (midi); // MTS-ESP: ¿hay maestro? y SysEx MTS del controlador
 
         // MIDI learn y All Sound Off (CC 120): JUCE lo trata como All Notes Off con release (juce_Synthesiser.cpp:278),
-        // pero "sound off" debe silenciar ya, colas de efectos incluidas -> panic completo
+        // pero "sound off" debe silenciar ya, colas de efectos incluidas -> panic completo (processBlock parte el bloque en
+        // su posición, así que aquí llega al principio). El pitch bend global del Synth se aplica en su muestra
+        // (synth.onMidiEvent); el de los demás motores, aquí, con resolución de bloque
+        const auto bendAtEvent = (int) params.engine->load() == 0;
         for (const auto metadata : midi)
         {
             const auto message = metadata.getMessage();
@@ -667,9 +727,11 @@ public:
             midiLearn.handle (message, getParameters());
             if (message.isProgramChange() && (int) params.engine->load() == 6)
                 applyDx7Program (message.getProgramChangeNumber());
-            const auto mpe = params.mpeOn->load() > 0.5f;
-            if (message.isPitchWheel() && ! (mpe && message.getChannel() != 1)) // 0..16383, centro 8192; en MPE solo el maestro
-                params.pitchBend = (float) (message.getPitchWheelValue() - 8192) / 8192.0f * params.bendRange->load();
+            if (isGlobalBend (message))
+            {
+                if (! bendAtEvent)
+                    params.pitchBend = bendSemitones (message);
+            }
             else if (message.isControllerOfType (74))
                 params.channelTimbre[(size_t) juce::jlimit (1, 16, message.getChannel()) - 1].store ((float) message.getControllerValue() / 127.0f);
             else if (message.isControllerOfType (1))
@@ -1978,6 +2040,8 @@ public:
     SessionTransport sessionTransport; // REC / STOP / PLAY (Transport/SessionTransport.h); inactivo hasta pulsar
     juce::MidiBuffer keyboardScratch = [] { juce::MidiBuffer b; b.ensureSize (4096); return b; }(); // teclado en pantalla al practicar
     juce::MidiBuffer midiFilterScratch = [] { juce::MidiBuffer b; b.ensureSize (4096); return b; }(); // filtros de canal y de CC 120-127
+    juce::MidiBuffer splitHead = [] { juce::MidiBuffer b; b.ensureSize (4096); return b; }(),  // processBlock partido en un CC 120
+                     splitTail = [] { juce::MidiBuffer b; b.ensureSize (4096); return b; }();
     // Volumen del MIDI Music Player (ganancia lineal, 0-1): lo fija la UI y se guarda en config.settings (midiPlayerVolume)
     std::atomic<float> playerVolume { [] { auto c = openConfig(); return c != nullptr ? (float) juce::jlimit (0.0, 1.0, c->getDoubleValue ("midiPlayerVolume", 1.0)) : 1.0f; }() };
     float lastPlayerVolume = 1.0f; // hilo de audio

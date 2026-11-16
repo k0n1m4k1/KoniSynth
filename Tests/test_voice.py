@@ -552,4 +552,19 @@ DMC = os.path.join(RENDERS, 'tri.dmc')
 open(DMC, 'wb').write(bytes([0xFF] * 8 + [0x00] * 8) * 16)
 x, _ = render(CONSOLES[0][2] + ['--prop=dpcmSamplePath=' + DMC], 0.4, ['60:0.02:0.3:100'], 'es_dmc.wav', engine='')
 c.check(np.abs(x).max() > 0.01, '8-Bit/DPCM con un .dmc: suena (pico %.1f dBFS)' % db(np.abs(x).max()))
+# --- Pitch bend global en su muestra: JUCE parte el render del Synth en cada evento y el bend se aplica ahí (antes, con el
+# valor final del bloque desde su principio: 223 muestras de adelanto). Evento a 0,538002604167 s = muestra 25 824 (bloque
+# 100, posición 224; KoniBench toma (int) (t · fs)). La primera muestra distinta es la siguiente al evento: cada muestra sale
+# de la fase antes de avanzarla con el nuevo incremento (también antes: la auditoría midió 25 601 con el cambio en 25 600)
+TONE = ['Wave=Sine', 'Filter On=Off', 'Attack=1 ms', 'Sustain=100%', 'Drift=0%']
+ctl = render(TONE, 1.1, ['69:0.1:0.9:100'], 'bend-ctl.wav')[0]
+bend = render(TONE, 1.1, ['69:0.1:0.9:100', 'pb:0.538002604167:8191:1'], 'bend.wav')[0]
+two = render(TONE, 1.1, ['69:0.1:0.9:100', 'pb:0.538002604167:8191:1', 'pb:0.53833334:0:1'], 'bend2.wav')[0]
+first = int(np.nonzero(ctl != bend)[0][0])
+first2 = int(np.nonzero(ctl != two)[0][0])
+after = int(np.nonzero(bend != two)[0][0])
+c.check(first == 25825 and first2 == 25825 and after == 25841,
+        'pitch bend en su muestra: primera diferencia %d (evento 25824); con un segundo bend en 25840 del mismo bloque, %d / %d'
+        % (first, first2, after))
+
 sys.exit(c.summary())

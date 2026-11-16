@@ -1,4 +1,5 @@
-# PANIC (aquí con CC 120, el mismo panic() que el botón y la acción de MIDI learn): silencio total desde el bloque en que llega.
+# PANIC (aquí con CC 120, el mismo panic() que el botón y la acción de MIDI learn): silencio total desde la muestra en que llega
+# (el bloque se parte en su posición: lo de antes es idéntico a un render sin el CC 120).
 # Por motor, una nota sostenida con reverb, muelles, flanger, eco y Leslie: tras el panic, el pico no pasa del de ese motor en
 # reposo (sin notas; algunos chips dan continua en reposo). Los ritmos que suenan solos (Drum Machine, Omnichord) y ANS con
 # Hold quedan parados hasta la siguiente nota y vuelven con ella.
@@ -9,7 +10,7 @@ from common import EXE, VST, RENDERS, SEED, Checker, analysis
 c = Checker('panic')
 FS, BS = 48000, 256  # render de KoniBench: 48 kHz, bloques de 256
 FX = ['--param=ambientOn=1', '--param=springOn=1', '--param=flangerOn=1', '--param=echoOn=1', '--param=leslieOn=1']
-START = (FS // BS) * BS  # bloque que contiene el CC 120 de t = 1,0 s: el panic se aplica al principio del bloque
+START = FS  # muestra del CC 120 de t = 1,0 s (a mitad del bloque 187, que empieza en 47 872): el panic se aplica ahí
 
 
 def peak(args, secs, notes):
@@ -31,9 +32,12 @@ ENGINES = ['KoniSynth', 'Theremin', 'Casio VL-1', 'Stylophone', 'Omnichord', 'Dr
 for k, name in enumerate(ENGINES):
     base = ['--param=engine=%d' % k] + FX
     held = peak(base, 1.6, ['60:0.1:1.5:100', 'cc:1.0:120:0:1'])
+    control = peak(base, 1.6, ['60:0.1:1.5:100'])
     idle = peak(base, 1.6, [])
     before, after, rest = held[FS // 2:FS].max(), held[START:].max(), idle[START:].max()
-    c.check(after <= rest * 1.0001 + 1e-9, '%-28s antes %6.1f dBFS; tras el panic %6.1f dBFS (reposo %6.1f)' % (name, db(before), db(after), db(rest)))
+    same = np.array_equal(held[:START], control[:START])
+    c.check(after <= rest * 1.0001 + 1e-9 and same,
+            '%-28s antes %6.1f dBFS (= sin CC 120: %s); tras el panic %6.1f dBFS (reposo %6.1f)' % (name, db(before), same, db(after), db(rest)))
 
 for name, args in (('Drum Machine, patrón 5', ['--param=engine=5', '--param=drumPattern=5']),
                    ('Omnichord, ritmo 1', ['--param=engine=4', '--param=omniRhythm=1']),
