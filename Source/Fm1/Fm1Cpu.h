@@ -288,6 +288,8 @@ public:
     // (KoniFm1Run --jitprofile) instrucciones que el JIT hace con jitOp, por clave fast << 24 | ruta << 16 | fmode << 8 |
     // fidx << 7 | fcond (en las crudas, en lugar de fmode, la subclase: ver jitOp); nullptr: sin contar
     std::unordered_map<uint32_t, uint64_t>* jitOpHist = nullptr;
+    // (con jitOpHist) accesos del JIT por la ruta lenta (jitMemSlow), por página de 256 B: addr >> 8, | 1 << 31 si escribe
+    std::unordered_map<uint32_t, uint64_t>* jitSlowPages = nullptr;
     // (KoniFm1Run --stepprofile) instrucciones que la ráfaga interpreta, por motivo << 28 | pc (1: estado de la CPU, 2: sin
     // bloque del JIT, 3: el bloque no cabe en lo que queda); nullptr: sin contar
     std::unordered_map<uint32_t, uint64_t>* stepHist = nullptr;

@@ -208,6 +208,7 @@ int main (int argc, char** argv)
     std::unordered_map<uint32_t, uint64_t> ioHist;
     std::unordered_map<uint32_t, uint64_t> stepHist;
     std::unordered_map<uint32_t, uint64_t> jitOpHist;
+std::unordered_map<uint32_t, uint64_t> jitSlowPages;  // (--jitprofile) accesos por la ruta lenta del JIT, por página de 256 B
     int hostProfile = 0;  // --hostprofile N: las N funciones y líneas del emulador con más muestras (Windows)
     std::vector<uint8_t> syx;
     bool haveSyx = false;
@@ -310,7 +311,7 @@ int main (int argc, char** argv)
     std::printf ("%s: \"%s\", entrada 0x%08x, XIP %zu B, clave 0x%04x\n", argv[1], st.identity.c_str(), st.entry, st.xip.size(), st.key);
     std::unordered_map<const Fm1IsaEntry*, uint64_t> hist;
     if (profile > 0) cpu.hist = &hist;
-    if (jitProfile > 0) cpu.jitOpHist = &jitOpHist;
+    if (jitProfile > 0) { cpu.jitOpHist = &jitOpHist; cpu.jitSlowPages = &jitSlowPages; }
     if (stepProfile > 0) cpu.stepHist = &stepHist;
     if (ioProfile > 0) soc.ioHist = &ioHist;
     std::unordered_map<const Fm1IsaEntry*, uint64_t> synHist;  // los dos núcleos
@@ -626,6 +627,15 @@ int main (int argc, char** argv)
                          (unsigned long long) h[i].first, f < std::size (kFast) ? kFast[f] : "?", (k >> 16) & 0xff, (k >> 8) & 0xff,
                          (k >> 7) & 1, k & 0x7f);
         }
+        std::vector<std::pair<uint64_t, uint32_t>> pg;
+        uint64_t slow = 0;
+        for (const auto& [k, c] : jitSlowPages) { pg.push_back ({ c, k }); slow += c; }
+        std::sort (pg.rbegin(), pg.rend());
+        std::printf ("ruta lenta del JIT (cpu0): %llu accesos en %zu páginas de 256 B:\n", (unsigned long long) slow, pg.size());
+        for (size_t i = 0; i < std::min<size_t> (pg.size(), (size_t) jitProfile); ++i)
+            std::printf ("  %6.2f %%  %10llu  %s 0x%08x-0x%08x\n", 100.0 * (double) pg[i].first / (double) std::max<uint64_t> (1, slow),
+                         (unsigned long long) pg[i].first, (pg[i].second >> 31) ? "esc" : "lee", (pg[i].second & 0x7fffffffu) << 8,
+                         ((pg[i].second & 0x7fffffffu) << 8) + 0xff);
     }
     if (ioProfile > 0)
     {

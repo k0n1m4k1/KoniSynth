@@ -4169,6 +4169,8 @@ int Cpu::jitMemSlow (JitCtx* c, uint32_t j, const Line* l, uint32_t addr)
     if (cpu.jitOpHist != nullptr)
         ++(*cpu.jitOpHist)[(uint32_t) pre.fast << 24 | (uint32_t) (pre.route & 0xff) << 16 | (uint32_t) (pre.fmode & 0xff) << 8
                            | (pre.fidx ? 0x80u : 0u) | (pre.fcond & 0x7fu)];
+    if (cpu.jitSlowPages != nullptr)
+        ++(*cpu.jitSlowPages)[addr >> 8 | (pre.fast == Fm1Pre::FastLd || pre.fast == Fm1Pre::FastLdX ? 0u : 1u << 31)];
     if (pre.fast == Fm1Pre::FastLd || pre.fast == Fm1Pre::FastLdX)
         cpu.regs[pre.fd] = ldW (bus, pre.fw, pre.fsign, addr);
     else if (pre.fast == Fm1Pre::FastSt)
