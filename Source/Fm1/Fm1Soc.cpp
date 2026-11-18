@@ -1745,11 +1745,21 @@ bool Machine::runCpu1 (uint64_t cycles, std::optional<Wait> until, uint64_t& ran
     std::memcpy (probeRegs, c1.regs, sizeof probeRegs);
     const uint64_t budget = std::min<uint64_t> (cycles, 1u << 20);
     uint64_t left = budget;
+    // La interrupción pendiente para cpu1, en caché mientras no haya un acceso con efectos (Soc::sideEffects): lo pendiente
+    // y la configuración de los bancos (icfg, icfg1, ilat) solo cambian así dentro de este tramo (los eventos de tiempo van en
+    // el de cpu0). irqReady (habilitación y prioridad de la CPU) se mira en cada vuelta. Antes se recalculaba tras cada bloque
+    // del JIT o cada paso: medido con 12 notas en Tessera, pendingIrqFor era el 8 % del tiempo del emulador
+    uint64_t irqSide = soc.sideEffects - 1;
+    std::optional<std::pair<uint8_t, uint8_t>> irq;
     while (left > 0)
     {
-        if (soc.periph.anyPending())
-            if (const auto p = soc.periph.pendingIrqFor (1); p && c1.irqReady (p->second))
-                c1.interrupt (soc.read32 (kVecBase + 4u * p->first), p->second);
+        if (soc.sideEffects != irqSide)
+        {
+            irqSide = soc.sideEffects;
+            irq = soc.periph.anyPending() ? soc.periph.pendingIrqFor (1) : std::nullopt;
+        }
+        if (irq && c1.irqReady (irq->second))
+            c1.interrupt (soc.read32 (kVecBase + 4u * irq->first), irq->second);
         if (hle.site && c1.pc == hle.site.entry && hle.mode != Hle::Off && ! hle.pending && hleEnter (c1))
         {
             left -= std::min<uint64_t> (left, hle.costPerCall);
