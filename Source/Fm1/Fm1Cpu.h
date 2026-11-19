@@ -47,6 +47,11 @@ struct Bus
     // escribir la flash; el búfer no se mueve ni cambia de tamaño)
     struct XipView { const uint8_t* data; uint32_t base, size; };
     virtual bool xipView (XipView&) { return false; }
+    // (JIT, solo el bus de cpu0, que lleva el reloj de periféricos) lecturas y escrituras de palabra de algunos periféricos sin
+    // el camino general del bus, en la ruta lenta (Cpu::jitMemSlow): load / store las hacen exactamente como read32 /
+    // write32 (efectos y paradas incluidos) o devuelven false sin tocar nada
+    struct IoView { void* ctx; bool (*load) (void* ctx, uint32_t addr, uint32_t& v); bool (*store) (void* ctx, uint32_t addr, uint32_t v); };
+    virtual bool ioView (IoView&) { return false; }
     // (JIT) marca como código las palabras de RAM de [lo, hi) y cuenta las escrituras a palabras marcadas: si cambia,
     // los bloques hechos desde RAM ya no valen
     virtual void markCode (uint32_t /*lo*/, uint32_t /*hi*/) {}
@@ -468,6 +473,8 @@ private:
     bool jitRamOk = false;
     Bus::XipView jitXip {};
     bool jitXipOk = false;
+    Bus::IoView jitIo {};
+    bool jitIoOk = false;
     // el código de un bloque; devuelve dónde empieza la segunda entrada y añade sus enlaces (con el desplazamiento del
     // epílogo en "to", que jitAt convierte en dirección)
     size_t jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inRam, uint64_t slotMask, std::vector<JitLink*>& links);

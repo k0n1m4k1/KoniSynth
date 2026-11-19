@@ -468,6 +468,56 @@ uint32_t Soc::timerRead (uint32_t addr)
     return sfrGet (addr);
 }
 
+// Lecturas y escrituras de palabra que la ruta lenta del JIT de cpu0 hace sin el camino general (Cpu::jitMemSlow), con
+// lo mismo que read32Slow / write32Slow: ++sideEffects y, en el P33, la parada si p33Event cambia nextDue (un reset o un
+// perro guardián que vence antes). Con observación, nada (la cuenta de accesos de Observe). Medido con 12 notas en 4 s por
+// la ruta lenta: el contador del TIMER4 (0x10804) en KARMA 11,8 M lecturas; el P33 (alimentar el perro guardián, ~24 accesos
+// cada vez) en zp12 43 M lecturas y 35 M escrituras, en mono2k y AMB-1 ~10 M lecturas
+bool Soc::ioView (IoView& v)
+{
+    v = { this, &Soc::ioLoad, &Soc::ioStore };
+    return true;
+}
+
+bool Soc::ioLoad (void* soc, uint32_t addr, uint32_t& v)
+{
+    auto& s = *static_cast<Soc*> (soc);
+    if (s.observing)
+        return false;
+    if (addr == 0x10804)
+    {
+        if (s.periph.skipIdle && ! s.periph.inIsr)
+            return false;  // (la racha de skipIdle puede saltar tiempo: Periph::read)
+        ++s.sideEffects;
+        v = s.periph.t4CountAt (s.periph.cycles);  // (0 con el TIMER4 parado, como Periph::read)
+        return true;
+    }
+    if (addr >= P33::kCon && addr <= P33::kDat + 3)
+    {
+        ++s.sideEffects;
+        v = s.p33.read (addr);
+        return true;
+    }
+    return false;
+}
+
+bool Soc::ioStore (void* soc, uint32_t addr, uint32_t v)
+{
+    auto& s = *static_cast<Soc*> (soc);
+    if (s.observing || addr < P33::kCon || addr > P33::kDat + 3)
+        return false;
+    ++s.sideEffects;
+    const auto due0 = s.periph.nextDue;
+    s.p33.write (addr, v);
+    s.p33Event();
+    if (s.periph.nextDue != due0)
+    {
+        ++s.stopEffects;
+        if (s.ioHist != nullptr) ++(*s.ioHist)[(addr & ~3u) | 1u];  // (como write32Slow)
+    }
+    return true;
+}
+
 uint32_t Soc::read32Slow (uint32_t addr)
 {
     ++sideEffects;

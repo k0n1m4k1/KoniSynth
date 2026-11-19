@@ -3659,6 +3659,7 @@ const Cpu::JitBlock* Cpu::jitAt (Bus& bus, uint32_t at)
     {
         jitRamOk = bus.ramView (jitRam) && jitRam.size >= 8;
         jitXipOk = jitRamOk && bus.xipView (jitXip) && jitXip.size >= 8;
+        jitIoOk = bus.ioView (jitIo);
         jitIndex.assign (kJitSpan / 2, 0);
         jitIndexRam.assign (jitRamOk ? jitRam.size / 2 : 0, 0);
         jitRamCw = bus.codeWrites();
@@ -4221,7 +4222,6 @@ static uint32_t stxValue (Bus& bus, const Fm1Pre& pre, uint32_t addr, uint32_t v
 int Cpu::jitMemSlow (JitCtx* c, uint32_t j, const Line* l, uint32_t addr)
 {
     auto& cpu = *c->cpu;
-    auto& bus = *c->bus;
     const auto& pre = l->pre;
     *c->cycles = c->now + j;
     cpu.fault = Fault::None;
@@ -4231,6 +4231,22 @@ int Cpu::jitMemSlow (JitCtx* c, uint32_t j, const Line* l, uint32_t addr)
                            | (pre.fidx ? 0x80u : 0u) | (pre.fcond & 0x7fu)];
     if (cpu.jitSlowPages != nullptr)
         ++(*cpu.jitSlowPages)[addr >> 8 | (pre.fast == Fm1Pre::FastLd || pre.fast == Fm1Pre::FastLdX ? 0u : 1u << 31)];
+    // Las palabras de algunos periféricos (Bus::ioView, solo cpu0: el contador del TIMER4 y el P33) sin el camino general
+    // del bus: un adaptador que las prueba antes (cargas, almacenamientos y lectura-modificación-escritura). En código
+    // nativo en cada carga, el código crecía ~110 B por carga y V15 llenaba el búfer de 16 MiB
+    struct IoBus final : Bus
+    {
+        Bus& b;
+        const Bus::IoView& io;
+        IoBus (Bus& bb, const Bus::IoView& v) : b (bb), io (v) {}
+        uint8_t read8 (uint32_t a) override { return b.read8 (a); }
+        uint16_t read16 (uint32_t a) override { return b.read16 (a); }
+        uint32_t read32 (uint32_t a) override { uint32_t v; return io.load (io.ctx, a, v) ? v : b.read32 (a); }
+        void write8 (uint32_t a, uint8_t v) override { b.write8 (a, v); }
+        void write16 (uint32_t a, uint16_t v) override { b.write16 (a, v); }
+        void write32 (uint32_t a, uint32_t v) override { if (! io.store (io.ctx, a, v)) b.write32 (a, v); }
+    } ioBus { *c->bus, cpu.jitIo };
+    auto& bus = cpu.jitIoOk ? (Bus&) ioBus : *c->bus;
     if (pre.fast == Fm1Pre::FastLd || pre.fast == Fm1Pre::FastLdX)
         cpu.regs[pre.fd] = ldW (bus, pre.fw, pre.fsign, addr);
     else if (pre.fast == Fm1Pre::FastSt)

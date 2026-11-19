@@ -74,6 +74,9 @@ public:
         v = { xip.data(), kXipBase, (uint32_t) xip.size() };
         return ! xip.empty();
     }
+    bool ioView (IoView& v) override;
+    static bool ioLoad (void* soc, uint32_t addr, uint32_t& v);
+    static bool ioStore (void* soc, uint32_t addr, uint32_t v);
 
     // ---- SoC ----
     void advance (uint64_t n);  // avanza el reloj de periféricos y saca de la RAM una mitad de audio acabada
