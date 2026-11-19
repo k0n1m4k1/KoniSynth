@@ -1006,6 +1006,205 @@ void Machine::LoopSkip::backOff (uint64_t now)
     backoffUntil = now + backoff;
 }
 
+// ¿Entraría ahora una interrupción en cpu0? (pendiente, habilitada en su banco y aceptada por la CPU: irqReady)
+bool Machine::irqWouldEnter() const noexcept
+{
+    if (! soc.periph.anyPending())
+        return false;
+    const auto p = soc.periph.pendingIrqFor (0);
+    return p && cpu0.irqReady (p->second);
+}
+
+namespace
+{
+// Bus de una vuelta de espera simulada: la RAM (sin efectos) y el contador del TIMER4 tal como se leería en el ciclo cyc;
+// cualquier otra cosa (escrituras, periféricos, cerrojos) la invalida
+struct WaitBus : Bus
+{
+    Soc& soc;
+    uint64_t cyc = 0;
+    uint32_t reads = 0;  // lecturas del contador
+    bool bad = false;
+    explicit WaitBus (Soc& s) : soc (s) {}
+    bool ram (uint32_t a, uint32_t width)
+    {
+        if (! bad && (size_t) (a - kRamBase) + width <= soc.ram.size())
+            return true;
+        bad = true;
+        return false;
+    }
+    uint8_t read8 (uint32_t a) override { return ram (a, 1) ? soc.read8 (a) : 0; }
+    uint16_t read16 (uint32_t a) override { return ram (a, 2) ? soc.read16 (a) : 0; }
+    uint32_t read32 (uint32_t a) override
+    {
+        if (! bad && a == kT4Cnt)
+        {
+            ++reads;
+            return soc.periph.t4CountAt (cyc);
+        }
+        return ram (a, 4) ? soc.read32 (a) : 0;
+    }
+    uint32_t fetch32 (uint32_t a) override { return soc.fetch32 (a); }
+    void write8 (uint32_t, uint8_t) override { bad = true; }
+    void write16 (uint32_t, uint16_t) override { bad = true; }
+    void write32 (uint32_t, uint32_t) override { bad = true; }
+    bool hwLock (uint32_t, bool) override { bad = true; return true; }
+    void spin (uint32_t, uint32_t) override { bad = true; }
+    void idle (uint32_t) override { bad = true; }
+};
+constexpr uint32_t kWaitMaxLen = 24;  // instrucciones por vuelta como mucho
+} // namespace
+
+// Una vuelta desde s con la cabeza en el ciclo cyc (una instrucción por ciclo): 1 si vuelve a la cabeza solo con
+// instrucciones de waitOp y accesos de WaitBus; 0 si sale del bucle (la espera acaba en esta vuelta): un salto lo lleva
+// fuera de la zona, o pasa de largo un salto hacia atrás y sigue con algo que no es de una espera; -1 si no. Con record apunta sus pc en waitPath, sin él exige los mismos. Deja la CPU donde se paró
+int Machine::waitRound (const Cpu::RoundState& s, uint64_t cyc, bool record, uint32_t& reads)
+{
+    constexpr uint32_t kZone = 64;
+    cpu0.setRoundState (s);
+    WaitBus bus (soc);
+    if (record)
+    {
+        waitPath.clear();
+        waitWritten = 0;
+    }
+    bool back = false;
+    for (uint32_t q = 0; q < kWaitMaxLen; ++q)
+    {
+        const auto at = cpu0.pc;
+        if (at - s.pc >= kZone)
+            return 0;  // fuera de la zona: la espera sale aquí
+        if (record)
+        {
+            if (! cpu0.waitOp (bus, at, waitWritten, back))
+                return back ? 0 : -1;  // (tras un salto hacia atrás no tomado: sale)
+            waitPath.push_back (at);
+        }
+        else if (q >= waitPath.size() || waitPath[q] != at)
+            return 0;  // otro recorrido (el contador ya llegó)
+        bus.cyc = cyc + q;
+        if (! cpu0.step (bus) || bus.bad)
+            return -1;
+        if (cpu0.pc == s.pc)
+        {
+            reads = bus.reads;
+            return record || q + 1 == waitPath.size() ? 1 : 0;
+        }
+    }
+    return -1;
+}
+
+// Espera con el contador en la cabeza pc, con el tick de esta instrucción pagado (ciclo c): el contador es función del
+// ciclo, así que cada vuelta se puede simular para el ciclo en que ocurriría. Vale si (1) la vuelta solo lee la RAM y el
+// contador y solo cambia registros y banderas, (2) sus lecturas del contador no tienen efectos (dentro de una ISR o sin
+// skipIdle: sin racha), (3) acaba igual con lo que escribe alterado al empezar (no lee restos de la anterior: el estado
+// tras k vueltas es el de la última). Se saltan las k vueltas que siguen igual (búsqueda binaria: el contador solo
+// avanza) dentro de room (el tramo y el siguiente evento: nada entra, y con cpu1 en marcha esta corre entre tramos, como
+// sin salto); la RAM no cambia en medio. Medido con 12 notas: en Tessera, dos esperas en ISR eran el 12,6 % de cpu0
+int64_t Machine::skipTimerWait (uint32_t room)
+{
+    const auto head = cpu0.pc;
+    const auto waitNote = [this, head] (int why)
+    {
+        ++loopSkip.waitFail[(size_t) why];
+        if (loopSkip.probeAt != nullptr)
+            ++(*loopSkip.probeAt)[1ull << 62 | (uint64_t) head << 3 | (uint64_t) why];
+    };
+    if (! loopSkip.waitOk || ! cpu0.roundable())
+        return waitNote (0), -1;
+    if (soc.periph.skipIdle && ! soc.periph.inIsr)
+        return waitNote (1), -1;  // fuera de una ISR, leer el contador puede saltar tiempo (la racha de skipIdle): ya lo resuelve eso
+    // sin sitio para dos vueltas de las de la última visita: ni se mira (en Tessera, 2 de cada 3 visitas: el tramo de cpu1
+    // o el siguiente evento quedan a pocas vueltas)
+    const auto slot = (head >> 1) & (LoopSkip::kWaitSlots - 1);
+    if (loopSkip.waitPc[slot] == head && room < 2u * loopSkip.waitLen[slot])
+        return waitNote (5), 0;
+    const auto s = cpu0.roundState();
+    const auto c = soc.periph.cycles;
+    const auto side = soc.sideEffects, stop = soc.stopEffects;
+    uint32_t reads = 0;
+    const auto first = waitRound (s, c, true, reads);
+    if (first > 0)
+    {
+        if (loopSkip.waitPc[slot] != head)
+        {
+            loopSkip.waitPc[slot] = head;
+            loopSkip.waitBad[slot] = 0;
+        }
+        loopSkip.waitLen[slot] = (uint8_t) waitPath.size();  // (<= kWaitMaxLen)
+    }
+    if (first == 0)
+    {
+        cpu0.setRoundState (s);
+        return 0;  // sale en esta vuelta: nada que saltar ahora
+    }
+    bool ok = first > 0;
+    if (! ok) waitNote (2);
+    else if (reads == 0) { waitNote (3); ok = false; }
+    Cpu::RoundState end {};
+    if (ok)
+    {
+        end = cpu0.roundState();
+        // (3): los registros que escriben sus instrucciones y las banderas, alterados al empezar (por el código y no por
+        // los valores: a 24 MHz el contador repite valor en vueltas de pocos ciclos, y la vuelta deja todo igual). Al final,
+        // los registros como en la vuelta real; las banderas, igual (las escribe) o como se alteraron (ni las toca)
+        auto p = s;
+        for (int r = 0; r < 16; ++r)
+            if ((waitWritten >> r) & 1u)
+                p.regs[r] ^= 0xa5a5a5a5u;
+        p.flags ^= 0xfu;
+        uint32_t reads2 = 0;
+        ok = waitWritten != 0 && waitRound (p, c, false, reads2) > 0 && reads2 == reads;
+        if (ok)
+        {
+            auto x = cpu0.roundState();
+            const bool flagsOk = x.flags == end.flags || (x.flags == p.flags && end.flags == s.flags);
+            x.flags = end.flags;
+            cpu0.setRoundState (x);
+            ok = flagsOk && cpu0.sameRound (end);
+        }
+        if (! ok) waitNote (4);
+    }
+    const auto len = (uint32_t) waitPath.size();
+    const uint64_t kMax = ok ? room / len : 0;
+    // la vuelta r (0 = la de ahora) sigue igual
+    const auto cont = [&] (uint64_t r) { uint32_t rd = 0; return waitRound (s, c + r * len, false, rd) > 0 && rd == reads; };
+    uint64_t k = 0;
+    if (kMax >= 2)
+    {
+        if (cont (kMax - 1))
+            k = kMax;
+        else
+        {
+            uint64_t lo = 0, hi = kMax - 1;  // sigue lo, no sigue hi
+            while (hi - lo > 1)
+            {
+                const auto mid = lo + (hi - lo) / 2;
+                (cont (mid) ? lo : hi) = mid;
+            }
+            k = lo + 1;
+        }
+    }
+    soc.sideEffects = side;
+    soc.stopEffects = stop;
+    if (k < 2)
+    {
+        if (ok) waitNote (5);
+        cpu0.setRoundState (s);
+        return ok ? 0 : -1;
+    }
+    // el estado tras k vueltas: el de la última, la k - 1 (no lee restos de las anteriores)
+    uint32_t rd = 0;
+    waitRound (s, c + (k - 1) * len, false, rd);
+    auto fin = cpu0.roundState();
+    fin.insns = s.insns + k * len;
+    cpu0.setRoundState (fin);
+    ++loopSkip.waitHits;
+    loopSkip.waitSkipped += k * len;
+    loopSkip.waitGood (head);
+    return (int64_t) (k * len);
+}
+
 // Busca un bucle de sondeo en el pc de cpu0 con el tick de esa instrucción pagado. Devuelve las instrucciones ejecutadas,
 // vueltas saltadas incluidas (como mucho budget; el tick de la siguiente sin pagar), o 0: no hay bucle y nada cambió
 uint32_t Machine::probeLoop (uint32_t budget)
@@ -1139,6 +1338,8 @@ uint32_t Machine::probeLoop (uint32_t budget)
         }
         ++i;
     }
+    if (ls.probeAt != nullptr)
+        ++(*ls.probeAt)[(uint64_t) pc0 << 2 | (result == 1 ? 0u : result == -1 ? 1u : result == -2 ? 2u : 3u)];
     if (result == 1)
     {
         // vueltas enteras cuyos ticks caen antes del siguiente pendiente, y dentro del presupuesto
@@ -1561,12 +1762,20 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
         }
         // bucle de retardo contado: vueltas enteras hasta antes del siguiente evento, exacto (ver Cpu::skipCountedLoop). El tick
         // de esta instrucción está pagado: k instrucciones dejan el reloj k - 1 más allá, y el tick de la siguiente lo paga el bucle
-        if (cpu0.pc == cpu0.loopHint && cpu0.counted (cpu0.pc) && loopSkip.enabled && ! soc.cpu1Release && ! soc.periph.anyPending())
+        // (con una interrupción pendiente que la CPU aún no acepta también: lo pendiente solo cambia con un tick que vence o un
+        // acceso con efectos, y el salto no pasa del siguiente evento; p. ej. las esperas dentro de la ISR del tick)
+        if (cpu0.pc == cpu0.loopHint && cpu0.counted (cpu0.pc) && loopSkip.enabled && ! soc.cpu1Release && ! irqWouldEnter())
         {
             const auto c = soc.periph.cycles, due = soc.periph.nextDue;
             const auto room = (uint32_t) std::min<uint64_t> (n - done, due > c ? due - c : 0);
-            const auto k = cpu0.skipCountedLoop (soc, room);
+            auto k = cpu0.skipCountedLoop (soc, room);
+            bool giveUp = false;
             if (k < 0)
+            {
+                k = skipTimerWait (room);  // ¿una espera con el contador? (con reintentos: LoopSkip::waitGiveUp)
+                giveUp = k < 0 && loopSkip.waitGiveUp (cpu0.pc);
+            }
+            if (giveUp)
                 cpu0.markNotCounted (cpu0.pc);
             else if (k > 0)
             {
@@ -1636,11 +1845,13 @@ bool Machine::runBlocks (uint32_t n, uint32_t& done, std::string& error)
                 bs.room = (uint32_t) std::min<uint64_t> (bs.room, observe.known[observe.idx].len + 1 - std::min<uint64_t> (
                                                                       cpu0.insnCount - observe.insn0, observe.known[observe.idx].len));
             }
-            // Con una interrupción pendiente (aún sin aceptar), arriba ni se sondea un bucle ni se salta uno contado (los dos
-            // piden ! anyPending): pararse por ellos solo daba una instrucción por ráfaga (GHOULBOX con 12 notas: 37 M de 47 M
-            // pasos por arriba, 4030 sondeos). Lo pendiente solo cambia con un evento o un acceso con efectos, y la ráfaga se
-            // para en los dos
+            // Con una interrupción pendiente (aún sin aceptar), arriba no se sondea un bucle (pide ! anyPending): pararse por
+            // ello solo daba una instrucción por ráfaga (GHOULBOX con 12 notas: 37 M de 47 M pasos por arriba, 4030 sondeos).
+            // Lo pendiente solo cambia con un evento o un acceso con efectos, y la ráfaga se para en los dos. Los bucles contados
+            // y las esperas (loopHint) sí se miran si no entraría (irqWouldEnter): un pc que no lo es se apunta en notCounted
+            // y no vuelve a parar (las esperas de Tessera y Melodee corren en una ISR con otra pendiente)
             bs.loopEnabled = loopSkip.enabled && ! soc.periph.anyPending();
+            bs.hintEnabled = loopSkip.enabled && ! irqWouldEnter();
             bs.nextTry = loopSkip.nextTry;
             bs.backoffUntil = loopSkip.backoffUntil;
             bs.loops = loopSkip.loops.data();

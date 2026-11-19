@@ -75,6 +75,8 @@ public:
     }
     bool irqEnabled (uint32_t core, uint8_t n) const noexcept;
     std::optional<std::pair<uint8_t, uint8_t>> pendingIrqFor (uint32_t core) const noexcept;  // (irq, prioridad)
+    // El contador del TIMER4 (0x10804) como se leería en el ciclo cyc, sin la racha de skipIdle (Machine::skipTimerWait)
+    uint32_t t4CountAt (uint64_t cyc) const noexcept;
 
     std::optional<uint32_t> read (uint32_t addr);  // nullopt = SFR de almacenamiento simple
     bool write (uint32_t addr, uint32_t v);         // false = SFR de almacenamiento simple

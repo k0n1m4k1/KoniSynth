@@ -372,6 +372,11 @@ std::optional<std::pair<uint8_t, uint8_t>> Periph::pendingIrqFor (uint32_t core)
     return best;
 }
 
+uint32_t Periph::t4CountAt (uint64_t cyc) const noexcept
+{
+    return (t4Con & 1) == 0 ? 0u : mulDiv (cyc - t4Base, kT4Hz, hz);
+}
+
 std::optional<uint32_t> Periph::read (uint32_t addr)
 {
     switch (addr)

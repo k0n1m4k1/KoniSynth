@@ -242,6 +242,9 @@ public:
         // (diagnóstico) vueltas encontradas: (pc inicial, longitud, lecturas del contador) -> (veces, vueltas saltadas)
         std::map<std::tuple<uint32_t, uint32_t, uint32_t>, std::pair<uint64_t, uint64_t>>* hitsAt = nullptr;
         std::unordered_map<uint32_t, uint64_t>* badAt = nullptr;  // (diagnóstico) sondeos malos por dirección del acceso
+        // (diagnóstico) sondeos por pc inicial y resultado: pc << 2 | 0 vuelta, 1 sin vuelta o un acceso, 2 un evento, 3 una
+        // interrupción
+        std::unordered_map<uint64_t, uint64_t>* probeAt = nullptr;
         struct Visit
         {
             Cpu::PlainState core; P33::Snap p33; Periph::AdcState adc; uint32_t at; size_t log;
@@ -260,6 +263,34 @@ public:
         // (comprobado: hash del estado final igual al de --reference 1)
         bool timerOk = true;
         bool timerSkip = true;  // (diagnóstico) false: se comprueba en sombra pero no se salta
+        bool waitOk = true;     // esperas con el contador (Machine::skipTimerWait)
+        uint64_t waitHits = 0, waitSkipped = 0;  // sus saltos y sus instrucciones
+        // Rechazos seguidos por cabeza, (pc >> 1) & 4095: una cabeza pasa a Cpu::notCounted tras kWaitTries sin un salto en
+        // medio. Una espera no siempre se puede saltar (la de 11 instrucciones de Tessera, 0x0202293c, falla ~1 de cada 6
+        // visitas): con el primer rechazo ya no se volvía a mirar (11 saltos en 4 s; con reintentos, ~46 000)
+        static constexpr uint32_t kWaitTries = 8, kWaitSlots = 4096;
+        std::array<uint32_t, kWaitSlots> waitPc {};
+        std::array<uint8_t, kWaitSlots> waitBad {};
+        std::array<uint8_t, kWaitSlots> waitLen {};  // instrucciones de su última vuelta (0: sin medir)
+        bool waitGiveUp (uint32_t pc) noexcept  // un rechazo más: ¿se deja de mirar?
+        {
+            const auto i = (pc >> 1) & (kWaitSlots - 1);
+            if (waitPc[i] != pc)
+            {
+                waitPc[i] = pc;
+                waitBad[i] = 0;
+                waitLen[i] = 0;
+            }
+            return ++waitBad[i] >= kWaitTries;
+        }
+        void waitGood (uint32_t pc) noexcept
+        {
+            if (const auto i = (pc >> 1) & (kWaitSlots - 1); waitPc[i] == pc)
+                waitBad[i] = 0;
+        }
+        // (diagnóstico) intentos rechazados: 0 estado, 1 fuera de ISR con skipIdle, 2 la vuelta, 3 sin lecturas del contador,
+        // 4 lee restos, 5 sin sitio
+        std::array<uint64_t, 6> waitFail {};
         uint64_t tReads = 0;  // lecturas del contador en el sondeo en curso
         uint64_t timerHits = 0, timerVerified = 0, timerRejected = 0;  // saltos con contador, vueltas comprobadas y rechazadas
         std::unordered_map<uint64_t, int8_t> verdict;
@@ -383,6 +414,14 @@ private:
     uint32_t hleKernelEnter (Cpu& c1);  // V16, en el gancho de un kernel: instrucciones que ahorra (0 = se emula)
     void hleKernelCompare (Cpu& c1);    // en su epílogo tras el emulado en Check
     uint32_t probeLoop (uint32_t budget);
+    bool irqWouldEnter() const noexcept;
+    // Espera con el contador del TIMER4 en pc (p. ej. "do t = TMR4_CNT - t0; while (t < n)"), también dentro de una ISR:
+    // vueltas enteras que siguen igual, exacto. Devuelve las instrucciones saltadas (0: nada ahora; -1: no tiene esa forma)
+    int64_t skipTimerWait (uint32_t room);
+    // 1: vuelve a la cabeza; 0: sale del bucle (el pc deja la zona de la cabeza a cabeza + 64 B); -1: otra cosa
+    int waitRound (const Cpu::RoundState& s, uint64_t cyc, bool record, uint32_t& reads);
+    std::vector<uint32_t> waitPath;  // los pc de la vuelta (skipTimerWait)
+    uint32_t waitWritten = 0;        // los registros que escriben sus instrucciones
     void observeStop();
     uint64_t observeEnd (uint32_t budget);  // en su pc con la vuelta observada acabada: instrucciones saltadas (0 = ninguna)
     bool probeTimerAlt (const LoopSkip::Visit& v, uint32_t roundLen, uint64_t roundReads);  // ver LoopSkip::timerOk

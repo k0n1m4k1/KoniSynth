@@ -181,6 +181,9 @@ public:
         int blockedPrio = -1;
         uint32_t stopA = 0xffffffffu, stopB = 0xffffffffu;
         bool loopEnabled = false;
+        // parar en loopHint (bucles contados y esperas, arriba): también con una interrupción pendiente que la CPU no acepta
+        // (las esperas dentro de una ISR); loopEnabled, además, las paradas de sondeo y de la tabla de bucles
+        bool hintEnabled = false;
         uint64_t nextTry = 0, backoffUntil = 0;
         const uint32_t* loops = nullptr;  // 64 pc (mapeo directo por (pc >> 1) & 63)
         uint32_t probeKnown = 0, probeMin = 0;
@@ -222,13 +225,37 @@ public:
     // banderas quedan como tras la última suma saltada. room = instrucciones que pueden pasar sin evento. Devuelve las
     // instrucciones saltadas; 0 si ahora no hay nada que saltar; -1 si el código en pc no tiene esa forma
     int64_t skipCountedLoop (Bus& bus, uint32_t room);
+
+    // Lo que cambia una vuelta de espera simulada (Machine::skipTimerWait): solo registros, banderas, pc y lo que step
+    // apunta. Vale dentro de una ISR (al contrario que PlainState): la vuelta no toca nada de las interrupciones
+    struct RoundState
+    {
+        uint32_t pc, regs[16], flags, loopHint, holdIrq;
+        bool cc;
+        uint64_t insns;
+    };
+    RoundState roundState() const noexcept;
+    void setRoundState (const RoundState& s) noexcept;
+    bool sameRound (const RoundState& a) const noexcept;  // registros, banderas y pc iguales a los de a
+    // ¿Se puede simular aquí una vuelta? (ruta rápida, sin par, bloque predicado ni rep)
+    bool roundable() const noexcept { return fastPath && ! pairPending && predSkips.empty() && repEnd == 0; }
+    // La instrucción en at solo lee memoria y cambia registros, banderas y pc: carga, ALU, mov, desplazamiento, salto
+    // condicional o nop / csync, sin par
+    // written |= los registros que escribe (1 << r); back |= es un salto hacia atrás
+    bool waitOp (Bus& bus, uint32_t at, uint32_t& written, bool& back);
     uint32_t loopHint = 0xffffffffu;  // destino del último "if (R != #C) goto" hacia atrás tomado (dónde mirar)
-    // pc que no tenían la forma de un bucle contado (no volver a mirarlos): 8, directa por (pc >> 1) & 7. Con uno solo,
-    // dos bucles anidados se pisaban y cada vuelta paraba la ráfaga y la cadena del JIT (HYP-1: el 57 % de sus salidas)
-    uint32_t notCounted[8] { 0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu,
-                             0xffffffffu, 0xffffffffu, 0xffffffffu, 0xffffffffu };
-    bool counted (uint32_t at) const noexcept { return notCounted[(at >> 1) & 7] != at; }
-    void markNotCounted (uint32_t at) noexcept { notCounted[(at >> 1) & 7] = at; }
+    // pc que no tenían la forma de un bucle contado (no volver a mirarlos): 256, directa por (pc >> 1) & 255. Con uno solo,
+    // dos bucles anidados se pisaban y cada vuelta paraba la ráfaga y la cadena del JIT (HYP-1: el 57 % de sus salidas); con
+    // 8, los "<" hacia atrás con inmediato (también posibles esperas: LoopSkip::waitOk) se pisaban y se volvían a sondear
+    // (Tessera: ~5000 sondeos por pc en 4 s)
+    // 4096 entradas (16 KB): con 256, las cabezas que se pisaban se volvían a sondear en cada visita (Tessera con 12 notas:
+    // 237 cabezas rechazadas, 82 en entradas ya ocupadas; las dos de la ISR del tick, 0x02026398 y 0x0204b998, ~4200 sondeos
+    // cada una en 4 s). Con 4096, 5 (mezclar bits altos en el índice no mejora: 8)
+    static constexpr uint32_t kNotCounted = 4096;
+    uint32_t notCounted[kNotCounted];
+    static uint32_t notCountedSlot (uint32_t at) noexcept { return (at >> 1) & (kNotCounted - 1); }
+    bool counted (uint32_t at) const noexcept { return notCounted[notCountedSlot (at)] != at; }
+    void markNotCounted (uint32_t at) noexcept { notCounted[notCountedSlot (at)] = at; }
     void setPlainState (const PlainState& s) noexcept;
 
     // Límites de PC (las guardas de la CPU): el código corre dentro de alguna de las dos ventanas; una instrucción

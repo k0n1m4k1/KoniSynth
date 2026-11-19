@@ -327,6 +327,8 @@ std::unordered_map<uint32_t, uint64_t> jitSlowPages;  // (--jitprofile) accesos 
     m.loopSkip.enabled = ! reference;
     std::unordered_map<uint32_t, uint64_t> badAt;
     m.loopSkip.badAt = &badAt;
+    std::unordered_map<uint64_t, uint64_t> probeAt;
+    m.loopSkip.probeAt = &probeAt;
     if (probeMax > 0)
         m.loopSkip.probeMax = probeMax;
     m.loopSkip.timerOk = loopTimer;
@@ -501,8 +503,17 @@ std::unordered_map<uint32_t, uint64_t> jitSlowPages;  // (--jitprofile) accesos 
         std::printf ("JIT: cpu1 %llu bloques ejecutados, %llu instrucciones, %llu compilados, %llu vaciados de RAM, %llu del búfer\n",
                      (unsigned long long) m.cpu1->jitRuns, (unsigned long long) m.cpu1->jitInsns, (unsigned long long) m.cpu1->jitCompiled,
                      (unsigned long long) m.cpu1->jitRamFlushes, (unsigned long long) m.cpu1->jitResets);
+    // fallos de la caché de instrucciones (cada uno decodifica la instrucción: decodeAny + computePre)
+    std::printf ("decodificaciones: cpu0 %llu, cpu1 %llu\n", (unsigned long long) cpu.decodes,
+                 (unsigned long long) (m.cpu1 ? m.cpu1->decodes : 0));
     std::printf ("salto de bucles: %llu sondeos, %llu con bucle, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.probes,
                  (unsigned long long) m.loopSkip.hits, (unsigned long long) m.loopSkip.skipped);
+    std::printf ("  esperas con el contador del TIMER4: %llu saltos, %llu instrucciones saltadas; rechazos: estado %llu, fuera de ISR %llu, "
+                 "vuelta %llu, sin contador %llu, restos %llu, sin sitio %llu\n", (unsigned long long) m.loopSkip.waitHits,
+                 (unsigned long long) m.loopSkip.waitSkipped, (unsigned long long) m.loopSkip.waitFail[0],
+                 (unsigned long long) m.loopSkip.waitFail[1], (unsigned long long) m.loopSkip.waitFail[2],
+                 (unsigned long long) m.loopSkip.waitFail[3], (unsigned long long) m.loopSkip.waitFail[4],
+                 (unsigned long long) m.loopSkip.waitFail[5]);
     std::printf ("  con el contador del TIMER4: %llu saltos; %llu vueltas comprobadas en sombra, %llu rechazadas\n",
                  (unsigned long long) m.loopSkip.timerHits, (unsigned long long) m.loopSkip.timerVerified,
                  (unsigned long long) m.loopSkip.timerRejected);
@@ -537,6 +548,18 @@ std::unordered_map<uint32_t, uint64_t> jitSlowPages;  // (--jitprofile) accesos 
         std::sort (bad.rbegin(), bad.rend());
         for (size_t q = 0; q < bad.size() && q < 24; ++q)
             std::printf ("    %llu  0x%08x\n", (unsigned long long) bad[q].first, bad[q].second);
+        std::vector<std::pair<uint64_t, uint64_t>> at;
+        for (const auto& [a, c] : probeAt)
+            at.push_back ({ c, a });
+        std::sort (at.rbegin(), at.rend());
+        static const char* const kWhy[] = { "vuelta", "sin vuelta", "evento", "interrupción" };
+        std::printf ("  sondeos por pc y resultado:\n");
+        for (size_t q = 0; q < at.size() && q < 400; ++q)
+            if ((at[q].second >> 62) != 0)
+                std::printf ("    %10llu  0x%08x  espera rechazada (%u)\n", (unsigned long long) at[q].first,
+                             (uint32_t) ((at[q].second & ~(1ull << 62)) >> 3), (unsigned) (at[q].second & 7));
+            else
+                std::printf ("    %10llu  0x%08x  %s\n", (unsigned long long) at[q].first, (uint32_t) (at[q].second >> 2), kWhy[at[q].second & 3]);
     }
     std::printf ("bucles de retardo contados: %llu saltos, %llu instrucciones saltadas\n", (unsigned long long) m.loopSkip.counted,
                  (unsigned long long) m.loopSkip.countedSkipped);

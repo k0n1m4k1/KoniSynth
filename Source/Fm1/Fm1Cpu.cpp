@@ -1324,6 +1324,7 @@ static size_t icacheSlot (uint32_t pc) noexcept
 
 Cpu::Cpu (uint32_t entry) : pc (entry)
 {
+    std::fill (std::begin (notCounted), std::end (notCounted), 0xffffffffu);
     predSkips.reserve (kMaxPred);
     irqLevels.reserve (32);
 }
@@ -1519,6 +1520,62 @@ int64_t Cpu::skipCountedLoop (Bus& bus, uint32_t room)
         at = next;
     }
     return -1;
+}
+
+Cpu::RoundState Cpu::roundState() const noexcept
+{
+    RoundState s;
+    s.pc = pc;
+    std::memcpy (s.regs, regs, sizeof regs);
+    s.flags = flags;
+    s.loopHint = loopHint;
+    s.holdIrq = holdIrq;
+    s.cc = cc;
+    s.insns = insnCount;
+    return s;
+}
+
+void Cpu::setRoundState (const RoundState& s) noexcept
+{
+    pc = s.pc;
+    std::memcpy (regs, s.regs, sizeof regs);
+    flags = s.flags;
+    loopHint = s.loopHint;
+    holdIrq = s.holdIrq;
+    cc = s.cc;
+    insnCount = s.insns;
+}
+
+bool Cpu::sameRound (const RoundState& a) const noexcept
+{
+    return pc == a.pc && flags == a.flags && cc == a.cc && std::memcmp (regs, a.regs, sizeof regs) == 0;
+}
+
+bool Cpu::waitOp (Bus& bus, uint32_t at, uint32_t& written, bool& back)
+{
+    const Line* l = fetch (bus, at);
+    if (l == nullptr)
+    {
+        fault = Fault::None;
+        return false;
+    }
+    const auto& p = l->pre;
+    if (p.pairHead)
+        return false;
+    switch (p.fast)
+    {
+        case Fm1Pre::FastLd: case Fm1Pre::FastAluI: case Fm1Pre::FastAluR: case Fm1Pre::FastMov: case Fm1Pre::FastMovI:
+        case Fm1Pre::FastShift:
+            written |= 1u << (p.fd & 15);
+            return true;
+        case Fm1Pre::FastBrI:
+            back |= p.foff < 0;
+            return true;
+        case Fm1Pre::FastBrR: case Fm1Pre::FastNop:
+            return true;
+        default:
+            return false;
+    }
 }
 
 uint32_t Cpu::doRti() noexcept
@@ -2913,8 +2970,10 @@ bool Cpu::jitBranch (Emitter& e, const Line& l, uint32_t pend)
     if (takenP != SIZE_MAX)
         e.patch32 (takenP, (uint32_t) (e.pos() - (takenP + 4)));
     setPc (target);
-    // loopHint, como execFast: "!=" hacia atrás (BrI); "<" hacia atrás corto, hasta 16 B (BrR)
-    const bool hint = (p.fast == Fm1Pre::FastBrI && p.foff < 0 && (Cond) p.fcond == Cond::Ne)
+    // loopHint, como execFast: "!=" hacia atrás y "<" hacia atrás hasta 32 B (BrI); "<" hacia atrás corto, hasta 16 B (BrR)
+    const bool hint = (p.fast == Fm1Pre::FastBrI && p.foff < 0
+                       && ((Cond) p.fcond == Cond::Ne
+                           || (p.foff >= -32 && ((Cond) p.fcond == Cond::LtU || (Cond) p.fcond == Cond::LtS))))
                    || (p.fast == Fm1Pre::FastBrR && p.foff < 0 && p.foff >= -16
                        && ((Cond) p.fcond == Cond::LtU || (Cond) p.fcond == Cond::LtS));
     if (hint)
@@ -3021,9 +3080,10 @@ size_t Cpu::jitEmit (Emitter& e, const std::vector<const Line*>& lines, bool inR
     e.bytes ({ 0x89, 0xc1 });                                       // mov ecx, eax
     e.u8 (0x2d); e.u32 (first);
     e.u8 (0x3d); e.u32 (span);
-    e.bytes ({ 0x77, 0x15 });                                       // ja fuera del bloque (21 bytes)
-    // dentro: solo si no está entre los no contados (Cpu::counted: notCounted[(pc >> 1) & 7] != pc)
-    e.bytes ({ 0x89, 0xc8, 0xd1, 0xe8, 0x83, 0xe0, 0x07 });         // mov eax, ecx; shr eax, 1; and eax, 7     (7)
+    e.bytes ({ 0x77, 0x17 });                                       // ja fuera del bloque (23 bytes)
+    // dentro: solo si no está entre los no contados (Cpu::counted: notCounted[(pc >> 1) & 4095] != pc)
+    static_assert (Cpu::kNotCounted == 4096, "JIT: el índice de notCounted (and eax, 0xfff)");
+    e.bytes ({ 0x89, 0xc8, 0xd1, 0xe8, 0x25 }); e.u32 (Cpu::kNotCounted - 1);  // mov eax, ecx; shr eax, 1; and eax, 0xfff  (9)
     e.bytes ({ 0x41, 0x3b, 0x8c, 0x84 }); e.u32 (off (notCounted)); // cmp ecx, [r12 + rax*4 + notCounted]  (8)
     toEpilogue ({ 0x0f, 0x85 });                                    // jne (contado: la ráfaga pararía)    (6)
     // y una entrada de la tabla en alguno de sus pc
@@ -3963,10 +4023,10 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
         // predicado, rep ni retención de interrupciones); si no, probeLoop vuelve sin hacer nada. Pararse para eso daba una
         // instrucción por ráfaga mientras dura la ISR (GHOULBOX sintetiza en ella: 3,6 M paradas en 4 s con 12 notas)
         const bool plain = irqLevels.empty() && holdIrq == 0 && ! pairPending && predSkips.empty() && repEnd == 0;
+        if ((s.loopEnabled || s.hintEnabled) && pc == loopHint && counted (pc))
+            break;
         if (s.loopEnabled)
         {
-            if (pc == loopHint && counted (pc))
-                break;
             // (room >= probeKnown && now >= nextTry && (loops[...] == pc || (room >= probeMin && now >= backoffUntil)),
             // con probeMin >= probeKnown: en dos partes)
             if (plain && now >= s.probeAnyAt && room >= s.probeMin)
@@ -3992,12 +4052,12 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                 bool fits = n <= room && now + n - 1 < s.due && ! inside (s.stopA) && ! inside (s.stopB);
                 if (! fits && stepHist != nullptr)
                     why = n > room || now + n - 1 >= s.due ? 3 : 4;
-                if (fits && s.loopEnabled)
+                if (fits && (s.loopEnabled || s.hintEnabled))
                 {
                     // (sondeo y tabla, solo en estado plano: dentro del bloque no cambia; rti, que lo cambia, lo cierra)
                     // (loopHint solo para la ráfaga si no está entre los no contados: counted)
                     const bool hintIn = inside (loopHint) && counted (loopHint);
-                    fits = ! hintIn && ! (plain && now + n - 1 >= s.probeAnyAt && room >= s.probeMin);
+                    fits = ! hintIn && ! (s.loopEnabled && plain && now + n - 1 >= s.probeAnyAt && room >= s.probeMin);
                     if (! fits)
                         why = hintIn ? 5 : 6;
                     else
@@ -4005,7 +4065,7 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                     // la tabla de bucles solo puede parar donde room >= probeKnown y now >= nextTry (arriba): con el
                     // bloque entero antes de nextTry, o sin room para eso, no hace falta mirarla (HYP-1 y DUB-1 la tienen
                     // con un reintento lejano: 71 y 56 M instrucciones interpretadas en 4 s por esto)
-                    if (fits && plain && s.anyLoops && room >= s.probeKnown && now + n - 1 >= s.nextTry)
+                    if (fits && s.loopEnabled && plain && s.anyLoops && room >= s.probeKnown && now + n - 1 >= s.nextTry)
                         fits = (b->slotMask & s.loopsMask) == 0 || [&]
                         {
                             for (uint32_t a = lo + 1; a <= hi; a += 2)  // (las instrucciones empiezan en media palabra)
@@ -4032,10 +4092,10 @@ uint32_t Cpu::burst (Bus& bus, const BurstStop& s, bool& ok, bool& trip)
                     c.budget = (uint32_t) budget;
                     c.stopA = s.stopA;
                     c.stopB = s.stopB;
-                    c.loopEnabled = s.loopEnabled ? 1 : 0;
+                    c.loopEnabled = s.loopEnabled || s.hintEnabled ? 1 : 0;  // (la tabla solo con loopEnabled: loopsMask)
                     c.irqWatch = s.blockedPrio >= 0 ? 1 : 0;
                     // (los bloques encadenados, igual: toda la cadena antes de nextTry, o sin room para la tabla, no la miran)
-                    c.loopsMask = plain && s.anyLoops && room >= s.probeKnown && now + budget > s.nextTry ? s.loopsMask : 0;
+                    c.loopsMask = s.loopEnabled && plain && s.anyLoops && room >= s.probeKnown && now + budget > s.nextTry ? s.loopsMask : 0;
                     if (hasPcWin)
                         std::memcpy (c.win, pcWin, sizeof c.win);
                     c.ramCw = jitRamCw;
@@ -4232,8 +4292,11 @@ bool Cpu::execFast (Bus& bus, const Line& l, uint32_t nextPc)
                 if (condEval ((Cond) pre.fcond, regs[pre.fa], pre.fimm))
                 {
                     jumpTo ((uint32_t) ((int64_t) nextPc + pre.foff));
-                    if (pre.foff < 0 && (Cond) pre.fcond == Cond::Ne)
-                        loopHint = target;  // quizá un bucle de retardo contado (skipCountedLoop)
+                    // quizá un bucle de retardo contado (skipCountedLoop) o, "<" hacia atrás corto (hasta 32 B), una espera
+                    // con el contador del TIMER4 (Machine::LoopSkip::waitOk)
+                    if (pre.foff < 0 && ((Cond) pre.fcond == Cond::Ne
+                                         || (pre.foff >= -32 && ((Cond) pre.fcond == Cond::LtU || (Cond) pre.fcond == Cond::LtS))))
+                        loopHint = target;
                 }
                 break;
             case Fm1Pre::FastBrR:
