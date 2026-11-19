@@ -1189,15 +1189,16 @@ struct Fm1Pot : juce::Slider
 //==============================================================================
 // Las 27 teclas de nota del FM-1 (F3..G5, teclas 14-40 de la matriz) como en fm1-live (panel.rs, keys): 16 blancas en fila
 // y 11 negras encima, en los huecos. Se tocan con el ratón, con la velocidad por la altura del clic (1 arriba, 127 abajo,
-// key_vel), y se iluminan con su LED: lo que el firmware enciende en cada página (pasos, escalas...). Sin rótulos: el
-// firmware no los pone (las teclas no tienen pantalla); lo que significa cada una lo dice la pantalla
+// key_vel), y se iluminan con su LED: lo que el firmware enciende en cada página (pasos, escalas...). Las 11 de arriba
+// llevan impreso en el aparato lo que hacen en el firmware de fábrica (OP1-OP6, PIT, GLD, MONO, POLY; la última, nada);
+// las de abajo, sin rótulo
 struct Fm1Keys : juce::Component, juce::SettableTooltipClient
 {
     std::function<void (int id, int vel)> onDown;
     std::function<void (int id)> onUp;
     std::array<float, 41> leds {};
 
-    struct Key { int id; juce::Rectangle<float> r; bool black; };
+    struct Key { int id; juce::Rectangle<float> r; bool black; const char* label = ""; };
     // en las unidades de fm1-live (teclas de 62 de ancho, 11 de hueco; blancas de 106 de alto, negras de 94 encima)
     std::vector<Key> layout() const
     {
@@ -1214,10 +1215,12 @@ struct Fm1Keys : juce::Component, juce::SettableTooltipClient
             v.push_back ({ 14 + whites[i], rect (x0 + (float) i * (kw + gap), 680.0f, kw, 106.0f), false });
         static const std::pair<int, int> blacks[] = { { 1, 0 }, { 3, 1 }, { 5, 2 }, { 8, 4 }, { 10, 5 }, { 13, 7 }, { 15, 8 },
                                                       { 17, 9 }, { 20, 11 }, { 22, 12 }, { 25, 14 } };
-        for (const auto& [n, after] : blacks)
+        static const char* const labels[] = { "OP1", "OP2", "OP3", "OP4", "OP5", "OP6", "PIT", "GLD", "MONO", "POLY", "" };
+        for (size_t i = 0; i < std::size (blacks); ++i)
         {
+            const auto [n, after] = blacks[i];
             const auto cx = x0 + (float) (after + 1) * (kw + gap) - gap / 2.0f;
-            v.push_back ({ 14 + n, rect (cx - kw / 2.0f, 574.0f, kw, 94.0f), true });
+            v.push_back ({ 14 + n, rect (cx - kw / 2.0f, 574.0f, kw, 94.0f), true, labels[i] });
         }
         return v;
     }
@@ -1235,6 +1238,13 @@ struct Fm1Keys : juce::Component, juce::SettableTooltipClient
             g.fillRoundedRectangle (r, juce::jmin (r.getWidth(), r.getHeight()) / 2.0f);
             g.setColour (juce::Colour (0xff8f7c7e).interpolatedWith (juce::Colour (0xffffe2b0), k.id == held ? 1.0f : lit));
             g.drawRoundedRectangle (r, juce::jmin (r.getWidth(), r.getHeight()) / 2.0f, 1.0f);
+            if (*k.label != 0)
+            {
+                // el rótulo impreso: blanco roto sobre la tecla (oscuro si está encendida, para que se lea sobre el ámbar)
+                g.setColour (juce::Colour (0xffe8dcd0).interpolatedWith (juce::Colour (0xff3a2a20), juce::jmax (heat, lit) > 0.3f ? 1.0f : 0.0f));
+                g.setFont (juce::FontOptions (juce::jlimit (6.0f, 11.0f, r.getHeight() * 0.28f), juce::Font::bold));
+                g.drawFittedText (k.label, r.toNearestInt(), juce::Justification::centred, 1, 0.7f);
+            }
         }
     }
 
