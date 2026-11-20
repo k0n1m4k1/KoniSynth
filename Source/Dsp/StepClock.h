@@ -3,6 +3,12 @@
 #pragma once
 
 //==============================================================================
+// Módulo y división hacia abajo de un índice de paso: con el transporte del host en una posición negativa (pre-roll,
+// claqueta) los pasos son negativos, y el % de C++ conserva el signo (índices fuera de los patrones)
+static inline long long stepMod (long long step, long long n) noexcept { const auto m = step % n; return m < 0 ? m + n : m; }
+static inline long long stepDiv (long long step, long long n) noexcept { return (step - stepMod (step, n)) / n; }
+
+//==============================================================================
 // Reloj de pasos para patrones de ritmo. Con transporte del host (bpm + ppq + reproduciendo) sigue su posición;
 // sin él corre libre con el tempo propio. Swing: retrasa los pasos impares una fracción de paso.
 struct StepClock

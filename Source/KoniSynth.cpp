@@ -569,6 +569,17 @@ public:
 
     void releaseResources() override {}
 
+    // Bypass del host: silencio (el de JUCE deja pasar el bus de entrada, activo por defecto para el vocoder y el monitor:
+    // juce_AudioProcessor.cpp, processBypassed) y, como los note-off de ese tiempo no llegan a los motores, All Notes Off
+    // (CC 123) en los 16 canales al volver; también tras reset (el host lo llama al parar el procesamiento). No el PANIC
+    // completo: ese pausa el reproductor, para los ritmos, corta las colas y cierra la sesión del agente
+    void processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
+    {
+        buffer.clear();
+        notesOffRequested = true;
+    }
+    void reset() override { notesOffRequested = true; }
+
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override
     {
         const auto& out = layouts.getMainOutputChannelSet();
@@ -583,6 +594,12 @@ public:
     // 256 / 48 kHz). El segundo tramo ve la misma posición del host que el primero (sin efecto tras el panic, que para todo)
     void processBlock (juce::AudioBuffer<float>& ioBuffer, juce::MidiBuffer& midi) override
     {
+        if (notesOffRequested.exchange (false)) // tras un bypass o un reset del host (processBlockBypassed)
+            for (int ch = 1; ch <= 16; ++ch)
+            {
+                const juce::uint8 off[3] { (juce::uint8) (0xB0 | (ch - 1)), 123, 0 };
+                midi.addEvent (off, 3, 0);
+            }
         const auto n = ioBuffer.getNumSamples();
         const auto cut = allSoundOffAt (midi);
         if (cut <= 0 || cut >= n)
@@ -662,9 +679,9 @@ public:
         const auto keepOnly = [&] (auto keep)
         {
             midiFilterScratch.clear();
-            for (const auto metadata : midi)
-                if (keep (metadata.getMessage()))
-                    midiFilterScratch.addEvent (metadata.getMessage(), metadata.samplePosition);
+            for (const auto metadata : midi)  // (SysEx, sin canal: pasa sin copiarlo a un MidiMessage, que reservaría memoria)
+                if (metadata.numBytes > 3 || keep (metadata.getMessage()))
+                    midiFilterScratch.addEvent (metadata.data, metadata.numBytes, metadata.samplePosition);
             midi.clear();
             midi.addEvents (midiFilterScratch, 0, -1, 0);
         };
@@ -675,7 +692,8 @@ public:
         {
             midiInBlocks.fetch_add (1, std::memory_order_relaxed);
             for (const auto metadata : midi)
-                if (const auto m = metadata.getMessage(); m.isController() && m.getControllerNumber() == 64)
+                if (metadata.numBytes <= 3)
+                    if (const auto m = metadata.getMessage(); m.isController() && m.getControllerNumber() == 64)
                     sustainDown.store (m.getControllerValue() >= 64, std::memory_order_relaxed);
         }
 
@@ -686,6 +704,8 @@ public:
             bool modeJunk = false;
             for (const auto metadata : midi)
             {
+                if (metadata.numBytes > 3)
+                    continue;
                 const auto m = metadata.getMessage();
                 if (m.isController() && m.getControllerNumber() >= 120 && m.getControllerValue() != 0)
                 {
@@ -703,28 +723,39 @@ public:
         // antes del .mid del transporte) y las del teclado en pantalla (diferencia tras mezclarlo, más abajo); las del agente
         // entran después, por su planificador. Sin el control, no se cuenta nada
         const auto agentInControl = agentSession.inControl.load (std::memory_order_relaxed);
-        const auto noteOns = [&midi] { int n = 0; for (const auto m : midi) n += m.getMessage().isNoteOn() ? 1 : 0; return n; };
+        const auto noteOns = [&midi] { int n = 0; for (const auto m : midi) n += m.numBytes <= 3 && m.getMessage().isNoteOn() ? 1 : 0; return n; };
         int userNoteOns = agentInControl ? noteOns() : 0;
         // Práctica sobre un .mid (Transport/PlayAlong.h): lo que hay ahora en midi es tuyo (controlador); va al canal de tu pista
         // y se compara con sus notas. Sin pista elegida, no cambia nada
         sessionTransport.setTargetMt32 ((int) params.engine->load() == 14); // GM -> MT-32 solo con el motor MT-32
         sessionTransport.routeUserMidi (midi);
+        // MIDI learn y All Sound Off (CC 120) solo con lo del host y el controlador, antes de añadir el .mid: un CC 120 de un
+        // fichero (habitual en los GM) es "silencia ese canal" para el motor, no el PANIC completo, que además pausaba el
+        // propio reproductor; y los CC del fichero no deben mover parámetros aprendidos ni aprenderse. JUCE trata el CC 120
+        // como All Notes Off con release (juce_Synthesiser.cpp:278), pero "sound off" del controlador debe silenciar ya, colas
+        // de efectos incluidas -> panic completo (processBlock parte el bloque en su posición, así que aquí llega al principio)
+        for (const auto metadata : midi)
+        {
+            if (metadata.numBytes > 3)
+                continue; // (SysEx: sin copiarlo; ni CC 120 ni MIDI learn)
+            const auto message = metadata.getMessage();
+            if (message.isAllSoundOff())
+                panicRequested = true;
+            midiLearn.handle (message, getParameters());
+        }
         // Transporte: eventos del .mid en reproducción (antes de leer bend, rueda y CC) y notas que deja al parar
         sessionTransport.injectMidi (midi, numSamples);
         const auto beforeKeyboard = agentInControl ? noteOns() : 0;
         tuning.beginBlock (midi); // MTS-ESP: ¿hay maestro? y SysEx MTS del controlador
 
-        // MIDI learn y All Sound Off (CC 120): JUCE lo trata como All Notes Off con release (juce_Synthesiser.cpp:278),
-        // pero "sound off" debe silenciar ya, colas de efectos incluidas -> panic completo (processBlock parte el bloque en
-        // su posición, así que aquí llega al principio). El pitch bend global del Synth se aplica en su muestra
-        // (synth.onMidiEvent); el de los demás motores, aquí, con resolución de bloque
+        // Program change del DX7, bend, rueda y CC 74 (también del .mid). El pitch bend global del Synth se aplica en su muestra
+        // (synth.onMidiEvent); el de los demás motores, aquí (su suavizado es por tiempo: no depende del bloque)
         const auto bendAtEvent = (int) params.engine->load() == 0;
         for (const auto metadata : midi)
         {
+            if (metadata.numBytes > 3)
+                continue; // (SysEx: sin copiarlo, que reserva memoria en el hilo de audio)
             const auto message = metadata.getMessage();
-            if (message.isAllSoundOff())
-                panicRequested = true;
-            midiLearn.handle (message, getParameters());
             if (message.isProgramChange() && (int) params.engine->load() == 6)
                 applyDx7Program (message.getProgramChangeNumber());
             if (isGlobalBend (message))
@@ -2892,6 +2923,7 @@ private:
     Underwater underwater;
     bool mediaWasOn = false;
     std::atomic<bool> panicRequested { false };
+    std::atomic<bool> notesOffRequested { false }; // All Notes Off pendiente tras un bypass o un reset del host
     static inline const juce::Identifier filterQualityProp { "filterQuality" };
     std::atomic<int> filterQualityRequested { 0 };
 

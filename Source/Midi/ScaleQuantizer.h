@@ -61,8 +61,13 @@ struct ScaleQuantizer
         const auto m = mask (scale);
         for (const auto meta : midi)
         {
-            const auto msg = meta.getMessage();
             const auto pos = meta.samplePosition;
+            if (meta.numBytes > 3)
+            {
+                out.addEvent (meta.data, meta.numBytes, pos); // SysEx: pasa sin copiarlo a un MidiMessage (reservaría memoria)
+                continue;
+            }
+            const auto msg = meta.getMessage();
             const auto ch = juce::jlimit (1, 16, msg.getChannel()) - 1;
             if (msg.isNoteOn())
             {

@@ -11,6 +11,24 @@ struct StepSequencer
     void prepare (double sr) { sampleRate = sr; out.ensureSize (2048); reset(); }
     void reset() { numHeld = 0; root = -1; sounding = -1; offCountdown = -1; step = 0; stepCounter = 0.0; lastGridStep = -1; wasOn = false; uiStep = -1; }
 
+    // Teclas pulsadas con el secuenciador apagado (nota, velocidad, canal): las suelta y las toma al encenderlo
+    struct OffHeld { int note; juce::uint8 velocity; int channel; };
+    std::array<OffHeld, 16> offHeld {};
+    int numOffHeld = 0;
+    void trackOff (const juce::MidiMessage& m)
+    {
+        if (m.isNoteOn() || m.isNoteOff() || m.isAllNotesOff() || m.isAllSoundOff())
+        {
+            int j = 0; // (quita la nota, o todas con CC 123 / 120)
+            for (int k = 0; k < numOffHeld; ++k)
+                if (! (m.isAllNotesOff() || m.isAllSoundOff()) && offHeld[(size_t) k].note != m.getNoteNumber())
+                    offHeld[(size_t) j++] = offHeld[(size_t) k];
+            numOffHeld = j;
+        }
+        if (m.isNoteOn() && numOffHeld < (int) offHeld.size())
+            offHeld[(size_t) numOffHeld++] = { m.getNoteNumber(), m.getVelocity(), juce::jlimit (1, 16, m.getChannel()) };
+    }
+
     void process (juce::MidiBuffer& midi, int numSamples, const Params& p, const Arpeggiator::HostTime& host)
     {
         if (p.seqOn->load() < 0.5f)
@@ -21,10 +39,14 @@ struct StepSequencer
                 if (sounding >= 0)
                     out.addEvent (juce::MidiMessage::noteOff (1, sounding), 0);
                 for (const auto m : midi)
-                    out.addEvent (m.getMessage(), m.samplePosition);
+                    out.addEvent (m.data, m.numBytes, m.samplePosition); // (sin copiar a un MidiMessage: SysEx)
                 midi.swapWith (out);
                 reset();
             }
+            // Apagado: registra las teclas pulsadas (como el arpegiador), para encenderlo con teclas abajo
+            for (const auto m : midi)
+                if (m.numBytes <= 3)
+                    trackOff (m.getMessage());
             return;
         }
         out.clear();
@@ -32,6 +54,18 @@ struct StepSequencer
         {
             stepCounter = 0.0;
             lastGridStep = -1;
+            // Al encender: corta las notas que sonaban por paso directo (en su canal) y el patrón toma la última tecla; sin
+            // esto, sus note-off se los quedaba el secuenciador y la voz seguía sonando hasta PANIC
+            for (int k = 0; k < numOffHeld; ++k)
+                out.addEvent (juce::MidiMessage::noteOff (offHeld[(size_t) k].channel, offHeld[(size_t) k].note), 0);
+            if (numOffHeld > 0)
+            {
+                numHeld = numOffHeld;
+                root = offHeld[(size_t) numOffHeld - 1].note;
+                velocity = offHeld[(size_t) numOffHeld - 1].velocity;
+                step = 0;
+            }
+            numOffHeld = 0;
         }
         wasOn = true;
 
@@ -49,6 +83,11 @@ struct StepSequencer
         {
             for (; it != midi.cend() && (*it).samplePosition <= i; ++it)
             {
+                if ((*it).numBytes > 3)
+                {
+                    out.addEvent ((*it).data, (*it).numBytes, i); // SysEx: pasa sin copiarlo
+                    continue;
+                }
                 const auto m = (*it).getMessage();
                 if (m.isNoteOn())
                 {
@@ -94,7 +133,7 @@ struct StepSequencer
                 const auto gridStep = (juce::int64) std::floor (ppq / stepBeats + 1.0e-9);
                 trigger = gridStep != lastGridStep;
                 if (trigger && lastGridStep >= 0 && root >= 0)
-                    step = (int) (gridStep % steps); // en sync el paso sigue a la posición del host
+                    step = (int) stepMod (gridStep, steps); // en sync el paso sigue a la posición del host (también negativa)
                 lastGridStep = gridStep;
             }
             else if ((stepCounter -= 1.0) <= 0.0)

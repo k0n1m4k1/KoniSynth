@@ -569,8 +569,8 @@ struct DrumMachine
                            stepsPerBeat == 4 ? (double) p.drumSwing->load() : 0.0, transport,
                 [&] (int sample, long long step)
                 {
-                    const auto cycle = step / numPlayable;
-                    const auto c = playable[(size_t) (step % numPlayable)];
+                    const auto cycle = stepDiv (step, numPlayable);
+                    const auto c = playable[(size_t) stepMod (step, numPlayable)];
                     for (size_t k = 0; k < 2; ++k)
                     {
                         if (active[k] == nullptr)
@@ -581,7 +581,7 @@ struct DrumMachine
                         for (int q = 0; q < c; ++q)
                             rank += (ownSkips[k] >> q & 1u) == 0 ? 1 : 0;
                         const auto own = 16 - juce::countNumberOfBits (ownSkips[k]);
-                        const auto idx = (size_t) ((cycle * own + rank) % pat.numSteps);
+                        const auto idx = (size_t) stepMod (cycle * own + rank, pat.numSteps);
                         for (const auto& [slot, lane] : pat.lanes)
                             if (const auto vel = stepVelocity (lane[idx]); vel > 0.0f)
                                 if (const auto voice = slotVoice (kitIndex, slot); voice >= 0 && numHits < (int) hits.size())

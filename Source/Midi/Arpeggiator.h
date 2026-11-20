@@ -47,19 +47,20 @@ struct Arpeggiator
                 stopSounding (0); // al apagar: suelta la nota del arpegio
             wasOn = false;
             for (const auto m : midi) // registra pulsaciones aunque esté apagado (encenderlo con teclas pulsadas)
-                track (m.getMessage());
+                if (m.numBytes <= 3)
+                    track (m.getMessage());
             if (out.isEmpty())
                 return;
             for (const auto m : midi)
-                out.addEvent (m.getMessage(), m.samplePosition);
+                out.addEvent (m.data, m.numBytes, m.samplePosition); // (sin copiar a un MidiMessage: SysEx)
             midi.swapWith (out);
             return;
         }
 
         if (! wasOn) // al encender: corta las notas que sonaban por paso directo; el arpegio las toma
         {
-            for (int k = 0; k < numHeld; ++k)
-                out.addEvent (juce::MidiMessage::noteOff (1, held[(size_t) k].note), 0);
+            for (int k = 0; k < numHeld; ++k) // (en su canal: el sintetizador solo suelta la voz de ese canal; MPE, canales 2-16)
+                out.addEvent (juce::MidiMessage::noteOff (held[(size_t) k].channel, held[(size_t) k].note), 0);
             stepCounter = 0.0;
             lastGridStep = -1;
         }
@@ -81,6 +82,11 @@ struct Arpeggiator
         {
             for (; it != midi.cend() && (*it).samplePosition <= i; ++it)
             {
+                if ((*it).numBytes > 3)
+                {
+                    out.addEvent ((*it).data, (*it).numBytes, i); // SysEx: pasa sin copiarlo
+                    continue;
+                }
                 const auto m = (*it).getMessage();
                 if (m.isNoteOnOrOff())
                 {
@@ -151,7 +157,7 @@ struct Arpeggiator
     }
 
 private:
-    struct Held { int note; juce::uint8 velocity; };
+    struct Held { int note; juce::uint8 velocity; int channel = 1; };
 
     int activeCount (bool latch) const { return latch ? numLatched : numHeld; }
 
@@ -181,7 +187,7 @@ private:
     {
         remove (list, count, m.getNoteNumber());
         if (count < maxNotes)
-            list[(size_t) count++] = { m.getNoteNumber(), m.getVelocity() };
+            list[(size_t) count++] = { m.getNoteNumber(), m.getVelocity(), juce::jlimit (1, 16, m.getChannel()) };
     }
 
     static void remove (std::array<Held, maxNotes>& list, int& count, int note)

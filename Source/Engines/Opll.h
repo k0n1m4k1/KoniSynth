@@ -22,6 +22,7 @@ struct OpllEngine
     void prepare (double sr)
     {
         resampler.prepare (kChipRate, sr);
+        bendTauSamples = (float) (0.048 * sr);
         dcCoef = std::exp (-juce::MathConstants<double>::twoPi * 5.0 / sr);
         reset();
     }
@@ -46,7 +47,9 @@ struct OpllEngine
     {
         if (vrc7Model != vrc7) { vrc7 = vrc7Model; reset(); }
         readParams (p);
-        bendSmoothed += 0.2f * (p.pitchBend.load() - bendSmoothed);
+        // pitch bend suavizado por tiempo (un polo de 48 ms, el que daba el 0,2 por bloque con 512 muestras a 48 kHz): igual con
+        // cualquier tamaño de bloque, también en un bounce (antes, de 6 ms con 64 muestras a 96 ms con 1024)
+        bendSmoothed += (1.0f - std::exp ((float) -out.getNumSamples() / bendTauSamples)) * (p.pitchBend.load() - bendSmoothed);
         tuneCents = (double) p.fineTune->load() + 100.0 * bendSmoothed;
         for (int k = 0; k < numVoices(); ++k)
             if (voices[(size_t) k].note >= 0) writePitch (k, false);
@@ -269,5 +272,6 @@ private:
     bool vrc7 = false, rhythm = false, sustain = false, velocityOn = true, dcPrimed = false;
     double tuneCents = 0.0, dcIn = 0.0, dcOut = 0.0, dcCoef = 0.0;
     float bendSmoothed = 0.0f;
+    float bendTauSamples = 0.048f * 44100.0f; // constante de tiempo del bend en muestras (prepare)
     long long age = 0;
 };

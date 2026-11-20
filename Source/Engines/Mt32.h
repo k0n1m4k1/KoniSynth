@@ -260,6 +260,13 @@ struct Mt32Engine
         for (const auto meta : midi)
         {
             renderTo (juce::jlimit (0, n, meta.samplePosition));
+            if (meta.numBytes > 0 && meta.data[0] == 0xF0) // SysEx: los bytes del búfer, sin copiarlos a un MidiMessage
+            {
+                if (! synth.playSysex (meta.data, (MT32Emu::Bit32u) meta.numBytes))
+                    synth.playSysexNow (meta.data, (MT32Emu::Bit32u) meta.numBytes); // no cabe en el búfer
+                namesRefreshes = 2;
+                continue;
+            }
             const auto msg = meta.getMessage();
             // Todo por la cola de Munt, en orden de llegada. Con playMsgNow, si la nota necesita abortar una poly (single-assign o
             // sin parciales libres) Munt sale sin tocarla (Part::playPoly) y se pierde: medido, 1 de cada 2 notas repetidas. La

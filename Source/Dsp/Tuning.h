@@ -283,6 +283,8 @@ public:
         bool any = false;
         for (const auto metadata : midi)
         {
+            if (metadata.numBytes > 3)
+                continue;
             const auto m = metadata.getMessage();
             if ((m.isNoteOn() && isFiltered (m.getNoteNumber())) || (m.isNoteOff() && dropped.test (index (m))))
             {
@@ -292,15 +294,20 @@ public:
         }
         if (! any)
             return;
-        juce::MidiBuffer kept;
+        // (kept: reservado, sin reservar ni liberar memoria en el hilo de audio; midi ya tiene sitio para lo que queda)
+        kept.clear();
         for (const auto metadata : midi)
         {
-            const auto m = metadata.getMessage();
-            if (m.isNoteOn() && isFiltered (m.getNoteNumber())) { dropped.set (index (m)); continue; }
-            if (m.isNoteOff() && dropped.test (index (m))) { dropped.reset (index (m)); continue; }
-            kept.addEvent (m, metadata.samplePosition);
+            if (metadata.numBytes <= 3)
+            {
+                const auto m = metadata.getMessage();
+                if (m.isNoteOn() && isFiltered (m.getNoteNumber())) { dropped.set (index (m)); continue; }
+                if (m.isNoteOff() && dropped.test (index (m))) { dropped.reset (index (m)); continue; }
+            }
+            kept.addEvent (metadata.data, metadata.numBytes, metadata.samplePosition);
         }
-        midi.swapWith (kept);
+        midi.clear();
+        midi.addEvents (kept, 0, -1, 0);
     }
 
 private:
@@ -313,6 +320,7 @@ private:
     std::atomic<MTSClient*> client { nullptr };
     MTSClient* blockClient = nullptr;
     std::bitset<16 * 128> dropped;
+    juce::MidiBuffer kept = [] { juce::MidiBuffer b; b.ensureSize (16384); return b; }(); // (filterNotes)
     juce::String scl, kbm, scaleName;
 };
 

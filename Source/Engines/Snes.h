@@ -99,6 +99,7 @@ struct SnesEngine
     {
         resampler.prepare (kRate, sr);
         zoh.prepare (kRate, sr);
+        bendTauSamples = (float) (0.048 * sr);
         (void) maxBlock;
         if (sources[0].brr.empty())
             buildSources();
@@ -151,7 +152,9 @@ struct SnesEngine
         else
             user = prepared;
         userRootNote = rootNote;
-        bendSmoothed += 0.2f * (p.pitchBend.load() - bendSmoothed);
+        // pitch bend suavizado por tiempo (un polo de 48 ms, el que daba el 0,2 por bloque con 512 muestras a 48 kHz): igual con
+        // cualquier tamaño de bloque, también en un bounce (antes, de 6 ms con 64 muestras a 96 ms con 1024)
+        bendSmoothed += (1.0f - std::exp ((float) -out.getNumSamples() / bendTauSamples)) * (p.pitchBend.load() - bendSmoothed);
         tuneCents = (double) p.fineTune->load() + 100.0 * bendSmoothed;
         for (auto& v : voice)
             if (v.note >= 0)
@@ -675,6 +678,7 @@ private:
     float pan = 0.0f, spread = 0.0f;
     bool monoOutput = false; // salida RF: L + R
     float bendSmoothed = 0.0f;
+    float bendTauSamples = 0.048f * 44100.0f; // constante de tiempo del bend en muestras (prepare)
     const MacroSet* macros = nullptr; // del bloque (nunca nulo durante render)
     double macroClock = 0.0;
     int userRootNote = 60;

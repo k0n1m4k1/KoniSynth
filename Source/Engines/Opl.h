@@ -33,6 +33,7 @@ struct OplEngine
     void prepare (double sr, int)
     {
         sampleRate = sr;
+        bendTauSamples = (float) (0.048 * sr);
         resampler.prepare (kChipRate, sr);
         gold.prepare (kChipRate, sr, kGain);
         opll.prepare (sr);
@@ -66,7 +67,9 @@ struct OplEngine
             return;
         }
         readParams (p);
-        bendSmoothed += 0.2f * (p.pitchBend.load() - bendSmoothed);
+        // pitch bend suavizado por tiempo (un polo de 48 ms, el que daba el 0,2 por bloque con 512 muestras a 48 kHz): igual con
+        // cualquier tamaño de bloque, también en un bounce (antes, de 6 ms con 64 muestras a 96 ms con 1024)
+        bendSmoothed += (1.0f - std::exp ((float) -out.getNumSamples() / bendTauSamples)) * (p.pitchBend.load() - bendSmoothed);
         tuneCents = (double) p.fineTune->load() + 100.0 * bendSmoothed;
         if (! gm) // en GM la frecuencia la pone el driver (gmUpdateFrequency)
             for (auto& v : voices)
@@ -990,5 +993,6 @@ private:
     int egState = 0, egAdd = 0, egTimerLo = 0, tremoloPos = 0, tremolo = 0, vibPos = 0;
     double tuneCents = 0.0;
     float bendSmoothed = 0.0f;
+    float bendTauSamples = 0.048f * 44100.0f; // constante de tiempo del bend en muestras (prepare)
     long long age = 0;
 };

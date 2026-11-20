@@ -94,7 +94,7 @@ struct Omnichord
             clock.process (out.getNumSamples(), sampleRate, (double) p.omniTempo->load(), pat.stepsPerBeat, 0.0, transport,
                 [&] (int sample, long long step)
                 {
-                    const auto idx = (size_t) (step % pat.numSteps);
+                    const auto idx = (size_t) stepMod (step, pat.numSteps);
                     for (const auto& [slot, lane] : pat.lanes)
                         if (lane[idx] != '.' && numHits < (int) hits.size())
                             hits[(size_t) numHits++] = { sample, slot, lane[idx] };
