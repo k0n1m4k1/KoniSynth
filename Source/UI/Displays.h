@@ -45,6 +45,7 @@ class BpmDisplay : public juce::Component, public juce::SettableTooltipClient, p
 public:
     explicit BpmDisplay (KoniSynthProcessor& p) : processor (p), menu (p.apvts, "arpBpm", *this)
     {
+        WheelGate::enable (*this);
         menu.paramSource = [this] { return clockParam(); };
         setTooltip ("Effective tempo: the host tempo when the DAW sends one (HOST lit), otherwise the internal clock of the "
                     "active engine (Drum Machine / Omnichord tempo, VL-1 clock) or the internal BPM (arpeggiator, sequencer, "
@@ -75,8 +76,10 @@ public:
         dragging = nullptr;
     }
 
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
+        if (! WheelGate::armed (*this)) // sin 300 ms quieto encima, la rueda desplaza el panel (UI/WheelGate.h)
+            return juce::Component::mouseWheelMove (e, w);
         if (auto* prm = clockParam(); prm != nullptr && w.deltaY != 0.0f)
         {
             prm->beginChangeGesture();
@@ -1063,6 +1066,7 @@ class Fm1Encoder : public juce::Component, public juce::SettableTooltipClient
 public:
     Fm1Encoder (juce::String name, std::function<void (int)> turnFn) : label (std::move (name)), turn (std::move (turnFn))
     {
+        WheelGate::enable (*this);
         shape.getProperties().set ("endless", true);
     }
 
@@ -1111,8 +1115,10 @@ public:
             step (d);
         }
     }
-    void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails& w) override
+    void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
+        if (! WheelGate::armed (*this)) // sin 300 ms quieto encima, la rueda desplaza el panel (UI/WheelGate.h)
+            return juce::Component::mouseWheelMove (e, w);
         wheel += w.deltaY * (w.isReversed ? -1.0f : 1.0f) / 0.05f; // ~0,05 por muesca de rueda en Windows
         auto d = (int) wheel;
         if (d != 0)

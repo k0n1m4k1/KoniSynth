@@ -3056,6 +3056,7 @@ inline juce::var KoniSynthProcessor::renderStatus()
 inline void KoniSynthProcessor::cancelStems() { if (stemRenderer != nullptr) stemRenderer->cancel(); }
 
 #include "UI/Skin.h" // antes que cualquier UI: Skin::c() en todos los colores
+#include "UI/WheelGate.h" // antes de Widgets: KoniLookAndFeel y los mandos con rueda la consultan
 #include "UI/Overlay.h" // antes de Widgets: el menú de parámetro abre "Set value..." en un Overlay
 #include "UI/MatrixUi.h" // antes de Widgets: la perilla es destino de las fuentes de la matriz
 #include "UI/Widgets.h"

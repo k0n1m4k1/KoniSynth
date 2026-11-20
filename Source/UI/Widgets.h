@@ -371,53 +371,71 @@ inline void collectParamIds (const juce::Component& c, juce::StringArray& ids)
         collectParamIds (*child, ids);
 }
 
-// "Reset ... to defaults" (marco de un bloque, pestañas de fuente y de bloque): solo parámetros (no las propiedades del preset:
-// receta de Modal, sample, wavetable...), en un solo paso de deshacer. 'engine' nunca: cambiar de motor no es restablecer un
-// bloque. Devuelve cuántos cambian
+// Reset de un grupo (marco de un bloque, pestañas de fuente y de bloque, matriz): solo parámetros (no las propiedades del
+// preset: receta de Modal, sample, wavetable...), en un solo paso de deshacer. 'engine' nunca: cambiar de motor no es
+// restablecer un bloque. Con un preset cargado, cada parámetro vuelve a su valor en ese preset (la referencia del "*" y de
+// la marca de los mandos, PresetManager::presetValue); sin preset, a su valor por defecto. Devuelve cuántos cambian
 inline juce::StringArray resettableIds (juce::StringArray ids)
 {
     ids.removeString ("engine");
     return ids;
 }
 
-inline int paramsOffDefault (APVTS& s, const juce::StringArray& ids)
+inline PresetManager& presetsOf (APVTS& s) { return dynamic_cast<KoniSynthProcessor&> (s.processor).presetManager; }
+
+// Valor normalizado al que vuelve p en el Reset de su grupo
+inline float groupResetValue (APVTS& s, juce::RangedAudioParameter& p)
+{
+    const auto v = presetsOf (s).presetValue (p.getParameterID());
+    return v.has_value() ? *v : p.getDefaultValue();
+}
+
+inline int paramsOffReference (APVTS& s, const juce::StringArray& ids)
 {
     auto n = 0;
     for (const auto& id : resettableIds (ids))
-        if (auto* p = s.getParameter (id); p != nullptr && std::abs (p->getValue() - p->getDefaultValue()) > 1.0e-6f)
+        if (auto* p = s.getParameter (id); p != nullptr && std::abs (p->getValue() - groupResetValue (s, *p)) > 1.0e-6f)
             ++n;
     return n;
 }
 
-inline int resetParamsToDefaults (APVTS& s, const juce::StringArray& ids)
+inline int resetParamsToReference (APVTS& s, const juce::StringArray& ids)
 {
     auto& undo = dynamic_cast<KoniSynthProcessor&> (s.processor).undoHistory;
     auto n = 0;
     undo.beginGroup();
     for (const auto& id : resettableIds (ids))
-        if (auto* p = s.getParameter (id); p != nullptr && std::abs (p->getValue() - p->getDefaultValue()) > 1.0e-6f)
-        {
-            p->beginChangeGesture();
-            p->setValueNotifyingHost (p->getDefaultValue());
-            p->endChangeGesture();
-            ++n;
-        }
+        if (auto* p = s.getParameter (id); p != nullptr)
+            if (const auto v = groupResetValue (s, *p); std::abs (p->getValue() - v) > 1.0e-6f)
+            {
+                p->beginChangeGesture();
+                p->setValueNotifyingHost (v);
+                p->endChangeGesture();
+                ++n;
+            }
     undo.endGroup();
     return n;
 }
 
-// Menú de una sola opción "Reset <qué> to defaults" (atenuada si ya están todos en su valor por defecto)
+// Texto de la opción: "Reset <qué> to preset" con un preset cargado, "... to defaults" sin él; y cuántos cambian
+inline juce::String groupResetText (APVTS& s, const juce::String& what, int off)
+{
+    const auto toPreset = presetsOf (s).presetValue ("engine").has_value();
+    return "Reset " + what + (toPreset ? " to preset" : " to defaults") + (off > 0 ? " (" + juce::String (off) + " changed)" : juce::String());
+}
+
+// Menú de una sola opción "Reset <qué> to preset / to defaults" (atenuada si ya están todos en su valor de referencia)
 inline void showResetMenu (APVTS& s, juce::Component& target, const juce::String& what, std::function<juce::StringArray()> ids)
 {
     const auto list = ids();
     if (resettableIds (list).isEmpty())
         return;
-    const auto off = paramsOffDefault (s, list);
+    const auto off = paramsOffReference (s, list);
     juce::PopupMenu m;
-    m.addItem (1, "Reset " + what + " to defaults" + (off > 0 ? " (" + juce::String (off) + " changed)" : juce::String()), off > 0);
+    m.addItem (1, groupResetText (s, what, off), off > 0);
     // Junto al puntero (el marco de un bloque puede medir cientos de px); el componente solo fija la escala del menú
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&target).withMousePosition(),
-                     [st = &s, list] (int id) { if (id == 1) resetParamsToDefaults (*st, list); });
+                     [st = &s, list] (int id) { if (id == 1) resetParamsToReference (*st, list); });
 }
 
 // Interruptor de palanca de los diálogos de opciones (Section::switchToggles): placa con ON arriba y OFF abajo grabados,
@@ -515,6 +533,7 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
           menu (s, id, slider),
           name (text),
           learn (dynamic_cast<KoniSynthProcessor&> (s.processor).midiLearn),
+          presets (dynamic_cast<KoniSynthProcessor&> (s.processor).presetManager),
           paramIndex (s.getParameter (id)->getParameterIndex()),
           paramId (id)
     {
@@ -524,7 +543,7 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
         slider.setSliderStyle (style == Style::rotary ? juce::Slider::RotaryVerticalDrag : juce::Slider::LinearVertical);
         slider.setViewportIgnoreDragFlag (true); // arrastrar un mando no desplaza el panel
         slider.onDragStart = [this] { showBubble (true); };
-        slider.onValueChange = [this] { if (bubble.isShowing()) showBubble (true); fitValueBox(); };
+        slider.onValueChange = [this] { if (bubble.isShowing()) showBubble (true); fitValueBox(); updatePresetMark(); };
         slider.onDragEnd = [this] { showBubble (false); };
         slider.setTextBoxStyle (juce::Slider::TextBoxBelow, true, style == Style::rotary ? 70 : 56, 18);
         slider.setDoubleClickReturnValue (true, p->convertFrom0to1 (p->getDefaultValue()));
@@ -558,7 +577,7 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
             key.setViewportIgnoreDragFlag (true);
             keyAttachment = std::make_unique<APVTS::ButtonAttachment> (s, id, key);
             keyMenu = std::make_unique<ParamMenu> (s, id, key);
-            key.onStateChange = [this] { updateKeyText(); };
+            key.onStateChange = [this] { updateKeyText(); updatePresetMark(); };
             keyValue.getProperties().set ("valueBox", true); // KoniLookAndFeel::drawLabel: caja hundida
             keyValue.setJustificationType (juce::Justification::centred);
             updateKeyText();
@@ -570,6 +589,7 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
                 asLever();
                 key.pilotLamp = false;
             }
+            startTimerHz (5); // MIDI learn en la etiqueta y marca de valor distinto del preset
             return;
         }
         if (style == Style::rotary && steps >= 3 && steps <= 16)
@@ -596,6 +616,45 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
 
         if (label.getText() != text)
             label.setText (text, juce::dontSendNotification);
+        updatePresetMark(); // también cuando cambia el preset cargado sin que cambie este valor
+        if (presetModified && blinkOn() != dotShown) // parpadeo del punto
+            repaint (presetDotArea().getSmallestIntegerContainer().expanded (2));
+    }
+
+    // Parpadeo del punto de valor modificado: 0,4 s encendido y 0,4 s apagado, con el reloj del sistema (todos los puntos a la
+    // vez). El temporizador del mando pasa a 10 Hz mientras hay punto: el cambio llega con 0-100 ms de retraso
+    static bool blinkOn() { return (juce::Time::getMillisecondCounter() / 400u) % 2u == 0u; }
+
+    juce::Rectangle<float> presetDotArea() const
+    {
+        const auto lb = label.getBounds().toFloat();
+        const auto tw = juce::jmin (lb.getWidth() - 8.0f, (float) juce::GlyphArrangement::getStringWidth (getLookAndFeel().getLabelFont (const_cast<juce::Label&> (label)), label.getText()));
+        const auto x = juce::jmax (lb.getX() + 3.0f, lb.getCentreX() - tw * 0.5f - 6.0f);
+        return juce::Rectangle<float> (5.0f, 5.0f).withCentre ({ x, lb.getCentreY() });
+    }
+
+    // Valor distinto del preset cargado (la referencia del "*" de la barra de presets): punto del acento junto a la etiqueta
+    // y, en perillas continuas y faders, una marca en la posición del valor del preset (propiedad "presetPos" del Slider,
+    // que dibuja KoniLookAndFeel). Sin preset cargado, nada. Tolerancia 1e-4 en escala 0..1, como isDirty
+    void updatePresetMark()
+    {
+        const auto ref = presets.presetValue (paramId);
+        const auto modified = ref.has_value() && std::abs (paramPtr->getValue() - *ref) > 1.0e-4f;
+        const auto pos = modified && options == 0
+                       ? (float) slider.valueToProportionOfLength (paramPtr->convertFrom0to1 (*ref)) : -1.0f;
+        if (modified == presetModified && std::abs (pos - presetPos) < 1.0e-4f)
+            return;
+        if (modified != presetModified)
+            startTimerHz (modified ? 10 : 5); // parpadeo del punto
+        presetModified = modified;
+        presetPos = pos;
+        const auto detents = (int) slider.getProperties().getWithDefault ("detents", 0);
+        if (pos >= 0.0f && detents == 0) // conmutadores por pasos: solo el punto
+            slider.getProperties().set ("presetPos", pos);
+        else
+            slider.getProperties().remove ("presetPos");
+        slider.repaint();
+        repaint();
     }
 
     void resized() override
@@ -678,6 +737,11 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
             const auto on = getToggleState();
             const auto travel = down ? 1.5f : 0.0f; // la tecla baja al pulsarla
             auto r = getLocalBounds().toFloat().reduced (2.0f, 1.0f).withTrimmedBottom (2.0f);
+            if (over && isEnabled()) // hover: halo del acento alrededor de la tecla (sin rueda: no hay estado armado)
+            {
+                g.setColour (Skin::accent().withAlpha (0.25f));
+                g.fillRoundedRectangle (r.expanded (1.8f), 5.5f);
+            }
             // Sombra en dos pasadas (ancha y tenue, estrecha y densa): más corta con la tecla pulsada
             g.setColour (juce::Colours::black.withAlpha (0.25f));
             g.fillRoundedRectangle (r.translated (0.0f, 2.5f - travel).expanded (1.0f), 5.0f);
@@ -833,6 +897,15 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
     // en el hueco inferior del dial (los 90° sin recorrido), las lámparas piloto de las fuentes, que brillan con su valor
     void paintOverChildren (juce::Graphics& g) override
     {
+        dotShown = presetModified && blinkOn();
+        if (dotShown) // valor distinto del preset cargado: punto del acento a la izquierda del nombre, parpadeando
+        {
+            const auto dot = presetDotArea();
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.fillEllipse (dot.expanded (1.0f));
+            g.setColour (Skin::accent());
+            g.fillEllipse (dot);
+        }
         if (dropHover) // una fuente arrastrada encima: se puede soltar aquí
         {
             g.setColour (Skin::accent().withAlpha (0.18f));
@@ -912,9 +985,13 @@ struct Knob : juce::Component, public juce::DragAndDropTarget, private juce::Tim
     ParamMenu menu;
     juce::String name;
     MidiLearn& learn;
+    PresetManager& presets;
     int paramIndex;
     juce::String paramId;
     bool ringOn = false, dropHover = false;
+    bool presetModified = false;  // updatePresetMark
+    bool dotShown = false;        // fase del parpadeo pintada
+    float presetPos = -1.0f;
     float ringLo = 0.0f, ringHi = 0.0f, ringLive = -1.0f;
     std::vector<float> voiceDots;
     std::vector<Lamp> lamps;
@@ -1257,6 +1334,24 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
 
         const int detents = slider.getProperties().getWithDefault ("detents", 0);
         const bool endless = slider.getProperties().getWithDefault ("endless", false); // encoder sin fin: solo el cuerpo
+        const auto armed = WheelGate::armed (slider);
+        slider.setScrollWheelEnabled (armed); // la rueda, solo con el mando armado (UI/WheelGate.h)
+        if (enabled && (armed || slider.isMouseOverOrDragging (true)))
+        {
+            // Hover: halo del acento en el anillo entre el cuerpo y el borde (no tiñe el cuerpo). Armado (300 ms quieto, la
+            // rueda ya cambia el valor): más intenso y con un aro fino en el borde
+            juce::Path ring;
+            ring.addEllipse (juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (c));
+            ring.addEllipse (juce::Rectangle<float> (2.0f * bodyR, 2.0f * bodyR).withCentre (c));
+            ring.setUsingNonZeroWinding (false);
+            g.setColour (Skin::accent().withAlpha (armed ? 0.22f : 0.10f));
+            g.fillPath (ring);
+            if (armed)
+            {
+                g.setColour (Skin::accent().withAlpha (0.8f));
+                g.drawEllipse (juce::Rectangle<float> (2.0f * radius - 1.0f, 2.0f * radius - 1.0f).withCentre (c), 1.0f);
+            }
+        }
         if (endless)
         {
         }
@@ -1296,6 +1391,17 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
                 g.strokePath (value, juce::PathStrokeType (lineW * 2.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
                 g.setColour (Skin::accent());
                 g.strokePath (value, stroke);
+            }
+            // Valor del preset cargado si el actual difiere (Knob::updatePresetMark): marca radial clara cruzando el arco
+            if (enabled && slider.getProperties().contains ("presetPos"))
+            {
+                const auto pa = startAngle + (float) (double) slider.getProperties()["presetPos"] * (endAngle - startAngle) - halfPi;
+                const auto r0 = arcR - lineW * 1.6f, r1 = arcR + lineW * 0.5f;
+                const juce::Line<float> tick (c.x + std::cos (pa) * r0, c.y + std::sin (pa) * r0, c.x + std::cos (pa) * r1, c.y + std::sin (pa) * r1);
+                g.setColour (juce::Colours::black.withAlpha (0.6f));
+                g.drawLine (tick, juce::jmax (2.4f, lineW * 0.9f));
+                g.setColour (Skin::white().withAlpha (0.9f));
+                g.drawLine (tick, juce::jmax (1.2f, lineW * 0.45f));
             }
         }
 
@@ -1407,6 +1513,8 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
     void drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos, float minSliderPos,
                            float maxSliderPos, juce::Slider::SliderStyle style, juce::Slider& slider) override
     {
+        const auto armed = WheelGate::armed (slider);
+        slider.setScrollWheelEnabled (armed); // la rueda, solo con el mando armado (UI/WheelGate.h)
         if (style != juce::Slider::LinearVertical && style != juce::Slider::LinearHorizontal)
         {
             LookAndFeel_V4::drawLinearSlider (g, x, y, width, height, sliderPos, minSliderPos, maxSliderPos, style, slider);
@@ -1448,6 +1556,15 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
             g.setColour (Skin::accent());
             g.fillRoundedRectangle (fill.reduced (vertical ? 0.5f : 0.0f, vertical ? 0.0f : 0.5f), 1.0f);
         }
+        if (enabled && slider.getProperties().contains ("presetPos")) // valor del preset cargado: raya clara que cruza la ranura
+        {
+            const auto pp = p0 + (p1 - p0) * (float) (double) slider.getProperties()["presetPos"];
+            const auto tick = vertical ? juce::Line<float> (mid - 7.0f, pp, mid + 7.0f, pp) : juce::Line<float> (pp, mid - 7.0f, pp, mid + 7.0f);
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawLine (tick, 3.0f);
+            g.setColour (Skin::white().withAlpha (0.9f));
+            g.drawLine (tick, 1.4f);
+        }
         // Tapa
         const auto across = juce::jmin ((vertical ? area.getWidth() : area.getHeight()) * 0.85f, 26.0f);
         const auto along = 18.0f;
@@ -1456,6 +1573,16 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         {
             juce::Path shape;
             shape.addRoundedRectangle (cap, 2.5f);
+            if (enabled && (armed || slider.isMouseOverOrDragging (true))) // hover: halo del acento alrededor de la tapa
+            {
+                g.setColour (Skin::accent().withAlpha (armed ? 0.45f : 0.22f));
+                g.fillRoundedRectangle (cap.expanded (armed ? 4.0f : 3.0f), 5.0f);
+                if (armed)
+                {
+                    g.setColour (Skin::accent().withAlpha (0.8f));
+                    g.drawRoundedRectangle (cap.expanded (4.0f), 5.0f, 1.0f);
+                }
+            }
             juce::DropShadow (juce::Colours::black.withAlpha (0.7f), 6, { 0, 4 }).drawForPath (g, shape); // proyectada
             g.setColour (juce::Colours::black.withAlpha (0.55f)); // de contacto
             g.fillRoundedRectangle (cap.translated (0.0f, 1.2f).expanded (0.6f), 2.5f);
@@ -1735,6 +1862,31 @@ struct KoniLookAndFeel : juce::LookAndFeel_V4
         g.drawFittedText (text, r.withTrimmedRight (3), juce::Justification::centredLeft, 1);
     }
 
+    // Caja de valor de un Slider: la de JUCE (LookAndFeel_V2::SliderLabelComp, juce_LookAndFeel_V2.cpp:1628) tiene un
+    // mouseWheelMove vacío que se traga la rueda: encima de la caja, ni cambiaba el valor ni desplazaba el panel. Esta la pasa
+    // al Slider (Component::mouseWheelMove), que con el mando sin armar la sube al Viewport (UI/WheelGate.h). Mismos
+    // colores y ajustes que la de V4, copiados de ella
+    struct WheelPassLabel final : juce::Label
+    {
+        std::unique_ptr<juce::AccessibilityHandler> createAccessibilityHandler() override
+        {
+            return createIgnoredAccessibilityHandler (*this); // como SliderLabelComp: el Slider ya es accesible
+        }
+    };
+    juce::Label* createSliderTextBox (juce::Slider& slider) override
+    {
+        std::unique_ptr<juce::Label> base (LookAndFeel_V4::createSliderTextBox (slider));
+        auto* l = new WheelPassLabel();
+        l->setJustificationType (base->getJustificationType());
+        l->setKeyboardType (juce::TextInputTarget::decimalKeyboard);
+        for (const int id : { (int) juce::Label::textColourId, (int) juce::Label::backgroundColourId, (int) juce::Label::outlineColourId,
+                              (int) juce::TextEditor::textColourId, (int) juce::TextEditor::backgroundColourId,
+                              (int) juce::TextEditor::outlineColourId, (int) juce::TextEditor::highlightColourId })
+            if (base->isColourSpecified (id))
+                l->setColour (id, base->findColour (id));
+        return l;
+    }
+
     // Caja de valor de perillas y faders: hundida (fondo oscuro, sombra interior arriba, luz abajo) en vez del contorno de V4.
     // Las demás etiquetas y la caja mientras se edita, como V4
     void drawLabel (juce::Graphics& g, juce::Label& label) override
@@ -1906,8 +2058,8 @@ struct Section : juce::Component
         addChildComponent (modFrame); // tras el marco y antes de los mandos: queda debajo de ellos
     }
 
-    // Clic derecho en el marco o en un hueco de la sección: "Reset <título> to defaults" con los parámetros de sus mandos y de
-    // sus diálogos (withResetSource)
+    // Clic derecho en el marco o en un hueco de la sección: "Reset <título> to preset" (o "to defaults" sin preset cargado)
+    // con los parámetros de sus mandos y de sus diálogos (withResetSource)
     void mouseDown (const juce::MouseEvent& e) override
     {
         // Solo si el clic es en la propia sección (marco, título, hueco): sobre un mando o una vista con su propio menú
@@ -2566,7 +2718,7 @@ private:
     int sideBodyWidth = 0;
     bool sideBodyTall = false;
     std::vector<std::unique_ptr<ParamMenu>> menus;
-    APVTS* paramState = nullptr; // el de sus parámetros (Reset ... to defaults); nulo en una sección sin mandos de parámetro
+    APVTS* paramState = nullptr; // el de sus parámetros (Reset ... to preset / to defaults); nulo en una sección sin mandos de parámetro
     std::vector<std::function<juce::StringArray()>> resetSources;
 };
 
@@ -2576,7 +2728,7 @@ private:
 struct ParamPanel : juce::Component
 {
     ParamPanel() = default;
-    // En seco: solo para saber qué parámetros tiene el diálogo (Reset ... to defaults de su sección); no se muestra
+    // En seco: solo para saber qué parámetros tiene el diálogo (Reset ... to preset / to defaults de su sección); no se muestra
     explicit ParamPanel (bool dry) : dryRun (dry) {}
     const bool dryRun = false;
 

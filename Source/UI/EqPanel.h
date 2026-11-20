@@ -17,6 +17,7 @@ public:
 
     explicit EqCurve (APVTS& s, bool isCompact = false) : apvts (s), compact (isCompact)
     {
+        WheelGate::enable (*this); // rueda = Q de los medios
         setInterceptsMouseClicks (true, false);
         if (compact)
             setTooltip ("EQ response (bands switched off in grey). Click: EQ Bands...");
@@ -177,6 +178,8 @@ public:
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
+        if (! WheelGate::armed (*this)) // sin 300 ms quieto encima, la rueda desplaza el panel (UI/WheelGate.h)
+            return juce::Component::mouseWheelMove (e, w);
         if (compact) return;
         const auto n = nodeAt (e.position);
         auto* q = n == 3 ? apvts.getParameter ("eqMid1Q") : n == 4 ? apvts.getParameter ("eqMid2Q") : nullptr;

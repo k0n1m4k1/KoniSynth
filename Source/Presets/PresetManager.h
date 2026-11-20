@@ -539,16 +539,8 @@ public:
         if (index < 0)
             return false;
 
-        if (! snapshotValid) // estado restaurado por el host: recalcula la referencia sin aplicarla
-        {
-            auto target = targetValues (presets[(size_t) index]);
-            if (! target)
-                return false;
-            snapshot = std::move (*target);
-            textSnapshot.clear();
-            snapshotFiles(); // sin referencia del preset para los ficheros: los del estado restaurado
-            snapshotValid = true;
-        }
+        if (! ensureSnapshot (index))
+            return false;
 
         for (auto* p : rangedParameters())
             if (std::abs (p->getValue() - snapshot[p->getParameterID()]) > 1.0e-4f)
@@ -563,6 +555,29 @@ public:
     }
 
     void invalidateSnapshot() { snapshotValid = false; } // seguro desde cualquier hilo
+
+    // Valor normalizado (0..1) de un parámetro en el preset cargado: la misma referencia que el "*" de isDirty. Sin preset
+    // cargado, o si el parámetro no forma parte de los presets (el pad del theremin), nada. Lo consultan los mandos varias
+    // veces por segundo (Knob: marca del valor del preset): el índice del preset se recalcula solo si cambia el preset
+    // cargado o la lista. Hilo de mensajes
+    std::optional<float> presetValue (const juce::String& id)
+    {
+        const auto name = apvts.state.getProperty (nameProp).toString();
+        const bool factory = apvts.state.getProperty (factoryProp);
+        if (name != refName || factory != refFactory || presets.size() != refCount)
+        {
+            refName = name;
+            refFactory = factory;
+            refCount = presets.size();
+            refIndex = currentIndex();
+        }
+        if (refIndex < 0 || refIndex >= (int) presets.size() || ! ensureSnapshot (refIndex))
+            return std::nullopt;
+        const auto it = snapshot.find (id);
+        if (it == snapshot.end())
+            return std::nullopt;
+        return it->second;
+    }
 
 private:
     using Values = std::map<juce::String, float>; // id -> valor normalizado 0..1
@@ -622,6 +637,21 @@ private:
     {
         apvts.state.setProperty (nameProp, p.name, nullptr);
         apvts.state.setProperty (factoryProp, p.factory, nullptr);
+    }
+
+    // Referencia de los valores del preset: tras restaurar el estado el host, se recalcula sin aplicarla
+    bool ensureSnapshot (int index)
+    {
+        if (snapshotValid)
+            return true;
+        auto target = targetValues (presets[(size_t) index]);
+        if (! target)
+            return false;
+        snapshot = std::move (*target);
+        textSnapshot.clear();
+        snapshotFiles(); // sin referencia del preset para los ficheros: los del estado restaurado
+        snapshotValid = true;
+        return true;
     }
 
     void markClean()
@@ -877,6 +907,10 @@ private:
     APVTS& apvts;
     std::vector<Preset> presets;
     Values snapshot;
+    juce::String refName;          // presetValue: preset de la última consulta y su índice
+    bool refFactory = false;
+    size_t refCount = 0;
+    int refIndex = -1;
     std::atomic<bool> snapshotValid { false };
     std::map<juce::String, juce::String> textSnapshot;
     std::map<juce::String, juce::String> fileSnapshot; // rutas de los ficheros del preset (filePathProperties)

@@ -17,6 +17,7 @@ class SeqGrid : public juce::Component, public juce::SettableTooltipClient, priv
 public:
     explicit SeqGrid (KoniSynthProcessor& p) : koni (p)
     {
+        WheelGate::enable (*this); // rueda = nota del paso
         setWantsKeyboardFocus (true);
         setTooltip ("Step grid. Drag up/down or use the mouse wheel on a step: interval (Shift: octaves). Click the articulation row: "
                     "Normal -> Tie -> Rest. Right-click: rest. Keys: arrows, a signed number + Enter, R rest, T tie, Ctrl+C / Ctrl+V.");
@@ -143,6 +144,8 @@ public:
 
     void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
     {
+        if (! WheelGate::armed (*this)) // sin 300 ms quieto encima, la rueda desplaza el panel (UI/WheelGate.h)
+            return juce::Component::mouseWheelMove (e, w);
         const auto i = stepAt (e.position.toInt());
         if (i < 0 || w.deltaY == 0.0f || ! on (i)) return;
         setNote (i, juce::jlimit (-24, 24, note (i) + (w.deltaY > 0.0f ? 1 : -1) * (e.mods.isShiftDown() ? 12 : 1)));

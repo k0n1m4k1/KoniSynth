@@ -25,7 +25,7 @@ public:
         for (size_t k = 0; k < sources.size(); ++k) // las pestañas, después: siempre por encima de las secciones
         {
             auto& t = tabs.emplace_back (std::make_unique<Tab> (*this, (int) k));
-            t->setTooltip (juce::String (sources[k].name) + ": click to show its controls. Right-click: Mute / Solo / Reset to defaults. "
+            t->setTooltip (juce::String (sources[k].name) + ": click to show its controls. Right-click: Mute / Solo / Reset (to the loaded preset, or to defaults without one). "
                            "The red LED is lit while this source sounds (level above 0 and not muted). All sources play together.");
             addAndMakeVisible (*t);
         }
@@ -186,16 +186,15 @@ private:
         m.addItem (2, soloed (k) ? "Unsolo" : "Solo", true, soloed (k));
         // Solo los parámetros de esta pestaña (y de sus diálogos); Mute no: es de la pestaña, no de sus mandos
         const auto ids = sources[(size_t) k].section->resetIds();
-        const auto off = paramsOffDefault (apvts, ids);
+        const auto off = paramsOffReference (apvts, ids);
         m.addSeparator();
-        m.addItem (3, "Reset " + juce::String (sources[(size_t) k].name) + " to defaults"
-                          + (off > 0 ? " (" + juce::String (off) + " changed)" : juce::String()), off > 0);
+        m.addItem (3, groupResetText (apvts, sources[(size_t) k].name, off), off > 0);
         m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (tabs[(size_t) k].get()),
                          [safe = juce::Component::SafePointer<SourceTabs> (this), k, ids] (int id)
                          {
                              if (safe == nullptr || id == 0) return;
                              if (id == 1) safe->setMute (k, ! safe->muted (k));
-                             else if (id == 3) resetParamsToDefaults (safe->apvts, ids);
+                             else if (id == 3) resetParamsToReference (safe->apvts, ids);
                              else safe->solo.store (safe->soloed (k) ? -1 : safe->first + k); // el otro grupo lo ve en su temporizador
                          });
     }

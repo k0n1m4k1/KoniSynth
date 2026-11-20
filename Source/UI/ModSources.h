@@ -96,7 +96,7 @@ private:
 };
 
 // Barra MOD bajo la tira SIGNAL: rótulo MOD, las fichas, el botón Matrix (n)... (diálogo de la matriz, con el número de rutas
-// activas) y Random Fade como perilla pequeña con su valor. Clic derecho en un hueco: Reset matrix to defaults (las 8 ranuras
+// activas) y Random Fade como perilla pequeña con su valor. Clic derecho en un hueco: Reset matrix to preset / to defaults (las 8 ranuras
 // y Random Fade). Mismo fondo que SignalStrip. Con ENGINE acoplado va fija sobre el scroll; en su ventana flotante, como una
 // fila más (por eso es una Section sin marco, como SignalStrip)
 // Botón con el relieve de la ficha Mixer de la tira SIGNAL (UI/WaveView.h): sombra, cara en degradado, canto superior
@@ -156,7 +156,7 @@ public:
     }
 
     std::function<void()> onMatrix;                  // abre el diálogo de la matriz (el editor)
-    std::function<juce::StringArray()> matrixIds;    // parámetros del diálogo, para Reset matrix to defaults
+    std::function<juce::StringArray()> matrixIds;    // parámetros del diálogo, para Reset matrix (al preset o a los valores por defecto)
     void setRoutes (int routes)
     {
         matrix.setButtonText (routes == 0 ? juce::String ("Matrix...") : "Matrix (" + juce::String (routes) + ")...");

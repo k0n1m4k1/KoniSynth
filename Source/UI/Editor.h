@@ -32,6 +32,7 @@ public:
           styloPad (p),
           engineAttachment (*p.apvts.getParameter ("engine"), [this] (float v) { engine = juce::roundToInt (v); updateMode(); })
     {
+        WheelGate::retain(); // rueda de los mandos: solo tras 300 ms quieto encima (UI/WheelGate.h)
         setLookAndFeel (&lookAndFeel);
         auto& s = p.apvts;
 
@@ -820,6 +821,7 @@ public:
 
     ~KoniSynthEditor() override
     {
+        WheelGate::release();
         if (midiPlayer != nullptr) midiPlayer->setLookAndFeel (nullptr);
         midiPlayer.reset();
         koni.undoHistory.onChange = nullptr;
@@ -2326,20 +2328,20 @@ private:
                     },
                     [this, group, b] (int id)
                     {
-                        if (id == 103) resetParamsToDefaults (koni.apvts, blockResetIds (b));
+                        if (id == 103) resetParamsToReference (koni.apvts, blockResetIds (b));
                         else if (id == 102) setFxOrder ({ 0, 1, 2, 3, 4, 5 });
                         else moveFx (group, id == 100 ? -1 : 1);
                     });
                 tab->setTooltip (juce::String (blocks[b].tip) + " Click to fold or unfold; right-click: docked, folded or floating window, "
-                                 "its place in the chain and reset to defaults. Drag it onto another effects block to change the order of the chain.");
+                                 "its place in the chain and reset (to the loaded preset, or to defaults without one). Drag it onto another effects block to change the order of the chain.");
             }
             else
             {
                 attachModeTab (*tab, [this, foldId] { return dockMode (foldId); }, [this, foldId] (int m) { setDockMode (foldId, m); },
                                [this, b] (juce::PopupMenu& m) { addBlockResetItem (m, b); },
-                               [this, b] (int id) { if (id == 103) resetParamsToDefaults (koni.apvts, blockResetIds (b)); });
+                               [this, b] (int id) { if (id == 103) resetParamsToReference (koni.apvts, blockResetIds (b)); });
                 tab->setTooltip (juce::String (blocks[b].tip) + " Click to fold or unfold; right-click: docked, folded or floating window, "
-                                 "and reset to defaults.");
+                                 "and reset (to the loaded preset, or to defaults without one).");
             }
             rows.addAndMakeVisible (*tab);
             blockTabs.push_back (std::move (tab));
@@ -2350,7 +2352,8 @@ private:
         content.addAndMakeVisible (*bpmTab);
     }
 
-    // Reset de un bloque desde su pestaña: los parámetros de todas sus secciones y de sus diálogos (id 103 del menú)
+    // Reset de un bloque desde su pestaña (al preset cargado o, sin él, a los valores por defecto): los parámetros de todas
+    // sus secciones y de sus diálogos (id 103 del menú)
     juce::StringArray blockResetIds (size_t b) const
     {
         juce::StringArray ids;
@@ -2361,10 +2364,9 @@ private:
     }
     void addBlockResetItem (juce::PopupMenu& m, size_t b)
     {
-        const auto off = paramsOffDefault (koni.apvts, blockResetIds (b));
+        const auto off = paramsOffReference (koni.apvts, blockResetIds (b));
         m.addSeparator();
-        m.addItem (103, "Reset " + juce::String (blocks[b].name) + " to defaults"
-                            + (off > 0 ? " (" + juce::String (off) + " changed)" : juce::String()), off > 0);
+        m.addItem (103, groupResetText (koni.apvts, blocks[b].name, off), off > 0);
     }
 
     bool blockFolded (size_t b) const { return (bool) koni.apvts.state.getProperty (blocks[b].foldId, false); }
@@ -3088,7 +3090,7 @@ private:
     FlowContent content; // contenedor a tamaño lógico; se escala en resized()
     // Filas de parámetros (ENGINE y bloques) con scroll vertical: cada línea tiene un alto mínimo (minLineHeight) y, si no
     // caben todas, se desplazan. Fuera del scroll: barra superior, DISPLAY/BPM, PAD/KEYS y la barra de plegados
-    juce::Viewport rowsView;
+    SmoothViewport rowsView; // rueda suave (UI/WheelGate.h)
     FlowContent rows;
     static constexpr int minLineHeight = 165; // px lógicos por línea de peso 1 (antes ~114 con 7 líneas en 1050 px)
     // Título clicable: abre el About (cursor de mano al pasar por encima). Dibujado a juego con cada skin:

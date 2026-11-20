@@ -25,7 +25,9 @@ for the **User File** wavetable.
 The Synth fills three rows: the wave display and the sources (Osc 1 / Wavetable / Sample / Math Model), then Osc 2 /
 Osc 3 / Noise and the Complex Oscillator, right under the Osc 1 tabs; Filter, Filter Envelope, Amp Envelope; Voice, LFO,
 LFO 2. Voice, LFO 2 and the matrix act only in the Synth. The panel scrolls with its scroll bar or the mouse wheel;
-dragging the background does not scroll it.
+dragging the background does not scroll it. Over a knob or fader, the wheel keeps scrolling the panel until the mouse
+has rested on that control for 0.3 s: then its halo brightens and the wheel changes its value. A control whose value
+differs from the loaded preset shows a blinking dot before its name and, on knobs and faders, a light mark at the preset value.
 
 The **SIGNAL** strip above the sources draws the path the sound takes right now: the sources (with **Complex** attached to
 Osc 1 and its modulator when the complex oscillator is on, marked *LP* when Mod LP filters it), the mixer, filter and
@@ -401,8 +403,8 @@ Osc 2 Pitch +/-2 st. LFO 1 also drives the PWM knob of Osc 1.
 
 8 slots, each a **source** moving a **destination** for each voice separately, by an **amount** of -100 to +100 %
 (negative inverts). The **Matrix...** button sits in the MOD bar, with the source chips and Random Fade; the number in
-brackets counts the active routes. Right-click an empty spot of the MOD bar: Reset matrix to defaults (the 8 slots and
-Random Fade).
+brackets counts the active routes. Right-click an empty spot of the MOD bar: Reset matrix (the 8 slots and Random Fade) to the loaded preset, or to
+defaults when no preset is loaded.
 
 **Drag a source onto a knob.** The **MOD** bar (fixed under the SIGNAL strip; a Mod Sources row when the engine is in
 its own window) has one chip per source: drag it onto a knob that is a destination and a new route appears in the first
