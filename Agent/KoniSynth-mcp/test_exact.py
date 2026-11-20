@@ -204,7 +204,7 @@ async def run():
 
             await s.call_tool("load_preset", {"name": "Init"})
             gain_db = (await tool("get_parameters", {"ids": ["outputGain"]}))["outputGain"]["value"]
-            gain = 0.0 if gain_db <= -60.0 else 10 ** (gain_db / 20.0)  # (Gain en dB: Layout.h)
+            gain = 10 ** (gain_db / 20.0)  # (Gain en dB, de -30 a +24: Layout.h)
             out, eng, xo, xe = await both("A4", 0.4)
             n = min(len(xo), len(xe))
             err = np.abs(xo[:n] - gain * xe[:n]).max()

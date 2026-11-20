@@ -6,8 +6,8 @@
 static juce::String paramHelp (const juce::String& id)
 {
     static const std::map<juce::String, const char*> help {
-        { "outputGain", "Master output volume in dB, at the very end of the chain. 0 dB (default) leaves the level as it is; -inf is silence. "
-                  "Factory presets set it so they all sound about as loud (-20 LUFS)." },
+        { "outputGain", "Master output volume in dB (-30 to +24), at the very end of the chain. 0 dB (default) leaves the level as it is. "
+                  "Factory presets set it so they all sound about as loud (-18 LUFS)." },
         { "n64Source", "Sound source: KoniSynth's own samples (Square, Saw, Sine: 32-sample loops; Strings, Choir: 3-voice loops; Bass) made at the chosen sample rate, or User Sample (its own file: Sample... button in this section)." },
         { "n64SourceRate", "Rate of the sample (8 to 32 kHz). N64 games stored most samples at low rates to save cartridge space: the dull, fuzzy N64 sound." },
         { "n64OutputRate", "Output rate of the console's audio interface (games used 22.05, 32 or 44.1 kHz). Notes can go at most one octave above the sample rate, as on the console (libultra MAX_RATIO 1.99996)." },

@@ -178,10 +178,10 @@ def generate(call: Callable[..., Any], audition: Callable[..., dict[str, Any]], 
             call("set", port=port, values=values)
         m = audition(rules["notes"], rules["duration"], 100, rules.get("tail", 0.6), port)
         level_note = None
-        if not m.get("silent") and m["peak_dbfs"] < -20:  # compensación con el Master (Output Gain en dB, 0 dB = unidad; de -60 a +12)
+        if not m.get("silent") and m["peak_dbfs"] < -20:  # compensación con el Master (Output Gain en dB, 0 dB = unidad; de -30 a +24)
             text = call("get", port=port, ids=["outputGain"])["outputGain"]
-            gain = -60.0 if "inf" in text else float(text.split()[0])
-            new = min(12.0, gain + (-10.0 - m["peak_dbfs"]))
+            gain = float(text.split()[0])
+            new = min(24.0, gain + (-10.0 - m["peak_dbfs"]))
             if new > gain + 0.05:
                 values["outputGain"] = f"{new:.1f} dB"
                 call("set", port=port, values={"outputGain": values["outputGain"]})
