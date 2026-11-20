@@ -302,7 +302,9 @@ static juce::String runSimdSelfTest()
     if (status.tested.exchange (true))
         return {};
 
-    status.cpuHasAvx2 = juce::SystemStats::hasAVX2();
+    // AVX2 y FMA: SimdAvx2.cpp se compila con -mavx2 -mfma (GCC/Clang) o /arch:AVX2 (MSVC, que también emite FMA), así que
+    // la CPU debe tener las dos (CPUID ECX bit 12; toda CPU con AVX2 conocida la tiene, pero no lo garantiza la norma)
+    status.cpuHasAvx2 = juce::SystemStats::hasAVX2() && juce::SystemStats::hasFMA3();
     if (! status.cpuHasAvx2.load())
         return {};
 

@@ -42,6 +42,67 @@ struct MegaDriveEngine
     enum Model { model1, model2, clean };
     enum Voice { voiceFm, voiceFmPsg, voicePsgTone, voicePsgNoise, voiceDac, voiceCh3 };
 
+    // Tasas del driver para el DAC (parámetro mdDacRate)
+    static double dacRateFor (int index)
+    {
+        static const double dacRates[5] = { 6500.0, 8000.0, 11025.0, 16000.0, 22050.0 };
+        return dacRates[juce::jlimit (0, 4, index)];
+    }
+
+    // Sample propio del motor (panel Sample) para la voz DAC y lo que lo define. Se prepara fuera del hilo de audio y se
+    // publica con DataSlot (KoniSynthProcessor::updateConsoleSources), como el BRR de SNES y el VADPCM de N64; render lo usa
+    // si coincide con los parámetros actuales. Loop no entra en la clave: no cambia los datos, solo cómo se leen
+    struct DacKey
+    {
+        const SampleData* sample = nullptr;
+        int length = 0, rateIndex = 0;
+        float start = 0.0f, lengthMs = 0.0f;
+        bool operator== (const DacKey&) const = default;
+    };
+    struct DacSource
+    {
+        DacKey key;
+        std::vector<uint8_t> pcm; // 8 bits sin signo a la tasa del driver, como los datos del registro $2A
+    };
+
+    static DacKey dacKey (const SampleData* sample, const Params& p)
+    {
+        DacKey k;
+        k.sample = sample;
+        k.length = sample != nullptr ? sample->length() : 0;
+        k.rateIndex = juce::jlimit (0, 4, (int) p.mdDacRate->load());
+        k.start = p.mdSampleStart->load();
+        k.lengthMs = p.mdSampleLength->load();
+        return k;
+    }
+
+    // Región Start/Length remuestreada a la tasa del driver y cuantizada a 8 bits sin signo. Coste: una lectura Hermite por
+    // muestra de salida (hasta 60 s × 22050 Hz = 1,3·10⁶). Fuera del hilo de audio (o en un render offline), con el sample
+    // vivo mientras dura. Sin sample, o de menos de 16 muestras: nullptr (la voz DAC calla)
+    static std::unique_ptr<DacSource> buildDac (const DacKey& k)
+    {
+        if (k.sample == nullptr || k.length < 16)
+            return nullptr;
+        auto d = std::make_unique<DacSource>();
+        d->key = k;
+        const auto* sample = k.sample;
+        const auto length = k.length;
+        const auto rate = dacRateFor (k.rateIndex);
+        const auto ratio = sample->sampleRate / rate;
+        const auto level = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::floor (std::log2 (std::max (1.0, ratio))));
+        const auto scale = ratio / std::exp2 ((double) level);
+        const auto first = (double) k.start * length / std::exp2 ((double) level);
+        auto count = (int) ((1.0 - k.start) * length / ratio);
+        if (k.lengthMs > 0.0f)
+            count = std::min (count, (int) (k.lengthMs / 1000.0 * rate));
+        d->pcm.resize ((size_t) std::max (0, count));
+        for (int i = 0; i < count; ++i)
+            // 8 bits sin signo como el byte alto de una muestra de 16 bits (x 128, recortado a 0-255): un WAV de 8 bits a la DAC Rate
+            // llega tal cual (remuestreo 1:1, Hermite en posiciones enteras = la muestra, 128 + 128 (b - 128) / 128 = b). Antes x 127
+            d->pcm[(size_t) i] = (uint8_t) juce::jlimit (0, 255, (int) std::lround (128.0 + 128.0 * sample->read (level, first + i * scale)));
+        return d;
+    }
+
     void prepare (double sr, int maxBlock)
     {
         sampleRate = sr;
@@ -75,15 +136,14 @@ struct MegaDriveEngine
     // que el remuestreador) la salida calla y el filtro sigue a la entrada: después arranca en equilibrio
     void settleOutput() { settle = 64; }
 
-    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const SampleData* userSample, int rootNote,
-                 const MacroSet* macroSet)
+    void render (juce::AudioBuffer<float>& out, const juce::MidiBuffer& midi, const Params& p, const SampleData* userSample,
+                 const DacSource* prepared, bool offline, int rootNote, const MacroSet* macroSet)
     {
         static const MacroSet none;
         macros = macroSet != nullptr ? macroSet : &none;
         readParams (p);
         dacRoot = rootNote;
-        if (voice == voiceDac)
-            prepareDac (userSample, p);
+        selectDac (userSample, prepared, offline, p);
         // pitch bend suavizado por tiempo (un polo de 48 ms, el que daba el 0,2 por bloque con 512 muestras a 48 kHz): igual con
         // cualquier tamaño de bloque, también en un bounce (antes, de 6 ms con 64 muestras a 96 ms con 1024)
         bendSmoothed += (1.0f - std::exp ((float) -out.getNumSamples() / bendTauSamples)) * (p.pitchBend.load() - bendSmoothed);
@@ -197,9 +257,8 @@ private:
         psgNoiseRate = juce::jlimit (0, 3, (int) p.mdPsgNoiseRate->load());
         psgA = (int) p.mdPsgAttack->load(); psgD = (int) p.mdPsgDecay->load();
         psgS = (int) p.mdPsgSustain->load(); psgR = (int) p.mdPsgRelease->load();
-        static const double dacRates[5] = { 6500.0, 8000.0, 11025.0, 16000.0, 22050.0 };
         dacRateIndex = juce::jlimit (0, 4, (int) p.mdDacRate->load());
-        dacRate = dacRates[dacRateIndex];
+        dacRate = dacRateFor (dacRateIndex);
         for (int k = 0; k < 3; ++k)
             ch3Offset[(size_t) k] = (int) p.mdCh3Op[(size_t) k]->load();
         model = juce::jlimit (0, 2, (int) p.mdModel->load());
@@ -482,33 +541,41 @@ private:
     // DAC: tasa de lectura para la nota (la Root de su panel Sample suena a la tasa del driver)
     double dacStepFor (int note) const { return dacRate * std::exp2 ((note - dacRoot) / 12.0 + tuneCents / 1200.0) / kChipRate; }
 
-    // Sample propio del motor (región Start/Length de su panel Sample) remuestreado a la tasa del driver y cuantizado a 8 bits sin
-    // signo, como los datos del registro $2A. Solo se recalcula si cambia algo.
-    void prepareDac (const SampleData* sample, const Params& p)
+    // Datos del DAC del bloque: los preparados fuera del audio (buildDac en KoniSynthProcessor::updateConsoleSources) si son
+    // los de los parámetros actuales; en un render offline se preparan aquí (el bounce suena como lo pedido desde el primer
+    // bloque); en tiempo real, mientras llegan los nuevos (hasta un tick del temporizador, 100 ms, más el remuestreo), la voz
+    // calla. Antes se remuestreaba aquí en cada cambio de sample, Start, Length o tasa: reservas de memoria y hasta 1,3·10⁶
+    // lecturas Hermite en el hilo de audio. Al cambiar los datos, la nota que sonaba se corta (como antes)
+    void selectDac (const SampleData* sample, const DacSource* prepared, bool offline, const Params& p)
     {
-        const auto start = p.mdSampleStart->load(), lengthMs = p.mdSampleLength->load();
         dacLoop = p.mdSampleLoop->load() > 0.5f;
-        const auto length = sample != nullptr ? sample->length() : 0;
-        if (sample == dacSource && length == dacSourceLength && dacRateIndex == dacPreparedRate && start == dacStart && lengthMs == dacLengthMs)
-            return;
-        dacSource = sample; dacSourceLength = length; dacPreparedRate = dacRateIndex; dacStart = start; dacLengthMs = lengthMs;
-        dacPcm.clear();
-        dacPlaying = false;
-        dacValue = 0x80;
-        if (sample == nullptr || length < 16)
-            return;
-        const auto ratio = sample->sampleRate / dacRate;
-        const auto level = juce::jlimit (0, SampleData::maxLevels - 1, (int) std::floor (std::log2 (std::max (1.0, ratio))));
-        const auto scale = ratio / std::exp2 ((double) level);
-        const auto first = (double) start * length / std::exp2 ((double) level);
-        auto count = (int) ((1.0 - start) * length / ratio);
-        if (lengthMs > 0.0f)
-            count = std::min (count, (int) (lengthMs / 1000.0 * dacRate));
-        dacPcm.resize ((size_t) std::max (0, count));
-        for (int i = 0; i < count; ++i)
-            // 8 bits sin signo como el byte alto de una muestra de 16 bits (x 128, recortado a 0-255): un WAV de 8 bits a la DAC Rate
-            // llega tal cual (remuestreo 1:1, Hermite en posiciones enteras = la muestra, 128 + 128 (b - 128) / 128 = b). Antes x 127
-            dacPcm[(size_t) i] = (uint8_t) juce::jlimit (0, 255, (int) std::lround (128.0 + 128.0 * sample->read (level, first + i * scale)));
+        const auto key = dacKey (sample, p);
+        const DacSource* next = nullptr;
+        if (key.sample != nullptr)
+        {
+            if (prepared != nullptr && prepared->key == key)
+                next = prepared;
+            else if (offline)
+            {
+                if (offlineDac == nullptr || ! (offlineDac->key == key))
+                    offlineDac = buildDac (key);
+                next = offlineDac.get();
+            }
+        }
+        // Comparación con la clave copiada, no con el puntero anterior: si el motor estuvo parado, DataSlot ya lo ha liberado
+        const auto nextKey = next != nullptr ? next->key : DacKey {};
+        if (! (nextKey == dacKeyNow))
+        {
+            dacPlaying = false;
+            dacValue = 0x80;
+        }
+        dac = next;
+        dacKeyNow = nextKey;
+    }
+    const std::vector<uint8_t>& dacPcm() const
+    {
+        static const std::vector<uint8_t> empty;
+        return dac != nullptr ? dac->pcm : empty;
     }
 
     // Voces monofónicas (ruido del PSG, DAC, canal 3 especial): prioridad a la última nota, con pila de notas pulsadas
@@ -526,7 +593,7 @@ private:
             dacNote = note;
             dacPos = 0.0;
             dacStep = dacStepFor (note);
-            dacPlaying = ! dacPcm.empty();
+            dacPlaying = ! dacPcm().empty();
         }
         else if (voice == voiceCh3)
         {
@@ -842,15 +909,16 @@ private:
         // DAC: el driver escribe la muestra siguiente a su tasa; el registro retiene el valor entre escrituras
         if (dacPlaying)
         {
+            const auto& pcm = dacPcm();
             auto idx = (size_t) dacPos;
-            if (idx >= dacPcm.size() && dacLoop && ! dacPcm.empty())
+            if (idx >= pcm.size() && dacLoop && ! pcm.empty())
             {
-                dacPos = std::fmod (dacPos, (double) dacPcm.size());
+                dacPos = std::fmod (dacPos, (double) pcm.size());
                 idx = (size_t) dacPos;
             }
-            if (idx < dacPcm.size())
+            if (idx < pcm.size())
             {
-                dacValue = dacPcm[idx];
+                dacValue = pcm[idx];
                 dacPos += dacStep;
             }
             else
@@ -995,10 +1063,10 @@ private:
     std::array<int, 16> held {};
     int heldCount = 0;
     float monoVel = 1.0f;
-    std::vector<uint8_t> dacPcm;
-    const SampleData* dacSource = nullptr;
-    int dacSourceLength = 0, dacPreparedRate = -1, dacRateIndex = 0, dacRoot = 60, dacNote = 60;
-    float dacStart = -1.0f, dacLengthMs = -1.0f;
+    const DacSource* dac = nullptr;          // del bloque: la publicada o offlineDac (selectDac)
+    std::unique_ptr<DacSource> offlineDac;  // render offline: preparada en el propio hilo
+    DacKey dacKeyNow;                       // la de dac (vacía sin datos)
+    int dacRateIndex = 0, dacRoot = 60, dacNote = 60;
     double dacRate = 8000.0, dacPos = 0.0, dacStep = 0.0;
     bool dacPlaying = false, dacLoop = false;
     int dacValue = 0x80;

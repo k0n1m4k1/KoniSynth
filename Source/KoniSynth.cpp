@@ -274,12 +274,18 @@ public:
 
     // MT-32 (cualquier hilo salvo el de audio): busca las ROM y publica la máquina. Un intento por modelo y frecuencia; "Rescan"
     // o una carpeta nueva lo repiten
+    // Frecuencia para la máquina: la del host o, antes de que la diga (el wrapper CLAP da 0 hasta activate), 48 kHz. La
+    // comparan el temporizador y prepareToPlay: antes comparaban getSampleRate() (0) con los 48000 guardados, nunca casaba, y
+    // la máquina se reconstruía cada 100 ms (y DataSlot sin audio no libera: la memoria crecía)
+    double mt32TargetRate() const { return getSampleRate() > 0.0 ? getSampleRate() : 48000.0; }
+
     void rebuildMt32()
     {
+        const juce::ScopedLock loadLock (engineLoadLock); // prepareToPlay (hilo del host) y temporizador
         mt32BuiltModel = (int) params.mt32Model->load();
         mt32BuiltQueue = (int) params.mt32Queue->load();
         mt32BuiltRom = (int) params.mt32Rom->load();
-        mt32Rate = getSampleRate() > 0.0 ? getSampleRate() : 48000.0;
+        mt32Rate = mt32TargetRate();
         juce::String report;
         auto machine = Mt32Machine::open (mt32RomFolder(), mt32BuiltModel, mt32Rate, report, 512u << juce::jlimit (0, 3, mt32BuiltQueue),
                                       mt32BuiltRom);
@@ -295,6 +301,7 @@ public:
     // firmware. Un intento al elegir el motor; Rescan lo repite, y el temporizador si la propiedad cambia (preset, proyecto)
     void startFm1()
     {
+        const juce::ScopedLock loadLock (engineLoadLock);
         fm1Tried = true;
         const auto folder = fm1FirmwareFolder();
         fm1StartedChoice = apvts.state.getProperty (fm1FirmwareProp).toString();
@@ -388,6 +395,7 @@ public:
     // el motor; "Rescan" o una carpeta nueva lo repiten
     void rebuildGus()
     {
+        const juce::ScopedLock loadLock (engineLoadLock);
         gusBuilt = true;
         juce::String report;
         auto bank = GusBank::load (gusPatchFolder(), report);
@@ -519,7 +527,7 @@ public:
         gusEngine.prepare (sampleRate, samplesPerBlock);
         fm1Engine.prepare (sampleRate, samplesPerBlock);
         fm1Engine.setLatencyMs (fm1LatencyMs()); // (ajuste global: lo último que guardó cualquier instancia)
-        if ((int) params.engine->load() == 14 && sampleRate != mt32Rate) // la conversión de Munt depende de la frecuencia
+        if ((int) params.engine->load() == 14 && mt32TargetRate() != mt32Rate) // la conversión de Munt depende de la frecuencia
             rebuildMt32();
         if ((int) params.engine->load() == 15 && ! gusBuilt) // Gravis: los patches, la primera vez (también sin editor: KoniBench)
             rebuildGus();
@@ -1020,7 +1028,8 @@ public:
                 allVoicesOff();
                 mdEngine.reset();
             }
-            mdEngine.render (buffer, midi, params, mdSampleSlot.current.load (std::memory_order_acquire), (int) params.mdSampleRoot->load(),
+            mdEngine.render (buffer, midi, params, mdSampleSlot.current.load (std::memory_order_acquire),
+                             mdDacSlot.current.load (std::memory_order_acquire), isNonRealtime(), (int) params.mdSampleRoot->load(),
                              mdMacroSlot.current.load (std::memory_order_acquire));
         }
         else if (ansOn)
@@ -1449,6 +1458,7 @@ public:
             slot->blocksDone.fetch_add (1, std::memory_order_release);
         snesUserSlot.blocksDone.fetch_add (1, std::memory_order_release);
         n64UserSlot.blocksDone.fetch_add (1, std::memory_order_release);
+        mdDacSlot.blocksDone.fetch_add (1, std::memory_order_release);
         n64FactorySlot.blocksDone.fetch_add (1, std::memory_order_release);
         ansSlot.blocksDone.fetch_add (1, std::memory_order_release);
         chipMacroSlot.blocksDone.fetch_add (1, std::memory_order_release);
@@ -2380,6 +2390,9 @@ private:
     bool fm1Tried = false; // se intentó arrancar el firmware con el motor elegido (Rescan lo repite)
     bool gusBuilt = false; // se intentó leer la carpeta de patches (una vez; Rescan lo repite)
     double mt32Rate = 0.0;
+    // rebuildMt32, rebuildGus y startFm1: los llaman prepareToPlay (algunos hosts lo hacen fuera del hilo de mensajes) y el
+    // temporizador; como updateConsoleSources con consoleSourcesLock, no deben solaparse
+    juce::CriticalSection engineLoadLock;
     int mt32BuiltModel = -1, mt32BuiltQueue = 0, mt32BuiltRom = 0; // con qué se construyó la máquina: si cambian, se reconstruye
     juce::String mt32Status; // protegido por sampleInfoLock
     juce::String gusStatus;  // protegido por sampleInfoLock
@@ -2449,11 +2462,13 @@ private:
     float lastInputGain = 1.0f;
     SampleSlot sampleSlot, osc2SampleSlot, osc3SampleSlot;
     SampleSlot dpcmSampleSlot, mdSampleSlot, snesSampleSlot, n64SampleSlot; // sample propio de cada motor de consola
-    // Lo que SNES y N64 tocan de esos samples (BRR, VADPCM) y las fuentes de fábrica de N64, preparados fuera del hilo de
-    // audio (updateConsoleSources) con la clave de lo último publicado
+    // Lo que Mega Drive, SNES y N64 tocan de esos samples (PCM de 8 bits del DAC, BRR, VADPCM) y las fuentes de fábrica de
+    // N64, preparados fuera del hilo de audio (updateConsoleSources) con la clave de lo último publicado
+    DataSlot<MegaDriveEngine::DacSource> mdDacSlot;
     DataSlot<SnesEngine::UserSource> snesUserSlot;
     DataSlot<N64Engine::UserSource> n64UserSlot;
     DataSlot<N64Engine::Factory> n64FactorySlot;
+    MegaDriveEngine::DacKey mdDacKey;
     SnesEngine::UserKey snesUserKey;
     N64Engine::UserKey n64UserKey;
     N64Engine::FactoryKey n64FactoryKey;
@@ -2466,6 +2481,7 @@ private:
     void updateConsoleSources()
     {
         const juce::ScopedLock sl (consoleSourcesLock); // (algunos hosts llaman a prepareToPlay desde otro hilo)
+        mdDacSlot.collect();
         snesUserSlot.collect();
         n64UserSlot.collect();
         n64FactorySlot.collect();
@@ -2474,6 +2490,14 @@ private:
             n64FactoryKey = fk;
             n64FactorySlot.replace (N64Engine::buildFactory (fk));
         }
+        mdSampleSlot.withCurrent ([this] (const SampleData* s)
+        {
+            if (const auto k = MegaDriveEngine::dacKey (s, params); ! (k == mdDacKey))
+            {
+                mdDacKey = k;
+                mdDacSlot.replace (MegaDriveEngine::buildDac (k));
+            }
+        });
         snesSampleSlot.withCurrent ([this] (const SampleData* s)
         {
             if (const auto k = SnesEngine::userKey (s, params); ! (k == snesUserKey))
@@ -2626,7 +2650,7 @@ private:
         }
         if ((int) params.engine->load() == 14 && ((int) params.mt32Model->load() != mt32BuiltModel || (int) params.mt32Queue->load() != mt32BuiltQueue
                                                   || (int) params.mt32Rom->load() != mt32BuiltRom
-                                                  || getSampleRate() != mt32Rate))
+                                                  || mt32TargetRate() != mt32Rate))
             rebuildMt32(); // solo con el motor elegido: desactivado no carga ROM ni ocupa memoria
         if ((int) params.engine->load() == 15 && ! gusBuilt)
             rebuildGus(); // igual: los patches solo se leen con el Gravis elegido

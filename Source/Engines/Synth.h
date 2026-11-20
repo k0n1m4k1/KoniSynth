@@ -214,6 +214,7 @@ struct SynthVoice : juce::SynthesiserVoice
         startString (juce::MidiMessage::getMidiNoteInHertz (note) * KoniTuning::ratio (note));
         bendSmoothed = params.pitchBend.load();
         modSmoothed  = params.modWheel.load() * params.modWheelDepth->load();
+        cutoffKnob = cutoffKnobTarget = params.cutoff->load(); // la nota nueva empieza en el Cutoff actual, sin rampa
         filter.reset();
         filterR.reset();
         osL = {};
@@ -419,8 +420,9 @@ struct SynthVoice : juce::SynthesiserVoice
         osc2Sample.loop = params.osc2SampleLoop->load() > 0.5f;
         osc3Sample.loop = params.osc3SampleLoop->load() > 0.5f;
         const auto* blockSample = sampleSlot.current.load (std::memory_order_acquire);
-        const auto baseCutoff = params.cutoff->load() * cutoffSpread
-                              * std::exp2 (params.filterKey->load() * keyOctaves);
+        cutoffKnobTarget = params.cutoff->load();
+        const auto cutoffKeyMul = std::exp2 (params.filterKey->load() * keyOctaves);
+        const auto baseCutoff = cutoffKnobTarget * cutoffSpread * cutoffKeyMul;
         const auto maxCutoff  = 0.45f * (float) sampleRate;
 
         complex.on        = params.complexOn->load() > 0.5f;
@@ -480,6 +482,14 @@ struct SynthVoice : juce::SynthesiserVoice
             wheelSmoothed += controlCoef * (wheelTarget - wheelSmoothed);
             timbreSmoothed += controlCoef * (mpeTimbre - timbreSmoothed);
             memberBendSmoothed += controlCoef * (memberBendSemis - memberBendSmoothed);
+            // Cutoff movido (automatización, MIDI, ratón): polo de 5 ms en octavas, como la rueda. Antes saltaba una vez por
+            // bloque (escalones a la tasa de bloque, audibles con resonancia alta). Quieto, el cálculo es el de siempre
+            if (cutoffKnob != cutoffKnobTarget)
+            {
+                cutoffKnob *= std::exp2 (controlCoef * std::log2 (cutoffKnobTarget / cutoffKnob));
+                if (std::abs (cutoffKnob / cutoffKnobTarget - 1.0f) < 1.0e-4f)
+                    cutoffKnob = cutoffKnobTarget;
+            }
             auto semis = bendSmoothed + memberBendSmoothed + glideSemis + pitchEnvAmount * pitchEnvValue + fineSemis;
             glideSemis *= glideCoef;
             pitchEnvValue *= pitchEnvCoef;
@@ -760,8 +770,9 @@ struct SynthVoice : juce::SynthesiserVoice
 
             if (filterOn)
             {
+                const auto baseNow = cutoffKnob == cutoffKnobTarget ? baseCutoff : cutoffKnob * cutoffSpread * cutoffKeyMul;
                 const auto fc = juce::jlimit (20.0f, maxCutoff,
-                                              baseCutoff * std::exp2 (envOctaves * filterEnvValue + lfoOctaves));
+                                              baseNow * std::exp2 (envOctaves * filterEnvValue + lfoOctaves));
                 auto kNow = k, compNow = inputComp, driveNow = driveGain, normNow = driveNorm, wetNow = cleanWet; // resonancia y drive (matriz)
                 if (matrix.targets[ModMatrix::dstResonance])
                 {
@@ -3101,6 +3112,7 @@ private:
     const WavetableSlot& osc3WavetableSlot;
     double wtPhase = 0.0;
     float bendTarget = 0.0f, modTarget = 0.0f, bendSmoothed = 0.0f, modSmoothed = 0.0f, controlCoef = 1.0f;
+    float cutoffKnob = 1000.0f, cutoffKnobTarget = 1000.0f; // Cutoff (Hz) suavizado por muestra y su valor del bloque
     float glideSemis = 0.0f, pitchEnvValue = 0.0f;
     bool pendingLegato = false;
     bool pendingRetrigger = false; // Mono/Legato: voz robada mientras sonaba; la nota nueva la redispara sin cortarla

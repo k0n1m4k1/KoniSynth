@@ -4,18 +4,35 @@
 
 // Configuración global del plugin (no va en presets ni en el proyecto): %APPDATA%\KoniSynth\config.settings. Es el único
 // fichero de ajustes de KoniSynth junto al KoniSynth.settings del standalone: skin, AVX2, Agent, favoritos, carpeta de ROM del
-// MT-32, puente MCP elegido... Cada uso abre el fichero (lee lo último que guardó otra instancia), cambia y guarda; el
-// bloqueo entre procesos serializa las lecturas y escrituras del fichero entre hilos e instancias del plugin
+// MT-32, puente MCP elegido... Cada uso abre el fichero (lee lo último que guardó otra instancia), cambia y guarda.
+// Leer, cambiar y guardar es atómico entre hilos, instancias y procesos: el objeto devuelto retiene dos cerrojos mientras
+// vive (de su lectura a su guardado, que PropertiesFile hace al destruirse o con saveIfNeeded). Antes, el bloqueo solo
+// cubría cada lectura y cada escritura del fichero: dos instancias que guardaban a la vez perdían la clave de la primera, y
+// dentro de un mismo proceso (varias instancias en un DAW) InterProcessLock no excluye a otro hilo (es reentrante por
+// proceso, juce_Threads_windows.cpp:420): de ahí el CriticalSection, que se toma primero (orden fijo: sin interbloqueo).
+// No guardar el objeto más allá de la función que lo usa
+struct ConfigLocks
+{
+    static juce::CriticalSection& threadLock() { static juce::CriticalSection c; return c; }
+    static juce::InterProcessLock& processLock() { static juce::InterProcessLock l ("KoniSynthConfig"); return l; }
+    const juce::ScopedLock threads { threadLock() };
+    juce::InterProcessLock::ScopedLockType process { processLock() };
+};
+// Base ConfigLocks antes que PropertiesFile: los cerrojos se toman antes de leer y se sueltan después de guardar
+struct LockedConfig final : private ConfigLocks, public juce::PropertiesFile
+{
+    explicit LockedConfig (const juce::PropertiesFile::Options& o) : juce::PropertiesFile (o) {}
+};
+
 static std::unique_ptr<juce::PropertiesFile> openConfig()
 {
-    static juce::InterProcessLock lock ("KoniSynthConfig");
     juce::PropertiesFile::Options options;
     options.applicationName = "config";
     options.filenameSuffix = ".settings";
     options.folderName = "KoniSynth";
     options.osxLibrarySubFolder = "Application Support";
-    options.processLock = &lock;
-    return std::make_unique<juce::PropertiesFile> (options);
+    options.processLock = &ConfigLocks::processLock();
+    return std::make_unique<LockedConfig> (options);
 }
 
 // Valor de texto de config.settings. Compatibilidad: si aún no está y existe el .txt de versiones anteriores
