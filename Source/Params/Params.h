@@ -8,7 +8,7 @@ struct Params
     explicit Params (APVTS& s)
     {
         auto get = [&s] (const juce::String& id) { return s.getRawParameterValue (id); };
-        gain = get ("gain"); monoOut = get ("monoOut");
+        gain = get ("outputGain"); monoOut = get ("monoOut");
         mpeOn = get ("mpeOn"); mpeBendRange = get ("mpeBendRange");
         voiceAssign = get ("voiceAssign"); oscPhase = get ("oscPhase"); voiceTolerance = get ("voiceTolerance");
         vcaClick = get ("vcaClick"); vcaLeak = get ("vcaLeak");

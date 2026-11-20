@@ -31,7 +31,7 @@ public:
             { "Noise", "noiseLevel", "noiseMute", Params::srcNoise, 3 } };
         for (const auto& d : defs)
             strips.push_back (std::make_unique<Strip> (*this, d.name, d.levelId, d.muteId, d.source, d.group));
-        strips.push_back (std::make_unique<Strip> (*this, "Master", "gain", nullptr, -1, numGroups));
+        strips.push_back (std::make_unique<Strip> (*this, "Master", "outputGain", nullptr, -1, numGroups));
         for (auto& s : strips) addAndMakeVisible (*s);
 
         const auto links = (int) processor.apvts.state.getProperty (linksProp, 0);
@@ -160,14 +160,15 @@ private:
             fader.setSliderStyle (juce::Slider::LinearVertical);
             fader.setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
             fader.setRange (0.0, 1.0);
-            fader.setDoubleClickReturnValue (true, posFromGain (param->convertFrom0to1 (param->getDefaultValue())));
+            isDb = src < 0; // Master: Gain va en dB (Layout.h); las fuentes, lineales
+            fader.setDoubleClickReturnValue (true, toPos (param->convertFrom0to1 (param->getDefaultValue())));
             fader.setTooltip (juce::String (label) + (src >= 0 ? ": level of this source in dB (before the filter and saturation)."
                                                                : ": output volume in dB (Gain, last in the chain)."));
             fader.addListener (this);
             fader.onDragStart = [this] { dragging = true; attachment->beginGesture(); owner.beginLinked (*this); };
             fader.onDragEnd = [this] { attachment->endGesture(); dragging = false; owner.endLinked (*this); };
             addAndMakeVisible (fader);
-            attachment = std::make_unique<juce::ParameterAttachment> (*param, [this] (float v) { fader.setValue (posFromGain (v), juce::dontSendNotification); update(); });
+            attachment = std::make_unique<juce::ParameterAttachment> (*param, [this] (float v) { fader.setValue (toPos (v), juce::dontSendNotification); update(); });
             attachment->sendInitialUpdate();
             title.setText (label, juce::dontSendNotification);
             title.setJustificationType (juce::Justification::centred);
@@ -200,13 +201,20 @@ private:
         void sliderValueChanged (juce::Slider*) override
         {
             // Arrastre: dentro del gesto; doble clic o rueda: un paso de deshacer completo. Con LINK, el grupo le sigue
-            if (dragging) attachment->setValueAsPartOfGesture (gainFromPos (fader.getValue()));
-            else attachment->setValueAsCompleteGesture (gainFromPos (fader.getValue()));
+            if (dragging) attachment->setValueAsPartOfGesture (fromPos (fader.getValue()));
+            else attachment->setValueAsCompleteGesture (fromPos (fader.getValue()));
             owner.followLinked (*this, fader.getValue());
             update();
         }
 
-        void update() { value.setText (dbText (param->convertFrom0to1 (param->getValue())), juce::dontSendNotification); }
+        // Posición del fader <-> valor del parámetro: lineal (gainFromPos) en las fuentes; en Master, dB de gainDbMin a gainDbMax
+        double toPos (float v) const { return isDb ? (double) (v - gainDbMin) / (double) (gainDbMax - gainDbMin) : posFromGain (v); }
+        float fromPos (double p) const { return isDb ? (float) (gainDbMin + p * (double) (gainDbMax - gainDbMin)) : gainFromPos (p); }
+        void update()
+        {
+            const auto v = param->convertFrom0to1 (param->getValue());
+            value.setText (isDb ? param->getCurrentValueAsText() : dbText (v), juce::dontSendNotification);
+        }
 
         void resized() override
         {
@@ -228,7 +236,7 @@ private:
         const int source, group;
         juce::String name;
         juce::RangedAudioParameter* param = nullptr;
-        bool dragging = false;
+        bool dragging = false, isDb = false;
         juce::Slider fader;
         std::unique_ptr<juce::ParameterAttachment> attachment;
         juce::Label title, value, playing; // playing: lo que toca la tira (MixerPanel::describe)

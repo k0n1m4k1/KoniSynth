@@ -730,7 +730,7 @@ public:
         // Omnichord y VL-1 tienen el suyo (también en su sección); el resto, el tempo interno (arpegiador, secuenciador, eco y
         // LFO sincronizados). Hay una perilla por reloj y updateInert deja visible solo la del motor elegido
         master.withExtraToggle (s, "monoOut", "Mono")
-              .withKnob (s, "gain", "Gain")
+              .withKnob (s, "outputGain", "Gain")
               .withKnob (s, "arpBpm", "Tempo").withKnob (s, "drumTempo", "Tempo").withKnob (s, "omniTempo", "Tempo")
               .withKnob (s, "vl1Tempo", "Tempo");
 

@@ -69,8 +69,9 @@ public:
     // osc3WtPath (ausentes: sin fichero); complexModSource con Noise al final. 7 (1.0.1): Osc 3 con Oct -2..+2 (osc3Octave) en vez
     // de subOctave ("-1 oct" / "-2 oct") y Semi ±12 en vez de ±24 (osc3FromSub). 8 (1.0.1): Wavetable y Sample de Osc 2 / Osc 3
     // dejan de ser formas de onda y pasan a fuentes con su nivel (splitOscFamilies). 9 (1.0.1): cola MIDI del MT-32 con 4 tamaños
-    // (mt32QueueFromFormat8). 10 (1.0.0): oplModel con el OPL (YM3526) delante de OPL2 (oplModelFromFormat9)
-    static constexpr int formatVersion = 10;
+    // (mt32QueueFromFormat8). 10 (1.0.0): oplModel con el OPL (YM3526) delante de OPL2 (oplModelFromFormat9). 11 (1.0.1): gain
+    // (lineal 0..1, 0,5 por defecto) pasa a outputGain en dB con el mismo nivel menos el nivel fijo del motor (engineTrimDb)
+    static constexpr int formatVersion = 11;
 
     // oplModel hasta el formato 9: OPL2 0, OPL3 1, OPLL 2, VRC7 3; desde el 10, OPL (YM3526) 0 y los demás un índice más
     static int oplModelFromFormat9 (int index) { return juce::jlimit (1, 4, index + 1); }
@@ -676,6 +677,13 @@ private:
         if (from < 10) // 9 -> 10: el OPL (YM3526) entra delante de OPL2 en oplModel
             if (const auto it = real.find ("oplModel"); it != real.end())
                 it->second = (float) oplModelFromFormat9 (juce::roundToInt (it->second));
+        if (from < 11) // 10 -> 11: gain lineal 0..1 (0,5 por defecto) -> outputGain en dB, mismo nivel (engineTrimDb va antes)
+        {
+            const auto engine = real.count ("engine") != 0 ? juce::roundToInt (real["engine"]) : 0;  // (thereminOn ya migrado: paso 2)
+            real["outputGain"] = juce::jlimit (gainDbMin, gainDbMax,
+                                               gainDbFromLinear (real.count ("gain") != 0 ? real["gain"] : 0.5f) - engineTrimFor (engine));
+            real.erase ("gain");
+        }
     }
 
 public:
@@ -797,7 +805,7 @@ private:
                 // Atributos que no son parámetros ni propiedades conocidas: de una versión posterior o renombrados
                 juce::StringArray known { formatAttribute, versionAttribute, categoryAttribute, playHintAttribute, playLowAttribute, playHighAttribute,
                                           sampleAttribute, osc2SampleAttribute, osc3SampleAttribute, wavetableAttribute, osc2WavetableAttribute,
-                                          osc3WavetableAttribute, cabIrAttribute, "ansUser", "thereminOn", "subOctave" };
+                                          osc3WavetableAttribute, cabIrAttribute, "ansUser", "thereminOn", "subOctave", "gain" };
                 for (const auto& e : engineSamples()) known.add (e.attribute);
                 for (const auto* prop : textProperties()) known.add (prop);
                 for (auto* p : rangedParameters()) known.add (p->getParameterID());

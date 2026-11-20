@@ -564,7 +564,8 @@ public:
 
         reverb.prepare (sampleRate);
 
-        lastGain = params.gain->load();
+        lastGain = gainLinearFromDb (params.gain->load());
+        lastEngineTrim = gainLinearFromDb (engineTrimFor ((int) params.engine->load()));
     }
 
     void releaseResources() override {}
@@ -1051,6 +1052,13 @@ public:
                 synth.renderNextBlock (buffer, midi, 0, numSamples);
             }
         }
+        // Nivel fijo del motor (engineTrimDb, Layout.h), con rampa por bloque al cambiar de motor
+        {
+            const auto trim = gainLinearFromDb (engineTrimFor (engine));
+            if (trim != 1.0f || lastEngineTrim != 1.0f)
+                buffer.applyGainRamp (0, numSamples, lastEngineTrim, trim);
+            lastEngineTrim = trim;
+        }
         thereminWasOn = thereminOn;
         vl1WasOn = vl1On;
         styloWasOn = styloOn;
@@ -1391,7 +1399,7 @@ public:
         }
         mediaWasOn = mediaOn;
 
-        const auto g = params.gain->load();
+        const auto g = gainLinearFromDb (params.gain->load()); // (en dB: Layout.h)
         buffer.applyGainRamp (0, numSamples, lastGain, g); // rampa por bloque: evita zipper noise
         lastGain = g;
         if (params.monoOut->load() > 0.5f && buffer.getNumChannels() >= 2)
@@ -1645,6 +1653,23 @@ public:
                                                { if (auto* e = param (id)) e->setAttribute ("value", (double) v); });
                 }
                 xml->removeAttribute (kslDbAttribute);
+
+                // Estados anteriores a Output Gain (sin outputGain): "gain" lineal 0..1 (sin él, el 0,5 de entonces) pasa a dB con el
+                // mismo nivel, descontando el nivel fijo del motor del estado (engineTrimDb, que ahora va antes). "gain" se quita
+                if (xml->getChildByAttribute ("id", "outputGain") == nullptr)
+                {
+                    auto* old = xml->getChildByAttribute ("id", "gain");
+                    const auto* eng = xml->getChildByAttribute ("id", "engine");
+                    const auto* legacyTheremin = xml->getChildByAttribute ("id", "thereminOn"); // (antes de "engine": abajo)
+                    const auto engine = eng != nullptr ? juce::roundToInt (eng->getDoubleAttribute ("value"))
+                                      : legacyTheremin != nullptr && legacyTheremin->getDoubleAttribute ("value") > 0.5 ? 1 : 0;
+                    const auto lin = old != nullptr ? (float) old->getDoubleAttribute ("value") : 0.5f;
+                    auto* e = xml->createNewChildElement ("PARAM");
+                    e->setAttribute ("id", "outputGain");
+                    e->setAttribute ("value", (double) juce::jlimit (gainDbMin, gainDbMax, gainDbFromLinear (lin) - engineTrimFor (engine)));
+                    if (old != nullptr)
+                        xml->removeChildElement (old, true);
+                }
 
                 // Estados anteriores al sample propio de los motores de consola (sin la marca engineSamples="1"): el motor de
                 // consola del proyecto usaba el de la fuente Sample; se le copian fichero y región para que suene igual
@@ -2943,6 +2968,7 @@ private:
     bool ambientWasOn = false;
 
     float lastGain = 0.5f;
+    float lastEngineTrim = 1.0f; // nivel fijo del motor del bloque anterior (lineal; engineTrimDb)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (KoniSynthProcessor)
 };

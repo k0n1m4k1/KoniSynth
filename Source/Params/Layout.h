@@ -19,6 +19,26 @@ static int midiNoteFromText (const juce::String& text)
     return juce::jlimit (0, 127, (t.substring (i).getIntValue() + 1) * 12 + pc);
 }
 
+// Output Gain (outputGain, en dB): rango y conversión a ganancia lineal (gainDbMin o menos: silencio). gainDbFromLinear: el
+// valor lineal 0..1 del "gain" anterior a la 1.0.1, en dB con el mismo nivel
+static constexpr float gainDbMin = -60.0f, gainDbMax = 12.0f;
+static inline float gainLinearFromDb (float db) noexcept { return db <= gainDbMin ? 0.0f : std::pow (10.0f, db / 20.0f); }
+static inline float gainDbFromLinear (float g) noexcept
+{
+    return g <= 0.001f ? gainDbMin : std::min (gainDbMax, std::max (gainDbMin, 20.0f * std::log10 (g)));
+}
+
+// Nivel fijo de cada motor (dB, por índice de "engine"), aplicado a su salida antes de los efectos: que el preset típico de
+// cada motor necesite un Output Gain cerca de 0 dB. Es la escala de salida del motor, no del aparato: lo fiel (el balance
+// interno de voces y canales, la saturación) va antes y no cambia. Medido 2026-11-20 (Factory.h, comentario de
+// factoryPresets): mediana del gain que necesitaban sus presets de fábrica para -23 LUFS, redondeada a 1 dB y fija, más 3 dB
+// comunes a todos (el objetivo del banco es -20 LUFS: así sus presets quedan centrados en 0 dB). Antes de esos 3 dB:
+// KoniSynth 0 (referencia); Theremin -7 (la mediana era -10,5: suena algo más alto a propósito, su carácter); MT-32 +2
+// (mediana de sus 128 programas +2,2, con las ROM del autor); GUS 0 (mediana de sus programas +0,5, pero un acorde a
+// velocidad 127 ya llega a 0 dBFS) y FM-1 0 (depende del firmware del usuario: de -13,8 a +11 dB entre 30 firmwares)
+static constexpr float engineTrimDb[17] = { 3, -4, -7, -1, -4, -6, 2, 6, -6, 3, -8, -6, -1, -6, 5, 3, 3 };
+static inline float engineTrimFor (int engine) noexcept { return engine >= 0 && engine < 17 ? engineTrimDb[engine] : 0.0f; }
+
 // Prefijos de los controladores del modo Function del DX7 (motor FM): rueda (CC 1), foot (CC 4), breath (CC 2), aftertouch
 static constexpr const char* fmCtlIds[4] = { "fmWheel", "fmFoot", "fmBreath", "fmAt" };
 
@@ -61,7 +81,16 @@ static APVTS::ParameterLayout createLayout()
         });
     };
     APVTS::ParameterLayout l;
-    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "gain", 1 }, "Gain", NormalisableRange<float> (0.0f, 1.0f), 0.5f, percent));
+    // Output Gain en dB, 0 dB por defecto (unidad), como el volumen de salida de otros instrumentos y los faders de una DAW;
+    // -60 dB es silencio, +12 dB arriba. Sustituye a "gain" (lineal 0..1, 0,5 = -6 dB por defecto): ID nuevo para que las
+    // automatizaciones y los MIDI Learn guardados con el normalizado antiguo no cambien de significado (un 1,0 = 0 dB habría
+    // pasado a ser el tope); quedan sin efecto. Los presets de usuario (formato 11) y los estados guardados (sin outputGain)
+    // se convierten al cargar con el mismo nivel, descontando el nivel fijo del motor (engineTrimDb)
+    l.add (std::make_unique<AudioParameterFloat> (ParameterID { "outputGain", 1 }, "Gain", NormalisableRange<float> (gainDbMin, gainDbMax, 0.1f), 0.0f,
+        AudioParameterFloatAttributes()
+            .withStringFromValueFunction ([] (float v, int) { return v <= gainDbMin ? String ("-inf dB") : String (v, 1) + " dB"; })
+            .withValueFromStringFunction ([] (const String& text)
+                { return text.containsIgnoreCase ("inf") ? gainDbMin : jlimit (gainDbMin, gainDbMax, text.retainCharacters ("+-.0123456789").getFloatValue()); })));
     // Suma a mono al final de la cadena (comprobar la compatibilidad mono de la mezcla)
     l.add (std::make_unique<AudioParameterBool>  (ParameterID { "monoOut", 1 }, "Mono Output", false));
     // Mute de las fuentes del Synth (pestañas Osc 1 / Wavetable / Sample / String): apagados por defecto, los presets no cambian

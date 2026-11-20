@@ -23,7 +23,7 @@ static const ControllerProfile& yamahaRefaceYc()
             { "Vibrato/Chorus depth (CC 77)", K::fader, "chorusMix" },
             { "Rotary speed lever (CC 19)", K::pedal, "leslieSpeed" },
             { "Effect: Dist (CC 18)", K::fader, "tubeDrive" },    { "Effect: Reverb (CC 91)", K::fader, "ambientMix" },
-            { "Foot controller FC7 (CC 11)", K::pedal, "gain" },
+            { "Foot controller FC7 (CC 11)", K::pedal, nullptr },  // (sin propuesta: el volumen de salida llega a +12 dB)
             { "Wave H/V/F/A/Y (CC 80)", K::knob, nullptr },       { "Percussion on/off, type, length (CC 111-113)", K::pad, nullptr },
             { "Keyboard (37 mini keys, channel 1)", K::pad, nullptr },
         },

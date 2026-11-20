@@ -26,7 +26,7 @@ FX_PREFIXES = ("crush", "formant", "tube", "eq", "ampOn", "ampModel", "ampGain",
                "compAttack", "compRelease", "compKnee", "compMakeup", "compMix", "compScHpf", "phaser", "flanger", "fshift", "chorus", "leslie", "echo", "ambient",
                "reverb", "spring", "media")
 # Nunca al azar: salida, MIDI y expresión, macros, interpretación, entrada, fuentes de fichero, paneo de voces, mutes
-EXCLUDE_EXACT = {"engine", "gain", "monoOut", "midiInChannel", "bendRange", "fineTune", "modWheelDepth", "voiceMode",
+EXCLUDE_EXACT = {"engine", "gain", "outputGain", "monoOut", "midiInChannel", "bendRange", "fineTune", "modWheelDepth", "voiceMode",
                  "glide", "osc1Mute", "wtMute", "sampleMute", "stringMute", "wtTable", "chipModel", "mdModel", "oplModel",
                  "styloModel", "styloRange", "reverbFreeze", "voicePan", "voicePanMode", "unisonVoices",
                  "atFilter", "atVibrato", "atAmp"}  # aftertouch: ids exactos (un prefijo "at" se comería "attack")
@@ -178,15 +178,16 @@ def generate(call: Callable[..., Any], audition: Callable[..., dict[str, Any]], 
             call("set", port=port, values=values)
         m = audition(rules["notes"], rules["duration"], 100, rules.get("tail", 0.6), port)
         level_note = None
-        if not m.get("silent") and m["peak_dbfs"] < -20:  # compensación con el Master (lineal 0..1, 100 % = ganancia unidad)
-            gain = float(call("get", port=port, ids=["gain"])["gain"].split()[0]) / 100.0
-            new = min(1.0, gain * 10 ** ((-10.0 - m["peak_dbfs"]) / 20.0))
-            if new > gain + 1e-3:
-                values["gain"] = f"{new * 100:.0f} %"
-                call("set", port=port, values={"gain": values["gain"]})
+        if not m.get("silent") and m["peak_dbfs"] < -20:  # compensación con el Master (Output Gain en dB, 0 dB = unidad; de -60 a +12)
+            text = call("get", port=port, ids=["outputGain"])["outputGain"]
+            gain = -60.0 if "inf" in text else float(text.split()[0])
+            new = min(12.0, gain + (-10.0 - m["peak_dbfs"]))
+            if new > gain + 0.05:
+                values["outputGain"] = f"{new:.1f} dB"
+                call("set", port=port, values={"outputGain": values["outputGain"]})
                 m = audition(rules["notes"], rules["duration"], 100, rules.get("tail", 0.6), port)
             if m["peak_dbfs"] < -20:
-                level_note = f"quiet ({m['peak_dbfs']} dBFS with Master at {min(new, 1.0) * 100:.0f} %): raise the source level"
+                level_note = f"quiet ({m['peak_dbfs']} dBFS with Master at {max(new, gain):.1f} dB): raise the source level"
         why = judge(style, m)
         cand = {"attempt": attempt, "seed": seed, "base_preset": b["name"], "engine": engine_names[eng],
                 "changed": len(values), "measured": summary(m), "values": values, "wav": m.get("wav")}
